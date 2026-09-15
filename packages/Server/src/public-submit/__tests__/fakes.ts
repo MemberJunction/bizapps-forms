@@ -4,6 +4,7 @@
  * typed against the real interfaces (no `any`) via narrowly-scoped casts at the
  * boundary where the fake is handed to code expecting the full class.
  */
+import type { PersistenceResult } from '../persistence.service';
 import type {
   DatabaseProviderBase,
   EntityInfo,
@@ -16,8 +17,11 @@ import { IsPlatformSQL } from '@memberjunction/core';
 import type {
   PublishedFormDefinition,
   mjBizAppsFormsFormDistributionEntityType,
+  mjBizAppsFormsFormResponseEntityType,
   mjBizAppsFormsFormVersionEntityType,
 } from '@mj-biz-apps/forms-entities';
+import { FILE_ENTITY_RECORD_LINK_ENTITY } from '../../file-links/file-links.service';
+import { FORM_UPLOAD_ENTITY } from '../entity-names';
 
 /** A recorded entity save, captured by the fake provider for assertions. */
 export interface SavedRecord {
@@ -31,7 +35,8 @@ export type CreatePermissions = Record<string, boolean>;
 /** A stored FormResponse row the fake returns from session-response lookups. */
 export interface ExistingResponseRow {
   ID: string;
-  Status: 'Complete' | 'Partial';
+  /** Every status a real row can hold, `Disqualified` included — the gates must see it too. */
+  Status: mjBizAppsFormsFormResponseEntityType['Status'];
   FormVersionID: string;
   AnonymousSessionID: string;
   /** Optional stored SourceMetadata JSON, exercised by the client-id LIKE proof lookups. */
@@ -63,12 +68,31 @@ export interface FakeProviderConfig {
    * would), and the subsequent recovery `Load` finds it.
    */
   concurrentlyCreated?: ExistingResponseRow[];
+  /**
+   * `MJ: File Entity Record Links` rows the link view should return. Returned unfiltered: the
+   * target is asserted on the WRITTEN row instead, which is where getting it wrong would matter.
+   */
+  fileLinks?: { ID: string; FileID: string }[];
+  /** `FormUpload` rows for the response under test — what Forms is allowed to unlink. */
+  responseUploads?: { FileID: string }[];
+  /**
+   * `FormResponseAnswer` rows already stored against the response — what a re-save has to clear
+   * before it re-inserts. Returned unfiltered; the tests that use these assert on what was
+   * DELETED, which is where getting it wrong matters.
+   *
+   * The fake returned an empty list for this entity until answer durability was under test, so
+   * "the prior answers were cleared" and "there were none" were indistinguishable — and the
+   * window in which a response holds neither its old answers nor its new ones was untestable.
+   */
+  existingAnswers?: { ID: string; QuestionID?: string }[];
 }
 
 /** The fake provider plus inspection handles for tests. */
 export interface FakeProvider {
   provider: DatabaseProviderBase;
   saved: SavedRecord[];
+  /** Rows `Delete()`d, so a test can assert a removal and not just an absence. */
+  deleted: SavedRecord[];
   distribution?: mjBizAppsFormsFormDistributionEntityType;
 }
 
@@ -88,6 +112,7 @@ type ResponseStore = Map<string, ExistingResponseRow>;
 function makeFakeEntity(
   entityName: string,
   saved: SavedRecord[],
+  deleted: SavedRecord[],
   failSave: boolean,
   responseStore: ResponseStore,
 ) {
@@ -97,6 +122,8 @@ function makeFakeEntity(
   const record = new Proxy(
     {
       ID: `id-${entityName}-${saved.length + 1}`,
+      // Only answer rows carry one; the loader below sets it when the fixture supplies it.
+      QuestionID: undefined as string | undefined,
       LatestResult: { CompleteMessage: 'forced save failure' },
       NewRecord: () => {
         isNew = true;
@@ -136,6 +163,11 @@ function makeFakeEntity(
           return false;
         }
         saved.push({ entityName, values: { ...values } });
+        // A real BaseEntity stops being new the moment it is inserted — the next Save is an
+        // UPDATE. Without this the fake treated a second save of the same row as a fresh insert
+        // and returned the PK-collision failure, which only mattered once anything saved a row
+        // twice (sealing a response after its answers are stored).
+        isNew = false;
         if (isResponse) {
           responseStore.set(record.ID, {
             ID: record.ID,
@@ -147,7 +179,10 @@ function makeFakeEntity(
         }
         return true;
       },
-      Delete: async () => true,
+      Delete: async () => {
+        deleted.push({ entityName, values: { ID: record.ID } });
+        return true;
+      },
     },
     {
       set(target, prop: string, value) {
@@ -169,10 +204,26 @@ function makeFakeEntity(
   return record;
 }
 
+/**
+ * Stable, GUID-shaped ids for the fake's entities. The file-link table stores an entity's ROW ID
+ * rather than its name, and rejects anything not shaped like one — so a fake `EntityInfo` without
+ * a realistic `ID` would make that guard look broken instead of exercising it.
+ */
+const fakeEntityIds = new Map<string, string>();
+export function fakeEntityId(entityName: string): string {
+  let id = fakeEntityIds.get(entityName);
+  if (!id) {
+    id = `eeeeeeee-0000-4000-8000-${String(fakeEntityIds.size + 1).padStart(12, '0')}`;
+    fakeEntityIds.set(entityName, id);
+  }
+  return id;
+}
+
 /** Build a fake EntityInfo whose GetUserPermisions reflects the configured CanCreate. */
 function makeFakeEntityInfo(entityName: string, canCreate: boolean): EntityInfo {
   const permissions = { CanCreate: canCreate, CanRead: true, CanUpdate: false, CanDelete: false } as EntityUserPermissionInfo;
   const info = {
+    ID: fakeEntityId(entityName),
     Name: entityName,
     GetUserPermisions: (_user: UserInfo): EntityUserPermissionInfo => permissions,
   };
@@ -182,6 +233,7 @@ function makeFakeEntityInfo(entityName: string, canCreate: boolean): EntityInfo 
 /** Construct a fake provider implementing the pipeline's required surface. */
 export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
   const saved: SavedRecord[] = [];
+  const deleted: SavedRecord[] = [];
 
   // The persistent row store. RunView-visible rows AND race-only rows both live here (so a
   // CREATE collides and the recovery Load resolves); only `existingResponses` is returned by
@@ -212,14 +264,38 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
       const rows = (config.existingResponses ?? []).filter((r) => matchesResponseFilter(r, filter));
       return runViewResult<T>(true, rows as unknown as T[]);
     }
+    if (name === FILE_ENTITY_RECORD_LINK_ENTITY) {
+      return runViewResult<T>(true, (config.fileLinks ?? []) as unknown as T[]);
+    }
+    if (name === FORM_UPLOAD_ENTITY) {
+      return runViewResult<T>(true, (config.responseUploads ?? []) as unknown as T[]);
+    }
+    if (name === FORM_RESPONSE_ANSWER_ENTITY) {
+      // `replaceAnswersClear` asks for `entity_object` and calls `.Delete()` on each row, so
+      // these have to be entity-LIKE, not plain data — a bare `{ ID }` throws inside the code
+      // under test rather than exercising it.
+      const rows = (config.existingAnswers ?? []).map((row) => {
+        const entity = makeFakeEntity(FORM_RESPONSE_ANSWER_ENTITY, saved, deleted, config.failSaveFor === name, responseStore);
+        entity.ID = row.ID;
+        if (row.QuestionID !== undefined) {
+          entity.QuestionID = row.QuestionID;
+        }
+        return entity;
+      });
+      return runViewResult<T>(true, rows as unknown as T[]);
+    }
     return runViewResult<T>(true, []);
   };
 
   const provider = {
     RunView: runView,
-    RunViews: async () => [],
+    // Batched reads go through the SAME emulation as single ones. This returned an empty array
+    // until the file-link reconciler started batching, at which point "no results" and "the view
+    // did not run" became indistinguishable to the code under test.
+    RunViews: async <T>(params: RunViewParams[]): Promise<RunViewResult<T>[]> =>
+      Promise.all(params.map((p) => runView<T>(p))),
     GetEntityObject: async (entityName: string) =>
-      makeFakeEntity(entityName, saved, config.failSaveFor === entityName, responseStore),
+      makeFakeEntity(entityName, saved, deleted, config.failSaveFor === entityName, responseStore),
     EntityByName: (entityName: string) =>
       makeFakeEntityInfo(entityName, config.createPermissions[entityName] ?? false),
   };
@@ -227,6 +303,7 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
   return {
     provider: provider as unknown as DatabaseProviderBase,
     saved,
+    deleted,
     distribution: config.distribution,
   };
 }
@@ -246,12 +323,30 @@ function matchesResponseFilter(row: ExistingResponseRow, filter: string): boolea
   // A bare `Status='Partial'` predicate (no explicit `=`) is emitted literally by the adopt/by-id
   // lookups; the eq() form above already covers it.
   return (
+    matchesStatusIn(row, filter) &&
     eq('Status', row.Status) &&
     eq('ID', row.ID) &&
     eq('AnonymousSessionID', row.AnonymousSessionID) &&
     eq('FormVersionID', row.FormVersionID) &&
     matchesSourceMetadataLike(row, filter)
   );
+}
+
+/**
+ * Emulate the `Status IN ('A','B')` predicate the session lookup emits.
+ *
+ * A real test double has to model the query it stands in for. When this fake only understood
+ * `Status='X'`, an `IN` filter matched every row regardless of status — so the very test written
+ * to prove dedupe recognises a sealed session would have passed against a lookup that recognised
+ * nothing. Absent from the filter => matches (the `=` form is checked separately).
+ */
+function matchesStatusIn(row: ExistingResponseRow, filter: string): boolean {
+  const m = filter.match(/(?:^|\W)Status\s+IN\s*\(([^)]*)\)/i);
+  if (m === null) {
+    return true;
+  }
+  const allowed = [...m[1].matchAll(/'([^']*)'/g)].map((q) => q[1]);
+  return allowed.includes(row.Status);
 }
 
 /**
@@ -309,6 +404,8 @@ export function makeDefinition(overrides?: Partial<PublishedFormDefinition>): Pu
         ],
       },
     ],
+    automations: [],
+    endScreens: [],
     ...overrides,
   };
 }
@@ -356,4 +453,28 @@ export function respondentPermissions(): CreatePermissions {
     'MJ_BizApps_Forms: Form Versions': false,
     'MJ_BizApps_Forms: Form Distributions': false,
   };
+}
+
+/**
+ * Narrow a {@link PersistenceResult} to one branch, failing the test with the OTHER branch's words
+ * if it went the other way.
+ *
+ * `PersistenceResult` is a discriminated union: a failure carries a `message`, a success carries a
+ * `responseId` and a `status`, and neither carries the other's fields. Before that, every field was
+ * optional and a spec could read `result.message` off a success and quietly assert `undefined`
+ * against `undefined`. These make the branch an explicit assertion, and a wrong branch reports what
+ * actually happened instead of a bare "expected undefined".
+ */
+export function expectPersistFailure(result: PersistenceResult): Extract<PersistenceResult, { outcome: 'failed' }> {
+  if (result.outcome === 'saved') {
+    throw new Error(`expected the save to FAIL, but it succeeded with response ${result.responseId}`);
+  }
+  return result;
+}
+
+export function expectPersistSuccess(result: PersistenceResult): Extract<PersistenceResult, { outcome: 'saved' }> {
+  if (result.outcome === 'failed') {
+    throw new Error(`expected the save to SUCCEED, but it failed: ${result.message}`);
+  }
+  return result;
 }

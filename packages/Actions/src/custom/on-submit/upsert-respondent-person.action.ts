@@ -6,6 +6,13 @@
  * loose and defensive — by email (case-insensitive). Idempotent: if the response
  * already has a RespondentPersonID, or no email was collected, it skips cleanly.
  *
+ * THIS ACTION OWNS RESPONDENT IDENTITY. A consuming app should read the
+ * `FormResponse.RespondentPersonID` this stamps rather than upserting its own Person from the same
+ * answers — the dedupe below covers only rows this action created, so an independent upsert
+ * produces a second Person for the same human that Forms neither knows about nor points at, with
+ * nothing logged. An app that genuinely owns subject identity should instead decline this hook
+ * (`onSubmitMode: 'Configured'`). See `docs/on-submit-automations.md`.
+ *
  * Contract: invoked BY NAME by WP-B's submit endpoint (seam S3). Do not rename.
  *
  * Input params: `FormResponseID` (string, required) — the just-saved response id.
@@ -16,15 +23,23 @@ import type { ActionResultSimple, RunActionParams } from '@memberjunction/action
 import { RegisterClass } from '@memberjunction/global';
 import { Metadata, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
+import { escapeSqlString } from '@mj-biz-apps/forms-entities';
 import type { FormQuestionType } from '@mj-biz-apps/forms-entities';
 // Person comes from the package that owns __mj_BizAppsCommon — Forms deliberately
 // does not generate it (rationale: `excludeSchemas` in mj.config.cjs).
 import type { mjBizAppsCommonPersonEntity } from '@mj-biz-apps/common-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
 import { saveOrExplain } from '../shared/save-entity';
+import { explainMissingEntityClasses } from '../shared/generated-entity';
 import { loadFormResponseContext, type AnswerWithType, type FormResponseContext } from '../shared/form-response-context';
 
 const PERSON_ENTITY = 'MJ_BizApps_Common: People';
+
+/**
+ * The sibling-app entities this action writes. Checked up front rather than trusted: an
+ * unregistered class does not fail the write, it silently drops every field set on it (#60).
+ */
+const SIBLING_ENTITIES = [PERSON_ENTITY] as const;
 
 /** Respondent identity fields harvested from the answers. */
 interface RespondentIdentity {
@@ -40,6 +55,10 @@ export class UpsertRespondentPersonAction extends BaseAction {
     const responseId = getStringParam(params, 'FormResponseID');
     if (!responseId) {
       return fail('FormResponseID parameter is required', 'MISSING_PARAMETERS');
+    }
+    const missingClasses = explainMissingEntityClasses(SIBLING_ENTITIES);
+    if (missingClasses) {
+      return fail(missingClasses, 'ENTITY_CLASS_UNREGISTERED');
     }
 
     const ctx = await loadFormResponseContext(responseId, params.ContextUser);
@@ -145,7 +164,7 @@ async function findPersonByEmail(
   contextUser: UserInfo,
 ): Promise<mjBizAppsCommonPersonEntity | null> {
   const rv = new RunView();
-  const escaped = email.replace(/'/g, "''");
+  const escaped = escapeSqlString(email);
   const result = await rv.RunView<mjBizAppsCommonPersonEntity>(
     {
       EntityName: PERSON_ENTITY,

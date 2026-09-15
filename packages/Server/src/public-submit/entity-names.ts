@@ -10,6 +10,12 @@ export const FORM_STYLE_ENTITY = 'MJ_BizApps_Forms: Form Styles';
 export const FORM_DISTRIBUTION_ENTITY = 'MJ_BizApps_Forms: Form Distributions';
 export const FORM_RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
 export const FORM_RESPONSE_ANSWER_ENTITY = 'MJ_BizApps_Forms: Form Response Answers';
+/**
+ * The upload provenance ledger. Read by the download route (to authorize a reader), by the
+ * submit/bind provenance checks (to prove a file id is this respondent's own), and by the
+ * file-link reconciler (to decide which attachments are Forms' to remove).
+ */
+export const FORM_UPLOAD_ENTITY = 'MJ_BizApps_Forms: Form Uploads';
 
 /**
  * Definition entities the anonymous respondent session must NOT be able to create

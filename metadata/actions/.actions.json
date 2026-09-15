@@ -46,6 +46,42 @@
             "lastModified": "2026-08-08T18:25:28.337Z",
             "checksum": "0832a79bc0a03c0b89a688e94ae4b12f45c5500a9583343017ad779a59fc77fa"
           }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "OnSubmitMode",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Whether this form's own automations are what run on submit ('Legacy' or 'Configured'). 'Configured' with no Automations is the supported way to run NOTHING - how a caller that owns its own subject identity declines Forms: Upsert Respondent Person. Omit to keep the historical behaviour."
+          },
+          "primaryKey": {
+            "ID": "7F0B0001-A1B2-4C3D-8E4F-000000000005"
+          },
+          "sync": {
+            "lastModified": "2026-09-12T03:02:33.895Z",
+            "checksum": "aa0dc8b1ad87ae3c13f22f6f3ed0e76192e9292dfdbecbeb6f6ea5e4400db739"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Automations",
+            "Type": "Input",
+            "ValueType": "Simple Object",
+            "IsArray": true,
+            "IsRequired": false,
+            "Description": "The on-submit steps this form runs, in order, each naming an MJ Action (for example [{\"actionName\":\"Forms: Send Confirmation Email\"}]). Supplying this implies OnSubmitMode='Configured', and supplying it alongside 'Legacy' is an error rather than a silently ignored list. An Action name this deployment does not have is an error, not a skipped step."
+          },
+          "primaryKey": {
+            "ID": "7F0B0001-A1B2-4C3D-8E4F-000000000006"
+          },
+          "sync": {
+            "lastModified": "2026-09-12T03:02:33.936Z",
+            "checksum": "d1e80bdb157b5f024b7a4c5109528732830ccea126cb1f1654c4e960b0f23665"
+          }
         }
       ]
     },
@@ -103,6 +139,42 @@
           "sync": {
             "lastModified": "2026-08-08T18:25:28.382Z",
             "checksum": "0832a79bc0a03c0b89a688e94ae4b12f45c5500a9583343017ad779a59fc77fa"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "OnSubmitMode",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Whether this form's own automations are what run on submit ('Legacy' or 'Configured'). 'Configured' with no Automations is the supported way to run NOTHING - how a caller that owns its own subject identity declines Forms: Upsert Respondent Person. Omit to keep the historical behaviour."
+          },
+          "primaryKey": {
+            "ID": "7F0B0002-A1B2-4C3D-8E4F-000000000005"
+          },
+          "sync": {
+            "lastModified": "2026-09-12T03:02:33.915Z",
+            "checksum": "aa0dc8b1ad87ae3c13f22f6f3ed0e76192e9292dfdbecbeb6f6ea5e4400db739"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Automations",
+            "Type": "Input",
+            "ValueType": "Simple Object",
+            "IsArray": true,
+            "IsRequired": false,
+            "Description": "The on-submit steps this form runs, in order, each naming an MJ Action (for example [{\"actionName\":\"Forms: Send Confirmation Email\"}]). Supplying this implies OnSubmitMode='Configured', and supplying it alongside 'Legacy' is an error rather than a silently ignored list. An Action name this deployment does not have is an error, not a skipped step."
+          },
+          "primaryKey": {
+            "ID": "7F0B0002-A1B2-4C3D-8E4F-000000000006"
+          },
+          "sync": {
+            "lastModified": "2026-09-12T03:02:33.964Z",
+            "checksum": "d1e80bdb157b5f024b7a4c5109528732830ccea126cb1f1654c4e960b0f23665"
           }
         }
       ]

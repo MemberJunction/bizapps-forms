@@ -14,6 +14,9 @@
  */
 import { RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
+import { quoteSqlString } from '@mj-biz-apps/forms-entities';
+
+import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names.js';
 
 /** Why a file id was rejected. */
 export type ProvenanceFailure =
@@ -129,10 +132,10 @@ export async function loadUploadLedger(
     return byFileId;
   }
 
-  const inList = unique.map((id) => `'${id.replace(/'/g, "''")}'`).join(',');
+  const inList = unique.map((id) => quoteSqlString(id)).join(',');
   const result = await new RunView().RunView<UploadLedgerRow>(
     {
-      EntityName: 'MJ_BizApps_Forms: Form Uploads',
+      EntityName: FORM_UPLOAD_ENTITY,
       ExtraFilter: `FileID IN (${inList})`,
       Fields: ['FileID', 'DistributionID', 'ResponseDraftID', 'AnonymousSessionID', 'Status'],
       ResultType: 'simple',

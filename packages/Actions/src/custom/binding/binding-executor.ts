@@ -20,12 +20,15 @@
  */
 import { LogError } from '@memberjunction/core';
 import {
+  answerColumnFor,
+  dateAnswerText,
   BindingConfigError,
   isFileAnswer,
   planMerge,
   resolveMappedValues,
   type CanonicalAnswers,
   type CanonicalAnswerValue,
+  type FormQuestionType,
   type FieldMappings,
   type IdentityNormalization,
   type IdentityRule,
@@ -118,8 +121,8 @@ export interface BindingTargetGateway {
    * against a live record.
    */
   findPriorOutcome?(responseId: string): Promise<PriorBindingOutcome | null>;
-  /** Field names that exist on the entity and can be written, or null when it does not resolve. */
-  describeEntity(entityName: string, needs: EntityCapability): Promise<ReadonlySet<string> | null>;
+  /** The writable shape of the target entity, or null when it does not resolve. */
+  describeEntity(entityName: string, needs: EntityCapability): Promise<TargetFields | null>;
   /** Oldest matching record, or null when none matched. Rejects when the lookup itself fails. */
   findMatch(query: MatchQuery): Promise<MatchedRecord | null>;
   /** Create (recordId null) or update a record; returns the primary key written. */
@@ -128,6 +131,23 @@ export interface BindingTargetGateway {
     recordId: string | null,
     values: ReadonlyMap<string, CanonicalAnswerValue>,
   ): Promise<string>;
+}
+
+/**
+ * What the executor needs to know about the target entity's fields.
+ *
+ * `temporal` exists because a date-column ANSWER has two correct spellings and only the target
+ * column can say which: an instant for a real datetime field, the respondent's own reading for a
+ * string one. Without it a `Time` answer mapped onto an `nvarchar` persisted
+ * `1970-01-01T14:30:00.000Z` — the "1970" the rest of #116 removed, written into data rather than
+ * merely displayed — and converting unconditionally instead would send `'14:30'` at a datetime
+ * column, which is `new Date('14:30')` and the original bug one layer down.
+ */
+export interface TargetFields {
+  /** Field names that exist on the entity and can be written. */
+  names: ReadonlySet<string>;
+  /** Of those, the ones whose column holds a date/time, where an instant is the right shape. */
+  temporal: ReadonlySet<string>;
 }
 
 export interface BindingConfig {
@@ -162,6 +182,15 @@ export interface ExecuteBindingInput {
    * nobody noticing what it protected.
    */
   allowFileAnswers?: boolean;
+  /**
+   * The type of each question the mapping may read, keyed by question id.
+   *
+   * Optional, and its absence means "write what `collapseAnswer` gave you" — the behaviour before
+   * this existed — so a caller that cannot say stays correct rather than guessing. Both real
+   * callers can say: the automation dispatcher holds the published definition, and the binding
+   * Action holds `AnswerWithType`.
+   */
+  questionTypes?: ReadonlyMap<string, FormQuestionType>;
 }
 
 /** Target fields whose value came from a file answer. */
@@ -207,7 +236,7 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<Bindin
   }
 
   const needs = capabilityFor(config.identityRule.mode);
-  let writableFields: ReadonlySet<string> | null;
+  let writableFields: TargetFields | null;
   try {
     writableFields = await gateway.describeEntity(config.targetEntityName, needs);
   } catch (error) {
@@ -217,7 +246,7 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<Bindin
     return fail('config', false, `Entity "${config.targetEntityName}" does not exist or is not writable.`);
   }
 
-  const unwritable = unwritableTargets(config, writableFields);
+  const unwritable = unwritableTargets(config, writableFields.names);
   if (unwritable.length > 0) {
     // Reported together rather than one per run: BaseEntity.Set silently ignores a field that does
     // not exist, so an unchecked mapping loses data with no error at all, and fixing them one
@@ -244,6 +273,7 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<Bindin
   }
 
   const resolved = resolveMappedValues(config.fieldMappings, input.answers);
+  readDateAnswersForTarget(resolved.values, config, writableFields, input.questionTypes);
   if (resolved.missingRequired.length > 0) {
     return fail('candidate', false, `Submission is missing required value(s): ${resolved.missingRequired.join(', ')}.`);
   }
@@ -359,6 +389,43 @@ function unmappedIdentityFields(config: BindingConfig): string[] {
   return (config.identityRule.match ?? [])
     .map((m) => m.targetField)
     .filter((field) => !mapped.has(field.toLowerCase()));
+}
+
+/**
+ * Rewrite each mapped date-column answer into the spelling its TARGET field can hold.
+ *
+ * `collapseAnswer` hands on the stored instant, which is right for a datetime column and wrong for
+ * every other kind — see {@link TargetFields}. Only a mapping whose source is a question of a
+ * date-column type and whose target is NOT temporal is touched; everything else is left exactly as
+ * the collapse produced it, including when the caller supplied no question types.
+ */
+function readDateAnswersForTarget(
+  values: Map<string, CanonicalAnswerValue>,
+  config: BindingConfig,
+  target: TargetFields,
+  questionTypes: ReadonlyMap<string, FormQuestionType> | undefined,
+): void {
+  if (!questionTypes) {
+    return;
+  }
+  const temporal = new Set([...target.temporal].map((f) => f.toLowerCase()));
+  for (const field of config.fieldMappings.fields) {
+    if (field.source.kind !== 'question' || temporal.has(field.targetField.toLowerCase())) {
+      continue;
+    }
+    const type = questionTypes.get(field.source.questionId);
+    if (!type || answerColumnFor(type) !== 'date') {
+      continue;
+    }
+    const value = values.get(field.targetField);
+    if (typeof value !== 'string') {
+      continue;
+    }
+    const instant = new Date(value);
+    if (!Number.isNaN(instant.getTime())) {
+      values.set(field.targetField, dateAnswerText(type, instant));
+    }
+  }
 }
 
 /** Target fields the mapping and the identity scope want to write but the entity will not accept. */

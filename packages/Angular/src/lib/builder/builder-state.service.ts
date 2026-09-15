@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 import {
   Metadata,
   RunView,
@@ -10,11 +10,39 @@ import type {
   mjBizAppsFormsFormPageEntity,
   mjBizAppsFormsFormQuestionEntity,
   mjBizAppsFormsFormQuestionOptionEntity,
+  mjBizAppsFormsFormScreenEntity,
   FormQuestionType,
 } from '@mj-biz-apps/forms-entities';
-import { FORMS_ENTITY } from './entity-names';
+import { questionTypeBehavior } from '@mj-biz-apps/forms-entities';
+import { FORMS_ENTITY } from '../shared/entity-names';
+
+/**
+ * How long an edit waits for a follow-up before it is written.
+ *
+ * Short enough that a save always lands well before an author reaches for Publish, long enough to
+ * swallow a burst of keystrokes across sibling fields — which is the burst that used to lose data.
+ */
+const SAVE_DEBOUNCE_MS = 400;
+
+/**
+ * How many times {@link BuilderStateService.flushPendingSaves} will drain the save chains before
+ * giving up.
+ *
+ * Generous on purpose — a real flush finishes in one or two passes, and every extra pass here
+ * costs nothing unless something is genuinely re-queueing without end.
+ */
+const MAX_FLUSH_PASSES = 50;
+
+/** Anything the builder persists in place. */
+type SaveableEntity =
+  | mjBizAppsFormsFormEntity
+  | mjBizAppsFormsFormPageEntity
+  | mjBizAppsFormsFormQuestionEntity
+  | mjBizAppsFormsFormQuestionOptionEntity
+  | mjBizAppsFormsFormScreenEntity;
+
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
-import { questionTypeHasOptions } from './question-type-catalog';
+import { defaultEndingChanges, defaultEndingId, vacantDefaultEnding } from './default-ending';
 
 /**
  * Loads and persists the editable form tree (Form + Pages + Questions + Options).
@@ -38,6 +66,7 @@ export class BuilderStateService {
     const pages = await this.loadPages(form.ID);
     const questions = await this.loadQuestions(form.ID);
     const optionsByQuestion = await this.loadOptions(questions.map((q) => q.ID));
+    const screens = await this.loadScreens(form.ID);
 
     const pageNodes: PageNode[] = pages.map((p) => ({
       entity: p,
@@ -56,7 +85,7 @@ export class BuilderStateService {
       this.sortQuestions(pageNodes[0]);
     }
 
-    return { form, pages: pageNodes };
+    return { form, pages: pageNodes, screens };
   }
 
   private toQuestionNode(
@@ -101,6 +130,33 @@ export class BuilderStateService {
     );
     if (!result.Success) {
       LogError(`Failed to load form questions: ${result.ErrorMessage}`);
+      return [];
+    }
+    return result.Results ?? [];
+  }
+
+  private async loadScreens(formId: string): Promise<mjBizAppsFormsFormScreenEntity[]> {
+    const rv = new RunView();
+    const result = await rv.RunView<mjBizAppsFormsFormScreenEntity>(
+      {
+        EntityName: FORMS_ENTITY.FormScreen,
+        ExtraFilter: `FormID='${formId}'`,
+        OrderBy: 'DisplayOrder',
+        ResultType: 'entity_object',
+      },
+      this.user,
+    );
+    if (!result.Success) {
+      // A failed read is NOT "this form has no screens", and the difference bites: `addScreen`
+      // guards against a second Welcome by looking for an existing one in this list, and computes
+      // a new Ending's `IsDefault` as "no Ending exists yet". An empty list defeats both.
+      //
+      // Reported rather than thrown, deliberately. `loadPages`, `loadQuestions` and `loadOptions`
+      // all answer a failed read the same way, and `loadTree`'s caller does not catch — so
+      // throwing only here would take the whole builder down over the least important of the
+      // four, while a failed QUESTIONS read still loaded fine. Making all four fail loudly is the
+      // right fix and is bigger than this change; tracked rather than half-done here.
+      LogError(`Failed to load form screens: ${result.ErrorMessage}`);
       return [];
     }
     return result.Results ?? [];
@@ -179,21 +235,38 @@ export class BuilderStateService {
     }
 
     const node: QuestionNode = { entity: question, options: [] };
-    if (questionTypeHasOptions(type)) {
-      await this.seedDefaultOptions(node);
-    }
+    await this.seedDefaultOptions(node, type);
     return node;
   }
 
-  /** Seed two starter options for a newly-added choice question. */
-  private async seedDefaultOptions(node: QuestionNode): Promise<void> {
-    const first = await this.addOption(node, 'Option 1');
-    const second = await this.addOption(node, 'Option 2');
-    if (first) {
-      node.options.push(first);
+  /**
+   * Seed starter options appropriate to the type's option mode.
+   *
+   * A Matrix seeded with the flat "Option 1 / Option 2" pair renders as a grid with two rows and
+   * NO columns — an empty table with no cell to click, which reads as a broken question rather
+   * than as one needing configuration. Ranking and PictureChoice are fine with plain options; only
+   * the matrix needs both axes present to be a coherent starting point.
+   */
+  private async seedDefaultOptions(node: QuestionNode, type: FormQuestionType): Promise<void> {
+    const mode = questionTypeBehavior(type).optionMode;
+    if (mode === 'none') {
+      return;
     }
-    if (second) {
-      node.options.push(second);
+    const seeds: ReadonlyArray<{ label: string; axis?: 'Row' | 'Column' }> =
+      mode === 'matrix'
+        ? [
+            { label: 'Row 1', axis: 'Row' },
+            { label: 'Row 2', axis: 'Row' },
+            { label: 'Column 1', axis: 'Column' },
+            { label: 'Column 2', axis: 'Column' },
+          ]
+        : [{ label: 'Option 1' }, { label: 'Option 2' }];
+
+    for (const seed of seeds) {
+      const option = await this.addOption(node, seed.label, seed.axis);
+      if (option) {
+        node.options.push(option);
+      }
     }
   }
 
@@ -201,6 +274,7 @@ export class BuilderStateService {
   public async addOption(
     node: QuestionNode,
     label: string,
+    matrixAxis?: 'Row' | 'Column',
   ): Promise<mjBizAppsFormsFormQuestionOptionEntity | undefined> {
     const option = await this.md.GetEntityObject<mjBizAppsFormsFormQuestionOptionEntity>(
       FORMS_ENTITY.FormQuestionOption,
@@ -211,20 +285,295 @@ export class BuilderStateService {
     option.Label = label;
     option.DisplayOrder = node.options.length;
     option.IsDefault = false;
+    if (matrixAxis) {
+      option.MatrixAxis = matrixAxis;
+    }
     if (!(await this.saveChecked(option, 'create option'))) {
       return undefined;
     }
     return option;
   }
 
-  /** Persist an entity that the UI has mutated in place. */
-  public async save(
-    entity:
-      | mjBizAppsFormsFormEntity
-      | mjBizAppsFormsFormPageEntity
-      | mjBizAppsFormsFormQuestionEntity
-      | mjBizAppsFormsFormQuestionOptionEntity,
+  /**
+   * Create + save a Welcome or Ending screen.
+   *
+   * A second Welcome screen is refused here rather than left to the database: the filtered unique
+   * index does reject it, but as a duplicate-key error with no indication of which of the author's
+   * two clicks was the problem. The form only has room for one, so the honest answer is to hand
+   * back the one that already exists.
+   */
+  public async addScreen(
+    tree: FormTree,
+    screenType: 'Welcome' | 'Ending',
+    title: string,
+  ): Promise<mjBizAppsFormsFormScreenEntity | undefined> {
+    if (screenType === 'Welcome') {
+      const existing = tree.screens.find((s) => s.ScreenType === 'Welcome');
+      if (existing) {
+        return existing;
+      }
+    }
+    const screen = await this.md.GetEntityObject<mjBizAppsFormsFormScreenEntity>(
+      FORMS_ENTITY.FormScreen,
+      this.user,
+    );
+    screen.NewRecord();
+    screen.FormID = tree.form.ID;
+    screen.ScreenType = screenType;
+    screen.Title = title;
+    screen.DisplayOrder = tree.screens.filter((s) => s.ScreenType === screenType).length;
+    // A new ending becomes the catch-all when the form does not already have one. Without this a
+    // form whose only ending carries a condition silently shows nothing when the condition misses.
+    //
+    // The question is "does this form HAVE a default", not "does it have any endings" — which is
+    // what it used to ask, and the two differ exactly where it matters: a form whose only ending
+    // is screened out has an ending and no default, so the next one added was left un-flagged and
+    // the form kept no catch-all at all.
+    screen.IsDefault = screenType === 'Ending' && defaultEndingId(tree.screens) === null;
+    if (!(await this.saveChecked(screen, 'create screen'))) {
+      return undefined;
+    }
+    return screen;
+  }
+
+  /**
+   * Delete a screen and leave the form's ending invariant intact.
+   *
+   * Takes the tree, and removes the screen from it, because the two cannot be separated: deleting
+   * the DEFAULT ending leaves the form with none, and the survivor then reads "Never shown — add
+   * a condition" on a form where it is the only place a respondent can land. Handing the caller a
+   * boolean and letting it splice the tree itself is what made that possible — the repair had no
+   * obvious owner, so nobody did it.
+   *
+   * Screens own nothing, so there is still no cascade; the only follow-on is the promotion.
+   */
+  public async deleteScreen(
+    tree: FormTree,
+    screen: mjBizAppsFormsFormScreenEntity,
   ): Promise<boolean> {
+    if (!(await this.deleteChecked(screen, 'delete screen'))) {
+      return false;
+    }
+    tree.screens = tree.screens.filter((s) => s.ID !== screen.ID);
+    const promote = vacantDefaultEnding(tree.screens);
+    if (promote === null) {
+      return true;
+    }
+    promote.IsDefault = true;
+    // Reported but not fatal: the screen IS deleted, and saying otherwise would offer an undo
+    // that cannot happen. `saveChecked` has already surfaced why the promotion did not stick.
+    //
+    // The flag comes back off when it does not stick, though. Left on, the builder shows a
+    // catch-all the database never recorded — the form reads as repaired while every respondent
+    // who finishes still falls through to the confirmation message.
+    if (!(await this.chainSave(promote, 'promote default ending'))) {
+      promote.IsDefault = false;
+    }
+    return true;
+  }
+
+  /**
+   * Move the form's default ending to one screen, clearing whichever screens held it.
+   *
+   * NOT `saveDebounced`, and that is the whole reason this method exists rather than the caller
+   * flipping two flags. The debounce keys a timer per entity OBJECT with no ordering between
+   * them, so the two writes could land in either order — and a filtered unique index permits one
+   * default per form, so "set the new one" landing first is a save the database REFUSES. The
+   * author sees a switch that flipped itself back, with the failure reported against the wrong
+   * screen. Cleared first, awaited, then set.
+   *
+   * Every write goes through {@link chainSave} rather than saving directly, for the reason the
+   * chain exists: `BaseEntity.Save()` re-reads the record from the row it gets back, so a save
+   * running concurrently with a pending autosave of the SAME screen overwrites whichever landed
+   * first. Making a screen the default while its title edit is still settling is an ordinary
+   * thing to do, and it used to be the one case that skipped the queue.
+   *
+   * Returns false if any write fails, and puts the form back the way it was — in the database via
+   * {@link restoreDefaultEnding}, and in memory, so the builder does not go on showing a move
+   * that did not happen. `saveChecked` has already surfaced why.
+   */
+  public async setDefaultEnding(tree: FormTree, screenId: string): Promise<boolean> {
+    const changes = defaultEndingChanges(tree.screens, screenId);
+    const cleared: mjBizAppsFormsFormScreenEntity[] = [];
+    for (const screen of changes.clear) {
+      screen.IsDefault = false;
+      if (!(await this.chainSave(screen, 'clear default ending'))) {
+        // The row still holds the flag, so the builder must too. Dropped in memory BEFORE the
+        // save is attempted, a refused clear otherwise leaves the author looking at a form with
+        // no default while the database has one, and nothing later corrects it.
+        screen.IsDefault = true;
+        return false;
+      }
+      cleared.push(screen);
+    }
+    if (changes.set === null) {
+      return true;
+    }
+    changes.set.IsDefault = true;
+    if (await this.chainSave(changes.set, 'set default ending')) {
+      return true;
+    }
+    await this.restoreDefaultEnding(changes.set, cleared);
+    return false;
+  }
+
+  /**
+   * Put the default back after a move that got halfway.
+   *
+   * The two halves of this invariant fail differently, and only one of them is noisy. The unique
+   * index refuses a SECOND default, so a bad `set` is reported; NOTHING refuses a form with none,
+   * which is exactly what a successful clear followed by a refused set leaves behind. Without
+   * this the method's own contract — "leaves the form as it was" — was false in the one case it
+   * was written for.
+   *
+   * ONE screen is restored, never all of them. `clear` holds more than one row only on a form
+   * that was already carrying several defaults, and re-setting those would ask the index to
+   * accept the very state it exists to refuse. The first is the lowest `DisplayOrder`, because
+   * `defaultEndingChanges` orders them the way `resolveEndingScreen` reads them — so the row that
+   * comes back is the one respondents were already landing on.
+   *
+   * Best effort, and deliberately not retried: if the restore is refused too, `saveChecked` has
+   * reported it and the author has to fix the form by hand. Looping here would spin on a database
+   * that is saying no.
+   */
+  private async restoreDefaultEnding(
+    failed: mjBizAppsFormsFormScreenEntity,
+    cleared: readonly mjBizAppsFormsFormScreenEntity[],
+  ): Promise<void> {
+    failed.IsDefault = false;
+    const restore = cleared[0];
+    if (restore === undefined) {
+      return;
+    }
+    restore.IsDefault = true;
+    await this.chainSave(restore, 'restore default ending');
+  }
+
+  // -------------------------------------------------------------------------
+  // Coalesced saves
+  // -------------------------------------------------------------------------
+
+  /**
+   * Pending debounced saves, keyed by the entity instance being saved.
+   *
+   * A `Map` keyed by the object rather than by ID, because two different entity types can share
+   * an id space only by accident but the same OBJECT is exactly what must not be saved twice
+   * concurrently.
+   */
+  /** Debounce timers, keyed by the entity instance awaiting a write. */
+  private readonly saveTimers = new Map<SaveableEntity, ReturnType<typeof setTimeout>>();
+
+  /**
+   * The in-flight save chain per entity.
+   *
+   * Keyed by the OBJECT, not by id: two entity types can share an id space by accident, but the
+   * same object is exactly what must never be saved twice at once.
+   */
+  private readonly saveChains = new Map<SaveableEntity, Promise<void>>();
+
+  /**
+   * Persist an entity the UI has mutated in place, coalescing rapid edits into one save.
+   *
+   * WHY THIS EXISTS. Every edit used to call {@link save} directly, and two edits landing in the
+   * same tick — which is what filling in a question's four Opinion-scale settings looks like —
+   * raced and SILENTLY LOST the second one. `BaseEntity.Save()` re-reads the record from the row
+   * it gets back, so a value written while a save was in flight is overwritten the moment that
+   * save returns; the template then re-renders from the entity and wipes the input too, so the
+   * author watches their own typing disappear with no error anywhere. Reproduced deterministically
+   * in the running Explorer: two `change` events in one tick, second value gone from both the
+   * input and the database.
+   *
+   * Serializing alone would NOT fix it — a queued save starts from an entity the previous save has
+   * already reset. Coalescing does: the timer restarts on every edit, so one save eventually runs
+   * against the entity's final state. The chain below then guarantees that even a flush arriving
+   * mid-write cannot start a second concurrent save of the same record.
+   */
+  public saveDebounced(entity: SaveableEntity): void {
+    const existing = this.saveTimers.get(entity);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    this.saveTimers.set(
+      entity,
+      setTimeout(() => {
+        this.saveTimers.delete(entity);
+        void this.chainSave(entity);
+      }, SAVE_DEBOUNCE_MS),
+    );
+  }
+
+  /**
+   * Await every coalesced save, running any still on its timer immediately.
+   *
+   * Call before anything that reads the PERSISTED form — publishing above all. The builder's
+   * in-memory tree is always current, so a pending save never changes what gets published; what it
+   * changes is whether the database agrees with it afterwards.
+   */
+  public async flushPendingSaves(): Promise<void> {
+    for (const [entity, timer] of [...this.saveTimers]) {
+      clearTimeout(timer);
+      this.saveTimers.delete(entity);
+      void this.chainSave(entity);
+    }
+    // Loop rather than one `Promise.all`: awaiting a chain can let a queued save start, and the
+    // caller asked for "nothing pending", not "nothing pending a moment ago".
+    //
+    // Capped, because the exit condition depends on something this method does not control:
+    // edits arriving during the drain re-arm the debounce and put a new chain in the map. A
+    // steady enough stream keeps it non-empty indefinitely, and since publish AWAITS this, an
+    // uncapped loop would hang Publish with no error and no way out but a reload. No path in the
+    // builder saves on save today, so the cap is a backstop rather than a fix for a live hang —
+    // but "no caller does this yet" is not something a loop should rely on.
+    for (let pass = 0; pass < MAX_FLUSH_PASSES && this.saveChains.size > 0; pass++) {
+      await Promise.all([...this.saveChains.values()]);
+    }
+    if (this.saveChains.size > 0) {
+      // Surfaced, never swallowed: the caller is about to publish, and it has to be able to say
+      // that what it publishes may not match what is stored.
+      this._lastFailure.set(
+        'Some changes were still being saved and could not be confirmed. Reload the builder and check the form before sharing it.',
+      );
+    }
+  }
+
+  /**
+   * Queue a save behind any save already running for the same entity, and report whether it stuck.
+   *
+   * The boolean is what lets the default-ending writes use this instead of calling `saveChecked`
+   * directly. They have to know: moving the default is two writes whose order the unique index
+   * enforces, so a caller that cannot tell the first one failed will go on to make the second.
+   */
+  private chainSave(entity: SaveableEntity, action = 'save'): Promise<boolean> {
+    const previous = this.saveChains.get(entity) ?? Promise.resolve();
+    const result = previous.then(() => this.saveChecked(entity, action));
+    const next = result
+      .then(() => undefined)
+      .finally(() => {
+        // Only clear the slot if no later edit has chained onto it meanwhile.
+        if (this.saveChains.get(entity) === next) {
+          this.saveChains.delete(entity);
+        }
+      });
+    this.saveChains.set(entity, next);
+    return result;
+  }
+
+  /**
+   * The most recent mutation the database refused, phrased for the author, or null when there is
+   * nothing outstanding. One signal for every path — direct save, debounced autosave, delete —
+   * because they all funnel through the same two checked helpers, and a second place to publish
+   * from is a second place to forget.
+   */
+  private readonly _lastFailure = signal<string | null>(null);
+  public readonly lastFailure = this._lastFailure.asReadonly();
+
+  /** Clear the reported failure — the author has read it. */
+  public dismissFailure(): void {
+    this._lastFailure.set(null);
+  }
+
+  /** Persist an entity that the UI has mutated in place. */
+  public async save(entity: SaveableEntity): Promise<boolean> {
     return this.saveChecked(entity, 'save');
   }
 
@@ -266,6 +615,74 @@ export class BuilderStateService {
     return ok;
   }
 
+  /**
+   * Move a question to another page and renumber BOTH pages (issue #149).
+   *
+   * The caller has already moved it in the in-memory tree — this persists that, it does not
+   * decide it. The preconditions are asserted rather than assumed because getting them wrong is
+   * silent: renumbering a page the question is still in writes the collision it exists to avoid.
+   *
+   * THE ORDER IS THE INTEGRITY STORY. There is no transaction — this is one `PageID` write plus
+   * up to N+M `DisplayOrder` writes, one row at a time, and `persistQuestionOrder` already
+   * documents that it can fail halfway. So the order is chosen so that every prefix of it leaves
+   * a tree that reloads consistently:
+   *
+   *   1. the moved question's `PageID` AND its final `DisplayOrder`, in ONE `Save()`;
+   *   2. the destination's remaining rows;
+   *   3. the source's remaining rows.
+   *
+   * Membership goes first and alone because it is the only write that cannot be re-derived from
+   * what is on screen — a wrong `DisplayOrder` is corrected by the next reorder or a reload; a
+   * lost `PageID` is not. And because `PageID` is one column on one row written by one `Save()`,
+   * the question belongs to exactly one page at every instant: "orphaned between sections" is
+   * unrepresentable, and the worst a partial failure can do is leave the order within one page
+   * wrong. Failing at (1) leaves the pre-move state untouched; failing inside (2) or (3) leaves
+   * duplicate or gapped `DisplayOrder` values, which `loadTree`'s sort tolerates.
+   *
+   * NOTHING IS ROLLED BACK, matching `reorderQuestion`: the screen goes on showing what the
+   * author did, `lastFailure()` says the database refused, and a reload re-asserts the truth. A
+   * rollback needs writes of its own, which can fail in turn, and would be a second answer to a
+   * question this file already answers one way.
+   *
+   * The moved row is not written twice: step 1 sets its `DisplayOrder` to its final value, so
+   * step 2's `persistQuestionOrder` skips it.
+   */
+  public async persistCrossPageMove(
+    node: QuestionNode,
+    source: PageNode,
+    destination: PageNode,
+  ): Promise<boolean> {
+    if (source.entity.ID === destination.entity.ID) {
+      throw new Error(
+        `persistCrossPageMove: source and destination are the same page (${source.entity.ID}); ` +
+          'an in-page reorder is persistQuestionOrder.',
+      );
+    }
+    const index = destination.questions.indexOf(node);
+    if (index < 0) {
+      throw new Error(
+        `persistCrossPageMove: question ${node.entity.ID} is not in destination page ` +
+          `${destination.entity.ID}; the caller moves it in memory first.`,
+      );
+    }
+    if (source.questions.includes(node)) {
+      throw new Error(
+        `persistCrossPageMove: question ${node.entity.ID} is still in source page ` +
+          `${source.entity.ID}; renumbering it there would write the collision this avoids.`,
+      );
+    }
+
+    node.entity.PageID = destination.entity.ID;
+    node.entity.DisplayOrder = index;
+    if (!(await this.saveChecked(node.entity, 'move question to another section'))) {
+      return false;
+    }
+
+    const destinationOk = await this.persistQuestionOrder(destination);
+    const sourceOk = await this.persistQuestionOrder(source);
+    return destinationOk && sourceOk;
+  }
+
   /** Renumber + persist DisplayOrder on a question's options to match array order. */
   public async persistOptionOrder(node: QuestionNode): Promise<boolean> {
     let ok = true;
@@ -289,7 +706,7 @@ export class BuilderStateService {
   ): Promise<boolean> {
     const ok = await entity.Save();
     if (!ok) {
-      LogError(`Forms builder failed to ${action}: ${entity.LatestResult?.CompleteMessage ?? 'unknown error'}`);
+      this.reportFailure(action, entity);
     }
     return ok;
   }
@@ -300,8 +717,24 @@ export class BuilderStateService {
   ): Promise<boolean> {
     const ok = await entity.Delete();
     if (!ok) {
-      LogError(`Forms builder failed to ${action}: ${entity.LatestResult?.CompleteMessage ?? 'unknown error'}`);
+      this.reportFailure(action, entity);
     }
     return ok;
+  }
+
+  /**
+   * Record a refusal where the AUTHOR can see it, as well as in the log.
+   *
+   * `BaseEntity` refuses by returning false, never by throwing, so nothing upstream notices
+   * unless it is told — and until this existed, nothing told it. A delete looked like a button
+   * that did nothing; an autosave looked like nothing at all, and the edit the author had just
+   * typed was simply gone. The reason is included verbatim rather than softened: this surface is
+   * for people who build forms, and "conflicted with a FOREIGN KEY constraint" is the difference
+   * between fixing it and filing a bug.
+   */
+  private reportFailure(action: string, entity: Parameters<BuilderStateService['save']>[0]): void {
+    const reason = entity.LatestResult?.CompleteMessage ?? 'unknown error';
+    LogError(`Forms builder failed to ${action}: ${reason}`);
+    this._lastFailure.set(`Could not ${action}. ${reason}`);
   }
 }

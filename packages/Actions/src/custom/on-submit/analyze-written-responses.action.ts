@@ -102,6 +102,19 @@ export class AnalyzeWrittenResponsesAction extends BaseAction {
     setOutputParam(params, 'AnalyzedCount', persisted);
     setOutputParam(params, 'SkippedCount', skipped);
     setOutputParam(params, 'AnalysisSummary', `Scored ${persisted} of ${selected.length} free-text answer(s).`);
+    // Nothing saved, when there WAS something to save, is a failed step — not a quiet success.
+    // A single answer refusing to save stays best-effort below; none of them saving means the
+    // work this step exists to do did not happen, and reporting SUCCESS for it is how a run
+    // ledger comes to say "Succeeded" for an automation whose entire output was discarded.
+    // Seen for real: the runner role holds CanRead but not CanUpdate on Form Response Answers,
+    // so every Save was refused and every AI-produced score was thrown away silently.
+    if (persisted === 0) {
+      return fail(
+        `Analyzed ${selected.length} free-text answer(s) but none of the scores could be saved. ` +
+          'The scores were discarded; check that the automation user may update Form Response Answers.',
+        'SCORES_NOT_SAVED',
+      );
+    }
     return {
       Success: true,
       ResultCode: 'SUCCESS',

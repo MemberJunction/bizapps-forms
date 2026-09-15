@@ -13,6 +13,7 @@
         min="0"
         class="mjf-input"
         [value]="_rule.minLength ?? ''"
+        [attr.aria-invalid]="conflict ? 'true' : null"
         (change)="setNumber('minLength', minLenInput.value)"
       />
     </div>
@@ -25,6 +26,7 @@
         min="0"
         class="mjf-input"
         [value]="_rule.maxLength ?? ''"
+        [attr.aria-invalid]="conflict ? 'true' : null"
         (change)="setNumber('maxLength', maxLenInput.value)"
       />
     </div>
@@ -39,6 +41,7 @@
         type="number"
         class="mjf-input"
         [value]="_rule.min ?? ''"
+        [attr.aria-invalid]="conflict ? 'true' : null"
         (change)="setNumber('min', minInput.value)"
       />
     </div>
@@ -50,8 +53,21 @@
         type="number"
         class="mjf-input"
         [value]="_rule.max ?? ''"
+        [attr.aria-invalid]="conflict ? 'true' : null"
         (change)="setNumber('max', maxInput.value)"
       />
+    </div>
+  }
+
+  <!-- Both bounds stay on screen while this stands: they are the two numbers the author has to
+       reconcile, and the second sentence is what keeps the refusal from being silent. -->
+  @if (conflict) {
+    <div class="vre-conflict mjf-alert" role="alert">
+      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+      <div>
+        <p>{{ conflict }}</p>
+        <p>Answer validation is not saved until this is fixed.</p>
+      </div>
     </div>
   }
 

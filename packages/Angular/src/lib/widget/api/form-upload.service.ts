@@ -14,17 +14,8 @@
 import { Injectable, inject } from '@angular/core';
 
 import { FORMS_API_CONFIG, deriveUploadUrl } from './forms-api.config';
-
-/** Metadata the server returns for a successfully-stored upload. */
-export interface UploadedFile {
-  fileId: string;
-  name: string;
-  size: number;
-  contentType: string;
-}
-
-/** Progress callback: fraction 0–1 of bytes sent, or `null` when indeterminate. */
-export type UploadProgress = (fraction: number | null) => void;
+import { serverErrorText } from '../../shared/server-error-text';
+import type { IFormsUploadService, UploadedFile, UploadProgress } from './form-upload.interface';
 
 /**
  * Build the multipart body for an upload. Pure + framework-free so the field wiring
@@ -54,6 +45,34 @@ export function buildUploadFormData(
 }
 
 /**
+ * The sentence a respondent should read when an upload fails.
+ *
+ * The server already writes a usable explanation for every refusal it makes — the file is
+ * too big, the content type is not allowed — and the widget used to discard it and show
+ * `Upload failed (HTTP 415). Please try again.` instead. That is two failures in one
+ * line: it names a number that means nothing outside a spec, and it prescribes an action
+ * that cannot possibly work. A 413 and a 415 are verdicts on the FILE; retrying the same
+ * one produces the same answer forever, and the respondent has no way to guess that what
+ * they actually need is a different file.
+ *
+ * So the server's message wins whenever there is one, and the fallbacks distinguish the
+ * two situations that matter: something wrong with the file (pick another) and something
+ * wrong at the moment (try again).
+ */
+export function uploadErrorMessage(status: number, body: unknown): string {
+  const fromServer = serverErrorText(body);
+  if (fromServer) {
+    return fromServer;
+  }
+  // 4xx here is always a judgement about this file — the endpoint's own failures are
+  // size, content type, an unknown question, or a closed form. None improve on a retry.
+  if (status >= 400 && status < 500) {
+    return 'That file was not accepted. Try a different file.';
+  }
+  return 'The upload did not go through. Please try again.';
+}
+
+/**
  * Parse the raw `POST /forms/upload` JSON response into an {@link UploadedFile},
  * throwing a respondent-friendly error when the shape is wrong. Pure + testable.
  */
@@ -75,13 +94,8 @@ export function parseUploadResponse(raw: unknown): UploadedFile {
 }
 
 @Injectable()
-export class FormUploadService {
+export class FormUploadService implements IFormsUploadService {
   private readonly config = inject(FORMS_API_CONFIG);
-
-  /** True when the widget has an endpoint + token to upload with. */
-  public get canUpload(): boolean {
-    return !!this.endpoint() && !!this.config.token;
-  }
 
   /**
    * Upload one file for a FileUpload question. Resolves with the stored file's
@@ -131,7 +145,11 @@ export class FormUploadService {
             reject(err instanceof Error ? err : new Error('Upload failed.'));
           }
         } else {
-          reject(new Error(`Upload failed (HTTP ${xhr.status}). Please try again.`));
+          // `xhr.response`, never `xhr.responseText`: reading responseText while
+          // responseType is 'json' throws InvalidStateError, and it throws INSIDE onload —
+          // so the promise never settles, the widget sits at "Uploading … 100%" forever,
+          // and Submit stays blocked behind an upload the server already answered.
+          reject(new Error(uploadErrorMessage(xhr.status, xhr.response)));
         }
       };
       xhr.onerror = (): void => reject(new Error('Upload failed. Check your connection and try again.'));

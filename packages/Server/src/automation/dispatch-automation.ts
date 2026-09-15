@@ -22,6 +22,7 @@ import {
   parseIdentityRule,
   parseMergePolicy,
   type CanonicalAnswers,
+  type FormQuestionType,
   type PublishedFormAutomation,
 } from '@mj-biz-apps/forms-entities';
 import type {
@@ -35,7 +36,10 @@ import {
   readPriorBindingOutcome,
   recordBindingLedgerRow,
   MJBindingGateway,
+  type BindingOutcome,
 } from '@mj-biz-apps/forms-actions';
+import { syncFileLinks, type FileLinkTarget } from '../file-links/file-links.service';
+import { globalFileLinkProvider, MJFileLinkGateway } from '../file-links/mj-file-link-gateway';
 
 const ENTITY = {
   AutomationRun: 'MJ_BizApps_Forms: Form Automation Runs',
@@ -48,9 +52,50 @@ export interface DispatchContext {
   formVersionId: string;
   distributionId: string;
   answers: CanonicalAnswers;
+  /**
+   * The type of every question in the published definition, keyed by id.
+   *
+   * `CanonicalAnswers` deliberately carries values without types, so anything that must write an
+   * answer ONWARD in a type-aware shape needs this beside it — entity binding writes a `Time` as a
+   * clock or as an instant depending on the target column, and cannot tell which without it.
+   */
+  questionTypes: ReadonlyMap<string, FormQuestionType>;
   principal: UserInfo;
   /** Entities this deployment permits bindings to write; null disables the check. */
   allowedEntities: ReadonlySet<string> | null;
+}
+
+/**
+ * What running a target produced: a human summary, plus the MJ record that holds the detail.
+ *
+ * The provenance ids are the point. `FormAutomationRun` has carried `ActionExecutionLogID` and
+ * `AIAgentRunID` since `V202608072330` and the responses dashboard reads both, but nothing ever
+ * wrote them — so every run in every deployment pointed at nothing, and Forms' ledger could not be
+ * joined to MJ's. That was invisible while the runner also lacked permission to write an
+ * `MJ: Action Execution Logs` row at all (#60): with no log rows to point AT, a null FK looked
+ * like the same defect rather than a second one underneath it.
+ */
+interface DispatchOutcome {
+  summary?: string;
+  actionExecutionLogId?: string;
+  aiAgentRunId?: string;
+}
+
+/**
+ * A target failure that still knows which MJ record recorded the attempt.
+ *
+ * A failed run is the case where provenance is worth most — it is where the reason lives — so the
+ * failure path must not be the one that drops it. Targets that have no provenance to report throw
+ * a plain Error and the run is stamped with nothing, exactly as before.
+ */
+class AutomationTargetError extends Error {
+  constructor(
+    message: string,
+    readonly outcome: DispatchOutcome,
+  ) {
+    super(message);
+    this.name = 'AutomationTargetError';
+  }
 }
 
 /**
@@ -63,11 +108,12 @@ export async function dispatchAutomation(
 ): Promise<void> {
   const run = await startRun(automation, ctx);
   try {
-    const summary = await dispatchByTarget(automation, ctx);
-    await finishRun(run, 'Succeeded', undefined, summary);
+    const outcome = await dispatchByTarget(automation, ctx);
+    await finishRun(run, 'Succeeded', undefined, outcome);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await finishRun(run, 'Failed', message);
+    const outcome = error instanceof AutomationTargetError ? error.outcome : {};
+    await finishRun(run, 'Failed', message, outcome);
     throw error;
   }
 }
@@ -75,7 +121,7 @@ export async function dispatchAutomation(
 async function dispatchByTarget(
   automation: PublishedFormAutomation,
   ctx: DispatchContext,
-): Promise<string | undefined> {
+): Promise<DispatchOutcome> {
   switch (automation.targetType) {
     case 'Action':
       return runActionTarget(automation, ctx);
@@ -92,7 +138,7 @@ async function dispatchByTarget(
 async function runActionTarget(
   automation: PublishedFormAutomation,
   ctx: DispatchContext,
-): Promise<string | undefined> {
+): Promise<DispatchOutcome> {
   if (!automation.actionId) {
     throw new Error(`Automation "${automation.name}" is an Action target with no action.`);
   }
@@ -114,10 +160,14 @@ async function runActionTarget(
   ].map((p) => Object.assign(new ActionParam(), { ...p, Type: 'Input' as const }));
 
   const result = await engine.RunAction({ Action: action, ContextUser: ctx.principal, Params: params, Filters: [] });
+  // `LogEntry` is the `MJ: Action Execution Logs` row the engine wrote for this execution. It is
+  // absent when the action is configured to skip logging, and it was absent on every host until
+  // V202608242110 granted the runner permission to write one at all.
+  const outcome: DispatchOutcome = { actionExecutionLogId: result.LogEntry?.ID ?? undefined };
   if (!result.Success) {
-    throw new Error(result.Message ?? `Action "${action.Name}" reported failure.`);
+    throw new AutomationTargetError(result.Message ?? `Action "${action.Name}" reported failure.`, outcome);
   }
-  return result.Message ?? undefined;
+  return { ...outcome, summary: result.Message ?? undefined };
 }
 
 /**
@@ -134,7 +184,7 @@ async function runActionTarget(
 async function runAgentTarget(
   automation: PublishedFormAutomation,
   ctx: DispatchContext,
-): Promise<string | undefined> {
+): Promise<DispatchOutcome> {
   if (!automation.agentId) {
     throw new Error(`Automation "${automation.name}" is an Agent target with no agent.`);
   }
@@ -155,21 +205,24 @@ async function runAgentTarget(
       },
     ],
   });
+  const outcome: DispatchOutcome = { aiAgentRunId: result.agentRun?.ID ?? undefined };
   if (!result.success) {
     // The run entity carries the detail; the result itself only reports success. Naming the run id
-    // is what makes the failure findable, since the agent's own log is where the reason lives.
-    throw new Error(
+    // is what makes the failure findable, since the agent's own log is where the reason lives —
+    // in the message for a human reading the error, and on the run row for anything querying it.
+    throw new AutomationTargetError(
       `Agent "${agent.Name}" reported failure${result.agentRun?.ID ? ` (AIAgentRun ${result.agentRun.ID})` : ''}.`,
+      outcome,
     );
   }
-  return result.agentRun?.ID ? `AgentRun ${result.agentRun.ID}` : undefined;
+  return { ...outcome, summary: result.agentRun?.ID ? `AgentRun ${result.agentRun.ID}` : undefined };
 }
 
 /** Execute an entity binding and record the identity-ledger row. */
 async function runBindingTarget(
   automation: PublishedFormAutomation,
   ctx: DispatchContext,
-): Promise<string | undefined> {
+): Promise<DispatchOutcome> {
   if (!automation.bindingId) {
     throw new Error(`Automation "${automation.name}" is an EntityBinding target with no binding.`);
   }
@@ -179,7 +232,7 @@ async function runBindingTarget(
     throw new Error(`Binding ${automation.bindingId} for "${automation.name}" could not be loaded.`);
   }
   if (binding.Status !== 'Active') {
-    return 'Binding is disabled.';
+    return { summary: 'Binding is disabled.' };
   }
 
   const config = parseBindingConfig(
@@ -188,9 +241,15 @@ async function runBindingTarget(
     { fieldMappings: parseFieldMappings, identityRule: parseIdentityRule, mergePolicy: parseMergePolicy },
   );
 
+  // Computed once and used twice: it decides both whether a file id may be WRITTEN onto the
+  // target record and whether the file may be ATTACHED to it. Asking twice would let the two
+  // answers disagree about the same response.
+  const filesVerified = await filesAreVerified(ctx);
+
   const result = await executeBinding({
     config,
     answers: ctx.answers,
+    questionTypes: ctx.questionTypes,
     gateway: Object.assign(new MJBindingGateway(ctx.principal), {
       findPriorOutcome: (responseId: string) =>
         readPriorBindingOutcome(automation.bindingId as string, responseId, ctx.principal),
@@ -201,7 +260,7 @@ async function runBindingTarget(
     // id it could not attribute to this respondent's own upload. Defence in depth rather than
     // trust: a response persisted under an older, more lenient configuration must not become
     // writable to a business record just because the setting changed afterwards.
-    allowFileAnswers: await filesAreVerified(ctx),
+    allowFileAnswers: filesVerified,
   });
   if (bindingFailed(result)) {
     throw new Error(`${result.failure.scope}: ${result.failure.message}`);
@@ -214,7 +273,79 @@ async function runBindingTarget(
     result.outcome,
     ctx.principal,
   );
-  return `${result.outcome.kind}${result.outcome.targetRecordId ? ` ${result.outcome.targetRecordId}` : ''}`;
+  await attachBoundRecordFiles(ctx, binding.TargetEntityID, result.outcome, filesVerified);
+  return {
+    // A binding writes a business record directly rather than through an Action or an Agent, so
+    // there is no MJ-side run to point at; the identity-ledger row above is its provenance.
+    summary: `${result.outcome.kind}${result.outcome.targetRecordId ? ` ${result.outcome.targetRecordId}` : ''}`,
+  };
+}
+
+/**
+ * Which record this outcome's files belong on, or null when none do.
+ *
+ * Three refusals, each for its own reason. An UNVERIFIED file is refused for the same reason it
+ * is refused as a field value: attaching it would publish someone else's upload onto a record
+ * other users can read, which is the disclosure the provenance check exists to prevent — and an
+ * attachment is every bit as readable as a column. A `Skipped` outcome wrote nothing, so there is
+ * no record to attach to. A null `targetRecordId` means the same thing more bluntly.
+ *
+ * `Unchanged` is deliberately NOT refused: the binding found its record and had nothing new to
+ * write to it, which says nothing about whether the attachments are current. Records bound before
+ * this feature existed reach us that way, and they are exactly the ones missing their files.
+ *
+ * NOTE WHAT AN UNVERIFIED VERDICT ALSO COSTS, because it is not obvious: refusing here skips
+ * RECONCILIATION, not merely attachment — so a file attached by an earlier, verified run stays on
+ * the record even if this response no longer answers with it. That is the intended direction.
+ * `filesAreVerified` returns false on any doubt, INCLUDING a provenance lookup that failed, and at
+ * this point "the upload was revoked" and "we could not find out" are the same value. Removing on
+ * doubt would strip legitimate attachments off business records during a database blip; leaving
+ * them costs a stale attachment until the next verified run reconciles it.
+ */
+function bindingAttachmentTarget(
+  targetEntityId: string,
+  outcome: BindingOutcome,
+  filesVerified: boolean,
+): FileLinkTarget | null {
+  if (!filesVerified || outcome.kind === 'Skipped' || !outcome.targetRecordId) {
+    return null;
+  }
+  return { entityId: targetEntityId, recordId: outcome.targetRecordId };
+}
+
+/**
+ * Attach this response's files to the business record the binding just wrote.
+ *
+ * The point of the whole feature: a reviewer opening the applicant sees the résumé on the
+ * applicant, not only on the form response it arrived with. Best-effort and logged — the business
+ * record is already written by the time this runs, so failing the dispatch here would report a
+ * write that succeeded as a failure and invite a re-drive that duplicates it.
+ */
+async function attachBoundRecordFiles(
+  ctx: DispatchContext,
+  targetEntityId: string,
+  outcome: BindingOutcome,
+  filesVerified: boolean,
+): Promise<void> {
+  const target = bindingAttachmentTarget(targetEntityId, outcome, filesVerified);
+  if (!target) {
+    return;
+  }
+  const result = await syncFileLinks(new MJFileLinkGateway(globalFileLinkProvider(), ctx.principal), {
+    target,
+    fileIds: fileAnswerIds(ctx.answers),
+    responseId: ctx.responseId,
+  });
+  for (const failure of result.failures) {
+    LogError(`Forms binding: response ${ctx.responseId}: ${failure}`);
+  }
+}
+
+/** The file ids among a response's answers. */
+function fileAnswerIds(answers: CanonicalAnswers): string[] {
+  return [...answers.Entries()]
+    .map(([, value]) => (isFileAnswer(value) ? value.fileId : undefined))
+    .filter((id): id is string => Boolean(id));
 }
 
 /**
@@ -235,9 +366,7 @@ async function runBindingTarget(
  * file onto a business record later, when nobody is waiting and the refusal costs nothing.
  */
 async function filesAreVerified(ctx: DispatchContext): Promise<boolean> {
-  const fileIds = [...ctx.answers.Entries()]
-    .map(([, value]) => (isFileAnswer(value) ? value.fileId : undefined))
-    .filter((id): id is string => Boolean(id));
+  const fileIds = fileAnswerIds(ctx.answers);
   if (fileIds.length === 0) {
     return true;
   }
@@ -288,7 +417,7 @@ async function finishRun(
   row: mjBizAppsFormsFormAutomationRunEntity | null,
   status: 'Succeeded' | 'Failed',
   errorMessage?: string,
-  summary?: string,
+  outcome: DispatchOutcome = {},
 ): Promise<void> {
   if (!row) {
     return;
@@ -296,7 +425,11 @@ async function finishRun(
   row.Status = status;
   row.CompletedAt = new Date();
   row.ErrorMessage = errorMessage ?? null;
-  row.OutputSummary = summary ? JSON.stringify({ summary }) : null;
+  row.OutputSummary = outcome.summary ? JSON.stringify({ summary: outcome.summary }) : null;
+  // Provenance: which MJ record holds the detail behind this run. Null for a binding, which has no
+  // MJ-side run, and for a target that failed before producing one.
+  row.ActionExecutionLogID = outcome.actionExecutionLogId ?? null;
+  row.AIAgentRunID = outcome.aiAgentRunId ?? null;
   if (!(await row.Save())) {
     LogError(`Forms automation: could not close run record ${row.ID}.`);
   }

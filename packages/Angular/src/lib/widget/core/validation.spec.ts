@@ -64,3 +64,42 @@ describe('validateQuestion', () => {
     expect(validateQuestion(t, 'anything').valid).toBe(true);
   });
 });
+
+describe('validateQuestion on composites', () => {
+  const contact = q({ type: 'ContactInfo' });
+
+  it('names the sub-fields that are wrong so each message can sit under its own input', () => {
+    const result = validateQuestion(contact, { email: 'fsa', phone: '12' });
+
+    expect(result.valid).toBe(false);
+    expect(result.parts).toEqual({
+      email: 'Enter a valid email address.',
+      phone: 'Enter a valid phone number.',
+    });
+  });
+
+  it('leaves parts empty for a group-level failure, which belongs to the whole question', () => {
+    const result = validateQuestion(q({ type: 'ContactInfo', isRequired: true }), null);
+
+    expect(result.message).toBe('This question is required.');
+    expect(result.parts).toBeUndefined();
+  });
+});
+
+describe('validateQuestion on consent boxes', () => {
+  it('refuses to accept a required consent box that was never ticked', () => {
+    // `false` is a SUPPLIED answer, so the plain required check waves it through. For a Legal
+    // or Checkbox question that is the whole point of the field: an unticked box is not consent.
+    const result = validateQuestion(q({ type: 'Legal', isRequired: true }), false);
+
+    expect(result.valid).toBe(false);
+  });
+
+  it('accepts a ticked one', () => {
+    expect(validateQuestion(q({ type: 'Legal', isRequired: true }), true).valid).toBe(true);
+  });
+
+  it('leaves an OPTIONAL consent box alone when unticked', () => {
+    expect(validateQuestion(q({ type: 'Checkbox', isRequired: false }), false).valid).toBe(true);
+  });
+});

@@ -35,4 +35,31 @@ describe('fireOnSubmitHooks', () => {
     const results = await fireOnSubmitHooks(hookContext, engine, makeContextUser());
     expect(results.every((r) => r.status === 'failed')).toBe(true);
   });
+
+  it('skips every hook, fires nothing, and says so when no automation principal resolves', async () => {
+    // FAIL-CLOSED. This path used to default to `UserCache.GetSystemUser()`, which silently
+    // restored the broad grants the dedicated principal exists to avoid — at exactly the moment
+    // nobody is watching, and on a fresh deployment where the seed had not been applied yet. A
+    // skipped automation is visible and recoverable; an over-privileged one is not.
+    //
+    // Every pre-existing test above passes an explicit principal, so before this test the null
+    // branch had no coverage at all.
+    const { engine, config, runAction } = makeFakeEngine(new Set(ON_SUBMIT_ACTION_NAMES));
+
+    const results = await fireOnSubmitHooks(hookContext, engine, null);
+
+    expect(results.map((r) => r.status)).toEqual(ON_SUBMIT_ACTION_NAMES.map(() => 'skipped-no-principal'));
+    // Not merely "no action ran": the engine is never even CONFIGURED, so nothing is elevated.
+    expect(config).not.toHaveBeenCalled();
+    expect(runAction).not.toHaveBeenCalled();
+  });
+
+  it('reports one result per hook whichever way it skips, so a caller can always account for all of them', async () => {
+    const { engine } = makeFakeEngine(new Set(ON_SUBMIT_ACTION_NAMES));
+
+    const skipped = await fireOnSubmitHooks(hookContext, engine, null);
+
+    expect(skipped).toHaveLength(ON_SUBMIT_ACTION_NAMES.length);
+    expect(skipped.map((r) => r.name).sort()).toEqual([...ON_SUBMIT_ACTION_NAMES].sort());
+  });
 });

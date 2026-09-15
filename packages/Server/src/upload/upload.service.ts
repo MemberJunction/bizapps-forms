@@ -19,10 +19,16 @@
  */
 import { LogError, Metadata } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
+import { answerColumnFor, isFormQuestionType } from '@mj-biz-apps/forms-entities';
+import { randomUUID } from 'node:crypto';
+
+
 import type { mjBizAppsFormsFormUploadEntity } from '@mj-biz-apps/forms-entities';
+import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names';
 import { checkRespondentScope, type ScopeMetadataProvider } from '../public-submit/scope-check.service';
 import { resolvePublishedDefinition, type DefinitionRunViewProvider } from '../public-submit/definition-loader.service';
-import { contentTypeAllowed, getUploadConfig } from './config';
+import { checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE } from '../http/embed-origin';
+import { contentTypeAllowed, getUploadConfig, uploadTooLargeMessage } from './config';
 import type { ParsedFile } from './multipart';
 
 /** What the service needs about the just-parsed request. */
@@ -46,6 +52,19 @@ export interface UploadRequest {
 export interface UploadContext {
   /** The anonymous session's UserInfo (already verified by MJ's unified auth middleware). */
   contextUser: UserInfo;
+  /**
+   * The caller's `Origin` header, from `RequestIdentityMiddleware` via `currentRequestIdentity()`.
+   *
+   * Lives on the CONTEXT rather than on {@link UploadRequest} because that type holds fields parsed
+   * out of the multipart body -- things the caller put in the payload -- and this is a fact about
+   * the HTTP request. It mirrors `PipelineContext.requestOrigin` on the submit path for the same
+   * reason, so the two doors describe the same input the same way.
+   *
+   * Absent in unit tests and absent for any non-browser client. Absent is a REFUSAL once a
+   * distribution has authored a list and an ADMISSION when it has not; `checkEmbedOrigin` owns that
+   * asymmetry and the reasoning for it.
+   */
+  requestOrigin?: string;
   /** Metadata provider for the anonymous-scope check (`EntityByName`/`GetUserPermisions`). */
   metadataProvider: ScopeMetadataProvider;
   /** RunView provider for resolving the distribution slug to its published definition. */
@@ -153,8 +172,70 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
     return distCheck;
   }
 
+  // 3a. Embed origin (#203). A distribution may name the browser origins permitted to use its
+  //     link; this refuses everyone else, exactly as the submit pipeline's gate 2a does.
+  //
+  //     THIS IS THE THIRD DOOR, and it was the one the origin gate first missed. `PublishedForm`
+  //     and `SubmitFormResponse` are the two the change reasons about, because enumerating
+  //     `@Query`/`@Mutation` finds them; this route is Express middleware contributed through
+  //     `GetPostAuthMiddleware`, so it is invisible to that enumeration while being reachable by
+  //     the same widget, on the same public path, with the same anonymous session, through the
+  //     same `resolvePublishedDefinition`. Measured before this gate existed: a caller the submit
+  //     refused still stored bytes and minted an `MJ: Files` row here.
+  //
+  //     IT CANNOT RUN EARLIER: the policy is a column on the distribution row, and step 3 above is
+  //     what turns the slug into that row. It runs BEFORE `validateQuestion` and before any byte is
+  //     stored.
+  //
+  //     IT DOES NOT PRECEDE THE RATE LIMITER, AND THAT IS THE ONE PLACE THIS DOOR DIVERGES FROM THE
+  //     SUBMIT PIPELINE -- deliberately, so do not "fix" it by moving this gate earlier. On the
+  //     submit path the whole sequence lives in one function, so `checkEmbedOrigin` genuinely
+  //     precedes `charge` (`submit-pipeline.ts:509` then `:526`) and a refused request spends no
+  //     budget. Here the per-caller window is charged one layer up, in the Express middleware:
+  //     `processUpload` -> `refuseIfRateLimited` (`UploadMiddleware.ts:141`) -> `checkUploadRateLimit`
+  //     -> `FormsRateLimiter.Instance.charge` (`upload-rate-limit.ts:50`), all of it before
+  //     `runUpload` is called at all (`:157`). So an origin refusal here HAS already cost the caller
+  //     one upload slot (of `FORMS_UPLOAD_IP_MAX`, default 30) whenever a peer address resolved --
+  //     `checkUploadRateLimit` no-ops when it cannot derive an identity.
+  //
+  //     That ordering is not an oversight to correct. This gate needs the distribution, the
+  //     distribution comes from the slug, and the slug is a multipart field in the BODY, which is
+  //     not read until `readCappedBody` (`:145`) -- after the charge. Gating on origin first would
+  //     mean buffering and parsing an untrusted body before any frequency control applied, which
+  //     inverts the property that charge point exists to provide: this route's controls were added
+  //     because an authenticated anonymous session could otherwise POST files without bound
+  //     (storage DoS), and even the in-flight cap is ordered so a shed request is charged to nobody
+  //     (`UploadMiddleware.ts:108-116`). Cheap-and-early beats precise-and-late on a door whose
+  //     abuse case is volume.
+  const embedOrigin = checkEmbedOrigin(distCheck.resolved?.allowedOrigins, ctx.requestOrigin);
+  if (!embedOrigin.allowed) {
+    // Operator gets which origin against which list; the respondent gets the one sentence the
+    // submit door already uses, so a prober cannot tell the doors apart and cannot map the
+    // allowlist by reading refusals.
+    LogError(
+      `[Forms] upload refused for ${req.distributionSlug ?? req.distributionId ?? '(no slug)'}: `
+        + `${embedOrigin.reason ?? 'origin not allowed'}`,
+    );
+    return fail(403, FOREIGN_ORIGIN_MESSAGE);
+  }
+
+  // 3b. The question must be a real FileUpload question on the published definition. Checked
+  // BEFORE any byte is stored: the definition is already in hand from step 3, and validating
+  // after storage is how the first live run of this path ended — bytes and an `MJ: Files` row
+  // orphaned on disk while the respondent saw a 500 from the ledger insert rejecting a
+  // non-GUID question id (found 2026-08-18 driving the full résumé arc, issue #49).
+  const questionCheck = validateQuestion(distCheck.resolved, req.questionId);
+  if (!questionCheck.ok) {
+    return questionCheck;
+  }
+
   // 4. Store bytes + create the MJ: Files record via the canonical MJ storage path.
-  return storeFile(ctx, file, req, distCheck.resolved);
+  //    The ledger records the DEFINITION's spelling of the question id, not the client's: the
+  //    match above is case-folded, so writing back what the caller sent would let
+  //    `FormUpload.QuestionID` disagree with the published definition about which question an
+  //    upload answered — and multipart field values are not trimmed (see multipart.ts), so the
+  //    raw string can also carry surrounding whitespace into a uniqueidentifier column.
+  return storeFile(ctx, file, req, distCheck.resolved, questionCheck.questionId);
 }
 
 /** Enforce presence, size cap, and content-type allowlist. */
@@ -167,10 +248,13 @@ function validateFile(file: ParsedFile | undefined): UploadResult {
     return fail(400, 'Uploaded file is empty.');
   }
   if (file.data.length > cfg.maxBytes) {
-    return fail(413, `File exceeds the maximum allowed size of ${cfg.maxBytes} bytes.`);
+    return fail(413, uploadTooLargeMessage());
   }
   if (!contentTypeAllowed(file.contentType, cfg.allowedTypes)) {
-    return fail(415, `Content type "${file.contentType}" is not allowed.`);
+    return fail(
+      415,
+      `Files of type "${file.contentType}" are not accepted here. ${describeAllowedTypes(cfg.allowedTypes)}`,
+    );
   }
   return { ok: true };
 }
@@ -184,7 +268,7 @@ function validateFile(file: ParsedFile | undefined): UploadResult {
 export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<boolean> {
   try {
     const row = await new Metadata().GetEntityObject<mjBizAppsFormsFormUploadEntity>(
-      'MJ_BizApps_Forms: Form Uploads',
+      FORM_UPLOAD_ENTITY,
       input.writer,
     );
     if (!row) {
@@ -218,6 +302,20 @@ export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<
   }
 }
 
+/** What step 3 hands to the question check and the store step. */
+interface ResolvedUploadTarget {
+  distributionId: string;
+  formId: string;
+  /**
+   * The distribution's raw `AllowedOrigins` column, carried out of the resolve so the gate in
+   * {@link runUpload} can read it without a second query. Resolving is a QUERY; deciding who may
+   * act on the result is the orchestrator's job, which is why the verdict is not taken here.
+   */
+  allowedOrigins: string | null | undefined;
+  /** Every question on the published definition, flattened across pages. */
+  questions: ReadonlyArray<{ id: string; type: string }>;
+}
+
 /**
  * Resolve the distribution slug to an open published form (rejects closed/unknown).
  *
@@ -227,7 +325,7 @@ export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<
 async function resolveOpenDistribution(
   ctx: UploadContext,
   req: UploadRequest,
-): Promise<UploadResult & { resolved?: { distributionId: string; formId: string } }> {
+): Promise<UploadResult & { resolved?: ResolvedUploadTarget }> {
   const slug = req.distributionSlug ?? req.distributionId;
   if (!slug) {
     return fail(400, 'Missing required field "distributionSlug" (or "distributionId").');
@@ -238,8 +336,49 @@ async function resolveOpenDistribution(
   }
   return {
     ok: true,
-    resolved: { distributionId: loaded.value.distribution.ID, formId: loaded.value.definition.formId },
+    resolved: {
+      distributionId: loaded.value.distribution.ID,
+      formId: loaded.value.definition.formId,
+      allowedOrigins: loaded.value.distribution.AllowedOrigins,
+      questions: loaded.value.definition.pages.flatMap((p) => p.questions.map((q) => ({ id: q.id, type: q.type }))),
+    },
   };
+}
+
+/**
+ * The uploaded-against question must exist on the published definition and be a FileUpload
+ * question. Fail-closed on both: an unknown id would otherwise travel all the way to the
+ * provenance insert (where a non-GUID surfaces as a raw SQL conversion error), and a non-file
+ * question id would mint a ledger row the submit path can never match to a file answer.
+ *
+ * GUIDs are compared case-folded — minted lowercase on the client, returned uppercase by
+ * SQL Server — the same boundary every other identifier in this codebase crosses.
+ */
+function validateQuestion(
+  target: ResolvedUploadTarget | undefined,
+  questionId: string,
+): UploadResult & { questionId?: string } {
+  const wanted = questionId.trim().toLowerCase();
+  const question = target?.questions.find((q) => q.id.trim().toLowerCase() === wanted);
+  if (!question) {
+    return fail(400, 'Unknown "questionId" for this form.');
+  }
+  // Ask the question-type contract whether this answer IS a file, rather than naming one type.
+  // The hardcoded 'FileUpload' rejected every Doodle upload with a 400 — the pad exports a
+  // PNG and sends it down this exact route, so the respondent drew something and got
+  // "Upload failed (HTTP 400)" underneath it with nothing to do about it. Both types declare
+  // `answerColumn: 'file'`, which is the property this guard was always reaching for: the
+  // ledger row must match a file answer at submit, and that is decided by the column, not the
+  // type name. Anything else added to that column later works here without a second edit.
+  // Guarded rather than cast: `type` arrives as a plain string off the published snapshot (it
+  // is JSON), so a definition published by an older or newer build can carry a type this server
+  // does not know. Treating an unrecognised one as "not a file" keeps the endpoint fail-closed.
+  if (!isFormQuestionType(question.type) || answerColumnFor(question.type) !== 'file') {
+    return fail(400, `Question does not take a file answer (got "${question.type}").`);
+  }
+  // Return the DEFINITION's id, not the caller's — the one place that decides which question this
+  // upload answered, so the ledger cannot record a spelling the definition disagrees with.
+  return { ok: true, questionId: question.id };
 }
 
 /** Store the file via FileStorageEngine.UploadFile and shape the success body. */
@@ -248,6 +387,8 @@ async function storeFile(
   file: ParsedFile,
   req: UploadRequest,
   resolved: { distributionId: string; formId: string } | undefined,
+  /** The published definition's spelling of the question id, from {@link validateQuestion}. */
+  questionId: string | undefined,
 ): Promise<UploadResult> {
   const cfg = getUploadConfig();
   // The File row and the provenance row are both written under an ELEVATED principal, not the
@@ -265,7 +406,7 @@ async function storeFile(
       mimeType: bareContentType(file.contentType),
       contextUser: writer,
       storageAccountId: cfg.storageAccountId,
-      pathPrefix: cfg.pathPrefix ?? defaultPathPrefix(),
+      pathPrefix: uploadPathPrefix(cfg.pathPrefix),
     });
 
     if (resolved) {
@@ -276,7 +417,7 @@ async function storeFile(
         providerKey: result.StoragePath,
         distributionId: resolved.distributionId,
         formId: resolved.formId,
-        questionId: req.questionId,
+        questionId,
         responseId: req.responseId,
         sessionId: ctx.sessionId,
         uploadedByUserId: ctx.contextUser?.ID,
@@ -326,6 +467,48 @@ function safeFileName(filename: string): string {
 }
 
 /** Default storage path prefix: `forms-uploads/<YYYY-MM-DD>`. */
-function defaultPathPrefix(): string {
-  return `forms-uploads/${new Date().toISOString().slice(0, 10)}`;
+/**
+ * The allow-list, as a sentence a respondent can act on.
+ *
+ * Deliberately families rather than the raw MIME list: "application/vnd.openxmlformats-
+ * officedocument.wordprocessingml.document" is the correct answer to a question nobody
+ * asked, and eleven of them is not a hint, it is a wall. Naming the recognisable kinds
+ * gets someone to the right file; the exact list stays in config for the operator.
+ */
+function describeAllowedTypes(allowed: readonly string[]): string {
+  const families = new Set<string>();
+  for (const type of allowed) {
+    if (type.startsWith('image/')) families.add('images');
+    else if (type === 'application/pdf') families.add('PDFs');
+    else if (type.startsWith('text/')) families.add('text files');
+    else families.add('Word and Excel documents');
+  }
+  const names = [...families];
+  if (names.length === 0) {
+    return 'No file types are currently accepted.';
+  }
+  const list =
+    names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `You can upload ${list}.`;
+}
+
+/**
+ * Where one upload's bytes go, given whatever prefix the operator configured.
+ *
+ * The UUID is the whole point, not decoration. The object path is `<prefix>/<filename>`, and the
+ * doodle pad names every file it exports `doodle.png` — so without a unique segment every
+ * drawing made on a given day, by every respondent, on every form, resolved to ONE object.
+ * Each upload overwrote the previous one while its own MJ: Files row was created happily, leaving
+ * several responses pointing at whichever bytes landed last: a respondent's drawing replaced by
+ * a stranger's, now served to a reviewer with a 200 by the download route.
+ *
+ * `configured` is folded in HERE rather than short-circuiting this function, because the first
+ * version of this fix lived in a `?? defaultPathPrefix()` fallback — which meant it protected only
+ * the hosts that had configured nothing, and `FORMS_UPLOAD_PATH_PREFIX` (documented and supported)
+ * silently put the data loss back. Uniqueness is an invariant of the path, so it belongs on every
+ * path this builds. The date stays because it makes the store browsable.
+ */
+export function uploadPathPrefix(configured?: string): string {
+  const base = configured?.replace(/\/+$/, '') || `forms-uploads/${new Date().toISOString().slice(0, 10)}`;
+  return `${base}/${randomUUID()}`;
 }

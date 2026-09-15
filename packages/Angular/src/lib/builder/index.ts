@@ -11,6 +11,18 @@ export { FormBuilderComponent } from './form-builder.component';
 export { QuestionEditorComponent } from './question-editor.component';
 export { DistributionManagerComponent } from './distribution-manager.component';
 export { DesignPanelComponent } from './design-panel.component';
+export { FormPreviewStageComponent } from './form-preview-stage.component';
+export { screenChips, type ScreenChip } from './screen-strip';
+export { ColorPickerComponent } from './color-picker.component';
+export {
+  PRESET_SWATCHES,
+  hexToHsv,
+  hsvToHex,
+  isCompleteHex,
+  normalizeHexInput,
+  sanitizeHexInput,
+  type Hsv,
+} from './color-model';
 export { DesignStateService, type BrandEdit } from './design-state.service';
 export {
   BRAND_TOKENS,
@@ -19,15 +31,112 @@ export {
   readBrandToken,
   withBrandToken,
 } from './style-tokens';
+export { ImageFieldComponent } from './image-field.component';
+export { ImagePickerDialogComponent } from './image-picker-dialog.component';
+export {
+  ACCEPTED_IMAGE_TYPES,
+  ACCEPT_ATTRIBUTE,
+  ACCEPTED_FORMATS_LABEL,
+  MAX_SIZE_LABEL,
+  isAcceptedType,
+} from './image-formats';
+export {
+  FormAssetService,
+  buildAssetFormData,
+  parseAssetResponse,
+  assetErrorMessage,
+  type UploadedAsset,
+} from './form-asset.service';
+export { resolveApiOrigin, resolveApiToken } from '../shared/mj-api-origin';
 export { ConditionalRuleEditorComponent } from './conditional-rule-editor.component';
+export { RuleEditorDialogComponent } from './rule-editor-dialog.component';
+export { RulesPanelComponent } from './rules-panel.component';
+export { LogicEditorComponent } from './logic-editor.component';
+export {
+  addJumpRule,
+  canAddJumpRule,
+  emptyLogicDraft,
+  isCommittableJump,
+  isLogicDraftDirty,
+  jumpRules,
+  logicDraftOf,
+  moveJumpRule,
+  removeJumpRule,
+  ruleFromLogicDraft,
+  updateJumpRule,
+  type JumpDraft,
+  type LogicDraft,
+} from './logic-draft';
+export {
+  groupedJumpTargets,
+  jumpTargetOptions,
+  storedTargetLabel,
+  targetFromValue,
+  targetValue,
+  type JumpDestination,
+  type JumpTargetGroup,
+  type JumpTargetOption,
+} from './jump-target-options';
+export {
+  jumpReach,
+  reachNote,
+  type JumpReach,
+  type ReachItem,
+  type ReachPage,
+  type ReachSource,
+} from './jump-reach';
+export {
+  collectRuleEntries,
+  endingReachFor,
+  ruleBadgesFor,
+  type EndingReach,
+  type RuleBadge,
+  type RuleEntry,
+  type RuleInventoryForm,
+  type RuleInventoryItem,
+  type RuleInventoryPage,
+  type RuleItemKind,
+} from './rules-inventory';
+export { PageEditorComponent } from './page-editor.component';
 export { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 export { BuilderStateService } from './builder-state.service';
+export {
+  NOTHING_SELECTED,
+  clearIfQuestion,
+  clearIfScreen,
+  questionId,
+  screenId,
+  selectQuestion,
+  selectScreen,
+  type BuilderSelection,
+} from './builder-selection';
 export { PublishService, type PublishResult } from './publish.service';
-export { DistributionService, type CreateDistributionInput, type DistributionChannel } from './distribution.service';
-export { FORMS_ENTITY } from './entity-names';
+export {
+  DistributionService,
+  type CreateDistributionInput,
+  type DistributionChannel,
+  type DistributionListResult,
+  type MutationOutcome,
+} from './distribution.service';
+export {
+  autoShareName,
+  credentialMayStillRedeem,
+  formReach,
+  isOpenToResponses,
+  shareState,
+  type FormReach,
+  type FormReachKind,
+  type ShareLinkFacts,
+  type ShareState,
+  type ShareStateKind,
+  type ShareStateTone,
+} from './share-state';
+export { fromLocalInputValue, toLocalInputValue } from './local-datetime';
 export {
   QUESTION_TYPE_CATALOG,
   questionTypeMeta,
+  questionGroupColorClass,
+  questionTypeColorClass,
   questionTypesInGroup,
   type QuestionTypeMeta,
   type QuestionPaletteGroup,

@@ -2,51 +2,69 @@ import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
+  ElementRef,
   Input,
+  OnDestroy,
   OnInit,
+  ViewChild,
   inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
+import { parseAllowedOrigins } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
-import { GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
-import { BUILDER_CONTROL_STYLES } from './builder-styles';
-import {
-  DistributionService,
-  type CreateDistributionInput,
-  type DistributionChannel,
-} from './distribution.service';
-import { textToQrSvg } from './qr-code';
+import { LogError } from '@memberjunction/core';
 
-const DISTRIBUTION_CSS = /* css */ `
-.dm { display: flex; flex-direction: column; gap: 16px; }
-.dm-create { display: grid; grid-template-columns: 1fr 160px auto; gap: 10px; align-items: end; }
-.dm-list { display: flex; flex-direction: column; gap: 12px; }
-.dm-card { border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-lg, 12px); padding: 14px 16px; background: var(--mj-bg-surface-card, var(--mj-bg-surface)); }
-.dm-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.dm-card-name { font-weight: 700; color: var(--mj-text-primary); }
-.dm-card-body { margin-top: 10px; display: flex; gap: 16px; flex-wrap: wrap; }
-.dm-artifact { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.dm-code { display: flex; gap: 6px; align-items: stretch; }
-.dm-code code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 0.8125rem; padding: 8px 10px; border-radius: var(--mj-radius-md, 8px); background: var(--mj-bg-surface-sunken); border: 1px solid var(--mj-border-subtle); color: var(--mj-text-primary); }
-.dm-copy { flex: none; }
-.dm-qr { width: 132px; height: 132px; border: 1px solid var(--mj-border-subtle); border-radius: var(--mj-radius-md, 8px); padding: 6px; background: var(--mj-bg-surface); }
-.dm-qr svg { width: 100%; height: 100%; display: block; }
-.dm-meta { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 0.8125rem; color: var(--mj-text-secondary); align-items: center; }
-.dm-actions { display: flex; gap: 8px; margin-top: 10px; }
-.dm-status { font-weight: 700; }
-.dm-status--active { color: var(--mj-status-success, var(--mj-color-success-600)); }
-.dm-status--closed { color: var(--mj-status-error, var(--mj-color-error-600)); }
-.dm-status--draft { color: var(--mj-text-muted); }
-.dm-empty { font-size: 0.875rem; color: var(--mj-text-muted); }
-.dm-num { width: 90px; }
-`;
+import { FORMS_UI_CSS } from '../shared';
+import { DISTRIBUTION_STYLES } from './distribution-manager.styles';
+import { DistributionService, type MutationOutcome } from './distribution.service';
+import { fromLocalInputValue, toLocalInputValue } from './local-datetime';
+import { resolveApiOrigin } from '../shared/mj-api-origin';
+import { textToQrSvg } from './qr-code';
+import { readResponseLimit } from './response-limit';
+import {
+  autoShareName,
+  credentialMayStillRedeem,
+  isOpenToResponses,
+  shareState,
+  type ShareState,
+} from './share-state';
+
+/** The three renderings of one link. Not three kinds of link — see the class comment. */
+type ShareView = 'link' | 'qr' | 'embed';
+
+/** Which artifact the "Copied" confirmation is currently attached to. */
+type CopyTarget = 'link' | 'embed';
+
+/** How long the copy button stays in its confirmed state, in ms. */
+const COPY_FEEDBACK_MS = 2000;
 
 /**
- * FormDistribution management surface: create distributions (PublicLink / Embed /
- * QR), list them, and show the shareable artifacts — public URL, `<iframe>` embed
- * snippet, and a scannable QR. Open/close the response window and cap MaxResponses.
+ * The Distribute tab: get a link to this form, and control who can still use it.
+ *
+ * THE THING THIS FIXES. The old version made you choose a "channel" — PublicLink, Embed or
+ * QR — before you could create anything, and then showed you only the artifact matching
+ * that choice. That choice was fiction. Every distribution has a link; a QR is that link
+ * drawn as a square and an embed is that link in an iframe. Nothing downstream reads the
+ * column except the server's minting allow-list, where all three behave identically. So
+ * the UI invented a decision the domain does not have, forced it at the worst possible
+ * moment (before you had seen a single artifact), made it permanent (nothing could edit
+ * `ChannelType`), and punished getting it wrong by making you create a SECOND link with a
+ * different URL to get a QR of the first. The junk half-named records this tab accumulates
+ * are the fossil record of people discovering that.
+ *
+ * Now: one link, three ways to use it, all always available. Creating one asks nothing.
+ *
+ * THE OTHER THING THIS FIXES. The badge showed `Status` verbatim, so a link sitting at its
+ * response cap read "Active" while the server refused every submission. {@link shareState}
+ * computes the effective answer from the same facts the server gates on.
+ *
+ * WHAT IS DELIBERATELY QUIET. Exactly one filled button exists on the share surface —
+ * Copy. Pausing, downloading, opening in a tab and deleting are all ghost or quiet, in
+ * roughly the order people need them. The previous layout made Open/Close the loudest
+ * control on every card, which is backwards: nobody arrives at this tab wanting to close
+ * something.
  */
 @Component({
   selector: 'mjf-distribution-manager',
@@ -55,9 +73,9 @@ const DISTRIBUTION_CSS = /* css */ `
   imports: [CommonModule, FormsModule],
   providers: [DistributionService],
   templateUrl: './distribution-manager.component.html',
-  styles: [BUILDER_CONTROL_STYLES, DISTRIBUTION_CSS],
+  styles: [FORMS_UI_CSS, DISTRIBUTION_STYLES],
 })
-export class DistributionManagerComponent implements OnInit {
+export class DistributionManagerComponent implements OnInit, OnDestroy {
   @Input({ required: true }) formId!: string;
   /** Public base URL where the respondent widget is hosted (slug appended as /f/:slug). */
   @Input() publicBaseUrl = '';
@@ -66,76 +84,559 @@ export class DistributionManagerComponent implements OnInit {
   private readonly sanitizer = inject(DomSanitizer);
   private readonly cdr = inject(ChangeDetectorRef);
 
-  protected distributions: mjBizAppsFormsFormDistributionEntity[] = [];
+  protected links: mjBizAppsFormsFormDistributionEntity[] = [];
   protected loading = true;
-  protected creating = false;
+  /** A failed LOAD, which is not the same as having no links — the empty state would lie. */
+  protected loadError: string | null = null;
+  /** A failed WRITE, shown against the selected link. */
+  protected actionError: string | null = null;
+  protected busy = false;
 
-  protected newName = '';
-  protected newChannel: DistributionChannel = 'PublicLink';
-  protected readonly channels: DistributionChannel[] = ['PublicLink', 'Embed', 'QR'];
+  protected selectedId: string | null = null;
+  protected view: ShareView = 'link';
+  protected copied: CopyTarget | null = null;
 
+  protected renaming = false;
+  protected nameDraft = '';
+  protected confirmingDelete = false;
+  protected confirmingReissue = false;
+
+  /**
+   * Focus and pre-select the rename box the moment it exists.
+   *
+   * A ViewChild SETTER rather than a lifecycle hook: it fires exactly when the query
+   * result changes, which is when `@if (renaming)` puts the input in the DOM — no timer
+   * racing the render, and nothing running on every check. Selecting the text matters as
+   * much as focusing it, because the name being replaced is usually the generated
+   * placeholder, and typing over it should not start with a manual select-all.
+   */
+  @ViewChild('nameBox')
+  protected set nameBox(ref: ElementRef<HTMLInputElement> | undefined) {
+    ref?.nativeElement.select();
+  }
+
+  private copyTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly qrCache = new Map<string, SafeHtml>();
 
   async ngOnInit(): Promise<void> {
     await this.reload();
   }
 
-  private async reload(): Promise<void> {
-    this.loading = true;
-    this.distributions = await this.service.list(this.formId);
-    this.qrCache.clear();
+  ngOnDestroy(): void {
+    if (this.copyTimer !== null) {
+      clearTimeout(this.copyTimer);
+    }
+  }
+
+  // ------------------------------------------------------------------ loading
+
+  /**
+   * Re-read the links.
+   *
+   * `quiet` re-reads WITHOUT raising `loading`, which the template turns into a full-pane
+   * "Loading share links…" that unmounts the two-pane shell. Right for the first load and wrong
+   * after a credential write: those happen on the Settings switch below the fold, so blanking the
+   * pane threw the author's scroll position away and dropped keyboard focus to `<body>` — on every
+   * pause and every reopen — leaving the switch they had just pressed unreachable without tabbing
+   * from the top of the document. The data still refreshes; only the announcement is suppressed.
+   */
+  protected async reload(quiet = false): Promise<void> {
+    this.loading = !quiet;
+    this.loadError = null;
+    this.cdr.markForCheck();
+
+    const result = await this.service.list(this.formId);
     this.loading = false;
+    if (!result.ok) {
+      this.loadError = result.error;
+      this.cdr.markForCheck();
+      return;
+    }
+    this.links = result.items;
+    this.qrCache.clear();
+    // Keep the author where they were across a reload; fall back to the newest link.
+    if (!this.links.some((l) => l.ID === this.selectedId)) {
+      this.selectLink(this.links[0]?.ID ?? null);
+    }
     this.cdr.markForCheck();
   }
 
+  /**
+   * Move the selection, dropping every confirmation armed against the link being left.
+   *
+   * The one place `selectedId` is assigned, because a confirmation is armed against a RECORD and
+   * the flags holding it are not. `select()` cleared them; creating a link, deleting one, and a
+   * reload whose selected row is gone all reassigned `selectedId` without doing so — so an armed
+   * "Replace it" survived onto whatever was selected next, and one click then rotated the token
+   * of a link the author never armed. Making assignment and reset the same act is what stops the
+   * next new path reintroducing it.
+   */
+  private selectLink(id: string | null): void {
+    this.selectedId = id;
+    this.confirmingDelete = false;
+    this.confirmingReissue = false;
+  }
+
+  protected get selected(): mjBizAppsFormsFormDistributionEntity | null {
+    return this.links.find((l) => l.ID === this.selectedId) ?? null;
+  }
+
+  protected select(link: mjBizAppsFormsFormDistributionEntity): void {
+    this.selectLink(link.ID);
+    this.cancelRename();
+    this.actionError = null;
+  }
+
+  // ----------------------------------------------------------------- creating
+
+  /**
+   * Create a share link and show it. No name, no channel, no dialog.
+   *
+   * The old flow disabled Create until you typed a name, which put a blank text field
+   * between a person and the only thing this tab produces. A generated placeholder name
+   * that is one click from being changed costs nothing and blocks nobody.
+   */
   protected async create(): Promise<void> {
-    const name = this.newName.trim();
-    if (name.length === 0 || this.creating) {
+    if (this.busy) {
       return;
     }
-    this.creating = true;
-    const input: CreateDistributionInput = {
+    this.busy = true;
+    this.actionError = null;
+    this.cdr.markForCheck();
+
+    const created = await this.service.create({
       formId: this.formId,
-      name,
-      channelType: this.newChannel,
-    };
-    const created = await this.service.create(input);
-    this.creating = false;
-    if (created) {
-      this.newName = '';
-      await this.reload();
+      name: autoShareName(this.links.map((l) => l.Name)),
+    });
+    this.busy = false;
+    if (!created) {
+      this.actionError = 'Could not create a share link. Check the console for details.';
+      this.cdr.markForCheck();
+      return;
+    }
+    await this.reload();
+    this.selectLink(created.ID);
+    this.view = 'link';
+    this.cdr.markForCheck();
+  }
+
+  // -------------------------------------------------------------------- state
+
+  /**
+   * Whether the "Open to responses" switch should read ON for this link.
+   *
+   * Delegates to the one exported predicate rather than restating it, because the template
+   * used to test `Status === 'Active'` here and that is only half of what "open" means — see
+   * {@link isOpenToResponses} for what the half-answer did to the control.
+   */
+  protected isOpen(link: mjBizAppsFormsFormDistributionEntity): boolean {
+    return isOpenToResponses(link);
+  }
+
+  /** The effective state of a link — what a respondent opening it right now would get. */
+  protected stateOf(link: mjBizAppsFormsFormDistributionEntity): ShareState {
+    return shareState(link, new Date());
+  }
+
+  /** `.mjf-badge` modifier for a state, or the bare badge for the neutral tone. */
+  protected badgeClass(state: ShareState): string {
+    return state.tone === 'neutral' ? 'mjf-badge' : `mjf-badge mjf-badge--${state.tone}`;
+  }
+
+  /** Matching dot for the rail. Decorative — the rail prints the state in words too. */
+  protected dotClass(state: ShareState): string {
+    return state.tone === 'neutral' ? 'dm-dot' : `dm-dot dm-dot--${state.tone}`;
+  }
+
+  /** How full a capped link is, 0–100. Zero when there is no cap to be full of. */
+  protected capPercent(link: mjBizAppsFormsFormDistributionEntity): number {
+    const cap = link.MaxResponses;
+    if (cap === null || cap <= 0) {
+      return cap === 0 ? 100 : 0;
+    }
+    return Math.min(100, Math.round((link.ResponseCount / cap) * 100));
+  }
+
+  /**
+   * Do whatever the current state's `fix` promises.
+   *
+   * One handler rather than five buttons: the state already decides which remedy is on
+   * offer, so the alternative is five conditionals in the template each duplicating that
+   * decision. `pending` and `paused` both go through {@link runCredentialWrite}, because
+   * both ask the server to mint a token and that is written by a second server-side save
+   * this client's copy of the record knows nothing about.
+   */
+  protected async applyFix(): Promise<void> {
+    const link = this.selected;
+    if (!link || this.busy) {
+      return;
+    }
+    const kind = this.stateOf(link).kind;
+    switch (kind) {
+      case 'pending':
+        await this.runCredentialWrite(() => this.service.issueLink(link));
+        this.warnIfStillUnissued(link.ID, 'issue');
+        return;
+      case 'paused':
+        // Warns for the same reason `pending` does: reopening asks the server to mint, and the
+        // hook is fail-soft, so "turned it back on and got no web address" is a real outcome the
+        // author would otherwise have to notice from the badge alone.
+        await this.runCredentialWrite(() => this.service.open(link));
+        this.warnIfStillUnissued(link.ID, 'issue');
+        return;
+      case 'ended':
+        await this.run(() => this.service.setSchedule(link, link.OpenAt, null));
+        return;
+      case 'scheduled':
+        await this.run(() => this.service.setSchedule(link, null, link.CloseAt));
+        return;
+      case 'full':
+        await this.run(() => this.service.setMaxResponses(link, null));
+        return;
+      case 'live':
+        return;
     }
   }
 
-  protected async toggleOpen(dist: mjBizAppsFormsFormDistributionEntity): Promise<void> {
-    const ok =
-      dist.Status === 'Active' ? await this.service.close(dist) : await this.service.open(dist);
-    if (ok) {
+  // ----------------------------------------------------------------- mutations
+
+  protected async toggleOpen(): Promise<void> {
+    const link = this.selected;
+    if (!link || this.busy) {
+      return;
+    }
+    const reopening = !this.isOpen(link);
+    await this.runCredentialWrite(() =>
+      reopening ? this.service.open(link) : this.service.close(link),
+    );
+    if (reopening) {
+      this.warnIfStillUnissued(link.ID, 'issue');
+    } else {
+      this.warnIfStillRedeemable(link.ID);
+    }
+  }
+
+  /**
+   * Flip this link's captcha requirement.
+   *
+   * `run()`, not `runCredentialWrite()` like its neighbour above: this writes one column and
+   * touches neither `PublicLinkToken` nor `MagicLinkInviteID`, so there is nothing a re-read could
+   * discover, and skipping it keeps the panel's scroll position and selection where they were.
+   */
+  protected async toggleCaptcha(): Promise<void> {
+    const link = this.selected;
+    if (!link || this.busy) {
+      return;
+    }
+    await this.run(() => this.service.setCaptchaRequired(link, !link.CaptchaRequired));
+  }
+
+  /**
+   * Say so when turning a link OFF did not actually take its access token away.
+   *
+   * The mirror of {@link warnIfStillUnissued}, and a separate method because the evidence is
+   * the opposite: that one fires on an EMPTY token, this one on a token still present. Both
+   * exist for the same reason — `FormDistributionEntityServer.Save()` logs a failed revoke and
+   * still returns true, so the service reports a green save either way and the reloaded record
+   * is the only place the difference shows.
+   *
+   * Worth saying out loud rather than leaving to the badge: an author turning a link off is
+   * usually doing it BECAUSE they want it to stop working, and "it is off" is what they will
+   * read from the switch. Silence here is the same overclaim the badge used to make.
+   *
+   * It says "not confirmed" rather than "could not withdraw" because the record cannot tell the
+   * two failures apart — `revoke-failed` leaves the token live, `unlink-failed` means the revoke
+   * landed and only the record is stale, and both leave the same two columns. See
+   * {@link credentialMayStillRedeem}, whose docstring draws exactly this limit.
+   */
+  private warnIfStillRedeemable(linkId: string): void {
+    if (this.actionError !== null) {
+      // The write itself failed and `run()` recorded why. A diagnosis about the token would
+      // OVERWRITE that reason with a guess — "magic links are not switched on" over a slug
+      // conflict — and send the author to audit config that is correct. The real error wins.
+      return;
+    }
+    const link = this.links.find((l) => l.ID === linkId);
+    if (!link || !credentialMayStillRedeem(link)) {
+      return;
+    }
+    this.actionError =
+      'This link is turned off, but its access token is still on record, so the withdrawal is ' +
+      'not confirmed — treat the old web address as possibly still working. The server tries ' +
+      'again the next time this link is saved. If it keeps failing, someone technical needs to ' +
+      'look at the server log.';
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Ask the server for a new access token, keeping the web address.
+   *
+   * Two clicks, because it cannot be undone: the previous token stops being redeemable the
+   * instant this lands, so anyone holding it (a scraped `PublicLinkToken`, a copied redeem URL)
+   * can no longer trade it for a session.
+   *
+   * It does NOT end sessions already granted. Revocation stops new redemptions; a respondent who
+   * had already opened the link holds a JWT that stays valid until its own `exp` — core ships no
+   * session revocation for magic-link tokens to hook into. The control's copy says so rather than
+   * promising an instant cutoff the product cannot deliver.
+   *
+   * What it also does NOT break is the shared link itself — `/f/:slug` looks the
+   * token up at request time, so posters, QR codes and embeds carry on working. That is
+   * the whole reason this exists instead of "delete it and make another".
+   */
+  protected async confirmReissue(): Promise<void> {
+    const link = this.selected;
+    if (!link || this.busy) {
+      return;
+    }
+    this.confirmingReissue = false;
+    await this.runCredentialWrite(() => this.service.reissueLink(link));
+    this.warnIfStillUnissued(link.ID, 'reissue');
+  }
+
+  /**
+   * Say so when a write that was supposed to produce a token did not — and be exact about which
+   * of the two failures it was, because for a reissue they are opposites.
+   *
+   * The service reports whether the SAVE succeeded; the hook that mints is deliberately
+   * fail-soft, so a green save and a link with no web address are the same outcome from here.
+   * The reloaded record carries the evidence, in the pair of columns the server writes together:
+   *
+   *  - a token          → nothing went wrong.
+   *  - no token, no invite → the old credential WAS withdrawn; only the replacement failed.
+   *  - no token, invite still linked → the revoke did NOT land. The server leaves it linked
+   *    precisely so the next save retries, and that is the state where the leaked token an
+   *    author just tried to kill is still redeemable. Saying "the old token was withdrawn"
+   *    here — which is what a single message did — is the inverse of the truth, on the one
+   *    flow whose entire purpose is killing a leaked credential.
+   *
+   * Takes the link's ID rather than reading `this.selected`, because the rail stays clickable
+   * through the two round-trips: the author can select a different link before this runs, and
+   * the warning would then be written under a record it says nothing about.
+   */
+  private warnIfStillUnissued(linkId: string, wrote: 'issue' | 'reissue'): void {
+    if (this.actionError !== null) {
+      // The write itself failed and `run()` recorded why. A diagnosis about the token would
+      // OVERWRITE that reason with a guess — "magic links are not switched on" over a slug
+      // conflict — and send the author to audit config that is correct. The real error wins.
+      return;
+    }
+    const link = this.links.find((l) => l.ID === linkId);
+    if (!link || link.PublicLinkToken) {
+      return;
+    }
+    if (link.MagicLinkInviteID) {
+      this.actionError =
+        'The server could not withdraw this link\'s old access token, so it may still work. ' +
+        'This link has no working web address in the meantime. Try again, and if it keeps ' +
+        'failing someone technical needs to look at the server log.';
+    } else if (wrote === 'reissue') {
+      this.actionError =
+        'The old token was withdrawn, but the server did not issue a new one, so this link is ' +
+        'not working. Use "Issue the link" to try again.';
+    } else {
+      this.actionError =
+        'The server did not hand out a web address for this link. Public links are not switched on for this server — someone technical needs to enable magic links before any share link here will work.';
+    }
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Apply a typed response limit, and leave the box showing what is actually stored.
+   *
+   * Takes the element rather than its value because both outcomes need to write back to
+   * it. Angular repaints `[value]` only when the BOUND expression changes, so a refused
+   * entry — or one clamped to a number the record already held — would sit in the box
+   * looking accepted while the database held something else. Setting it by hand after
+   * every path is what keeps displayed and stored the same thing.
+   */
+  protected async setMax(box: HTMLInputElement): Promise<void> {
+    const link = this.selected;
+    if (!link || this.busy) {
+      return;
+    }
+    const edit = readResponseLimit(box.value, box.validity.badInput);
+    if (edit.action === 'ignore') {
+      this.actionError = edit.reason;
+      this.showStoredLimit(box, link);
+      return;
+    }
+    await this.run(() =>
+      this.service.setMaxResponses(link, edit.action === 'clear' ? null : edit.value),
+    );
+    this.showStoredLimit(box, link);
+  }
+
+  private showStoredLimit(box: HTMLInputElement, link: mjBizAppsFormsFormDistributionEntity): void {
+    box.value = link.MaxResponses === null ? '' : String(link.MaxResponses);
+    this.cdr.markForCheck();
+  }
+
+  /** The expiry. There is no start-date setter: the UI offers only this half — see the
+   *  template's note on why, and `applyFix` for how a start date set elsewhere is cleared. */
+  protected async setCloseAt(raw: string): Promise<void> {
+    const link = this.selected;
+    if (!link || this.busy) {
+      return;
+    }
+    await this.run(() => this.service.setSchedule(link, link.OpenAt, fromLocalInputValue(raw)));
+  }
+
+  /**
+   * The authored list as one address per line — the shape the box shows.
+   *
+   * Three stored states, three answers. An allowlist shows its origins, one per line. An
+   * UNRESTRICTED link shows an empty box, because empty is what "any site may show this" looks
+   * like. A CLOSED one — authored, but nothing in it parses, which is reachable from Explorer's
+   * raw entity form — shows the raw column back: the author has to see what is actually stored to
+   * fix it, and an empty box would read as "no restriction" while the link was refusing everyone.
+   */
+  protected authoredOrigins(link: mjBizAppsFormsFormDistributionEntity): string {
+    const policy = parseAllowedOrigins(link.AllowedOrigins);
+    if (policy.kind === 'allowlist') {
+      return policy.origins.join('\n');
+    }
+    return policy.kind === 'closed' ? (link.AllowedOrigins ?? '') : '';
+  }
+
+  /**
+   * Save an edited list of sites.
+   *
+   * Takes the element rather than its value for the reason {@link setMax} does: Angular repaints
+   * `[value]` only when the BOUND expression changes, so an edit the service normalised
+   * (`HTTPS://Acme.com` becoming `https://acme.com`) would sit in the box in a spelling the record
+   * does not hold.
+   *
+   * Written back only on success, which is where this parts company with {@link setMax}. A
+   * REFUSED edit must keep the author's text exactly as they typed it — that text is the thing
+   * they have to fix, and `actionError` above already names the entry that failed. Replacing it
+   * with what is stored would delete the work and leave the refusal unexplainable.
+   */
+  protected async saveOrigins(box: HTMLTextAreaElement): Promise<void> {
+    const link = this.selected;
+    if (!link || this.busy) {
+      return;
+    }
+    await this.run(() => this.service.setAllowedOrigins(link, box.value));
+    if (this.actionError === null) {
+      box.value = this.authoredOrigins(link);
       this.cdr.markForCheck();
     }
   }
 
-  protected async setMax(
-    dist: mjBizAppsFormsFormDistributionEntity,
-    raw: string,
-  ): Promise<void> {
-    const value = raw.trim() === '' ? null : Number(raw);
-    const next = value === null || Number.isNaN(value) ? null : value;
-    await this.service.setMaxResponses(dist, next);
+  /**
+   * Run one write, keeping `busy` and `actionError` honest on every path.
+   *
+   * The entity is mutated in place by the service, so a successful write needs no reload —
+   * which is what keeps selection, scroll position and the open panel where they were.
+   */
+  private async run(write: () => Promise<MutationOutcome>): Promise<void> {
+    this.busy = true;
+    this.actionError = null;
+    this.cdr.markForCheck();
+    try {
+      const outcome = await write();
+      this.actionError = outcome.ok ? null : (outcome.error ?? 'That did not save.');
+    } finally {
+      this.busy = false;
+      this.cdr.markForCheck();
+    }
+  }
+
+  /**
+   * Run one write that changes this link's access token, then re-read the record.
+   *
+   * The reload is not optional here, and is what separates these writes from the others.
+   * Pausing, reopening, issuing and reissuing all make the server's lifecycle hook write
+   * `MagicLinkInviteID` / `PublicLinkToken` in a SECOND save that this client's copy of
+   * the record never sees. Skipping the re-read leaves the screen rendering a token that
+   * has been revoked, or none where one was just minted — which the badge reads as "Not
+   * ready" on a link that is live.
+   */
+  private async runCredentialWrite(write: () => Promise<MutationOutcome>): Promise<void> {
+    await this.run(write);
+    await this.reload(true);
+  }
+
+  // -------------------------------------------------------------------- rename
+
+  protected startRename(): void {
+    const link = this.selected;
+    if (!link) {
+      return;
+    }
+    this.nameDraft = link.Name;
+    this.renaming = true;
     this.cdr.markForCheck();
   }
 
-  protected publicUrl(dist: mjBizAppsFormsFormDistributionEntity): string {
-    return this.service.publicUrl(dist, this.effectiveBaseUrl);
+  protected cancelRename(): void {
+    this.renaming = false;
+    this.cdr.markForCheck();
   }
 
-  protected embedSnippet(dist: mjBizAppsFormsFormDistributionEntity): string {
-    return this.service.embedSnippet(dist, this.effectiveBaseUrl);
+  /** Commit a rename. A blank name is treated as a cancel, never saved as an empty title. */
+  protected async commitName(): Promise<void> {
+    const link = this.selected;
+    const name = this.nameDraft.trim();
+    this.renaming = false;
+    if (!link || name.length === 0 || name === link.Name) {
+      this.cdr.markForCheck();
+      return;
+    }
+    await this.run(() => this.service.setName(link, name));
   }
 
-  /** Render the QR for a distribution's public URL; returns null if encoding fails. */
-  protected qrSvg(dist: mjBizAppsFormsFormDistributionEntity): SafeHtml | null {
-    const url = this.publicUrl(dist);
+  // -------------------------------------------------------------------- delete
+
+  /**
+   * Whether deleting is offered at all.
+   *
+   * A link with responses stays undeletable: `FormUpload.DistributionID` is a required FK
+   * so the database would refuse anyway, and the record is the only thing explaining where
+   * those responses came from. Pausing does the job people actually want here — it stops
+   * responses without breaking a URL that may be printed on something.
+   */
+  protected get canDelete(): boolean {
+    const link = this.selected;
+    return link !== null && link.ResponseCount === 0;
+  }
+
+  protected async confirmDelete(): Promise<void> {
+    const link = this.selected;
+    if (!link || this.busy) {
+      return;
+    }
+    this.busy = true;
+    this.actionError = null;
+    this.cdr.markForCheck();
+
+    const outcome = await this.service.remove(link);
+    this.busy = false;
+    this.confirmingDelete = false;
+    if (!outcome.ok) {
+      this.actionError = `Could not delete this share link. ${outcome.error ?? ''}`.trim();
+      this.cdr.markForCheck();
+      return;
+    }
+    this.links = this.links.filter((l) => l.ID !== link.ID);
+    this.selectLink(this.links[0]?.ID ?? null);
+    this.cdr.markForCheck();
+  }
+
+  // ------------------------------------------------------------------ artifacts
+
+  protected publicUrl(link: mjBizAppsFormsFormDistributionEntity): string {
+    return this.service.publicUrl(link, this.effectiveBaseUrl);
+  }
+
+  protected embedSnippet(link: mjBizAppsFormsFormDistributionEntity): string {
+    return this.service.embedSnippet(link, this.effectiveBaseUrl);
+  }
+
+  /** Render the QR for a link's public URL; returns null if encoding fails. */
+  protected qrSvg(link: mjBizAppsFormsFormDistributionEntity): SafeHtml | null {
+    const url = this.publicUrl(link);
     const cached = this.qrCache.get(url);
     if (cached) {
       return cached;
@@ -144,23 +645,101 @@ export class DistributionManagerComponent implements OnInit {
       const svg = this.sanitizer.bypassSecurityTrustHtml(textToQrSvg(url));
       this.qrCache.set(url, svg);
       return svg;
-    } catch {
+    } catch (err) {
+      LogError(`Could not build a QR for distribution ${link.ID}: ${String(err)}`);
       return null;
     }
   }
 
-  protected async copy(text: string): Promise<void> {
-    if (navigator.clipboard) {
-      try {
-        await navigator.clipboard.writeText(text);
-      } catch {
-        // Clipboard may be blocked; the value is visible for manual copy.
-      }
+  /**
+   * Download a link's QR.
+   *
+   * SVG rather than a raster: a QR goes on a poster or a slide, and vector prints crisply
+   * at any size where a fixed-pixel PNG does not. The file is self-contained — the
+   * `--mjf-qr-*` fallbacks resolve to literal colours once it is outside the app — so it
+   * opens correctly in any viewer or design tool.
+   */
+  protected downloadQr(link: mjBizAppsFormsFormDistributionEntity): void {
+    let svg: string;
+    try {
+      svg = textToQrSvg(this.publicUrl(link));
+    } catch (err) {
+      LogError(`Could not build a QR for distribution ${link.ID}: ${String(err)}`);
+      this.actionError = 'Could not build a QR code for this link.';
+      this.cdr.markForCheck();
+      return;
     }
+    const blob = new Blob([svg], { type: 'image/svg+xml' });
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = `${link.Slug || 'form'}-qr.svg`;
+    a.click();
+    // Revoking immediately can race the download in some browsers; one turn is enough.
+    setTimeout(() => URL.revokeObjectURL(href), 0);
   }
 
-  protected statusClass(dist: mjBizAppsFormsFormDistributionEntity): string {
-    return `dm-status dm-status--${dist.Status.toLowerCase()}`;
+  /**
+   * Whether this link points at the machine the builder is running on.
+   *
+   * Worth saying out loud in the QR panel specifically. "localhost" means "the device
+   * reading this", so a phone scanning a localhost QR dials itself, finds nothing, and
+   * shows a connection error — which reads as a broken QR code rather than as the address
+   * being unreachable. Nothing is wrong with the code, and nothing needs fixing before
+   * release: the URL is built from the configured API origin, so it becomes a real domain
+   * the moment this is deployed and the warning disappears on its own.
+   */
+  protected isLocalOnly(link: mjBizAppsFormsFormDistributionEntity): boolean {
+    const url = this.publicUrl(link);
+    return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(url);
+  }
+
+  /** The value a `datetime-local` input should show for a stored instant. */
+  protected asInputValue(value: Date | string | null): string {
+    return toLocalInputValue(value);
+  }
+
+  // ---------------------------------------------------------------------- copy
+
+  /**
+   * Copy, and SAY so.
+   *
+   * The old copy button wrote to the clipboard and changed nothing on screen, which is
+   * indistinguishable from a button that does not work — so people click it again, and
+   * still get nothing. The confirmation is the entire interaction's feedback loop.
+   */
+  protected async copy(target: CopyTarget, text: string): Promise<void> {
+    if (!navigator.clipboard) {
+      this.actionError = 'This browser will not let the page copy for you — select the text instead.';
+      this.cdr.markForCheck();
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (err) {
+      LogError(`Clipboard write was refused: ${String(err)}`);
+      this.actionError = 'Copying was blocked — select the text and copy it instead.';
+      this.cdr.markForCheck();
+      return;
+    }
+    this.copied = target;
+    this.cdr.markForCheck();
+    if (this.copyTimer !== null) {
+      clearTimeout(this.copyTimer);
+    }
+    this.copyTimer = setTimeout(() => {
+      this.copied = null;
+      this.copyTimer = null;
+      this.cdr.markForCheck();
+    }, COPY_FEEDBACK_MS);
+  }
+
+  /** Select the whole URL on focus, so keyboard copying is one shortcut rather than a drag. */
+  protected selectAll(event: Event): void {
+    const input = event.target;
+    if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+      input.select();
+    }
   }
 
   /**
@@ -171,27 +750,16 @@ export class DistributionManagerComponent implements OnInit {
    * `http://localhost:4121/f/:slug` (the shell-free respondent host).
    *
    * Resolution order: an explicit `publicBaseUrl` input → the configured GraphQL API
-   * origin (`GraphQLDataProvider.Instance.ConfigData.URL`) → `window.location.origin`
-   * as a last resort.
+   * origin ({@link resolveApiOrigin}) → `window.location.origin` as a last resort.
    */
   private get effectiveBaseUrl(): string {
     if (this.publicBaseUrl.length > 0) {
       return this.publicBaseUrl;
     }
-    const apiOrigin = this.resolveApiOrigin();
+    const apiOrigin = resolveApiOrigin();
     if (apiOrigin) {
       return apiOrigin;
     }
     return typeof window !== 'undefined' ? window.location.origin : '';
-  }
-
-  /** Origin of the configured MJAPI GraphQL endpoint, or '' if unavailable. */
-  private resolveApiOrigin(): string {
-    try {
-      const url = GraphQLDataProvider.Instance?.ConfigData?.URL;
-      return url ? new URL(url).origin : '';
-    } catch {
-      return '';
-    }
   }
 }

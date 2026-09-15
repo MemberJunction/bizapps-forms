@@ -8,12 +8,13 @@
  * / `ServerExtensionsCore` (PR #2037). That seam was absent when this was written against MJ
  * 5.43.0, so `ConfigureExpressApp(app)` was the only hook available. It is NO LONGER absent:
  * 5.51.0 re-exports `ServerExtensionLoader` and `BaseServerExtension` from
- * `@memberjunction/server-extensions-core`, and `serve()` instantiates the loader. Migrating
- * these two routes is now possible and is deliberately NOT part of this change —
- * `ConfigureExpressApp` remains a supported hook in 5.51.0 and both routes work through it, so
- * the move is a behaviour-preserving refactor that belongs in its own commit.
+ * `@memberjunction/server-extensions-core`, and `serve()` instantiates the loader. That migration
+ * is still outstanding and is a DIFFERENT move from the one #181 made: the page and the favicon
+ * went from `ConfigureExpressApp` to `GetPreAuthMiddleware` to get behind MJ's `compression()`,
+ * which is about where a route sits in Express's stack. `BaseServerExtension` is about which
+ * abstraction declares it at all, and `POST /f/:slug/resume` still registers the old way.
  *
- * It adds a GET route (`/f/:slug`) through {@link ConfigureExpressApp}; the route runs
+ * It contributes a GET route (`/f/:slug`) through {@link GetPreAuthMiddleware}; the route runs
  * BEFORE auth (it is just static HTML), so an anonymous respondent reaches it without a
  * login. The path matches the Forms `publicUrl()` / embed-snippet convention
  * (`${base}/f/${slug}`). The page reads the distribution `slug` (from the path, and as a
@@ -42,23 +43,69 @@
  * the DB without a request JWT (the redeem is what mints that JWT). There is no request user to
  * borrow, so it uses the MJ-canonical server-side system user — `UserCache.Instance.GetSystemUser()`
  * (the same `UserInfo` the data provider uses for non-request server work) — with a `new Metadata()`
- * provider, exactly as other server-side-only MJ code does. Reads are a single slug lookup.
+ * provider, exactly as other server-side-only MJ code does. Reads are the slug lookup plus one
+ * primary-key read of the form's description for the page's `<head>` (see {@link loadFormIdentity}).
  */
-import type { Application, Request, Response } from 'express';
+import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware, configInfo } from '@memberjunction/server';
 import { LogStatus, LogError, RunView, type UserInfo } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import { getMagicLinkProvisioningConfig } from '@mj-biz-apps/forms-core-entities-server';
+import { frameAncestorsDirective, parseAllowedOrigins } from '@mj-biz-apps/forms-entities';
 
+import { matchesExactRoute, matchSingleSegmentRoute } from '../http/route-match.js';
 import { getRespondentHostConfig } from './config.js';
-import { renderRespondentHostPage, renderRespondentHostErrorPage } from './host-page.js';
+import { getPublicSubmitConfig } from '../public-submit/config.js';
+import { renderRespondentHostPage } from './host-page.js';
 import { redeemSlugToToken, type RedeemRunViewProvider } from './redeem.service.js';
-import { checkRespondentReadiness } from './host-readiness.js';
-import { redeemFailureToView, type RedeemErrorView } from './error-view.js';
+import { loadFormIdentity } from './form-identity.js';
+import { assessRespondentReadiness } from './host-readiness.js';
+import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.js';
+import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
+import { runForget, runRemember, runResume, type ResumeRouteOutcome } from './device-resume.service.js';
+import { makeDeviceResumeDeps } from './resume-deps.js';
+import { readResumeCookie } from './resume-cookie.js';
+import { matchResumeRoute } from './resume-routes.js';
+import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
+import { checkRedeemRateLimit, redeemInFlightLimiter } from './redeem-rate-limit.js';
+import { currentRequestIdentity } from '../http/request-identity.js';
+import { requestIdentityHandler } from '../http/RequestIdentityMiddleware.js';
 
 /** Route the respondent host page is served from (matches the Forms `publicUrl()` shape). */
 export const RESPONDENT_HOST_ROUTE = '/f/:slug';
+
+/**
+ * The literal half of {@link RESPONDENT_HOST_ROUTE}.
+ *
+ * The page is contributed as a pre-auth handler rather than an `app.get`, so there is no
+ * path-to-regexp to split the path for us — {@link matchSingleSegmentRoute} does it, and this is
+ * what it matches against.
+ */
+export const RESPONDENT_HOST_PREFIX = '/f';
+
+/**
+ * The pre-auth resume route.
+ *
+ * `/resume` is the one route here that has NO session yet — the cookie is the credential, and the
+ * redeem is what mints a session — so it registers beside the page route, before MJ's auth
+ * middleware. Its two siblings do the opposite: `/remember` and `/forget` carry the distribution
+ * JWT the widget is already running under, and identity is their whole gate, so they register
+ * POST-auth where `req.userPayload` is verified. That is the same split `UploadMiddleware` makes,
+ * for the same reason.
+ */
+export const RESPONDENT_RESUME_ROUTE = '/f/:slug/resume';
+
+/** A resume request body is two UUIDs at most; anything larger is not one. */
+const RESUME_BODY_CAP_BYTES = 2048;
+
+/**
+ * Every browser asks the ORIGIN for this on every page, and a link unfurler may too. MJAPI serves no
+ * icon, so unmatched the request fell through to the authenticated routes and answered 401 — the one
+ * console error on a healthy respondent load, and auth-failure noise proportional to form traffic
+ * (bizapps-forms#120). Answering here keeps a public page from ever emitting an auth failure.
+ */
+export const FAVICON_ROUTE = '/favicon.ico';
 
 @RegisterClass(BaseServerMiddleware, 'mj:formsRespondentHost')
 export class RespondentHostMiddleware extends BaseServerMiddleware {
@@ -70,17 +117,42 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     return getRespondentHostConfig().enabled;
   }
 
-  public override ConfigureExpressApp(app: Application): void {
+  /**
+   * The one route that still registers here, and the boot-time readiness report.
+   *
+   * `POST /f/:slug/resume` stays in this hook deliberately (#181) — but NOT because it is too small
+   * to compress. That was the original reason given here and it was wrong, so the real trade is
+   * recorded instead of the comfortable one.
+   *
+   * Its REFUSAL bodies are tiny (`{"reason":"no-pointer"}` is 23 bytes). Its SUCCESS body is not: all
+   * three `status: 200` exits of `runResume` return `{ token: redeemed.token }`, and that token is
+   * core's magic-link session JWT, signed RS256 — a real one measures 1,238 characters, so the body
+   * is about 1.25 KB, comfortably OVER MJ's 1,024-byte threshold. Compressing it would save roughly
+   * 320 bytes, on the returning-respondent path that `host-page.ts`'s `resumeThenMount()` takes on
+   * every load that finds a resume cookie.
+   *
+   * It stays anyway, for the reason that does survive checking: moving it means matching its path by
+   * hand and taking a case-sensitivity decision on `matchResumeRoute`, which claims
+   * `/f/:slug/{remember,forget}` too — and those two are post-auth, so the decision is not local to
+   * this route. That belongs to its own change. The page and the favicon moved because they gained
+   * far more for no such decision: see {@link GetPreAuthMiddleware}.
+   */
+  public override async ConfigureExpressApp(app: Application): Promise<void> {
     const cfg = getRespondentHostConfig();
 
-    app.get(RESPONDENT_HOST_ROUTE, (req: Request, res: Response) => {
-      // Slug arrives on the path (`/f/:slug`). The page also accepts `?slug=` as a fallback,
-      // so the baked-in value is just a default.
-      const slug = typeof req.params.slug === 'string' ? req.params.slug : '';
-      // Never let an unexpected error crash the route — always render a page.
-      void this.handleRequest(slug, res).catch((e: unknown) => {
-        LogError(`[Forms] Respondent host route error: ${e instanceof Error ? e.message : String(e)}`);
-        this.sendError(res, { status: 500, message: 'We could not open this form right now. Please try again later.' });
+    // Pre-auth, like the page: this route's caller has no session — obtaining one is what it is
+    // for. `requestIdentityHandler()` is mounted ON THE ROUTE, not relied on globally, because this
+    // hook runs inside MJServer's middleware-COLLECTION loop (`index.ts:824`) while the pre-auth
+    // handlers it gathers are not `app.use`-d until `index.ts:1158`. Express dispatches in
+    // registration order, so the global copy is added after this route and never runs for it.
+    // Without this argument `currentRequestIdentity()` inside `resumeDeps()` is always undefined
+    // here, which silently made BOTH the address forwarded to core's redeem (`callerIp`, #191) and
+    // this route's own per-caller rate-limit bucket (`callerKey`, #181) inert — the latter falling
+    // back to one shared bucket per FORM (`slug:${slug}`) that any single caller can spend.
+    app.post(RESPONDENT_RESUME_ROUTE, requestIdentityHandler(), (req: Request, res: Response) => {
+      void this.handleResumeRoute(req, res).catch((e: unknown) => {
+        LogError(`[Forms] Resume route error: ${e instanceof Error ? e.message : String(e)}`);
+        sendJsonError(res, 500, 'Could not reopen your saved answers. Please try again.');
       });
     });
 
@@ -88,23 +160,171 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       `[Forms] Respondent host page served at ${RESPONDENT_HOST_ROUTE} ` +
         `(graphql: ${cfg.graphqlUrl}, widget: ${cfg.widgetBundleUrl}, redeem: ${cfg.magicLinkRedeemUrl})`,
     );
-
-    // Surfaced at boot, not at first publish. The magic-link minter's gate is
-    // deliberately graceful, so a misconfigured host stays silent until a respondent
-    // hits a 409 — by which time nobody connects it to an install-time setting.
-    // Pass the role the MINTER grants, not a constant: both read FORMS_MAGICLINK_ROLE, so a host
-    // that renames the role gets a readiness verdict about the role it will actually mint.
-    const readiness = checkRespondentReadiness(
-      configInfo.magicLink,
-      getMagicLinkProvisioningConfig().roleName,
+    LogStatus(
+      `[Forms] Same-device resume routes registered at POST ${RESPONDENT_RESUME_ROUTE}, ` +
+        `/f/:slug/remember and /f/:slug/forget ` +
+        `(device resume ${cfg.deviceResumeEnabled ? 'enabled' : 'DISABLED'} host-wide)`,
     );
-    if (readiness.ready === false) {
-      LogError(`[Forms] Anonymous respondent path is NOT ready: ${readiness.reason}`);
+
+    // Surfaced at boot, not at first publish or first submit. The magic-link minter's gate is
+    // deliberately graceful, core's provisioning fallback is silent to everyone but the log, and
+    // the captcha gate fails closed at submit — so a misconfigured host stays quiet until a
+    // respondent pays for it, by which time nobody connects it to an install-time setting.
+    await this.reportReadiness();
+  }
+
+  /**
+   * The public page and the origin's favicon, in the slot that sits BEHIND MJ's `compression()`.
+   *
+   * ── Why these are pre-auth middleware and not `ConfigureExpressApp` routes (#181) ─────────────
+   * Both hooks run before auth; they differ in where the route lands in Express's stack. `serve()`
+   * calls `ConfigureExpressApp` while it is still collecting middleware contributions
+   * (`index.ts:824`), BEFORE it mounts its own `compression()` (`index.ts:1129`) — so an `app.get`
+   * registered there finishes its response before compression ever wraps `res.write`, and ~9 KB of
+   * HTML went out uncompressed to every respondent who opened a shared link, on the phones and
+   * cellular connections this product is built for. `GetPreAuthMiddleware` is documented by the
+   * base class as running "after compression but before OAuth/REST/GraphQL routes". Same
+   * negotiation, threshold and level as everything else MJAPI serves; nothing compression-specific
+   * lives here. This is the move #121 made for the widget bundle, finished.
+   *
+   * WHAT ELSE MOVING SLOTS DOES, ON PURPOSE. Pre-auth contributions are mounted as ONE ordered
+   * `app.use` chain, so these routes are no longer ahead of every other pre-auth handler — they are
+   * behind them. That includes MJ's own `RateLimitMiddleware`, a global IP-keyed limiter
+   * (`enabled: false` by default). A host that switches rate limiting on will see the page counted
+   * and eventually answer 429, where before it was exempt. That is the right trade for a public
+   * unauthenticated route, but the failure mode is worth knowing: a respondent refused there gets
+   * MJ's rate-limit response, not this middleware's error page.
+   *
+   * Forms cannot pick its position in that chain anyway — the order comes from ClassFactory
+   * registration order across every middleware the host loads, which is why the page carries its
+   * own identity handler rather than trusting the global one to have been mounted first (see
+   * {@link hostPageHandler}).
+   */
+  public override GetPreAuthMiddleware(): RequestHandler[] {
+    return [this.hostPageHandler(), faviconHandler()];
+  }
+
+  /**
+   * `GET /f/:slug` as a handler that claims exactly the URLs `app.get('/f/:slug')` claimed.
+   *
+   * GET and HEAD, like the `app.get` this replaced (Express routes HEAD to GET handlers). Anything
+   * else passes through untouched. What "exactly the URLs" means — one optional trailing slash, a
+   * case-insensitive `/f`, a percent-decoded single segment — lives in {@link matchSingleSegmentRoute},
+   * with the parity table it was probed against.
+   *
+   * WHY THE IDENTITY HANDLER IS STILL MOUNTED HERE. It is no longer for the reason it was: this
+   * route now sits in the same `app.use` chain as `RequestIdentityMiddleware`'s global copy, and
+   * that copy is mounted first today because `packages/Server/src/index.ts` imports it first. But
+   * "today" is the problem — that ordering is module import order in a barrel file, and if it ever
+   * changes, `currentRequestIdentity()` returns undefined, `checkRedeemRateLimit` takes its
+   * deliberate "cannot identify the caller, admit everything" branch, and the per-IP meter reports
+   * itself installed while admitting every caller at any `FORMS_REDEEM_IP_MAX`. Mounting it twice
+   * is documented harmless — `AsyncLocalStorage.run` nests and the inner store wins — so the cheap
+   * copy stays and the ordering assumption is pinned by a test rather than trusted
+   * (`redeem-rate-limit.spec.ts`, "even when the global identity handler is mounted after it").
+   */
+  private hostPageHandler(): RequestHandler {
+    const withIdentity = requestIdentityHandler();
+    return (req: Request, res: Response, next: NextFunction): void => {
+      const slug =
+        req.method === 'GET' || req.method === 'HEAD'
+          ? matchSingleSegmentRoute(req.path, RESPONDENT_HOST_PREFIX)
+          : undefined;
+      if (slug === undefined) {
+        next();
+        return;
+      }
+      withIdentity(req, res, () => {
+        // PRESENCE of the pointer only. This route stays side-effect-free — a mail scanner or a
+        // browser prefetch must not be able to spend a single-use invite — so nothing is redeemed
+        // here and the token is never read.
+        const hasDraft = readResumeCookie(req.headers.cookie) !== undefined;
+        // Never let an unexpected error crash the route — always render a page.
+        void this.handleMetered(slug, hasDraft, res).catch((e: unknown) => {
+          LogError(`[Forms] Respondent host route error: ${e instanceof Error ? e.message : String(e)}`);
+          this.sendError(res, {
+            status: 500,
+            message: 'We could not open this form right now. Please try again later.',
+          });
+        });
+      });
+    };
+  }
+
+  /**
+   * Run every readiness check and log each failing reason under one grep-able prefix.
+   *
+   * The checks are pure; this gathers their inputs from the host. Pass the role the MINTER grants,
+   * not a constant: both read FORMS_MAGICLINK_ROLE, so a host that renames the role gets a verdict
+   * about the role it will actually mint — and pass it as a thunk, because resolving the minter's
+   * config can throw, and boot is the one place that must not propagate one: it would take down all
+   * of MJAPI, which also serves Caliber and ATS, over a Forms env-var typo. `userExists` is core's
+   * own `UserByName` — the lookup core's provisioning performs — so the verdict cannot disagree
+   * with it. The captcha-demand read is the one database read on this path; it answers with a
+   * result, and a failed read is logged here and leaves the Turnstile verdict to config alone
+   * rather than guessing at data.
+   */
+  private async reportReadiness(): Promise<void> {
+    const demand = await readCaptchaDemand(this.systemProvider(), this.systemUser());
+    if (demand.ok === false) {
+      LogError(`[Forms] Could not read captcha demand at boot; Turnstile readiness judged on config only: ${demand.error}`);
+    }
+    const reasons = assessRespondentReadiness({
+      magicLink: configInfo.magicLink,
+      resolveRoleName: () => getMagicLinkProvisioningConfig().roleName,
+      userHandling: configInfo.userHandling,
+      userExists: (name) => UserCache.Instance.UserByName(name) !== undefined,
+      systemUserName: this.systemUser()?.Name,
+      turnstile: {
+        secretConfigured: getPublicSubmitConfig().turnstileSecret !== undefined,
+        siteKeyConfigured: getRespondentHostConfig().turnstileSiteKey !== undefined,
+      },
+      captchaDemand: demand.ok ? demand.demand : undefined,
+    });
+    for (const reason of reasons) {
+      LogError(`[Forms] Anonymous respondent path is NOT ready: ${reason}`);
+    }
+  }
+
+  /**
+   * Two gates BEFORE the redeem work, mirroring `UploadMiddleware`: a process-wide in-flight cap
+   * (how much may run at once) and a per-caller window keyed on the resolved peer IP (how often
+   * one caller may act). Every hit past them costs a DB slug lookup plus an outbound POST to
+   * core's magic-link redeem, which mints a session JWT — real work that was previously entirely
+   * unmetered on an anonymous route.
+   *
+   * The in-flight cap goes FIRST so a request shed for load is never charged to anyone's window,
+   * and the slot wraps the whole request in a `finally` so it releases on every exit path.
+   */
+  private async handleMetered(slug: string, hasDraft: boolean, res: Response): Promise<void> {
+    if (!redeemInFlightLimiter().TryEnter()) {
+      // 503 (load), not 429 (over budget): this clears the instant in-flight work drains.
+      LogStatus('[Forms] Respondent host refused: too many redeems in flight. Clears as work drains.');
+      this.sendError(res, { status: 503, message: 'This form is receiving a lot of traffic right now. Please try again in a moment.' });
+      return;
+    }
+    try {
+      const limit = checkRedeemRateLimit(currentRequestIdentity()?.ipHash);
+      if (!limit.allowed) {
+        // This door's own per-IP meter and core's redeem meter are different budgets, but they are
+        // the SAME fact to the respondent — "this network, too many times" — so they get the same
+        // sentence from the same place rather than a second spelling written here (#139).
+        this.sendError(
+          res,
+          redeemFailureToView('rate-limited', {
+            retryAfterSeconds: Math.max(1, Math.ceil((limit.retryAfterMs ?? 0) / 1000)),
+          }),
+        );
+        return;
+      }
+      await this.handleRequest(slug, hasDraft, res);
+    } finally {
+      redeemInFlightLimiter().Exit();
     }
   }
 
   /** Resolve the slug, do the server-side redeem, and render the host page or a friendly error. */
-  private async handleRequest(slug: string, res: Response): Promise<void> {
+  private async handleRequest(slug: string, hasDraft: boolean, res: Response): Promise<void> {
     const cfg = getRespondentHostConfig();
     const outcome = await redeemSlugToToken(
       {
@@ -112,28 +332,208 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
         contextUser: this.systemUser(),
         redeemUrl: cfg.magicLinkRedeemUrl,
         fetchImpl: fetch,
+        // The same resolved peer the meter above was charged against — never a header the caller
+        // chose. Core keys its own redeem cap on this; without it every respondent in the
+        // deployment shares one bucket (register row 29).
+        clientIp: currentRequestIdentity()?.ip,
       },
       slug,
     );
 
-    if (!outcome.ok) {
-      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed'));
+    // Names BOTH things an identified page needs, because `RedeemOutcome` is a flat optional-field
+    // shape rather than a discriminated union: `ok` is a plain boolean, so it narrows nothing, and
+    // the row would otherwise arrive here as possibly-undefined. `redeemSlugToToken` sets the two
+    // together or neither, so the second clause is unreachable through that door today — it is the
+    // guard that keeps `loadFormIdentity` taking a row it can rely on, and without it a success
+    // carrying no row is a TypeError on `source.FormID`: a 500 with a stack, on the anonymous path.
+    if (!outcome.ok || !outcome.distribution) {
+      // The whole outcome, not a field picked out of it: `RedeemOutcome` satisfies
+      // `RedeemFailureDetails` structurally, so which facts a refusal may name is the view's
+      // decision rather than a second one made here and kept in step by hand.
+      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed', outcome));
       return;
     }
 
+    // The page's identity — what the tab and an unfurl card show — comes from the row the door just
+    // resolved (never re-read) plus one primary-key read for the description. Best-effort by design:
+    // `loadFormIdentity` logs and degrades rather than costing the respondent the form.
+    const identity = await loadFormIdentity(this.systemProvider(), this.systemUser(), outcome.distribution);
     const html = renderRespondentHostPage({
       graphqlUrl: cfg.graphqlUrl,
       widgetBundleUrl: cfg.widgetBundleUrl,
+      pageTitle: identity.name,
+      pageDescription: identity.description,
       defaultSlug: slug,
       token: outcome.token,
       turnstileSiteKey: cfg.turnstileSiteKey,
+      hasDraft,
     });
+    // The embed control that can actually SEE the customer's origin, and therefore the real one
+    // (#203). This product's embed snippet is an `<iframe>` (`distribution.service.ts`
+    // `embedSnippet`), so the framed document's origin is OURS — nothing on the API side can tell a
+    // legitimate embed on the customer's site from one on anybody else's page, because both report
+    // us. `frame-ancestors` is the exception: the BROWSER evaluates it against the framing
+    // ancestor, which is exactly the fact the author authorised.
+    //
+    // Judged on the author's list alone, via the pure contract rather than `checkEmbedOrigin`.
+    // Same-origin framing is covered by CSP `'self'`, which the browser resolves against this
+    // page's own origin: a page served from our origin is already us, and an allowlist naming
+    // other people's sites was never meant to say anything about that. Because `'self'` is
+    // resolved by the browser rather than composed by us, the directive needs no knowledge of the
+    // deployment's own URL — routing this through the API-side verdict would instead have made a
+    // framing decision depend on `MJAPI_PUBLIC_URL`, an environment variable it has no need of.
+    //
+    // Deliberately no `X-Frame-Options` beside it: it cannot express a list (`ALLOW-FROM` is
+    // unsupported in every current browser), and `SAMEORIGIN` would refuse the very embeds this
+    // feature exists to permit. A browser too old for `frame-ancestors` therefore gets no framing
+    // control at all — which is today's behaviour for every link, stated here rather than papered
+    // over with a header that would break the working case to look like protection.
+    const frameAncestors = frameAncestorsDirective(parseAllowedOrigins(outcome.distribution.AllowedOrigins));
     res
       .status(200)
       .type('html')
       // The page carries a per-respondent session JWT now — must NOT be shared-cached.
-      .set('Cache-Control', 'no-store')
-      .send(html);
+      .set('Cache-Control', 'no-store');
+    if (frameAncestors) {
+      // Absent, not permissive, when the link authored nothing: a distribution with no allowlist
+      // must be framable exactly as it is today, and an empty or catch-all directive would be a
+      // behaviour change for every live embed.
+      res.set('Content-Security-Policy', frameAncestors);
+    }
+    res.send(html);
+  }
+
+  /**
+   * Contribute `/remember` and `/forget` as POST-AUTH middleware, so `req.userPayload` is already
+   * verified when they run. A no-op for every request except those two.
+   */
+  public override GetPostAuthMiddleware(): RequestHandler[] {
+    return [
+      (req: Request, res: Response, next: (err?: unknown) => void): void => {
+        const match = matchResumeRoute(req.method, req.path);
+        if (!match || match.action === 'resume') {
+          // `/resume` is handled pre-auth; everything else here is somebody else's request.
+          next();
+          return;
+        }
+        void this.handleAuthedResumeRoute(match.action, match.slug, req, res).catch((e: unknown) => {
+          LogError(`[Forms] Resume route error: ${e instanceof Error ? e.message : String(e)}`);
+          sendJsonError(res, 500, 'Could not save this device preference. Please try again.');
+        });
+      },
+    ];
+  }
+
+  /** `POST /f/:slug/resume` — the pre-auth route: a pointer in, a session out. */
+  private async handleResumeRoute(req: Request, res: Response): Promise<void> {
+    const slug = typeof req.params.slug === 'string' ? req.params.slug : '';
+    if (!slug) {
+      sendJsonError(res, 404, 'Unknown form.');
+      return;
+    }
+    const body = await this.readResumeBody(req, res);
+    if (body === undefined) {
+      return;
+    }
+    const outcome = await runResume(this.resumeDeps(slug), {
+      slug,
+      cookieToken: readResumeCookie(req.headers.cookie),
+      // The emailed link's interstitial hands its token over here rather than through a route of
+      // its own, so both channels share one redeem — and one rotation.
+      bodyToken: typeof body.token === 'string' ? body.token : undefined,
+    });
+    this.sendResumeOutcome(res, outcome);
+  }
+
+  /** `POST /f/:slug/remember` and `/forget` — the post-auth routes, where identity is the gate. */
+  private async handleAuthedResumeRoute(
+    action: 'remember' | 'forget',
+    slug: string,
+    req: Request,
+    res: Response,
+  ): Promise<void> {
+    const payload = userPayloadOf<{ userRecord?: UserInfo; sessionId?: string }>(req);
+    const contextUser = payload?.userRecord;
+    if (!contextUser) {
+      // Should not happen — unified auth would have refused — but fail closed rather than mint a
+      // credential for a caller we cannot identify.
+      sendJsonError(res, 401, 'This form session has expired. Please reload the page.');
+      return;
+    }
+    const body = await this.readResumeBody(req, res);
+    if (body === undefined) {
+      return;
+    }
+    const deps = this.resumeDeps(slug);
+    const cookieToken = readResumeCookie(req.headers.cookie);
+    const outcome =
+      action === 'forget'
+        ? await runForget(deps, { slug, cookieToken })
+        : await runRemember(deps, {
+            slug,
+            responseId: typeof body.responseId === 'string' ? body.responseId : '',
+            // The widget's own header, forwarded by the page. It is the ONLY ownership proof a
+            // first sitting has, which is why `/remember` refuses without it.
+            sessionId: typeof body.sessionId === 'string' ? body.sessionId : (payload?.sessionId ?? ''),
+            scopeId: contextUser.MagicLinkScope?.ResourceID ?? '',
+            cookieToken,
+          });
+    this.sendResumeOutcome(res, outcome);
+  }
+
+  /** Read a small JSON body, or answer the caller and return `undefined`. */
+  private async readResumeBody(req: Request, res: Response): Promise<Record<string, unknown> | undefined> {
+    const read = await readCappedBody(req, RESUME_BODY_CAP_BYTES, 'That request was too large.');
+    if (!read.ok) {
+      sendJsonError(res, read.status ?? 400, read.error ?? 'Malformed request.');
+      return undefined;
+    }
+    if (!read.body || read.body.length === 0) {
+      // No body is ordinary: `/resume` and `/forget` carry none.
+      return {};
+    }
+    try {
+      const parsed: unknown = JSON.parse(read.body.toString('utf8'));
+      return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+    } catch {
+      sendJsonError(res, 400, 'Malformed request.');
+      return undefined;
+    }
+  }
+
+  /** Apply one route outcome. Never caches, and never puts a token anywhere but the cookie. */
+  private sendResumeOutcome(res: Response, outcome: ResumeRouteOutcome): void {
+    if (res.headersSent) {
+      return;
+    }
+    if (outcome.setCookie) {
+      res.append('Set-Cookie', outcome.setCookie);
+    }
+    res.status(outcome.status).set('Cache-Control', 'no-store');
+    if (outcome.status === 204) {
+      res.end();
+      return;
+    }
+    res.json({ ...(outcome.body ?? {}), ...(outcome.reason ? { reason: outcome.reason } : {}) });
+  }
+
+  /** The dependency set one resume request runs on. */
+  private resumeDeps(slug: string) {
+    return makeDeviceResumeDeps({
+      systemUser: this.systemUser(),
+      slug,
+      // The resolved peer, never a header the caller chose. Absent (no middleware mounted) falls
+      // back to the slug, which bounds the route per FORM rather than per caller — coarse, but a
+      // bound, and the same trade `rateLimitGatesFor` makes when it has no address.
+      callerKey: currentRequestIdentity()?.ipHash ?? `slug:${slug}`,
+      // Forwarded to core on the resume redeem so its own per-IP cap applies per respondent, same
+      // as the door's `clientIp` above (register row 29). Unlike `callerKey`, this has NO
+      // slug-shaped fallback: core reads this value as an address, so standing in anything else
+      // when identity is absent would be a fiction it audits and buckets on. Absent simply means
+      // the header is omitted (`postRedeem`'s `forwardedHeaders`) and core falls back to its own
+      // peer for that one request — a degradation, never an invented value.
+      callerIp: currentRequestIdentity()?.ip,
+    });
   }
 
   /** Render a friendly, shell-free error page with the matching HTTP status. */
@@ -141,11 +541,10 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     if (res.headersSent) {
       return;
     }
-    res
-      .status(view.status)
-      .type('html')
-      .set('Cache-Control', 'no-store')
-      .send(renderRespondentHostErrorPage({ message: view.message }));
+    // What the response IS — status, headers, page — is decided by `respondentErrorResponse`, which
+    // is pure and asserted whole in `middleware-error-view.spec.ts`. This method only applies it.
+    const { status, headers, html } = respondentErrorResponse(view);
+    res.status(status).type('html').set(headers).send(html);
   }
 
   /** The MJ-canonical server-side system user for pre-auth DB reads (see header). */
@@ -154,11 +553,29 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
   }
 
   /**
-   * A provider for the slug read. The `RunView` class routes to the global data provider and
-   * implements `IRunViewProvider`, so it is the cast-free way to read outside a request — the
-   * same `new RunView()` pattern the magic-link minter and definition-loader use.
+   * A provider for the pre-auth reads (the slug lookup, and the boot-time captcha-demand probe).
+   * The `RunView` class routes to the global data provider and implements `IRunViewProvider`, so
+   * it is the cast-free way to read outside a request — the same `new RunView()` pattern the
+   * magic-link minter and definition-loader use.
    */
-  private systemProvider(): RedeemRunViewProvider {
+  private systemProvider(): RedeemRunViewProvider & CaptchaDemandProvider {
     return new RunView();
   }
+}
+
+/**
+ * `GET /favicon.ico` — an explicit "nothing to show" rather than an icon.
+ *
+ * There is no Forms icon asset to serve, and 204 is the answer every browser and fetcher treats as
+ * "no icon" without logging an error. Origin-wide by nature of the path; contributed with the host
+ * page so disabling the page (`FORMS_RESPONDENT_HOST_ENABLED=false`) takes this with it.
+ */
+function faviconHandler(): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if ((req.method !== 'GET' && req.method !== 'HEAD') || !matchesExactRoute(req.path, FAVICON_ROUTE)) {
+      next();
+      return;
+    }
+    res.status(204).end();
+  };
 }

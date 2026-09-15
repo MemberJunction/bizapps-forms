@@ -6,13 +6,21 @@
  * resolvable by the MJ ClassFactory from the Dashboard metadata's DriverClass.
  */
 export * from './models/reporting.model';
+export * from './reporting-view-model';
 export * from './services/reporting-aggregations';
 export * from './services/forms-reporting.service';
+export * from './services/export-pivot';
 export * from './services/forms-reporting-export.service';
+export * from './services/question-insight-roles';
+export * from './services/respondent-profile';
+export * from './services/open-text-insights';
+export * from './services/temporal-buckets';
+export * from './services/statistics';
+export * from './components/proportion-bar.component';
+export * from './components/respondent-profile.component';
+export * from './components/open-text-panel.component';
 export * from './components/summary-stats.component';
 export * from './components/question-breakdown.component';
 export * from './components/distribution-chart.component';
 export * from './components/funnel-chart.component';
-export * from './components/response-list.component';
-export * from './components/response-detail.component';
 export * from './forms-reporting-dashboard.component';

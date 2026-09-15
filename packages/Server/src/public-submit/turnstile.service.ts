@@ -7,9 +7,14 @@
  * Cloudflare's siteverify endpoint using the server-side secret.
  *
  * Fail-closed: if captcha is required but the secret is unconfigured, verification
- * fails (we never silently let a challenged form through unverified).
+ * fails (we never silently let a challenged form through unverified). That outcome is
+ * {@link TURNSTILE_NOT_CONFIGURED}, and it is the one code here that is the SERVER's fault, not the
+ * respondent's — the pipeline words it accordingly (#122).
  */
 import { getPublicSubmitConfig } from './config';
+
+/** Captcha was required but `FORMS_TURNSTILE_SECRET` is unset: a host misconfiguration, not a failed check. */
+export const TURNSTILE_NOT_CONFIGURED = 'turnstile-not-configured';
 
 /** Outcome of a Turnstile check; `errorCode` is set only on failure. */
 export interface TurnstileResult {
@@ -42,7 +47,7 @@ export async function verifyTurnstile(
   }
   const config = getPublicSubmitConfig();
   if (!config.turnstileSecret) {
-    return { success: false, errorCode: 'turnstile-not-configured' };
+    return { success: false, errorCode: TURNSTILE_NOT_CONFIGURED };
   }
   if (!token || token.trim() === '') {
     return { success: false, errorCode: 'missing-token' };

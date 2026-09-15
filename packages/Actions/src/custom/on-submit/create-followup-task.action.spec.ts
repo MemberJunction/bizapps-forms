@@ -12,6 +12,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
+// PRECONDITION, not decoration. The action refuses to run when no generated class is registered
+// for the entities it writes, because MJ's fallback would silently discard every field it sets
+// (#60). In production `custom/register.ts` imports this package for exactly that reason, and
+// `register.spec.ts` is what pins that it still does; here we only need the precondition met.
+import '@mj-biz-apps/tasks-entities';
 
 // ---------------------------------------------------------------------------
 // Fakes for the entity / RunView layer.
@@ -71,7 +76,16 @@ const state: {
   getEntityCalls: [],
 };
 
-vi.mock('@memberjunction/core', () => {
+/**
+ * PARTIAL mock: the real module first, then the two classes this test fakes.
+ *
+ * The whole-module form this replaced failed to load with
+ * `No "BaseEngine" export is defined on the mock` — a symbol nothing here mentions, coming from
+ * something further down the import graph. Overriding rather than replacing keeps the mock's
+ * surface to what it actually stubs.
+ */
+vi.mock('@memberjunction/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class Metadata {
     async GetEntityObject<T>(entityName: string): Promise<T> {
       state.getEntityCalls.push(entityName);
@@ -99,7 +113,7 @@ vi.mock('@memberjunction/core', () => {
       return { Success: true, Results: results as T[] };
     }
   }
-  return { Metadata, RunView };
+  return { ...actual, Metadata, RunView };
 });
 
 // The action loads the response via a shared helper; stub it to return our fake context.

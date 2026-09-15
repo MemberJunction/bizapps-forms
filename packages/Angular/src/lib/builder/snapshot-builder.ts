@@ -1,14 +1,19 @@
 import type {
   mjBizAppsFormsFormStyleEntity,
+  FormSettings,
   FormStyleTokens,
   PublishedFormAutomation,
   PublishedFormDefinition,
   PublishedFormPage,
   PublishedFormQuestion,
   PublishedFormQuestionOption,
+  PublishedFormScreen,
   FormRenderMode,
+  mjBizAppsFormsFormScreenEntity,
 } from '@mj-biz-apps/forms-entities';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
+import { publishedOptionIdentities } from './option-labels';
+import { endScreensOf, welcomeScreenOf } from './builder-models';
 import {
   parseConditionalRule,
   parseValidationRule,
@@ -16,6 +21,7 @@ import {
   parseFormSettings,
   buildStyleTokens,
 } from './json-fields';
+import { parseQuestionScoring, parseSocialLinks } from '@mj-biz-apps/forms-entities';
 
 /**
  * Pure transform from the live builder tree to the immutable
@@ -29,6 +35,10 @@ import {
  * `styleTokensOverride` lets the builder's live Preview reflect UNSAVED theme edits: when
  * supplied it is used verbatim instead of deriving tokens from `style`.
  *
+ * `settingsOverride` is the mirror image and exists for the opposite reason: publish must NOT
+ * trust the tree, because the Automate tab writes `Form.Settings` through its own entity and the
+ * builder's copy never learns about it.
+ *
  * `automations` is REQUIRED rather than defaulted, because defaulting it is exactly how this
  * silently broke once: publish emitted a hardcoded empty array, every configured binding
  * therefore never fired, and nothing failed — the submit path simply fell back to the legacy
@@ -41,6 +51,7 @@ export function buildPublishedDefinition(
   formVersionId: string,
   automations: readonly PublishedFormAutomation[],
   styleTokensOverride?: FormStyleTokens,
+  settingsOverride?: FormSettings,
 ): PublishedFormDefinition {
   const form = tree.form;
   return {
@@ -49,7 +60,11 @@ export function buildPublishedDefinition(
     name: form.Name,
     description: form.Description ?? undefined,
     renderMode: form.RenderMode as FormRenderMode,
-    settings: parseFormSettings(form.Settings),
+    // The override is what publish supplies, and it is authoritative: the builder's tree is loaded
+    // once and never refreshed, so `form.Settings` here can be older than what the database holds
+    // — see `PublishService.loadStoredSettings`. Deriving from the tree remains right for the live
+    // Preview, which renders unsaved edits.
+    settings: settingsOverride ?? parseFormSettings(form.Settings),
     styleTokens:
       styleTokensOverride ??
       buildStyleTokens(
@@ -66,7 +81,66 @@ export function buildPublishedDefinition(
     // than loudly broken. An empty array is also what keeps an already-published form on the
     // legacy hook list, so it is a meaningful value rather than a placeholder.
     automations: [...automations],
+    // Same reasoning, one level up: the welcome screen is OPTIONAL because absent genuinely means
+    // "start on the first question", while the ending list is always emitted because empty and
+    // absent resolve identically and a consumer should not have to tell them apart.
+    welcomeScreen: buildWelcomeScreen(tree),
+    endScreens: endScreensOf(tree).map(buildScreen),
   };
+}
+
+/**
+ * Freeze one screen into the snapshot.
+ *
+ * `displayOrder` is re-derived from position rather than copied, matching how pages and questions
+ * are renumbered above: ending resolution walks this list in order, so a gap left by a deleted
+ * screen must not survive into the published form.
+ */
+function buildWelcomeScreen(tree: FormTree): PublishedFormScreen | undefined {
+  const welcome = welcomeScreenOf(tree);
+  return welcome ? buildScreen(welcome, 0) : undefined;
+}
+
+function buildScreen(
+  screen: mjBizAppsFormsFormScreenEntity,
+  displayOrder: number,
+): PublishedFormScreen {
+  const built: PublishedFormScreen = {
+    id: screen.ID,
+    screenType: screen.ScreenType,
+    title: screen.Title,
+    displayOrder,
+  };
+  if (screen.Body) {
+    built.body = screen.Body;
+  }
+  if (screen.ButtonLabel) {
+    built.buttonLabel = screen.ButtonLabel;
+  }
+  if (screen.MediaURL) {
+    built.mediaURL = screen.MediaURL;
+  }
+  if (screen.RedirectURL) {
+    built.redirectURL = screen.RedirectURL;
+  }
+  if (screen.IsDefault) {
+    built.isDefault = true;
+  }
+  if (screen.IsDisqualification) {
+    built.isDisqualification = true;
+  }
+  const conditional = parseConditionalRule(screen.ConditionalRule);
+  if (conditional) {
+    built.conditionalRule = conditional;
+  }
+  // Parsed rather than copied: the snapshot is what a public page renders, so a link that could
+  // not be drawn — unknown platform, blank, or a non-web scheme — is dropped at publish time
+  // rather than shipped to every respondent for the widget to re-litigate.
+  const social = parseSocialLinks(screen.SocialLinks);
+  if (social.length > 0) {
+    built.socialLinks = social;
+  }
+  return built;
 }
 
 function buildPage(page: PageNode, displayOrder: number): PublishedFormPage {
@@ -82,6 +156,9 @@ function buildPage(page: PageNode, displayOrder: number): PublishedFormPage {
   }
   if (page.entity.Description) {
     result.description = page.entity.Description;
+  }
+  if (page.entity.IsPartialSubmitPoint) {
+    result.isPartialSubmitPoint = true;
   }
   const conditional = parseConditionalRule(page.entity.ConditionalRule);
   if (conditional) {
@@ -111,6 +188,12 @@ function buildQuestion(node: QuestionNode, displayOrder: number): PublishedFormQ
   if (validation) {
     result.validationRule = validation;
   }
+  // Per-option points (C4). Tolerant parse: a ScoringConfig holding non-scoring content (the
+  // documented LLM-judge use) publishes no scoring rather than failing the snapshot.
+  const scoring = parseQuestionScoring(q.ScoringConfig);
+  if (scoring) {
+    result.scoring = scoring;
+  }
   const settings = parseQuestionSettings(q.Settings);
   if (Object.keys(settings).length > 0) {
     result.settings = settings;
@@ -118,19 +201,32 @@ function buildQuestion(node: QuestionNode, displayOrder: number): PublishedFormQ
   return result;
 }
 
+/**
+ * Publish a question's options in display order, with unique values.
+ *
+ * The uniqueness pass is not cosmetic. An option's value IS the respondent's answer, so two
+ * options sharing a value are one answer wearing two labels: the widget highlighted both when
+ * either was picked, and the response was indistinguishable afterwards. Deduping here rather
+ * than in the widget is deliberate — the widget would only be papering over a definition that
+ * was already ambiguous, and the ambiguity would survive into the stored response.
+ */
 function buildOptions(node: QuestionNode): PublishedFormQuestionOption[] {
-  return [...node.options]
-    .sort((a, b) => a.DisplayOrder - b.DisplayOrder)
-    .map((opt, index) => {
-      const built: PublishedFormQuestionOption = {
-        id: opt.ID,
-        label: opt.Label,
-        value: opt.Value ?? opt.Label,
-        displayOrder: index,
-      };
-      if (opt.IsDefault) {
-        built.isDefault = true;
-      }
-      return built;
-    });
+  return publishedOptionIdentities(node.options).map(({ source, label, value }, index) => {
+    const built: PublishedFormQuestionOption = {
+      id: source.ID,
+      label,
+      value,
+      displayOrder: index,
+    };
+    if (source.IsDefault) {
+      built.isDefault = true;
+    }
+    if (source.ImageURL) {
+      built.imageURL = source.ImageURL;
+    }
+    if (source.MatrixAxis) {
+      built.matrixAxis = source.MatrixAxis;
+    }
+    return built;
+  });
 }

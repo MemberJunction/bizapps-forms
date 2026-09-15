@@ -41,12 +41,30 @@ instead of something the next reader has to infer from a directory listing:
 | `V202608081700__…Metadata_Sync` | 4,600 lines of `EXEC __mj.spCreate*` calls. The converter emits these as raw T-SQL, and a PostgreSQL core exposes the equivalents as functions with a different call shape — porting it is a hand-authored rewrite, not a conversion |
 | `V202608081800__…Seed_SchemaInfo_EntityNamePrefix` | seeds a row the file above depends on |
 | `V202608131600__…Respondent_Grant_Hardening` | repairs grants that only the seed creates, so on PostgreSQL there is nothing for it to repair — neither the vulnerability it closes nor the rows it corrects exist (#39) |
+| `V202608181030__…Automation_Runner_Form_Uploads_Read` | same reason as the row above: it grants a permission on `Forms Automation Runner`, a role only the seed creates. On PostgreSQL the role, the eight grants it repairs alongside, and the automation runtime that needs the read do not exist, so there is nothing to grant it to (#49) |
 
 The consequence is worth stating plainly: **a PostgreSQL host installs the Forms schema but none of
 the seed payload** — no roles, no grants, no actions, prompts, styles or dashboards — so the
 anonymous respondent path does not run there at all. Port the seed and this file in the same change
 if that is ever taken on; shipping the hardening without the seed would repair nothing, and shipping
 the seed without the hardening would import the vulnerability #39 closed.
+
+**The chain has not been extended past `v0.8.x`.** The table above names the first five files with
+no twin; every `v0.10.x`–`v0.12.x` migration since is in the same position and for the same reason,
+and a few of them are schema changes (`Rules_And_Branching`, `Form_Templates`, the one-published-
+version index) that a PostgreSQL install would need before the seed question even arises. Two more
+arrived with the credential lifecycle (bizapps-forms#104, PR #109), and belong on the list rather
+than left to be inferred:
+
+| SQL Server migration | why there is no PostgreSQL twin |
+|---|---|
+| `V202608302200__…Link_Credential_Lifecycle` | rewrites two column descriptions (`sp_updateextendedproperty` + `__mj.EntityField`) whose `EntityField` rows the seed-less PostgreSQL chain never created; the `COMMENT ON COLUMN` half is trivial to port, the metadata half needs the seed |
+| `V202608302210__…Revoke_Credentials_Of_Retired_Links` | repairs `__mj.MagicLinkInvite` rows minted by the respondent path, which has never run on PostgreSQL, so there is nothing to repair. Idempotent and data-only; port it verbatim (three UPDATEs, `CAST(d."ID" AS text)` for the ownership join) the day the path runs there |
+| `V202609050300__…Hierarchy_Opt_In` | seeds `EntityField.Configuration → Hierarchy.IsHierarchy` behind the SQL Server CodeGen gate MJ 6.1.0-edge.3 added. PostgreSQL never runs CodeGen — the documented install is migrations-only — so `root_parentid` in `V202606301400__…CodeGen_Objects.pgonly.sql` is already produced ungated and `scripts/pg-objectmodel-test.mjs:88` (`vwFormCategories.RootParentID` walks the tree to the root) still passes without this seed. The day PostgreSQL runs CodeGen, it needs this seed too, and the capture moves from that one column to the five-column shape (`RootParentID`, `ParentIDDepth`, `ParentIDPath`, `ParentIDIsLeaf`, `ParentIDChildCount`) the SQL Server twin produces |
+
+Porting the chain is a piece of work in its own right — a converter run plus the hand-fixes the
+"Converter gaps" section lists, then the seed — and is tracked as such rather than done one
+migration at a time in unrelated PRs.
 
 ## Prerequisite
 

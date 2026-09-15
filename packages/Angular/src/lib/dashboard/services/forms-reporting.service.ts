@@ -2,59 +2,44 @@
  * Forms reporting data service (WP-F).
  *
  * Pure RunView/RunViews + snapshot-parsing — NO new infra (FORMS_BUILD_PLAN §8.1).
- * Loads the reportable forms, then for a selected form version: the published
- * snapshot (for question labels/options), the responses, and the answers, and
- * folds them into the `FormReportData` read-model. Stateless and injectable; the
- * dashboard owns selection state.
+ * Loads the reportable forms, then for a selected form: the published snapshot (for
+ * question labels/options), the responses, and the answers, and folds them into the
+ * `FormReportData` read-model. Stateless and injectable; the dashboard owns selection
+ * state.
+ *
+ * Everything response-shaped lives in {@link ResponsesDataService}, which the builder's
+ * Responses tab and the Form Response entity-form override consume directly. This service
+ * adds only the dashboard-only concerns: the form picker and the summary/breakdown/funnel
+ * aggregations. It does NOT re-expose the response reads — callers that want a single
+ * response's detail or the export's answer rows inject `ResponsesDataService` themselves,
+ * rather than reaching them through a pass-through method here.
  */
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { RunView, RunViewResult } from '@memberjunction/core';
 import type {
   mjBizAppsFormsFormResponseEntityType,
-  mjBizAppsFormsFormResponseAnswerEntityType,
   mjBizAppsFormsFormVersionEntityType,
   mjBizAppsFormsFormEntityType,
-  PublishedFormDefinition,
-  PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
-import type {
-  FormReportData,
-  ReportableForm,
-  ResponseDetail,
-} from '../models/reporting.model';
+import { FORMS_ENTITY } from '../../shared/entity-names';
+import { flattenQuestions } from '../../shared/published-questions';
+import { buildResponseRows } from '../../responses/response-aggregations';
+import { ResponsesDataService } from '../../responses/responses-data.service';
+import type { FormReportData, ReportableForm } from '../models/reporting.model';
 import {
-  flattenQuestions,
   buildSummary,
   buildBreakdowns,
   buildFunnel,
-  buildResponseRows,
-  buildResponseDetail,
 } from './reporting-aggregations';
-
-/** Entity names (PHASE1_DECOMPOSITION entity-name table). */
-const ENTITY = {
-  forms: 'MJ_BizApps_Forms: Forms',
-  versions: 'MJ_BizApps_Forms: Form Versions',
-  responses: 'MJ_BizApps_Forms: Form Responses',
-  answers: 'MJ_BizApps_Forms: Form Response Answers',
-} as const;
-
-/** DB schema for the Forms tables/views — the IN-subquery view must be qualified. */
-const FORMS_SCHEMA = '__mj_BizAppsForms';
-
-/**
- * Build the answers `ExtraFilter` that scopes to a form's responses across all versions.
- * The `vwFormResponses` view MUST be schema-qualified: the connection's default schema is
- * not `__mj_BizAppsForms`, so a bare name resolves against `dbo` and throws
- * "Invalid object name 'vwFormResponses'". Exported for unit testing.
- */
-export function answersForFormFilter(formId: string): string {
-  return `ResponseID IN (SELECT ID FROM ${FORMS_SCHEMA}.vwFormResponses WHERE FormID='${formId}')`;
-}
+import { buildRespondentProfile } from './respondent-profile';
+import { buildOpenTextInsights } from './open-text-insights';
+import { insightRoleFor } from './question-insight-roles';
+import { questionTypeMeta } from '../../builder/question-type-catalog';
 
 @Injectable()
 export class FormsReportingService {
   private readonly rv = new RunView();
+  private readonly responses = inject(ResponsesDataService);
 
   /**
    * Lists forms that have at least one published version, with their latest
@@ -64,20 +49,20 @@ export class FormsReportingService {
   public async loadReportableForms(): Promise<ReportableForm[]> {
     const [formsRes, versionsRes, responsesRes] = await this.rv.RunViews([
       {
-        EntityName: ENTITY.forms,
+        EntityName: FORMS_ENTITY.Form,
         ResultType: 'simple',
         Fields: ['ID', 'Name'],
         OrderBy: 'Name',
       },
       {
-        EntityName: ENTITY.versions,
+        EntityName: FORMS_ENTITY.FormVersion,
         ExtraFilter: `Status='Published'`,
         ResultType: 'simple',
         Fields: ['ID', 'FormID', 'VersionNumber'],
         OrderBy: 'VersionNumber DESC',
       },
       {
-        EntityName: ENTITY.responses,
+        EntityName: FORMS_ENTITY.FormResponse,
         // Headline response count is COMPLETE-only: in-progress Partial autosaves are not
         // "responses". (Partials still feed the drop-off funnel in loadReport, which reads
         // its own rows.)
@@ -140,146 +125,44 @@ export class FormsReportingService {
    * come from the latest published definition; answers map back by `QuestionID`.
    */
   public async loadReport(form: ReportableForm): Promise<FormReportData> {
-    const definition = await this.loadDefinition(form.formVersionId);
+    const definition = await this.responses.loadDefinition(form.formVersionId);
     const questions = flattenQuestions(definition);
+    const { responses, answers } = await this.responses.loadResponsesForForm(form.formId);
 
-    const [responsesRes, answersRes] = await this.rv.RunViews([
-      {
-        EntityName: ENTITY.responses,
-        ExtraFilter: `FormID='${form.formId}'`,
-        ResultType: 'simple',
-        Fields: [
-          'ID',
-          'Status',
-          'StartedAt',
-          'SubmittedAt',
-          'RespondentPerson',
-          'AnonymousSessionID',
-        ],
-        OrderBy: 'SubmittedAt DESC',
-      },
-      {
-        EntityName: ENTITY.answers,
-        ExtraFilter: answersForFormFilter(form.formId),
-        ResultType: 'simple',
-        Fields: [
-          'ID',
-          'ResponseID',
-          'QuestionID',
-          'TextValue',
-          'NumericValue',
-          'DateValue',
-          'BooleanValue',
-          'JSONValue',
-          'FileID',
-        ],
-      },
-    ]) as [
-      RunViewResult<mjBizAppsFormsFormResponseEntityType>,
-      RunViewResult<mjBizAppsFormsFormResponseAnswerEntityType>,
-    ];
+    const summary = buildSummary(responses);
+    // Every rate on the Insights view divides by the RESPONSE count rather than by the
+    // number of answers to the question, so a skipped question counts against its own
+    // coverage instead of silently reporting 100%.
+    const totalResponses = summary.totalResponses;
 
-    if (!responsesRes.Success || !answersRes.Success) {
-      throw new Error(
-        responsesRes.ErrorMessage ||
-          answersRes.ErrorMessage ||
-          'Failed to load responses.',
-      );
-    }
-
-    const responses = responsesRes.Results;
-    const answers = answersRes.Results;
+    // Insights describe the COMPLETE responses the headline counts, so their answers must
+    // come from the same population. `answers` spans partial (in-progress) responses too,
+    // and mixing them produced counts larger than the denominator they were shown against —
+    // "Contactable: 40 of 32 responses" on a live form, which reads as a broken dashboard
+    // because it is an impossible statement.
+    //
+    // The funnel below deliberately keeps the UNFILTERED rows: drop-off is a fact about the
+    // people who abandoned, so excluding partials would leave it measuring only the
+    // respondents who never dropped off.
+    const completeResponseIds = new Set(
+      responses.filter((r) => r.Status === 'Complete').map((r) => r.ID),
+    );
+    const completeAnswers = answers.filter((a) => completeResponseIds.has(a.ResponseID));
 
     return {
       form,
       questions,
-      summary: buildSummary(responses),
-      breakdowns: buildBreakdowns(questions, answers),
+      summary,
+      profile: buildRespondentProfile(questions, completeAnswers, totalResponses),
+      breakdowns: buildBreakdowns(questions, completeAnswers),
+      openText: buildOpenTextInsights(
+        questions.filter((q) => insightRoleFor(q.type) === 'openText'),
+        completeAnswers,
+        totalResponses,
+        (q) => questionTypeMeta(q.type).label,
+      ),
       funnel: buildFunnel(definition, answers),
-      responses: buildResponseRows(responses, answers),
+      responses: buildResponseRows(responses, answers, questions),
     };
-  }
-
-  /**
-   * Loads one response's labelled answers for the detail view.
-   */
-  public async loadResponseDetail(
-    responseId: string,
-    questions: PublishedFormQuestion[],
-  ): Promise<ResponseDetail> {
-    const [responseRes, answersRes] = await this.rv.RunViews([
-      {
-        EntityName: ENTITY.responses,
-        ExtraFilter: `ID='${responseId}'`,
-        ResultType: 'simple',
-        Fields: ['ID', 'Status', 'StartedAt', 'SubmittedAt', 'RespondentPerson', 'AnonymousSessionID'],
-      },
-      {
-        EntityName: ENTITY.answers,
-        ExtraFilter: `ResponseID='${responseId}'`,
-        ResultType: 'simple',
-        Fields: ['ID', 'ResponseID', 'QuestionID', 'TextValue', 'NumericValue', 'DateValue', 'BooleanValue', 'JSONValue', 'FileID'],
-      },
-    ]) as [
-      RunViewResult<mjBizAppsFormsFormResponseEntityType>,
-      RunViewResult<mjBizAppsFormsFormResponseAnswerEntityType>,
-    ];
-
-    if (!responseRes.Success || !answersRes.Success || responseRes.Results.length === 0) {
-      throw new Error(
-        responseRes.ErrorMessage || answersRes.ErrorMessage || 'Response not found.',
-      );
-    }
-
-    return buildResponseDetail(responseRes.Results[0], answersRes.Results, questions);
-  }
-
-  /**
-   * Loads all answer rows for a form (across ALL its versions' responses). Used by the
-   * export service to pivot responses into a wide matrix. Scoped by `FormID` for the
-   * same reason as {@link loadReport} — responses span versions.
-   */
-  public async loadAnswersForForm(
-    formId: string,
-  ): Promise<mjBizAppsFormsFormResponseAnswerEntityType[]> {
-    const res = (await this.rv.RunView({
-      EntityName: ENTITY.answers,
-      ExtraFilter: answersForFormFilter(formId),
-      ResultType: 'simple',
-      Fields: [
-        'ID',
-        'ResponseID',
-        'QuestionID',
-        'TextValue',
-        'NumericValue',
-        'DateValue',
-        'BooleanValue',
-        'JSONValue',
-        'FileID',
-      ],
-    })) as RunViewResult<mjBizAppsFormsFormResponseAnswerEntityType>;
-    if (!res.Success) {
-      throw new Error(res.ErrorMessage || 'Failed to load answers.');
-    }
-    return res.Results;
-  }
-
-  /** Loads + parses the published `DefinitionSnapshot` for a version. */
-  private async loadDefinition(formVersionId: string): Promise<PublishedFormDefinition> {
-    const res = (await this.rv.RunView({
-      EntityName: ENTITY.versions,
-      ExtraFilter: `ID='${formVersionId}'`,
-      ResultType: 'simple',
-      Fields: ['ID', 'DefinitionSnapshot'],
-    })) as RunViewResult<mjBizAppsFormsFormVersionEntityType>;
-
-    if (!res.Success || res.Results.length === 0) {
-      throw new Error(res.ErrorMessage || 'Form version not found.');
-    }
-    const snapshot = res.Results[0].DefinitionSnapshot;
-    if (!snapshot) {
-      throw new Error('This form version has no published definition snapshot.');
-    }
-    return JSON.parse(snapshot) as PublishedFormDefinition;
   }
 }

@@ -1,5 +1,9 @@
 # Issue #39 — Form Respondent seed hardening
 
+> *Historical record. `migrations/metadata-seed.manifest.json` and `npm run seed:manifest`, named
+> below, were retired by [#105](https://github.com/MemberJunction/bizapps-forms/issues/105) on
+> 2026-08-30 — the steps involving them no longer exist. Nothing else here changed.*
+
 **Issue:** [MemberJunction/bizapps-forms#39](https://github.com/MemberJunction/bizapps-forms/issues/39)
 **Status:** PLANNED (no implementation yet)
 **Planned:** 2026-08-13 · **Planning agent:** this PR's author

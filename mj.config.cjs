@@ -95,19 +95,22 @@ module.exports = {
   // mixed-case spelling excludes Forms' own schema from its own CodeGen run.
   includeSchemas: ['__mj_BizAppsForms', '__mj_bizappsforms'],
 
+  // Empty on purpose. includeSchemas is the scope; unnamed schemas (core,
+  // siblings, never-seen) are already out. mj app install may append here
+  // on a consumer host, so keep the key.
+  excludeSchemas: [],
   /**
-   * System schemas, kept explicit.
-   *
-   * Redundant while `includeSchemas` is set — the allow-list already puts everything
-   * unnamed out of scope — but retained deliberately for two reasons: CodeGen's config
-   * schema expects the key, and if `includeSchemas` were ever removed this is the
-   * behaviour the repo falls back to rather than generating from the whole database.
+   * Schema → npm for peer entity classes this emit does NOT generate
+   * (embeds + related-record collections). Distinct from:
+   *   includeSchemas     — what this run generates
+   *   entityPackageName  — the npm package this run writes (string form)
+   * Core (__mj) always comes from @memberjunction/core-entities; do not list it.
+   * Do not map a foreign schema to this emit's own package.
    */
-  excludeSchemas: [
-    'sys', 'staging', 'dbo', '__mj',
-    '__mj_BizAppsCommon', '__mj_BizAppsTasks',
-    '__mj_bizappscommon', '__mj_bizappstasks',
-  ],
+  entityImportPackages: {
+    '__mj_BizAppsCommon': '@mj-biz-apps/common-entities',
+    '__mj_BizAppsTasks': '@mj-biz-apps/tasks-entities',
+  },
 
   /** SQL migration output for CodeGen-produced objects */
   SQLOutput: {
@@ -115,7 +118,14 @@ module.exports = {
     folderPath: './migrations/codegen/',
     appendToFile: false,
     convertCoreSchemaToFlywayMigrationFile: true,
-    omitRecurringScriptsFromLog: false,
+    // TRUE, deliberately: the recurring scripts are the schema-heal EXECs, and CodeGen builds their
+    // @EntityIDs argument as a comma-joined list of RAW GUIDs read off the database it just ran
+    // against (MJ/packages/CodeGenLib/src/Database/heal-schema-params.ts:55). Logged into a shipped
+    // migration, those ids resolve on the author's box and nowhere else -- which is how #168 put two
+    // entity ids that no shipped SQL seeds onto next. The heal runs on every host anyway via MJ's own
+    // R__RefreshMetadata; shipping a captured copy of it buys nothing and carries this hazard.
+    // See .claude/rules/migrations-codegen.md, "The __mj.Entity id rule".
+    omitRecurringScriptsFromLog: true,
     schemaPlaceholders: [
       // Order matters: the more-specific app schema must come first so the
       // greedy '__mj' rule doesn't partially match '__mj_BizAppsForms'.

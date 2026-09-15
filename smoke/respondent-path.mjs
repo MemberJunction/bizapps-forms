@@ -23,9 +23,12 @@
  * Usage:  node smoke/respondent-path.mjs [distribution-slug]
  *         FORMS_SMOKE_URL=http://host:port node smoke/respondent-path.mjs my-slug
  */
+import { sessionIdFor } from './lib/session.mjs';
+import { buildAnswers, resolveSlug } from './lib/fixture.mjs';
+import { smokeBaseUrl } from './lib/target.mjs';
 
-const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
-const SLUG = process.argv[2] || process.env.FORMS_SMOKE_SLUG || 'contact-us-e2e';
+const BASE = smokeBaseUrl();
+const SLUG = resolveSlug('respondent-path.mjs');
 
 let failures = 0;
 const pass = (m) => console.log(`  ok    ${m}`);
@@ -36,7 +39,13 @@ const check = (cond, m, detail) => (cond ? pass(m) : fail(m, detail));
 async function gql(token, query, variables) {
   const res = await fetch(`${BASE}/`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      // Mirrors the widget's per-instance correlator; without it every request shares one
+      // rate-limit bucket. See smoke/lib/session.mjs.
+      'x-session-id': sessionIdFor(token),
+    },
     body: JSON.stringify({ query, variables }),
   });
   const body = await res.json();
@@ -49,7 +58,10 @@ async function main() {
 
   // 1. The public host page must render for an anonymous visitor with no session.
   const pageRes = await fetch(`${BASE}/f/${SLUG}`);
-  check(pageRes.status === 200, `GET /f/${SLUG} serves 200`, `got ${pageRes.status} — 409 means the distribution has no PublicLinkToken (host magicLink not enabled?)`);
+  check(pageRes.status === 200, `GET /f/${SLUG} serves 200`,
+    `got ${pageRes.status} — 409 means either no PublicLinkToken (host magicLink not enabled?) or, ` +
+      'since bizapps-forms#118, that the form has no Published version; 503 means the link has an ' +
+      'OpenAt in the future. The page body says which.');
   const html = await pageRes.text();
 
   // 2. The page must carry a redeemed anonymous session token.
@@ -59,8 +71,13 @@ async function main() {
 
   // 3. The widget bundle must actually be served, not 404. Without it the page renders
   //    an empty shell — which looks like a styling problem, not a missing build step.
-  const widget = await fetch(`${BASE}/forms/widget/mj-form.js`);
+  //    And served COMPRESSED (#121): `fetch` offers gzip like a browser does, and a 1.2 MB
+  //    bundle with no Content-Encoding is the whole first-load cost on a phone. A route
+  //    registered ahead of MJAPI's compression middleware fails this while still answering 200.
+  const widget = await fetch(`${BASE}/forms/widget/mj-form.js`, { headers: { 'Accept-Encoding': 'gzip' } });
   check(widget.status === 200, 'widget bundle is served', `got ${widget.status} — run "npm run build:packages"`);
+  const encoding = widget.headers.get('content-encoding');
+  check(encoding === 'gzip', 'widget bundle is served compressed', `Content-Encoding: ${encoding ?? '(none)'}`);
 
   // 4. The published definition must load for that anonymous session.
   const published = await gql(token,
@@ -76,53 +93,11 @@ async function main() {
   const versionIdFromSnapshot = definition.formVersionId;
   check(Boolean(versionIdFromSnapshot), 'snapshot carries a formVersionId');
 
-  // Answers must FIT THEIR QUESTION'S TYPE. Until 2026-08-01 the server ignored question
-  // type and applied only the author's ValidationRule, so this test could post
-  // "smoke check <date>" into a Number question and still get a Complete response — the
-  // same hole that let `not-an-email` persist into an Email question. Now that the server
-  // enforces a type-derived format — the one the widget already applied to Email/Number/
-  // Rating/NPS, plus Phone and Date, which neither side used to check — a smoke run has to
-  // send what a real respondent would, which is what it should have been sending all along.
-  //
-  // "What the widget sends" is TWO hops, and mirroring only the first is wrong:
-  // `toAnswerInput` (core/answer-value.ts) picks the typed COLUMN, then `submission-mapping.ts`
-  // serializes it. `jsonValue` is a JSON STRING in the SDL, so passing the contract's array
-  // straight through is rejected before any resolver runs ("String cannot represent a non string
-  // value") and the smoke aborts on any form carrying a MultiChoice question.
-  //
-  // This used to send `textValue` for every type, so a Date answer landed in the column
-  // `answerValueOf` reads first and the run never touched `dateValue` — the one column this
-  // branch hardened, since `isDate` now rejects non-strings.
-  //
-  // `FileUpload` is still not mirrored here, but the reason has changed. It used to be pointless:
-  // `answerValueOf` did not read the `fileId` column at all, so a required upload question read as
-  // unanswered whatever the widget sent, and an optional one was silently dropped before
-  // persistence. That is fixed — a file answer is now a supplied answer. What stops this script
-  // sending one is that `FormResponseAnswer.FileID` is a real foreign key to `__mj.File`, and a
-  // smoke run has no uploaded file to point at. Covering it properly means POSTing to
-  // /forms/upload first, which is its own test.
-  const answerFor = (type) => {
-    switch (type) {
-      case 'Number':
-      case 'Rating':
-      case 'NPS':
-        return { numericValue: 7 };
-      case 'YesNo':
-        return { booleanValue: true };
-      case 'Date':
-      case 'Time':
-        return { dateValue: new Date(0).toISOString() };
-      case 'MultiChoice':
-        return { jsonValue: JSON.stringify(['smoke']) };
-      case 'Email':
-        return { textValue: 'smoke@example.com' };
-      case 'Phone':
-        return { textValue: '+1 555 010 1234' };
-      default:
-        return { textValue: `smoke check ${new Date(0).toISOString()}` };
-    }
-  };
-  const answers = questions.map((q) => ({ questionId: q.id, ...answerFor(q.type) }));
+  // Answers must FIT THEIR QUESTION'S TYPE, and choice answers must be one of the OFFERED
+  // options -- the server enforces a type-derived format, so a smoke run has to send what a
+  // real respondent would. `buildAnswers` reads the published definition's own options, which
+  // is what makes this work on a form with real choices rather than only on the fixture.
+  const answers = buildAnswers(questions, { email: 'smoke@example.com' });
 
   const submission = await gql(token, `
     mutation S($input: FormSubmissionInputType!) {

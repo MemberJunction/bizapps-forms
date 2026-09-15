@@ -6,17 +6,26 @@
  *
  * Plain Node rather than Vitest on purpose: the gate is stdlib-only so it can run in CI without
  * `npm ci`, and its test should not reintroduce the dependency it was designed to avoid.
+ *
+ * CASE NUMBERS ARE STABLE, INCLUDING THE GAPS. Cases 1–4, 47 and 48 covered CHECK 1, the hash
+ * manifest retired in #105, and went with it; the numbers are not reused. Dozens of comments below
+ * cite each other by number ("the shape case 43 covers", "case 18 pins…") and renumbering would
+ * make every one of those quietly wrong — which is the class of defect this whole file exists to
+ * catch. A gap is a fact about the history; a stale cross-reference is a lie.
  */
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import {
     runChecks,
-    buildManifest,
     findRespondentGrants,
     findPermissionCalls,
     countPermissionProcedureMentions,
+    findIdOnlyGuardedInserts,
+    findMaxTypedExtendedPropertyValues,
+    findSeededEntityIds,
+    findEntityIdReferences,
     RESPONDENT_GUARDED_GRANTS,
 } from './check-distribution-seed.mjs';
 
@@ -32,17 +41,48 @@ function check(name, condition, detail) {
     }
 }
 
-/** A minimal repo-shaped fixture: real metadata, plus whatever migrations the case needs. */
+/**
+ * The Forms entity ids the fixtures below bind permissions and metadata rows to. Declared up here
+ * rather than beside the cases that read them because {@link fixture} needs them first — see the
+ * background seed it writes.
+ */
+const FORM_RESPONSES = '63600739-7165-4BDC-B7D7-19A1B1951DFA';
+const FORM_DISTRIBUTIONS = '1FC60BDA-25B8-473B-ACE5-1238670D3535';
+const FORMS = 'C6DB9AD8-11EA-451B-B0E1-71D7BFD894B8'; // granted nothing after #39 — see V202608131600
+const FORM_RESPONSE_ANSWERS = 'D03BCDF5-0B32-4EA8-88E8-F73D70A90810';
+
+/**
+ * A minimal repo-shaped fixture: whatever migrations the case needs, plus the background below.
+ *
+ * It used to copy the whole real `metadata/` tree into every fixture, because CHECK 1 hashed it.
+ * With CHECK 1 gone the gate reads only SQL, so the copy would be 99 pointless tree copies per
+ * run — and the mutation harness runs this whole spec once per mutant.
+ *
+ * 99 is measured, not counted by eye: `mkdtempSync` fires that many times per run. There are only 15
+ * `withFixture` call sites; the rest come from the table-driven loops, which is exactly why counting
+ * call sites off the source gives the wrong answer and measuring gives the right one. It was 87
+ * before CHECK 7; re-measure when you add fixtures rather than adjusting the number by arithmetic.
+ *
+ * THE BACKGROUND SEED, added with CHECK 7. That check rules on the whole corpus — every entity id
+ * shipped SQL references must be one shipped SQL SEEDS — so a fixture that binds a grant to
+ * `FORM_RESPONSES` and ships no `[Entity]` row fails on a fact about the FIXTURE rather than about
+ * the case under test. The real `B202606281200` seeds those rows; every fixture now does too, under
+ * a stamp early enough that no other check rules on it, and with no ids beyond the four above — in
+ * particular NOT the one CHECK 7's own cases use for an unseeded reference, which would turn those
+ * cases green for the wrong reason.
+ */
+const FIXTURE_BACKGROUND = [FORM_RESPONSES, FORM_DISTRIBUTIONS, FORMS, FORM_RESPONSE_ANSWERS]
+    .map(
+        (id) =>
+            'INSERT INTO [${mjSchema}].[Entity] ([ID], [Name], [BaseTable], [SchemaName])\n' +
+            `   VALUES ('${id}', 'MJ_BizApps_Forms: Fixture ${id.slice(0, 8)}', 'Fixture${id.slice(0, 8)}', '\${flyway:defaultSchema}');\n`,
+    )
+    .join('');
+
 function fixture(build) {
     const root = mkdtempSync(join(tmpdir(), 'dist-gate-'));
-    cpSync(join(REPO_ROOT, 'metadata'), join(root, 'metadata'), {
-        recursive: true,
-        // `dereference` so a symlink under metadata/ is copied as content: cases below WRITE into
-        // this copy, and through a link those writes would land in the real working tree.
-        dereference: true,
-        filter: (src) => !src.includes(`${'metadata'}/sql_logging`),
-    });
     mkdirSync(join(root, 'migrations'), { recursive: true });
+    writeFileSync(join(root, 'migrations', 'B202606281200__v0.1.x__Fixture_Entities.sql'), FIXTURE_BACKGROUND);
     build(root);
     return root;
 }
@@ -58,71 +98,95 @@ function withFixture(build, assert) {
 
 console.log('distribution gate:');
 
-// 1. The state MJ Forms was actually in: metadata present, no seed migration anywhere.
-withFixture(
-    () => {},
-    (violations) => {
-        check(
-            'flags metadata that ships nowhere (no Metadata_Sync migration)',
-            violations.some((v) => v.includes('ships') && v.includes('NOWHERE')),
-            JSON.stringify(violations),
-        );
-    },
-);
+// 1–4 were CHECK 1's cases (metadata with no seed, a seed with no manifest, metadata edited after
+//     the manifest was written, and a rewritten `sync` block that must NOT fire). They were removed
+//     with CHECK 1 in #105 — see this file's header for why the numbers are not reused.
 
-// 2. A seed exists but nothing records what it was generated from.
-withFixture(
-    (root) => writeFileSync(join(root, 'migrations', 'V1__Metadata_Sync.sql'), '-- seed\n'),
-    (violations) => {
-        check(
-            'flags a seed migration with no manifest to date it',
-            violations.some((v) => v.includes('metadata-seed.manifest.json')),
-            JSON.stringify(violations),
-        );
-    },
-);
-
-// 3. The common case this exists for: someone edits metadata and does not regenerate the seed.
+// 5c. CHECK 5 and the POSITIVE scope. `@IncludedSchemaNames` landed in MJ 6.1.0-edge.4
+//     (MJ/migrations/v6/V202608260829) as a positive filter: when non-empty, the heal is limited to
+//     those schemas. It is strictly safer than the negative list CHECK 5 models, and CHECK 5 had
+//     never heard of it — so it reported PR #168's correctly-scoped calls as unsafe.
 withFixture(
     (root) => {
-        writeFileSync(join(root, 'migrations', 'V1__Metadata_Sync.sql'), '-- seed\n');
         writeFileSync(
-            join(root, 'migrations', 'metadata-seed.manifest.json'),
-            JSON.stringify(buildManifest(root), null, 2),
+            join(root, 'migrations', 'V202609090001__v0.13.x__Positive.sql'),
+            "EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='', " +
+                "@IncludedSchemaNames='${flyway:defaultSchema}';\n",
         );
-        // Edit a record AFTER the manifest was written — exactly the drift being guarded against.
-        const rolesPath = join(root, 'metadata', 'roles', '.roles.json');
-        const roles = JSON.parse(readFileSync(rolesPath, 'utf-8'));
-        roles[0].fields.Description = 'edited after the seed was generated';
-        writeFileSync(rolesPath, JSON.stringify(roles, null, 2));
     },
     (violations) => {
         check(
-            'flags metadata edited after the seed was generated',
-            violations.some((v) => v.includes('.roles.json') && v.includes('changed since')),
+            'case 113: a heal scoped to this app\'s own schema by @IncludedSchemaNames needs no exclusion list',
+            !violations.some((v) => v.includes('ExcludedSchemaNames')),
             JSON.stringify(violations),
         );
     },
 );
 
-// 4. A `sync` block rewritten by a push is bookkeeping, not content — it must NOT fire, or the
-//    gate cries wolf on the very push that regenerated the seed.
 withFixture(
     (root) => {
-        writeFileSync(join(root, 'migrations', 'V1__Metadata_Sync.sql'), '-- seed\n');
         writeFileSync(
-            join(root, 'migrations', 'metadata-seed.manifest.json'),
-            JSON.stringify(buildManifest(root), null, 2),
+            join(root, 'migrations', 'V202609090002__v0.13.x__Reaches_Core.sql'),
+            "EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='', " +
+                "@IncludedSchemaNames='${flyway:defaultSchema},${mjSchema}';\n",
         );
-        const rolesPath = join(root, 'metadata', 'roles', '.roles.json');
-        const roles = JSON.parse(readFileSync(rolesPath, 'utf-8'));
-        roles[0].sync = { lastModified: '2099-01-01T00:00:00.000Z', checksum: 'deadbeef' };
-        writeFileSync(rolesPath, JSON.stringify(roles, null, 2));
     },
     (violations) => {
         check(
-            'ignores a rewritten sync block (bookkeeping, not content)',
-            !violations.some((v) => v.includes('.roles.json')),
+            'case 114: an include list naming a schema this app does NOT own is still refused',
+            violations.some((v) => v.includes('ExcludedSchemaNames')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+withFixture(
+    (root) => {
+        writeFileSync(
+            join(root, 'migrations', 'V202609090003__v0.13.x__No_Include.sql'),
+            "EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging';\n",
+        );
+    },
+    (violations) => {
+        check(
+            'case 115: a bare `sys,staging` exclusion with NO include list is still refused',
+            violations.some((v) => v.includes('ExcludedSchemaNames')),
+            'this is the inlined R__RefreshMetadata shape — faithful to MJ core, but core runs it as ' +
+                'core; shipped inside an app migration it reaches __mj and every sibling on the host',
+        );
+    },
+);
+
+// 5b. CHECK 2 and the comment trap. Added after PR #168 shipped a header saying it had REMOVED
+//     `${flyway:timestamp}`, and CHECK 2 read the word in that sentence as a live placeholder.
+withFixture(
+    (root) => {
+        writeFileSync(
+            join(root, 'migrations', 'V2__Prose.sql'),
+            '-- inlined copy of R__RefreshMetadata.sql (minus ${flyway:timestamp}). EXEC target ${mjSchema}.\n' +
+                "EXEC [${mjSchema}].[spRecompileAllViews];\n",
+        );
+    },
+    (violations) => {
+        check(
+            'case 111: a placeholder NAMED IN A COMMENT is not a placeholder the file uses',
+            !violations.some((v) => v.includes('flyway:timestamp')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+withFixture(
+    (root) => {
+        writeFileSync(
+            join(root, 'migrations', 'V2__Real.sql'),
+            "EXEC [${mjSchema}].[spThing] @When='${flyway:timestamp}';\n",
+        );
+    },
+    (violations) => {
+        check(
+            'case 112: the same placeholder in CODE is still flagged — 111 must not blind the check',
+            violations.some((v) => v.includes('flyway:timestamp')),
             JSON.stringify(violations),
         );
     },
@@ -131,11 +195,6 @@ withFixture(
 // 5. The placeholder leak, in the form it actually shipped in.
 withFixture(
     (root) => {
-        writeFileSync(join(root, 'migrations', 'V1__Metadata_Sync.sql'), '-- seed\n');
-        writeFileSync(
-            join(root, 'migrations', 'metadata-seed.manifest.json'),
-            JSON.stringify(buildManifest(root), null, 2),
-        );
         writeFileSync(
             join(root, 'migrations', 'V2__Leak.sql'),
             "EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sys,${commonSchema}';\n",
@@ -153,11 +212,6 @@ withFixture(
 // 6. Teardown scripts get a stricter map — only ${mjSchema} is substituted there.
 withFixture(
     (root) => {
-        writeFileSync(join(root, 'migrations', 'V1__Metadata_Sync.sql'), '-- seed\n');
-        writeFileSync(
-            join(root, 'migrations', 'metadata-seed.manifest.json'),
-            JSON.stringify(buildManifest(root), null, 2),
-        );
         mkdirSync(join(root, 'migrations-teardown'), { recursive: true });
         writeFileSync(
             join(root, 'migrations-teardown', 'V001__Teardown.sql'),
@@ -183,9 +237,8 @@ check('the repository itself passes', runChecks(REPO_ROOT).length === 0, JSON.st
 const DENY_CREATE_FILTER = '7F0E0001-A1B2-4C3D-8E4F-000000000001';
 const OWN_DISTRIBUTION_FILTER = '7F0E0002-A1B2-4C3D-8E4F-000000000002';
 const OWN_VERSIONS_FILTER = '7F0E0003-A1B2-4C3D-8E4F-000000000003';
-const FORM_RESPONSES = '63600739-7165-4BDC-B7D7-19A1B1951DFA';
-const FORM_DISTRIBUTIONS = '1FC60BDA-25B8-473B-ACE5-1238670D3535';
-const FORMS = 'C6DB9AD8-11EA-451B-B0E1-71D7BFD894B8'; // granted nothing after #39 — see V202608131600
+// FORM_RESPONSES / FORM_DISTRIBUTIONS / FORMS / FORM_RESPONSE_ANSWERS live above `fixture`, which
+// seeds them into every fixture for CHECK 7.
 
 /**
  * One filter argument as `mj sync push` would log it. `clear` and `unset` are the two ways the
@@ -203,9 +256,15 @@ function filterArgument(suffix, capability, spec) {
 /**
  * One permission record in the shape the generator actually logs: DECLAREs, per-record SET
  * assignments, then an EXEC whose every argument is a variable reference. Built rather than pasted
- * so each case states only what it is testing — but built in the REAL shape, because a
- * hand-simplified `EXEC ... @RoleID = '<literal>'` would exercise a parser path the shipped files
- * never take.
+ * so each case states only what it is testing — but built in the REAL shape by default, because a
+ * hand-simplified `EXEC ... @RoleID = '<literal>'` exercises a parser path the shipped files never
+ * take: all twenty `@RoleID` bindings in `V202608081700` go through a variable.
+ *
+ * `roleBinding` reaches that other path on purpose for case 43. D3 names three ways a call may bind
+ * the role — through the call's own SET, as a literal, or as an inline subselect — and the first was
+ * the only one any fixture used, so the two the generator does not emit today were unpinned. They
+ * are the shapes a future MetadataSync is most likely to switch to, which is the whole reason the
+ * gate reads them.
  */
 function permissionRecord({
     suffix,
@@ -222,9 +281,11 @@ function permissionRecord({
 }) {
     const entity = entityId ? `'${entityId}'` : `(SELECT ID FROM [\${mjSchema}].[Entity] WHERE Name = N'${entityName}')`;
     const role =
-        roleBinding === 'byId'
+        roleBinding === 'byId' || roleBinding === 'inlineById'
             ? "'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C'"
             : `(SELECT ID FROM [\${mjSchema}].[Role] WHERE Name = N'Form Respondent')`;
+    // An inline binding writes the value in the EXEC and emits no SET, which is the point of it.
+    const inlineRole = roleBinding.startsWith('inline');
     const create = filterArgument(suffix, 'Create', createFilter);
     const read = filterArgument(suffix, 'Read', readFilter);
     return [
@@ -241,7 +302,7 @@ function permissionRecord({
         `@Type_${suffix} NVARCHAR(10)`,
         `SET\n  @ID_${suffix} = '00000000-0000-4000-8000-0000000000${suffix.slice(0, 2)}'`,
         `SET\n  @EntityID_${suffix} = ${entity}`,
-        `SET\n  @RoleID_${suffix} = ${role}`,
+        inlineRole ? null : `SET\n  @RoleID_${suffix} = ${role}`,
         `SET\n  @CanCreate_${suffix} = ${canCreate}`,
         `SET\n  @CanRead_${suffix} = ${canRead}`,
         `SET\n  @CanUpdate_${suffix} = ${canUpdate}`,
@@ -251,7 +312,7 @@ function permissionRecord({
         `SET\n  @Type_${suffix} = N'Allow' EXEC [\${mjSchema}].${procedure} @ID = @ID_${suffix},`,
         [
             `  @EntityID = @EntityID_${suffix}`,
-            `  @RoleID = @RoleID_${suffix}`,
+            `  @RoleID = ${inlineRole ? role : `@RoleID_${suffix}`}`,
             `  @CanCreate = @CanCreate_${suffix}`,
             `  @CanRead = @CanRead_${suffix}`,
             `  @CanUpdate = @CanUpdate_${suffix}`,
@@ -263,7 +324,9 @@ function permissionRecord({
         '',
         'GO',
         '',
-    ].join('\n');
+    ]
+        .filter((line) => line !== null)
+        .join('\n');
 }
 
 /** A seed file: the header comment these always carry, then the records. */
@@ -271,19 +334,15 @@ function seedSql(...records) {
     return `-- MJ Forms metadata seed (fixture)\n-- =====================================\nGO\n\n${records.join('\n')}`;
 }
 
-/** A fixture where CHECKs 1 and 2 are already satisfied, so only CHECK 3 can speak. */
-function quietRepo(root) {
-    writeFileSync(join(root, 'migrations', 'V1__Metadata_Sync.sql'), '-- seed\n');
-    writeFileSync(join(root, 'migrations', 'metadata-seed.manifest.json'), JSON.stringify(buildManifest(root), null, 2));
-}
-
-/** Drops one extra seed file into an otherwise-quiet repo and asserts on what CHECK 3 says. */
+/**
+ * Drops one seed file into an empty repo and asserts on what CHECK 3 says about it.
+ *
+ * The filter by file name is what makes each case speak for itself: an assertion on the whole
+ * violation list would pass or fail on anything else the fixture happened to trip.
+ */
 function withSeed(fileName, sql, assert) {
     withFixture(
-        (root) => {
-            quietRepo(root);
-            writeFileSync(join(root, 'migrations', fileName), sql);
-        },
+        (root) => writeFileSync(join(root, 'migrations', fileName), sql),
         (violations) => assert(violations.filter((v) => v.includes(fileName))),
     );
 }
@@ -485,7 +544,6 @@ withSeed(
 // 19. migrations-pg/ ships no seed today, and the scan covers it so the first one is born checked.
 withFixture(
     (root) => {
-        quietRepo(root);
         mkdirSync(join(root, 'migrations-pg'), { recursive: true });
         writeFileSync(
             join(root, 'migrations-pg', 'V202609010000__v0.11.x__Metadata_Sync.pg.sql'),
@@ -650,7 +708,6 @@ withSeed(
 //     renders these calls as `SELECT`s.
 withFixture(
     (root) => {
-        quietRepo(root);
         writeFileSync(
             join(root, 'migrations', POST),
             `SELECT \${mjSchema}.spcreateentitypermission('60470c16-21ab-48df-bd12-eb3482f365f7'::uuid, '${FORM_RESPONSES.toLowerCase()}'::uuid, (SELECT id FROM \${mjSchema}.role WHERE name = 'Form Respondent'), true, false, false, false, NULL, NULL, 'Allow');\n`,
@@ -682,6 +739,1283 @@ withSeed(
     (violations) => {
         check('scans a seed named MetadataSync, without the underscore', violations.some((v) => v.includes('CanCreate')), JSON.stringify(violations));
     },
+);
+
+// ---------------------------------------------------------------------------
+// CHECK 3 — behaviours a mutation pass found unpinned (#44).
+//
+// This section covered CHECK 1's branches too, in cases 47 and 48; both went with it in #105.
+//
+// `scripts/check-distribution-seed.mutants.mjs` deletes each of the behaviours
+// below one at a time and fails if no case here notices. Every case names the
+// mutant it kills, because a case whose purpose nobody can state is the next one
+// to be "simplified" away — which is the failure mode this whole file exists for.
+// ---------------------------------------------------------------------------
+
+const RESPONDENT_BY_NAME = `(SELECT ID FROM [\${mjSchema}].[Role] WHERE Name = N'Form Respondent')`;
+
+/**
+ * One hand-written call, for the shapes `permissionRecord` deliberately does not emit. Everything
+ * inline, no DECLAREs: these cases are about how a call is RECOGNISED and read, not about the
+ * generator's record shape, and a real record around them would only add noise.
+ */
+function rawCall(args, { keyword = 'EXEC', prefix = `[\${mjSchema}].`, procedure = 'spCreateEntityPermission' } = {}) {
+    return `${keyword} ${prefix}${procedure} ${args};\nGO\n`;
+}
+
+// 31. mask/escaped-quote. T-SQL doubles an apostrophe and `V202608081700` already carries 36 of
+//     them. Reading `''` as a closing quote inverts code and prose for everything after it, and the
+//     record below stops existing — the gate reads a clean file and says so.
+stillCaught(
+    "sees the record after a description carrying an escaped '' apostrophe",
+    `DECLARE @D_${VIOLATION.suffix} NVARCHAR(200)\nSET\n  @D_${VIOLATION.suffix} = N'The respondent''s own submissions'\n${permissionRecord(VIOLATION)}`,
+);
+
+// 32. mask/string-body. The structure mask blanks string bodies so that a `;` or an `EXEC` inside
+//     prose cannot truncate a statement or invent a call. Note what is asserted: not just that the
+//     real record survives — it does either way, because the phantom call the mutant conjures out of
+//     the quoted text ends where the real one begins — but that the quoted text produces NO call at
+//     all. "Still caught" would have passed here and measured nothing.
+withSeed(
+    POST,
+    `DECLARE @D_${VIOLATION.suffix} NVARCHAR(200)\nSET\n  @D_${VIOLATION.suffix} = N'Run; then EXEC spCreateEntityPermission by hand'\n${permissionRecord(VIOLATION)}`,
+    (violations) => {
+        check(
+            'reads a procedure named inside a description as prose, not as a second call',
+            violations.some((v) => v.includes('CanCreate')) && !violations.some((v) => v.includes('cannot resolve')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 33. call/backstop-independent-of-string-mask. The backstop counts mentions on the VALUES mask,
+//     which keeps string bodies, rather than the structure mask the parser matches on — so it does
+//     not share the string-scanning layer with the thing it is checking. The cost is visible here:
+//     a procedure named only inside a string reads as a call the parser missed, and the gate says so
+//     rather than staying quiet. Loud is the direction this file chooses.
+withSeed(
+    POST,
+    `DECLARE @D NVARCHAR(200)\nSET\n  @D = N'documented at spCreateEntityPermission'\nGO\n`,
+    (violations) => {
+        check(
+            'refuses a seed naming a permission procedure it could not parse, even inside a string',
+            violations.some((v) => v.includes('could not parse')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 34. mask/block-comment. Case 22 pins only the unbalanced-`/*` trade-off; nothing pinned the
+//     blanking itself, so a record commented out for a later delta read as a live grant.
+withSeed(POST, `/* superseded by the delta in v0.12:\n${permissionRecord(VIOLATION)}\n*/\n`, (violations) => {
+    check('does not read a /* */-commented-out record as a live grant', violations.length === 0, JSON.stringify(violations));
+});
+
+// 35. scan/go-batches. Variables are traced per `GO` batch. Collapse that to one file-wide map and
+//     the LAST binding of a reused suffix wins everywhere, so the second record below re-attributes
+//     the first record's grant to another role and the violation disappears. The generator suffixes
+//     per record today; the batch boundary is what stops that from being load-bearing.
+withSeed(
+    POST,
+    `DECLARE @RoleID_x UNIQUEIDENTIFIER, @EntityID_x UNIQUEIDENTIFIER, @CanCreate_x BIT
+SET
+  @RoleID_x = ${RESPONDENT_BY_NAME}
+SET
+  @EntityID_x = '${FORM_RESPONSES}'
+SET
+  @CanCreate_x = 1
+EXEC [\${mjSchema}].spCreateEntityPermission @EntityID = @EntityID_x, @RoleID = @RoleID_x, @CanCreate = @CanCreate_x, @CreateRLSFilterID_Clear = 1;
+GO
+DECLARE @RoleID_x UNIQUEIDENTIFIER
+SET
+  @RoleID_x = (SELECT ID FROM [\${mjSchema}].[Role] WHERE Name = N'Integration')
+EXEC [\${mjSchema}].spCreateEntityPermission @RoleID = @RoleID_x, @CanRead = 1;
+GO
+`,
+    (violations) => {
+        check(
+            'traces variables per GO batch, so a suffix reused by a later record cannot rewrite an earlier grant',
+            violations.some((v) => v.includes('CanCreate')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 36. scan/assignment-terminators. A `SET` value ends at the next `EXEC`/`EXECUTE`/`DECLARE` as well
+//     as at `;`. Without that, an unterminated assignment swallows the statement after it: the
+//     filter id below resolves to itself plus a whole EXEC, stops being a literal UUID, and rule 4
+//     silently skips a grant pointed at another app's filter record. The generator puts `@Type` last
+//     today, which is the only reason no shipped file depends on this.
+for (const [name, sql] of [
+    [
+        'an EXEC on the same line',
+        `DECLARE @F_y UNIQUEIDENTIFIER\nSET\n  @F_y = '${OWN_DISTRIBUTION_FILTER}' EXEC [\${mjSchema}].spCreateEntityPermission @EntityID = '${FORM_RESPONSES}', @RoleID = ${RESPONDENT_BY_NAME}, @CanCreate = 1, @CreateRLSFilterID = @F_y;\nGO\n`,
+    ],
+    [
+        "the next record's DECLARE",
+        `DECLARE @F_y UNIQUEIDENTIFIER\nSET\n  @F_y = '${OWN_DISTRIBUTION_FILTER}'\nDECLARE @Unused INT\nEXEC [\${mjSchema}].spCreateEntityPermission @EntityID = '${FORM_RESPONSES}', @RoleID = ${RESPONDENT_BY_NAME}, @CanCreate = 1, @CreateRLSFilterID = @F_y;\nGO\n`,
+    ],
+]) {
+    withSeed(POST, sql, (violations) => {
+        check(
+            `ends a SET value at ${name}, so the filter it binds is still read as a literal`,
+            violations.some((v) => v.includes(OWN_DISTRIBUTION_FILTER) && v.includes(DENY_CREATE_FILTER)),
+            JSON.stringify(violations),
+        );
+    });
+}
+
+// 37. call/schema-prefix-optional, call/schema-prefix-bare, call/execute-spelling. The call regex
+//     accepts all three and every fixture wrote the same one — `EXEC [${mjSchema}].sp…` — so the
+//     other arms were decoration. A seed emitted by a differently-configured MetadataSync takes
+//     exactly these shapes, and an unrecognised call is a silent pass, not an error.
+for (const [name, options] of [
+    ['no schema prefix at all', { prefix: '' }],
+    ['a bare, unbracketed schema prefix', { prefix: 'dbo.' }],
+    ['the EXECUTE spelling', { keyword: 'EXECUTE' }],
+]) {
+    withSeed(
+        POST,
+        rawCall(`@EntityID = '${FORM_RESPONSES}', @RoleID = ${RESPONDENT_BY_NAME}, @CanCreate = 1, @CreateRLSFilterID_Clear = 1`, options),
+        (violations) => {
+            check(`reads a permission call written with ${name}`, violations.some((v) => v.includes('CanCreate')), JSON.stringify(violations));
+        },
+    );
+}
+
+// 38. identity/uuid-case. Lower-case UUID literals already ship in migrations/, and case 28's own
+//     PostgreSQL fixture is written entirely in them. Drop the normalisation and a lower-case seed
+//     matches neither the role nor the guarded table: every rule skips and the gate reports health.
+withSeed(
+    POST,
+    rawCall(
+        `@EntityID = '${FORM_RESPONSE_ANSWERS.toLowerCase()}', @RoleID = 'a18e13fc-b2c1-4e77-a3d7-ee775bde098c', ` +
+            `@CanCreate = 1, @CreateRLSFilterID = '${OWN_DISTRIBUTION_FILTER.toLowerCase()}'`,
+    ),
+    (violations) => {
+        check(
+            'matches the role and the guarded table when the seed writes its ids in lower case',
+            violations.some((v) => v.includes(DENY_CREATE_FILTER)),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 39. identity/uuid-n-prefix. `N'<uuid>'` is a spelling T-SQL accepts and nothing ships today; the
+//     parser reads it, and without a case that is an accident rather than a decision.
+withSeed(
+    POST,
+    rawCall(`@EntityID = N'${FORM_RESPONSES}', @RoleID = N'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C', @CanCreate = 1, @CreateRLSFilterID_Clear = 1`),
+    (violations) => {
+        check("reads a UUID literal written with the N prefix", violations.some((v) => v.includes('CanCreate')), JSON.stringify(violations));
+    },
+);
+
+// 40. identity/role-substring-fallback. When neither the id reader nor the `Name = N'…'` reader can
+//     make sense of `@RoleID`, a call that still names the role literally is attributed to it rather
+//     than written off as unreadable. It is the last thing standing between a reworded subselect and
+//     an unexamined grant.
+withSeed(
+    POST,
+    rawCall(
+        `@EntityID = '${FORM_RESPONSES}', ` +
+            `@RoleID = (SELECT TOP 1 ID FROM [\${mjSchema}].[Role] WHERE UPPER(Name) = UPPER('Form Respondent')), ` +
+            '@CanCreate = 1, @CreateRLSFilterID_Clear = 1',
+    ),
+    (violations) => {
+        check(
+            'attributes a grant whose @RoleID expression it cannot parse but which names the role literally',
+            violations.some((v) => v.includes('CanCreate')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 41. identity/absent-vs-unknown. Case 18 pins that an unreadable `@RoleID` is reported; it does not
+//     pin WHY, and the two whys are different facts — a missing parameter is a malformed call, an
+//     unreadable one is a shape the parser has outgrown. Someone reading the failure needs to know
+//     which of those they are looking at.
+withSeed(POST, rawCall(`@EntityID = '${FORM_RESPONSES}', @CanCreate = 1`), (violations) => {
+    check(
+        'says the @RoleID parameter is absent, rather than that it could not be read',
+        violations.some((v) => v.includes('the parameter is absent')),
+        JSON.stringify(violations),
+    );
+});
+
+// 42. rule/delete-is-a-write. D2.3 names Update AND Delete; only Update was tested, so half the rule
+//     could have been deleted with the suite green.
+withSeed(POST, rawCall(`@EntityID = '${FORM_RESPONSE_ANSWERS}', @RoleID = ${RESPONDENT_BY_NAME}, @CanDelete = 1`), (violations) => {
+    check('flags a CanDelete grant, not just CanUpdate', violations.some((v) => v.includes('CanDelete')), JSON.stringify(violations));
+});
+
+// 43. rule/guard-key-capability — a MUST PASS. The guarded table is keyed on (entity, capability),
+//     and Form Distributions appears in it only for Read. A filtered CREATE grant on that entity is
+//     therefore an ordinary new grant: rules 1-3 clear it and rule 4 has nothing to say. Judge it
+//     against the Read row and the gate invents a contract this app never declared.
+const UNGUARDED_CREATE = rawCall(
+    `@EntityID = '${FORM_DISTRIBUTIONS}', @RoleID = ${RESPONDENT_BY_NAME}, @CanCreate = 1, @CreateRLSFilterID = '${DENY_CREATE_FILTER}'`,
+);
+withSeed(POST, UNGUARDED_CREATE, (violations) => {
+    // Both halves matter. "No violations" alone would also hold if the gate had never read the file
+    // at all, which is the shape of pass this whole suite exists to distrust — so the second half
+    // says the silence is informed: the call WAS parsed, as a respondent grant of Create.
+    const parsed = findPermissionCalls(UNGUARDED_CREATE);
+    check(
+        'does not judge a Create grant against the guarded table row for Read on the same entity',
+        violations.length === 0 && parsed.length === 1 && parsed[0].role === 'respondent' && parsed[0].granted.Create,
+        `violations=${JSON.stringify(violations)} parsed=${JSON.stringify(parsed)}`,
+    );
+});
+
+// 44. rule/guard-key-entity-id. Case 13 resolves its guarded pair by entity NAME and case 27 by a
+//     bracketed one; both go through `readQuotedName`. Nothing reached rule 4 through a literal
+//     entity id, which is how `V202608081700` itself binds every one of them.
+withSeed(
+    POST,
+    rawCall(`@EntityID = '${FORM_RESPONSE_ANSWERS}', @RoleID = ${RESPONDENT_BY_NAME}, @CanCreate = 1, @CreateRLSFilterID = '${OWN_DISTRIBUTION_FILTER}'`),
+    (violations) => {
+        check(
+            'applies rule 4 to a guarded pair identified by literal entity id',
+            violations.some((v) => v.includes(OWN_DISTRIBUTION_FILTER) && v.includes(DENY_CREATE_FILTER)),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 45. scope/unstamped-is-checked. A file Skyway cannot order is the one most likely to land last, so
+//     it is scanned rather than skipped. The comment said so; nothing held it to it.
+withSeed(
+    'Metadata_Sync_hotfix.sql',
+    seedSql(permissionRecord({ suffix: 'de04ef05', entityId: FORM_RESPONSE_ANSWERS, canCreate: 1, createFilter: 'clear' })),
+    (violations) => {
+        check(
+            'scans a seed whose filename carries no version stamp',
+            violations.some((v) => v.includes('CanCreate')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 46. scope/watershed-is-exclusive — a MUST PASS, and the case that decides which side of the
+//     boundary the watershed sits on. `V202608131600` IS the hardening migration, so a seed sharing
+//     its stamp is corrected by it, exactly like the pre-watershed seeds of case 14. Nothing said
+//     whether `>` was deliberate or an off-by-one nobody had thought about.
+//     Asserted as a BOUNDARY rather than as a silence: the identical seed content is checked at the
+//     watershed minute and at the minute after it, so the case fails if the gate stops scanning
+//     either side. A bare "no violations" at one stamp would also pass on a gate that had quietly
+//     stopped reading the directory.
+const AT_WATERSHED = seedSql(permissionRecord({ suffix: 'ef05fa06', entityId: FORM_RESPONSE_ANSWERS, canCreate: 1, createFilter: 'clear' }));
+withSeed('V202608131600__v0.10.x__Metadata_Sync.sql', AT_WATERSHED, (violations) => {
+    check('exempts a seed stamped exactly at the watershed, which the hardening migration corrects', violations.length === 0, JSON.stringify(violations));
+});
+withSeed('V202608131601__v0.10.x__Metadata_Sync.sql', AT_WATERSHED, (violations) => {
+    check(
+        'checks the very next minute after the watershed, so the exemption is a boundary and not a blind spot',
+        violations.some((v) => v.includes('CanCreate')),
+        JSON.stringify(violations),
+    );
+});
+
+// 47–48 were CHECK 1's remaining two branches (metadata added, and metadata deleted, after the
+//       manifest was written). Removed with CHECK 1 in #105; the property they approximated —
+//       "does a declared record actually reach a host?" — is now checked directly, without a
+//       manifest, by scripts/check-release-seed-coverage.mjs at the release boundary.
+
+// 49. Not a mutant — a coverage gap, and the one item on #44 that no mutant expresses. D3 names
+//     three ways a call may bind the role and every fixture used the same one, because
+//     `permissionRecord` builds the generator's real shape and the generator always routes through a
+//     variable. The other two are what a future MetadataSync would most plausibly switch to.
+for (const roleBinding of ['inlineById', 'inlineByName']) {
+    stillCaught(`reads @RoleID bound inline in the EXEC (${roleBinding})`, seedSql(permissionRecord({ ...VIOLATION, roleBinding })));
+}
+
+// ---------------------------------------------------------------------------
+// CHECK 4 — ID-only guards on core-metadata inserts
+// ---------------------------------------------------------------------------
+
+/** A migration that lands AFTER CHECK 4's watershed, so the check speaks; and one that lands before. */
+const POST_GUARD = 'V202609010000__v0.12.x__New_Metadata.sql';
+const PRE_GUARD = 'V202608200000__v0.11.x__Old_Metadata.sql';
+
+/** Drops one migration into an otherwise-quiet repo and asserts on what CHECK 4 says about it. */
+function withMigration(fileName, sql, assert) {
+    withFixture(
+        (root) => {
+            writeFileSync(join(root, 'migrations', fileName), sql);
+        },
+        (violations) => assert(violations.filter((v) => v.includes(fileName))),
+    );
+}
+
+const idOnlyGuarded = (table) => `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[${table}] WHERE [ID] = '6729890a-d62c-4806-8fd3-3ce466fd0395')
+BEGIN
+   INSERT INTO [\${mjSchema}].[${table}] ([ID], [EntityID]) VALUES ('6729890a-d62c-4806-8fd3-3ce466fd0395', 'C6DB9AD8-11EA-451B-B0E1-71D7BFD894B8')
+END;
+`;
+
+// 50. The defect itself, on the table whose duplicate broke CodeGen (#66).
+withMigration(POST_GUARD, idOnlyGuarded('EntityRelationship'), (violations) => {
+    check(
+        'flags an EntityRelationship insert guarded on [ID] alone',
+        violations.some((v) => v.includes('EntityRelationship') && v.includes("[ID] = '<guid>'")),
+        JSON.stringify(violations),
+    );
+});
+
+// 51. Every table on the list, not just the one that bit us. The three with upstream unique
+//     constraints are included deliberately — see CORE_METADATA_TABLES' comment.
+for (const table of ['Entity', 'EntityField', 'EntityFieldValue', 'EntityRelationship', 'EntityPermission', 'ApplicationEntity', 'EntitySetting']) {
+    withMigration(POST_GUARD, idOnlyGuarded(table), (violations) => {
+        check(`flags an ID-only guard on ${table}`, violations.length === 1, JSON.stringify(violations));
+    });
+}
+
+// 52. A MUST PASS — the shape `V202608191300`'s EntityField inserts already use, and the shape the
+//     violation message tells authors to write. If this fired, the check would be telling people to
+//     fix a guard by making it a violation.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityField] WHERE ID = '26476755-bae0-4a03-b6c3-79857c530d6f' OR (EntityID = 'C6DB9AD8-11EA-451B-B0E1-71D7BFD894B8' AND Name = 'TemplateSourceFormID')) BEGIN
+   INSERT INTO [\${mjSchema}].[EntityField] ([ID], [Name]) VALUES ('26476755-bae0-4a03-b6c3-79857c530d6f', 'TemplateSourceFormID')
+END;
+`,
+    (violations) => check('stays silent on an OR-joined natural-key guard', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 53. A MUST PASS — the Entity fence, where the guard names a natural key and the block it governs
+//     inserts THREE different core tables. Keying off the inserted table rather than the predicate
+//     would fail this.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[Entity] WHERE [BaseTable] = 'FormScreen' AND [SchemaName] = '\${flyway:defaultSchema}')
+BEGIN
+   INSERT INTO [\${mjSchema}].[Entity] ([ID], [Name]) VALUES ('1', 'x');
+   INSERT INTO [\${mjSchema}].[ApplicationEntity] ([ID], [EntityID]) VALUES ('2', '1');
+   INSERT INTO [\${mjSchema}].[EntityPermission] ([ID], [EntityID]) VALUES ('3', '1');
+END;
+`,
+    (violations) => check('stays silent on a natural-key fence governing several inserts', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 54. The rescue that isn't. `V202608191300`'s QuestionType inserts carry a companion `AND EXISTS`
+//     OUTSIDE the NOT EXISTS, and it does not help: it tests that a DIFFERENT row exists, so on a
+//     host where the ID guard is wrong the insert still fires. A parser that read the whole `IF`
+//     condition rather than the NOT EXISTS subquery would call this natural-keyed and pass it.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityFieldValue] WHERE [ID] = 'a3807a5d-b745-4aa1-8c9c-97a37c3f0651')
+   AND EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityField] WHERE [ID] = '0A4FF448-80DF-4D5D-94EC-E315822A1B45' AND Name = 'QuestionType')
+INSERT INTO [\${mjSchema}].[EntityFieldValue] ([ID], [EntityFieldID], [Value]) VALUES ('a3807a5d-b745-4aa1-8c9c-97a37c3f0651', '0A4FF448-80DF-4D5D-94EC-E315822A1B45', 'ShortText');
+`,
+    (violations) =>
+        check(
+            'a companion AND EXISTS does not rescue an ID-only guard',
+            violations.some((v) => v.includes('EntityFieldValue')),
+            JSON.stringify(violations),
+        ),
+);
+
+// 55. The watershed. The same SQL before the stamp is shipped history nobody may edit.
+withMigration(PRE_GUARD, idOnlyGuarded('EntityRelationship'), (violations) =>
+    check('exempts migrations at or before the watershed', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 56. A MUST PASS — plain DML under no guard at all, which is what the repair migration itself is.
+//     Flagging it would fail the very file that fixes the defect.
+withMigration(
+    POST_GUARD,
+    `
+DELETE FROM [\${mjSchema}].[EntityRelationship] WHERE [ID] = 'f3063e0c-7b0a-4b29-8f0c-86450e15f6d3';
+UPDATE [\${mjSchema}].[EntityPermission] SET CanRead = 1 WHERE [ID] = '855332fc-b2ee-4254-b3fa-6b513e29de83';
+`,
+    (violations) => check('ignores guard-free DML', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 57. A MUST PASS — a table OUTSIDE the core-metadata list. This app's own tables are guarded on ID
+//     legitimately all over `migrations/`, because their ids ARE ours to mint: no other writer
+//     creates a `Form` row behind our back, which is the whole difference.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${flyway:defaultSchema}].[Form] WHERE [ID] = '6729890a-d62c-4806-8fd3-3ce466fd0395')
+   INSERT INTO [\${flyway:defaultSchema}].[Form] ([ID], [Name]) VALUES ('6729890a-d62c-4806-8fd3-3ce466fd0395', 'x');
+`,
+    (violations) => check('ignores inserts into this app\'s own schema', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 58. Comments cannot manufacture a violation, and cannot hide one. The same lesson CHECK 3's mask
+//     layer records — its worst bugs were all a comment being read as code or code as a comment.
+withMigration(
+    POST_GUARD,
+    `
+-- IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityRelationship] WHERE [ID] = 'x') INSERT INTO [\${mjSchema}].[EntityRelationship]
+/* A block explaining that guarding INSERT INTO [\${mjSchema}].[EntitySetting] on [ID] = 'y' is wrong. */
+SELECT 1;
+`,
+    (violations) => check('reads no violation out of prose describing one', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 59. A MUST PASS — a guard whose subquery has NO `WHERE` at all. "Does this table have any rows"
+//     is not the defect this check names, and reading a missing predicate as an ID-only one would
+//     flag the broadest possible guard as the narrowest.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityRelationship])
+   INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID], [EntityID]) VALUES ('1', '2');
+`,
+    (violations) => check('does not treat a WHERE-less guard as ID-only', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 60. A MUST PASS — a CORE-SCHEMA table that is not one of the seven. `V202608131600` guards its
+//     `RowLevelSecurityFilter` inserts on `[ID]` exactly like this, and correctly: those ids are
+//     Forms' own to mint, so no other writer creates the row behind our back. That is the whole
+//     distinction the table list draws, and case 57 does not reach it — a filter on the SCHEMA alone
+//     would pass that one for the wrong reason.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[RowLevelSecurityFilter] WHERE ID = '7F0E0001-A1B2-4C3D-8E4F-000000000001')
+    INSERT INTO [\${mjSchema}].[RowLevelSecurityFilter] (ID, Name) VALUES ('7F0E0001-A1B2-4C3D-8E4F-000000000001', N'x');
+`,
+    (violations) => check('ignores a core table outside the metadata seven', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 61. A MUST PASS — an ID-only guard whose body is NOT DML must not reach forward and blame the
+//     next insert. Found by adversarial review: matching only DML made the scan step over the
+//     `PRINT` and attribute the well-guarded `EntityRelationship` insert below to this guard,
+//     reporting a violation against a line that is correct. Over-reporting is this gate's safe
+//     direction; naming the WRONG statement is not, because it sends someone to fix healthy code.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityRelationship] WHERE [ID] = '6729890a-d62c-4806-8fd3-3ce466fd0395')
+    PRINT 'nothing to do';
+
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityRelationship] WHERE ID = '855332fc-b2ee-4254-b3fa-6b513e29de83' OR (EntityID = 'C6DB9AD8-11EA-451B-B0E1-71D7BFD894B8' AND RelatedEntityJoinField = 'TemplateSourceFormID'))
+    INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID], [EntityID]) VALUES ('855332fc-b2ee-4254-b3fa-6b513e29de83', 'C6DB9AD8-11EA-451B-B0E1-71D7BFD894B8');
+`,
+    (violations) =>
+        check(
+            'an ID-only guard over a non-DML statement does not blame the next insert',
+            violations.length === 0,
+            JSON.stringify(violations),
+        ),
+);
+
+// 62. The parser reproduces, on the real shipped file, exactly the count established by hand while
+//     writing the repair migration: 14 EntityFieldValue + 1 EntityRelationship + 2 EntitySetting.
+//     Pinned against `migrations/` itself so the number cannot drift from the file it describes.
+{
+    const offender = readFileSync(join(REPO_ROOT, 'migrations', 'V202608191300__v0.11.x__Element_Parity_Metadata_Backfill.sql'), 'utf-8');
+    const byTable = {};
+    for (const { table } of findIdOnlyGuardedInserts(offender)) {
+        byTable[table] = (byTable[table] ?? 0) + 1;
+    }
+    check(
+        'reads the 17 ID-only guards V202608191300 actually ships',
+        byTable.EntityFieldValue === 14 && byTable.EntityRelationship === 1 && byTable.EntitySetting === 2,
+        JSON.stringify(byTable),
+    );
+}
+
+// ------------------------------------------------------------------------------------------------
+// CHECK 5 and the unguarded-insert scan. Both shipped without a case here, and that gap is exactly
+// how CHECK 5's three silent passes survived its own rewrite: narrowing a list was covered by hand,
+// REMOVING one was not, and "not seen" reads identically to "correct".
+// ------------------------------------------------------------------------------------------------
+
+const FULL_EXCLUSIONS =
+    "'sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks," +
+    "${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber'";
+
+/** A gated migration whose only content is one schema-sync call with the given argument text. */
+function syncMigration(argument) {
+    return `EXEC [\${mjSchema}].[spUpdateExistingEntitiesFromSchema]${argument};\n`;
+}
+
+withMigration(POST_GUARD, syncMigration(` @ExcludedSchemaNames=${FULL_EXCLUSIONS}`), (violations) =>
+    check('CHECK 5 passes a sync that excludes the full baseline', violations.length === 0, JSON.stringify(violations)),
+);
+
+withMigration(POST_GUARD, syncMigration(" @ExcludedSchemaNames='sys,staging,dbo,${mjSchema}'"), (violations) =>
+    check('CHECK 5 catches a NARROWED exclusion list', violations.some((v) => v.includes('drops')), JSON.stringify(violations)),
+);
+
+withMigration(POST_GUARD, syncMigration(''), (violations) =>
+    check(
+        'CHECK 5 catches a sync call with NO exclusion argument at all',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+withMigration(POST_GUARD, syncMigration(' @ExcludedSchemaNames=@Excl'), (violations) =>
+    check(
+        'CHECK 5 catches an exclusion list bound to a variable',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+withMigration(
+    PRE_GUARD,
+    syncMigration(" @ExcludedSchemaNames='sys'"),
+    (violations) => check('CHECK 5 leaves pre-watershed migrations alone', violations.length === 0, JSON.stringify(violations)),
+);
+
+withMigration(
+    POST_GUARD,
+    `INSERT INTO [\${mjSchema}].[EntityFieldValue] ([ID], [Value]) VALUES ('1', 'x');\n`,
+    (violations) =>
+        check(
+            'an unguarded core insert is caught',
+            violations.some((v) => v.includes('no `IF NOT EXISTS` guard at all')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityFieldValue] WHERE [EntityFieldID] = '1' AND [Value] = 'x')
+BEGIN
+   INSERT INTO [\${mjSchema}].[EntityFieldValue] ([ID], [Value]) VALUES ('1', 'x');
+   INSERT INTO [\${mjSchema}].[EntityPermission] ([ID]) VALUES ('2');
+END;
+`,
+    (violations) =>
+        check(
+            'one fence over a BEGIN…END covers every insert inside it',
+            !violations.some((v) => v.includes('no `IF NOT EXISTS` guard at all')),
+            JSON.stringify(violations),
+        ),
+);
+
+// The case that proves the point of reading history at all: a schema NO constant here names.
+// `bizapps-somethingelse` stands for the Open App this repo has not heard of — `mj.config.cjs`
+// says of `__mj_BizAppsCaliber` that no hand-written deny-list "could ever have named it in
+// advance", which is why the requirement is derived from what the repo has already shipped. An
+// earlier migration excludes it; a later one must not quietly stop.
+withFixture(
+    (root) => {
+        writeFileSync(
+            join(root, 'migrations', PRE_GUARD),
+            syncMigration(` @ExcludedSchemaNames=${FULL_EXCLUSIONS.slice(0, -1)},\${mjSchema}_BizAppsSomethingElse'`),
+        );
+        writeFileSync(join(root, 'migrations', POST_GUARD), syncMigration(` @ExcludedSchemaNames=${FULL_EXCLUSIONS}`));
+    },
+    (violations) =>
+        check(
+            'CHECK 5 catches dropping a sibling schema only HISTORY knows about',
+            violations.some((v) => v.includes(POST_GUARD) && v.includes('BizAppsSomethingElse')),
+            JSON.stringify(violations.filter((v) => v.includes(POST_GUARD))),
+        ),
+);
+
+// The proc round eight found missing. `spDeleteUnneededEntityFields` is the LAST sync call CodeGen
+// emits, and the first version of the accounting regex did not name it — so deleting that one
+// call's exclusion list passed clean while the same deletion on any other call was caught. A case
+// per proc would be noise; a case for the one that was actually missed is the case that matters.
+withFixture(
+    (root) => {
+        writeFileSync(
+            join(root, 'migrations', POST_GUARD),
+            'EXEC [\${mjSchema}].[spDeleteUnneededEntityFields];\n',
+        );
+    },
+    (violations) =>
+        check(
+            'CHECK 5 accounts for spDeleteUnneededEntityFields, not only the procs it happens to see used',
+            violations.some((v) => v.includes(POST_GUARD) && v.includes('this gate can read')),
+            JSON.stringify(violations.filter((v) => v.includes(POST_GUARD))),
+        ),
+);
+
+// The PostgreSQL call form. `migrations-pg/` passes the exclusion list POSITIONALLY, so a check
+// that only reads `@ExcludedSchemaNames=` cannot see that path at all — and the lists there name
+// no sibling Open App, which is exactly the drift CHECK 5 exists to catch. Both dialects now.
+withFixture(
+    (root) => {
+        mkdirSync(join(root, 'migrations-pg'), { recursive: true });
+        writeFileSync(
+            join(root, 'migrations-pg', 'V202609010000__v0.12.x__Probe.pg.sql'),
+            `SELECT \${mjSchema}."spUpdateExistingEntitiesFromSchema"('sys,staging,dbo,\${mjSchema}');\n`,
+        );
+    },
+    (violations) =>
+        check(
+            'CHECK 5 reads the PostgreSQL positional exclusion list, not only the named T-SQL form',
+            violations.some((v) => v.includes('Probe.pg.sql') && v.includes('drops')),
+            JSON.stringify(violations.filter((v) => v.includes('Probe.pg.sql'))),
+        ),
+);
+
+// The two directions CHECK 5's accounting has to get right at once, and they pull apart. Round
+// nine reported a false failure on prose; round ten reported that the fix for it went blind to a
+// real call inside a dynamic-SQL literal. Both are cases now, because either alone licenses the
+// other's bug.
+withMigration(
+    POST_GUARD,
+    "EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'Rebuilt by spUpdateExistingEntitiesFromSchema during install';\n",
+    (violations) =>
+        check(
+            'a procedure named in PROSE is not counted as a call',
+            !violations.some((v) => v.includes('this gate can read')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    POST_GUARD,
+    "DECLARE @cmd NVARCHAR(MAX) = N'EXEC [\${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames = @p';\n",
+    (violations) =>
+        check(
+            'a real call hidden inside a dynamic-SQL literal IS counted',
+            violations.some((v) => v.includes('this gate can read')),
+            JSON.stringify(violations),
+        ),
+);
+
+// `syncMigration()` hardcodes brackets, so every case above reached only ONE of the three spellings
+// a real call takes. That is how requiring a bracket went silent on `EXEC schema.spX` — the suite
+// could not see the difference. One case per spelling now, plus the repeatable.
+withMigration(POST_GUARD, 'EXEC ${mjSchema}.spUpdateExistingEntitiesFromSchema;\n', (violations) =>
+    check(
+        'an UNBRACKETED T-SQL call is counted',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+withMigration(POST_GUARD, 'EXEC spUpdateExistingEntitiesFromSchema;\n', (violations) =>
+    check(
+        'an UNQUALIFIED `EXEC spX` call is counted',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+withMigration('R__Repeatable_Sync.sql', 'EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema];\n', (violations) =>
+    check(
+        'a repeatable migration is gated too — it runs on every migrate',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+// The poison the positional matcher must not swallow: a generated CRUD function whose first
+// argument is a GUID, not a schema list. Discovering through the positional form would read that
+// GUID as an exclusion list and corrupt the history floor for every later migration.
+withFixture(
+    (root) => {
+        mkdirSync(join(root, 'migrations-pg'), { recursive: true });
+        writeFileSync(
+            join(root, 'migrations-pg', 'V202609030000__v0.12.x__Probe.pg.sql'),
+            `SELECT \${mjSchema}."spCreateFormQuestion"('11111111-2222-3333-4444-555555555555');\n`,
+        );
+    },
+    (violations) =>
+        check(
+            'a generated CRUD function is not mistaken for a schema sync',
+            !violations.some((v) => v.includes('Probe.pg.sql')),
+            JSON.stringify(violations.filter((v) => v.includes('Probe.pg.sql'))),
+        ),
+);
+
+// The prose shape that a punctuation anchor could not distinguish from a call. Kept as a case
+// because the fix for it has now been got wrong twice in opposite directions: once by counting
+// prose as a call, once by going blind to a call inside a literal.
+withMigration(
+    POST_GUARD,
+    `EXEC [\${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames=${FULL_EXCLUSIONS};\n` +
+        "EXEC sp_addextendedproperty @value = N'See dbo.spUpdateExistingEntitiesFromSchema for how this is populated.';\n",
+    (violations) =>
+        check(
+            'a DOT-qualified procedure name in prose is not counted as a call',
+            !violations.some((v) => v.includes('this gate can read')),
+            JSON.stringify(violations),
+        ),
+);
+
+// Flyway accepts versions this gate cannot order. It used to skip them, which exempted them; the
+// other watershed helpers in this file fail safe instead, and now so does this one.
+for (const name of ['V1__Unstamped.sql', 'V2026_08__Unstamped.sql']) {
+    withMigration(name, 'EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema];\n', (violations) =>
+        check(
+            `an unstamped but Flyway-legal name (${name}) is GATED, not exempt`,
+            violations.some((v) => v.includes('this gate can read')),
+            JSON.stringify(violations),
+        ),
+    );
+}
+
+// ------------------------------------------------------------------------------------------------
+// CHECK 6 — an extended-property value is never a MAX-typed variable (cases 58-64)
+//
+// Found by running V202608302200 rather than reading it: `sp_addextendedproperty` /
+// `sp_updateextendedproperty` declare `@value` as `sql_variant`, and `sql_variant` cannot hold ANY
+// of the MAX types. The batch dies with `Operand type clash: nvarchar(max) is incompatible with
+// sql_variant` and takes the release's whole migration run with it. Every other gate here was blind
+// to it because every other gate reads shipped SQL for what it MEANS; this one asks whether it can
+// run at all. It stayed invisible for the usual reason — the migration had never been applied.
+// ------------------------------------------------------------------------------------------------
+
+withMigration(
+    'V202608302200__v0.12.x__Broken.sql',
+    "DECLARE @d NVARCHAR(MAX) = N'text';\n" +
+        "EXEC sp_addextendedproperty @name = N'MS_Description', @value = @d,\n" +
+        "    @level0type = N'SCHEMA', @level0name = N'${flyway:defaultSchema}';\n",
+    (violations) =>
+        check(
+            'case 58: an NVARCHAR(MAX) variable passed as @value is GATED',
+            violations.some((v) => v.includes('sql_variant')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    'V202608302201__v0.12.x__BrokenVarchar.sql',
+    "DECLARE @d VARCHAR(MAX) = 'text';\n" +
+        "EXEC sp_updateextendedproperty @name = N'MS_Description', @value = @d;\n",
+    (violations) =>
+        check(
+            'case 59: VARCHAR(MAX) is gated too — the restriction is the MAX type, not the N prefix',
+            violations.some((v) => v.includes('sql_variant')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    'V202608302202__v0.12.x__Bounded.sql',
+    "DECLARE @d NVARCHAR(4000) = N'text';\n" +
+        "EXEC sp_addextendedproperty @name = N'MS_Description', @value = @d;\n",
+    (violations) =>
+        check(
+            'case 60: a bounded NVARCHAR(4000) variable is fine — the fix must not itself be gated',
+            !violations.some((v) => v.includes('sql_variant')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    'V202608302203__v0.12.x__Literal.sql',
+    "EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'text';\n",
+    (violations) =>
+        check(
+            'case 61: a string LITERAL is fine — which is why every earlier migration escaped this',
+            !violations.some((v) => v.includes('sql_variant')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    'V202608302204__v0.12.x__MaxElsewhere.sql',
+    "DECLARE @big NVARCHAR(MAX) = N'a very long body';\n" +
+        "UPDATE [${mjSchema}].[EntityField] SET Description = @big WHERE ID = '00000000-0000-0000-0000-000000000001';\n",
+    (violations) =>
+        check(
+            'case 62: a MAX variable NOT handed to an extended property is fine — nvarchar(max) is legal everywhere else',
+            !violations.some((v) => v.includes('sql_variant')),
+            JSON.stringify(violations),
+        ),
+);
+
+check(
+    'case 63: the finder reports the variable and the line, not just that something is wrong',
+    (() => {
+        const hits = findMaxTypedExtendedPropertyValues(
+            "DECLARE @x NVARCHAR(MAX) = N'v';\nEXEC sp_addextendedproperty @value = @x;\n",
+        );
+        return hits.length === 1 && hits[0].variable === '@x' && hits[0].line === 2 && hits[0].declaredType === 'NVARCHAR(MAX)';
+    })(),
+    JSON.stringify(findMaxTypedExtendedPropertyValues("DECLARE @x NVARCHAR(MAX) = N'v';\nEXEC sp_addextendedproperty @value = @x;\n")),
+);
+
+check(
+    'case 64: the real V202608302200 in this repo passes — the defect it was written for is fixed',
+    !runChecks(REPO_ROOT).some((v) => v.includes('sql_variant')),
+    JSON.stringify(runChecks(REPO_ROOT).filter((v) => v.includes('sql_variant'))),
+);
+
+// Two holes the first cut of CHECK 6 had, both found by review rather than by the suite: every
+// case above spells `EXEC` in capitals and declares exactly one variable, so neither could be
+// seen. The corpus is genuinely mixed-case — `migrations/*.sql` already carries lowercase
+// `execute` — and a multi-variable DECLARE is ordinary T-SQL. A gate whose premise is "a
+// migration that cannot execute never ships" cannot be case-sensitive about the keyword.
+
+withMigration(
+    'V202608302205__v0.12.x__LowercaseExec.sql',
+    "DECLARE @d NVARCHAR(MAX) = N'text';\n" + 'exec sp_addextendedproperty @value = @d;\n',
+    (violations) =>
+        check(
+            'case 65: a LOWERCASE exec is gated — the keyword is case-insensitive to SQL Server, so it must be here',
+            violations.some((v) => v.includes('sql_variant')),
+            JSON.stringify(violations),
+        ),
+);
+
+check(
+    'case 66: a MAX variable declared second in a DECLARE list is still seen',
+    findMaxTypedExtendedPropertyValues(
+        'DECLARE @a NVARCHAR(100), @d NVARCHAR(MAX);\nEXEC sp_addextendedproperty @value = @d;\n',
+    ).some((h) => h.variable === '@d'),
+    JSON.stringify(
+        findMaxTypedExtendedPropertyValues(
+            'DECLARE @a NVARCHAR(100), @d NVARCHAR(MAX);\nEXEC sp_addextendedproperty @value = @d;\n',
+        ),
+    ),
+);
+
+check(
+    'case 67: a bounded variable in a DECLARE list beside a MAX one is not itself blamed',
+    (() => {
+        const hits = findMaxTypedExtendedPropertyValues(
+            'DECLARE @a NVARCHAR(100), @d NVARCHAR(MAX);\nEXEC sp_addextendedproperty @value = @a;\n',
+        );
+        return hits.length === 0;
+    })(),
+    'a bounded variable must not be reported',
+);
+
+// Four more shapes the second cut still let through, all in the "let it through" direction —
+// the wrong one for a gate whose premise is that a migration which cannot execute never ships.
+// The walk-back to the nearest preceding `EXEC` was the root of the worst of them: it was a bare
+// substring search, so a named parameter carrying a table whose name CONTAINS "exec"
+// (`ActionExecutionLog` — a table this repo's migrations already write to) captured the walk-back
+// and hid the call. Reading the CALL'S OWN argument list instead removes the walk-back entirely,
+// and picks up positional arguments for free.
+
+const BROKEN_SHAPES = [
+    [
+        'case 68: `AS` in the DECLARE is legal T-SQL and must not hide the type',
+        "DECLARE @d AS NVARCHAR(MAX) = N'x';\nEXEC sp_addextendedproperty @value = @d;\n",
+    ],
+    [
+        'case 69: a POSITIONAL @value argument is gated — the parameter need not be named',
+        "DECLARE @d NVARCHAR(MAX) = N'x';\n" +
+            "EXEC sp_addextendedproperty N'MS_Description', @d, N'SCHEMA', N'dbo';\n",
+    ],
+    [
+        'case 70: VARBINARY(MAX) is gated — sql_variant rejects every MAX type, not just the string ones',
+        "DECLARE @d VARBINARY(MAX);\nEXEC sp_addextendedproperty @value = @d;\n",
+    ],
+    [
+        'case 71: XML is gated — sql_variant rejects it too, and it carries no (MAX) to spot',
+        "DECLARE @d XML;\nEXEC sp_addextendedproperty @value = @d;\n",
+    ],
+    [
+        'case 72: an earlier named argument containing the letters "exec" does not hide the call',
+        "DECLARE @d NVARCHAR(MAX) = N'x';\n" +
+            "EXEC sp_addextendedproperty @name = N'MS_Description',\n" +
+            "    @level1type = N'TABLE', @level1name = N'ActionExecutionLog',\n" +
+            '    @value = @d;\n',
+    ],
+];
+
+for (const [name, sql] of BROKEN_SHAPES) {
+    check(name, findMaxTypedExtendedPropertyValues(sql).length > 0, JSON.stringify(findMaxTypedExtendedPropertyValues(sql)));
+}
+
+check(
+    'case 73: a MAX variable used by a DIFFERENT procedure in the same file is not blamed',
+    findMaxTypedExtendedPropertyValues(
+        "DECLARE @d NVARCHAR(MAX) = N'x';\nEXEC __mj.spSomethingElse @value = @d;\n",
+    ).length === 0,
+    'only extended-property procedures have the sql_variant parameter',
+);
+
+check(
+    'case 74: a bounded variable in an extended-property call is still fine after the rewrite',
+    findMaxTypedExtendedPropertyValues(
+        "DECLARE @d NVARCHAR(4000) = N'x';\nEXEC sp_addextendedproperty @value = @d;\n",
+    ).length === 0,
+    'the fix must not gate itself',
+);
+
+check(
+    'case 75: a lowercase `nvarchar(max)` declaration is gated — T-SQL type names are case-insensitive too',
+    findMaxTypedExtendedPropertyValues(
+        "declare @d nvarchar(max) = N'x';\nexec sp_addextendedproperty @value = @d;\n",
+    ).length > 0,
+    'the whole statement can be lowercase and still be the same broken migration',
+);
+
+check(
+    'case 76: a stored-procedure PARAMETER typed NVARCHAR(MAX) is not a declared variable, so a call in the same file is not blamed',
+    findMaxTypedExtendedPropertyValues(
+        "CREATE PROCEDURE [x].[spThing] @Value NVARCHAR(MAX) AS BEGIN SELECT 1 END;\n" +
+            "EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'a literal', @level0type = N'SCHEMA';\n",
+    ).length === 0,
+    'only a DECLARE introduces a variable; a parameter named @Value must not be matched to the call\'s @value',
+);
+
+check(
+    'case 77: a blank line ends an unterminated extended-property call, so a missing semicolon cannot swallow the rest of the file',
+    findMaxTypedExtendedPropertyValues(
+        "DECLARE @d NVARCHAR(MAX) = N'x';\nEXEC sp_addextendedproperty @name = N'MS_Description', @value = N'literal'\n\nSELECT @d;\n",
+    ).length === 0,
+    'the @d two lines below the call belongs to the SELECT, not to the argument list',
+);
+
+// 78. CHECK 6 reads migrations-teardown too. A teardown that cannot execute is as fatal as an
+//     install that cannot, and the scan lists the directory by name — one edit drops it silently.
+withFixture(
+    (root) => {
+        mkdirSync(join(root, 'migrations-teardown'), { recursive: true });
+        writeFileSync(
+            join(root, 'migrations-teardown', 'V001__Teardown.sql'),
+            "DECLARE @d NVARCHAR(MAX) = N'x';\nEXEC sp_dropextendedproperty @name = N'MS_Description';\nEXEC sp_updateextendedproperty @name = N'MS_Description', @value = @d;\n",
+        );
+    },
+    (violations) => {
+        check(
+            'case 78: a MAX-typed extended-property value in a TEARDOWN script is gated, not only in an install migration',
+            violations.some((v) => v.includes('migrations-teardown') && /sql_variant|MAX/i.test(v)),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// ---------------------------------------------------------------------------
+// CHECK 7 — every `__mj.Entity` id shipped SQL references is one shipped SQL seeds (#155)
+// ---------------------------------------------------------------------------
+//
+// The defect: CodeGen wrote the Form Screens id its own database happened to hold into
+// `V202608252340`, and no shipped migration creates that row. `mj app install` died on
+// FK_EntityField_Entity on every database except the one that generated the file — and died
+// TOTALLY, since nothing after a failed migration runs. Nothing in the repo could see it.
+//
+// Every reference shape below was found in this repo's shipped SQL, so each has its own case: a
+// shape nobody pins is a shape the next refactor drops, and dropping one is silent by construction.
+
+/** The Form Screens entity id `V202608191300` actually seeds. */
+const SEEDED_ENTITY = '6313B0B1-37E8-432F-AEB6-F35F218C5D22';
+
+/** The id CodeGen captured off one laptop for that same entity. No migration creates it — that is #155. */
+const CAPTURED_ENTITY = 'A1F8CC58-B040-429C-B695-70DB0E9E7327';
+
+/** An `[Entity]` seed in the shape CodeGen emits, with only the columns this check reads. */
+const entitySeed = (id) =>
+    'INSERT INTO [${mjSchema}].[Entity] ([ID], [Name], [BaseTable], [SchemaName])\n' +
+    `   VALUES ('${id}', 'MJ_BizApps_Forms: Form Screens', 'FormScreen', '\${flyway:defaultSchema}');\n`;
+
+/** Fixture stamps sit before every other check's watershed, so only CHECK 7 rules on them. */
+const EARLY = 'V202608010000__v0.11.x__Fixture.sql';
+const idsIn = (sql) => findEntityIdReferences(sql).map((r) => r.id);
+
+const REFERENCE_SHAPES = [
+    [
+        'case 79: an unbracketed `EntityID = \'<guid>\'` is a reference — the shape of the guard #155 shipped',
+        `IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityField] WHERE EntityID = '${CAPTURED_ENTITY}' AND Name = 'X')`,
+    ],
+    [
+        'case 80: a BRACKETED `[EntityID] = \'<guid>\'` is a reference — #155 shipped that spelling too, inside a MAX([Sequence]) subquery',
+        `(SELECT COALESCE(MAX([Sequence]), 0) FROM [\${mjSchema}].[EntityField] WHERE [EntityID] = '${CAPTURED_ENTITY}') + 15,`,
+    ],
+    [
+        'case 81: `[RelatedEntityID]` compared to a literal is a reference — it points at the same table',
+        `SELECT 1 FROM [\${mjSchema}].[EntityRelationship] WHERE [RelatedEntityID] = '${CAPTURED_ENTITY}'`,
+    ],
+    [
+        "case 82: CodeGen's positional `'<guid>', -- Entity: <name>` annotation is a reference",
+        `            '${CAPTURED_ENTITY}', -- Entity: MJ_BizApps_Forms: Form Screens\n`,
+    ],
+    [
+        'case 83: the `-- RelatedEntity:` spelling of that annotation is a reference too',
+        `            '${CAPTURED_ENTITY}', -- RelatedEntity: MJ_BizApps_Forms: Form Screens\n`,
+    ],
+    [
+        'case 84: `@EntityIDs=\'<guid>\'` on a heal procedure is a reference — an id it cannot resolve makes the sweep UNSCOPED',
+        `EXEC [\${mjSchema}].[spDeleteUnneededEntityFields] @EntityIDs='${CAPTURED_ENTITY}';`,
+    ],
+    [
+        'case 85: a metadata seed\'s generated `@EntityID_<hash>` variable is a reference — the same defect arriving by regeneration',
+        `SET\n  @EntityID_3f9807d3 = '${CAPTURED_ENTITY}'\n`,
+    ],
+];
+
+for (const [name, sql] of REFERENCE_SHAPES) {
+    check(name, idsIn(sql).includes(CAPTURED_ENTITY), JSON.stringify(findEntityIdReferences(sql)));
+}
+
+check(
+    'case 86: `@EntityIDs` is comma-separated, so an unseeded id hiding behind a seeded one is still read',
+    idsIn(`EXEC [x].[spDeleteUnneededEntityFields] @EntityIDs='${SEEDED_ENTITY},${CAPTURED_ENTITY}';`).includes(CAPTURED_ENTITY),
+    'the second id in the list must be read as well as the first',
+);
+
+check(
+    'case 87: a trailing separator in an `@EntityIDs` list yields no id, rather than an empty one to report',
+    idsIn(`EXEC [x].[spDeleteUnneededEntityFields] @EntityIDs='${SEEDED_ENTITY}, ';`).length === 1,
+    JSON.stringify(idsIn(`EXEC [x].[spDeleteUnneededEntityFields] @EntityIDs='${SEEDED_ENTITY}, ';`)),
+);
+
+// 88–91. Four ways a guid can appear in shipped SQL without CHECK 7 reading it. The first three are
+//        LIVE in the tree — the fixed migration's provenance note, a `/* */` header naming an
+//        application id, and the natural-key lookup that replaced the defect — and a gate that fired
+//        on any of them is a gate the next author switches off. The fourth is a scope BOUNDARY
+//        rather than a non-reference, and case 91 says so.
+
+const NOT_A_REFERENCE = [
+    [
+        'case 88: a `--` comment discussing the id in prose is not a reference — the fixed migration records the provenance that way ON PURPOSE',
+        `-- CodeGen captured ${CAPTURED_ENTITY}, which is simply the id the database it introspected\n` +
+            `-- happened to hold. No shipped SQL creates that row. See EntityID = '${CAPTURED_ENTITY}' below.\n`,
+    ],
+    [
+        'case 89: a `/* */` comment discussing the id is not a reference either',
+        `/* the old text read EntityID = '${CAPTURED_ENTITY}' and could not apply anywhere else */\n`,
+    ],
+    [
+        'case 90: the natural-key LOOKUP is the correct shape and must not be flagged',
+        `DECLARE @X UNIQUEIDENTIFIER = (SELECT TOP 1 [ID] FROM [\${mjSchema}].[Entity]\n` +
+            `    WHERE [BaseTable] = 'FormScreen' AND [SchemaName] = '\${flyway:defaultSchema}');\n` +
+            `INSERT INTO [\${mjSchema}].[EntityField] ([EntityID]) VALUES (@X); -- Entity: MJ_BizApps_Forms: Form Screens\n`,
+    ],
+    [
+        // The boundary, stated as a case so nobody has to read it out of a lookbehind: this app's own
+        // TargetEntityID IS a foreign key to __mj.Entity, and CHECK 7 still does not read it. No
+        // generator writes it as a literal — it carries runtime data — and the check is scoped to the
+        // shapes a CodeGen paste produces. A migration that ever seeds one by literal id has to widen
+        // ENTITY_ID_COLUMNS and change this case with it.
+        'case 91: a longer identifier ending in EntityID is out of scope — `TargetEntityID` is an entity FK this check deliberately does not read',
+        `UPDATE [\${flyway:defaultSchema}].[FormEntityBinding] SET Sequence = 1 WHERE TargetEntityID = '${CAPTURED_ENTITY}';`,
+    ],
+];
+
+for (const [name, sql] of NOT_A_REFERENCE) {
+    check(name, idsIn(sql).length === 0, JSON.stringify(findEntityIdReferences(sql)));
+}
+
+check(
+    'case 92: an annotation on the FOLLOWING line labels nothing — CodeGen writes the label inline, and a `--` line of its own is a banner',
+    idsIn(`      '${CAPTURED_ENTITY}'\n-- Entity: MJ_BizApps_Forms: Form Screens\n`).length === 0,
+    'without the same-line rule, every banner in the file would annotate whatever code precedes it',
+);
+
+check(
+    "case 93: CodeGen's file banner in full — a rule line, `-- SQL Code Generation`, then `-- Entity: <name>` — labels the guid on the statement above it no more than the distilled form does",
+    idsIn(
+        `INSERT INTO [\${flyway:defaultSchema}].[FormScreen] ([ID]) VALUES ('${CAPTURED_ENTITY}');\n` +
+            '-----------------------------------------------------------------\n' +
+            '-- SQL Code Generation\n' +
+            '-- Entity: MJ_BizApps_Forms: Form Screens\n',
+    ).length === 0,
+    'migrations-pg is full of these banners, and every one of them sits below unrelated code',
+);
+
+// 94–97. The seed side. A seed this reader misses fails LOUD (every reference to that id fires), so
+//        it is written narrowly; a seed it INVENTS is an id the gate then stops asking about, which
+//        is the silent direction and the one these cases guard.
+
+check(
+    'case 94: `[ID]` is located by column NAME, so a seed that does not list it first is still read',
+    findSeededEntityIds(
+        `INSERT INTO [\${mjSchema}].[Entity] ([Name], [ID]) VALUES ('MJ_BizApps_Forms: Form Screens', '${SEEDED_ENTITY}');`,
+    ).has(SEEDED_ENTITY),
+    'CodeGen puts ID first today; reading position 0 blindly would seed whatever moved into that slot',
+);
+
+check(
+    'case 95: an `[EntityField]` insert is not an entity seed, though its first column is an [ID] too',
+    findSeededEntityIds(
+        `INSERT INTO [\${mjSchema}].[EntityField] ([ID], [EntityID]) VALUES ('${CAPTURED_ENTITY}', '${SEEDED_ENTITY}');`,
+    ).size === 0,
+    'inventing a seed is how an unseeded id stops being asked about',
+);
+
+check(
+    'case 96: a commented-out `[Entity]` insert seeds nothing — it does not run',
+    findSeededEntityIds(
+        `/* INSERT INTO [\${mjSchema}].[Entity] ([ID]) VALUES ('${CAPTURED_ENTITY}'); */`,
+    ).size === 0,
+    'the seed reader matches on the comment-blanked mask, like every other parser in this file',
+);
+
+check(
+    'case 97: an `INSERT … SELECT` does not pair its column list with the NEXT statement\'s VALUES row',
+    findSeededEntityIds(
+        `INSERT INTO [\${mjSchema}].[Entity] ([ID], [Name]) SELECT [ID], [Name] FROM [stale].[Entity];\n` +
+            `INSERT INTO [\${mjSchema}].[EntityField] ([ID]) VALUES ('${CAPTURED_ENTITY}');\n`,
+    ).size === 0,
+    'a mispaired row would put a foreign id into the seeded set, and the gate would go quiet about it',
+);
+
+check(
+    'case 108: a CONDITIONALLY GUARDED `[Entity]` insert seeds nothing — the id exists only where the guard fired',
+    findSeededEntityIds(
+        `IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[Entity] WHERE [BaseTable] = 'FormScreen')\n` +
+            `BEGIN\n` +
+            `INSERT INTO [\${mjSchema}].[Entity] ([ID], [BaseTable]) VALUES ('${SEEDED_ENTITY}', 'FormScreen');\n` +
+            `END`,
+    ).size === 0,
+    'this is #155 in the other direction: a host that ran CodeGen first keeps its own id and skips the block, ' +
+        'so crediting the literal unconditionally licenses a reference that FK-violates there (issue #171)',
+);
+
+check(
+    'case 109: an UNGUARDED `[Entity]` insert still seeds — the fix for 108 must not swallow the normal case',
+    findSeededEntityIds(
+        `INSERT INTO [\${mjSchema}].[Entity] ([ID], [BaseTable]) VALUES ('${SEEDED_ENTITY}', 'FormScreen');`,
+    ).has(SEEDED_ENTITY),
+    'every baseline in this repo and its siblings seeds unguarded; reading none of them would fail the whole corpus',
+);
+
+check(
+    'case 110: a guard around ONE insert does not disqualify an unguarded insert later in the file',
+    findSeededEntityIds(
+        `IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[Entity] WHERE [BaseTable] = 'A')\n` +
+            `BEGIN\n` +
+            `INSERT INTO [\${mjSchema}].[Entity] ([ID], [BaseTable]) VALUES ('${CAPTURED_ENTITY}', 'A');\n` +
+            `END\n` +
+            `INSERT INTO [\${mjSchema}].[Entity] ([ID], [BaseTable]) VALUES ('${SEEDED_ENTITY}', 'B');`,
+    ).has(SEEDED_ENTITY) &&
+        !findSeededEntityIds(
+            `IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[Entity] WHERE [BaseTable] = 'A')\n` +
+                `BEGIN\n` +
+                `INSERT INTO [\${mjSchema}].[Entity] ([ID], [BaseTable]) VALUES ('${CAPTURED_ENTITY}', 'A');\n` +
+                `END\n` +
+                `INSERT INTO [\${mjSchema}].[Entity] ([ID], [BaseTable]) VALUES ('${SEEDED_ENTITY}', 'B');`,
+        ).has(CAPTURED_ENTITY),
+    'the governed range must end at the END, or one guard would disqualify the rest of the file',
+);
+
+// 98–105. The wiring: which directories are read, which of them may SEED, and the message itself.
+
+withFixture(
+    (root) => {
+        writeFileSync(join(root, 'migrations', 'V202608010000__v0.11.x__Seed.sql'), entitySeed(SEEDED_ENTITY));
+        writeFileSync(
+            join(root, 'migrations', 'V202608010001__v0.11.x__Fields.sql'),
+            'INSERT INTO [${mjSchema}].[EntityField] ([ID], [EntityID], [Name])\n' +
+                '   VALUES (\n' +
+                "      '0992C64A-75B2-4897-BEDD-E0CC36E20413',\n" +
+                `      '${CAPTURED_ENTITY}', -- Entity: MJ_BizApps_Forms: Form Screens\n` +
+                "      'IsDisqualification');\n",
+        );
+    },
+    (violations) => {
+        const mine = violations.filter((v) => v.includes(CAPTURED_ENTITY));
+        check(
+            'case 98: an unseeded entity id is reported, naming the file, the line and the id',
+            mine.length === 1 && mine[0].includes('V202608010001') && /:\d/.test(mine[0]),
+            JSON.stringify(violations),
+        );
+        check(
+            'case 99: the message tells an author what to do when the id genuinely belongs to another app',
+            mine.length === 1 && /natural key/i.test(mine[0]) && /MJ core|sibling Open App/i.test(mine[0]),
+            mine[0] ?? '(no violation)',
+        );
+        check(
+            'case 100: the seed in the OTHER file licenses nothing it did not seed, and flags nothing it did',
+            !violations.some((v) => v.includes(SEEDED_ENTITY)),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 101. Case, in BOTH directions, because the two halves are normalised by different code and only
+//      one of them is exercised by the shipped tree: CodeGen writes the `[Entity]` seed lower-case
+//      and its references upper-case, so a reader that folded case on the seed alone would look
+//      correct here forever and then miss the first lower-case reference somebody generates.
+for (const [name, seedId, referenceId] of [
+    ['case 101: a lower-case seed licenses an upper-case reference — the pairing the shipped tree actually contains', SEEDED_ENTITY.toLowerCase(), SEEDED_ENTITY],
+    ['case 102: an upper-case seed licenses a lower-case reference — the pairing nothing in the tree exercises yet', SEEDED_ENTITY, SEEDED_ENTITY.toLowerCase()],
+]) {
+    withFixture(
+        (root) => {
+            writeFileSync(join(root, 'migrations', 'V202608010000__v0.11.x__Seed.sql'), entitySeed(seedId));
+            writeFileSync(
+                join(root, 'migrations', 'V202608010001__v0.11.x__Use.sql'),
+                `SELECT 1 FROM [\${mjSchema}].[EntityField] WHERE EntityID = '${referenceId}';\n`,
+            );
+        },
+        (violations) => check(name, !violations.some((v) => v.toUpperCase().includes(SEEDED_ENTITY)), JSON.stringify(violations)),
+    );
+}
+
+withFixture(
+    (root) => {
+        mkdirSync(join(root, 'migrations-pg'), { recursive: true });
+        writeFileSync(
+            join(root, 'migrations-pg', 'V202608010000__v0.11.x__Fields.pg.sql'),
+            `SELECT 1 FROM "\${mjSchema}"."EntityField" WHERE "EntityID" = '${CAPTURED_ENTITY}';\n`,
+        );
+    },
+    (violations) => {
+        check(
+            'case 103: migrations-pg is read, and its double-quoted `"EntityID"` is the same reference',
+            violations.some((v) => v.includes('migrations-pg') && v.includes(CAPTURED_ENTITY)),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 104–105. A teardown is read for references — a hardcoded id there deletes nothing on a host that
+//      minted its own — but may NEVER seed: it only ever removes an [Entity] row. Both halves in
+//      one fixture, because the interesting failure is the second one silently licensing the first.
+withFixture(
+    (root) => {
+        mkdirSync(join(root, 'migrations-teardown'), { recursive: true });
+        writeFileSync(
+            join(root, 'migrations-teardown', 'V001__Retire.sql'),
+            entitySeed(CAPTURED_ENTITY) +
+                `DELETE FROM [\${mjSchema}].[EntityPermission] WHERE EntityID = '${CAPTURED_ENTITY}';\n`,
+        );
+        writeFileSync(
+            join(root, 'migrations', EARLY),
+            `SELECT 1 FROM [\${mjSchema}].[EntityField] WHERE EntityID = '${CAPTURED_ENTITY}';\n`,
+        );
+    },
+    (violations) => {
+        check(
+            'case 104: a hardcoded entity id in a TEARDOWN script is gated too',
+            violations.some((v) => v.includes('migrations-teardown') && v.includes(CAPTURED_ENTITY)),
+            JSON.stringify(violations),
+        );
+        check(
+            'case 105: an [Entity] INSERT in a teardown seeds NOTHING — a teardown can only delete, so it may not license a reference in migrations/',
+            violations.some((v) => v.includes(EARLY) && v.includes(CAPTURED_ENTITY)),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 106–107. Against the real tree, both halves. The constants above are only worth what they cost if
+//          they still describe shipped SQL, and the comment trap is LIVE: the fixed migration's
+//          header records the captured id in prose to say where it came from — no count here, see
+//          the note on ENTITY_VALUE_ANNOTATION in check-distribution-seed.mjs.
+check(
+    'case 106: the shipped V202608191300 seeds Form Screens CONDITIONALLY, so it licenses no literal',
+    (() => {
+        const backfill = readFileSync(
+            join(REPO_ROOT, 'migrations', 'V202608191300__v0.11.x__Element_Parity_Metadata_Backfill.sql'),
+            'utf-8',
+        );
+        // The literal is there, and it is inside `IF NOT EXISTS (… BaseTable = 'FormScreen' …)`.
+        return backfill.toUpperCase().includes(SEEDED_ENTITY) && !findSeededEntityIds(backfill).has(SEEDED_ENTITY);
+    })(),
+    'this is the fact the whole check rests on: the id exists only where the guard fired, so a host ' +
+        'that ran CodeGen first kept its own and a literal reference FK-violates there',
+);
+
+const rulesAndBranching = readFileSync(
+    join(REPO_ROOT, 'migrations', 'V202608252340__v0.12.x__Rules_And_Branching.sql'),
+    'utf-8',
+);
+check(
+    'case 107: no shipped migration references the Form Screens entity id by literal',
+    findEntityIdReferences(rulesAndBranching).every((r) => r.id !== SEEDED_ENTITY),
+    'PR #168 regenerated this file against a clean database and captured ' + SEEDED_ENTITY + ' six times. ' +
+        'Proven to FK-violate on a host that minted its own id — same error, same file, same stopping point ' +
+        'as #155. Resolve by natural key: ' +
+        JSON.stringify(findEntityIdReferences(rulesAndBranching).filter((r) => r.id === SEEDED_ENTITY).map((r) => r.line)),
 );
 
 if (failures > 0) {

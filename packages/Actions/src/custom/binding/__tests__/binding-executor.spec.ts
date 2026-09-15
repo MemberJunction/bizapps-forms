@@ -13,6 +13,7 @@ import {
   type BindingTargetGateway,
   type MatchedRecord,
   type MatchQuery,
+  type TargetFields,
 } from '../binding-executor';
 
 /** A gateway backed by a plain in-memory record, recording what it was asked to write. */
@@ -23,6 +24,7 @@ class FakeGateway implements BindingTargetGateway {
   constructor(
     private readonly options: {
       writableFields?: string[] | null;
+      temporalFields?: string[];
       match?: MatchedRecord | null;
       describeThrows?: boolean;
       matchThrows?: boolean;
@@ -32,7 +34,7 @@ class FakeGateway implements BindingTargetGateway {
 
   public capabilityAsked: { create: boolean; update: boolean } | null = null;
 
-  async describeEntity(_name: string, needs: { create: boolean; update: boolean }): Promise<ReadonlySet<string> | null> {
+  async describeEntity(_name: string, needs: { create: boolean; update: boolean }): Promise<TargetFields | null> {
     this.capabilityAsked = needs;
     if (this.options.describeThrows) {
       throw new Error('metadata unavailable');
@@ -40,7 +42,10 @@ class FakeGateway implements BindingTargetGateway {
     if (this.options.writableFields === null) {
       return null;
     }
-    return new Set(this.options.writableFields ?? ['Email', 'FirstName', 'Phone', 'Notes', 'CompanyID', 'LeadSource']);
+    return {
+      names: new Set(this.options.writableFields ?? ['Email', 'FirstName', 'Phone', 'Notes', 'CompanyID', 'LeadSource']),
+      temporal: new Set(this.options.temporalFields ?? []),
+    };
   }
 
   async findMatch(query: MatchQuery): Promise<MatchedRecord | null> {
@@ -480,5 +485,88 @@ describe('executeBinding — idempotent short-circuit', () => {
 
     // The write path is idempotent without the ledger, so a failed read must not stop the binding.
     expect(result.ok && result.outcome.kind).toBe('Created');
+  });
+});
+
+describe('a date-column answer is written in the shape the TARGET field can hold', () => {
+  // The rest of #116 taught every reader that a stored `Time` is an instant on the epoch date and
+  // has to be read back as its clock. Binding was the one reader left on the stored scale, and it
+  // could not do better: it knew neither the question's type nor the target column's, so a `Time`
+  // mapped onto a string field persisted `1970-01-01T14:30:00.000Z` — the "1970" failure the rest
+  // of the PR removed, written into someone's data instead of merely displayed.
+  //
+  // Converting unconditionally would be worse: a `Time` mapped onto a real datetime column must
+  // stay an instant, because `'14:30'` reaching a datetime field is `new Date('14:30')` all over
+  // again. So the target field's type decides, which is why the gateway now reports it.
+  const timeRow = { QuestionID: 'q-time', DateValue: new Date(Date.UTC(1970, 0, 1, 14, 30)) };
+  const dateRow = { QuestionID: 'q-date', DateValue: new Date('2026-09-01T00:00:00Z') };
+
+  const mappingTo = (targetField: string, questionId: string): BindingConfig => ({
+    targetEntityName: 'People',
+    fieldMappings: parseFieldMappings({
+      version: 1,
+      fields: [{ targetField, source: { kind: 'question', questionId } }],
+    }),
+    identityRule: parseIdentityRule({ mode: 'AlwaysCreate' }),
+    mergePolicy: parseMergePolicy({ version: 1, default: 'latestWins' }),
+  });
+
+  const types = new Map([
+    ['q-time', 'Time' as const],
+    ['q-date', 'Date' as const],
+  ]);
+
+  it('writes a Time as its clock when the target column is not temporal', async () => {
+    const gateway = new FakeGateway({ writableFields: ['Notes'], temporalFields: [] });
+    await executeBinding({
+      config: mappingTo('Notes', 'q-time'),
+      answers: answersOf([timeRow]),
+      gateway,
+      allowedEntities: null,
+      questionTypes: types,
+    });
+
+    expect(gateway.writes[0].values.Notes).toBe('14:30');
+  });
+
+  it('writes a Date as its calendar day when the target column is not temporal', async () => {
+    const gateway = new FakeGateway({ writableFields: ['Notes'], temporalFields: [] });
+    await executeBinding({
+      config: mappingTo('Notes', 'q-date'),
+      answers: answersOf([dateRow]),
+      gateway,
+      allowedEntities: null,
+      questionTypes: types,
+    });
+
+    expect(gateway.writes[0].values.Notes).toBe('2026-09-01');
+  });
+
+  it('keeps the instant when the target column IS temporal', async () => {
+    // The case that would break if the conversion were unconditional.
+    const gateway = new FakeGateway({ writableFields: ['StartsAt'], temporalFields: ['StartsAt'] });
+    await executeBinding({
+      config: mappingTo('StartsAt', 'q-time'),
+      answers: answersOf([timeRow]),
+      gateway,
+      allowedEntities: null,
+      questionTypes: types,
+    });
+
+    expect(gateway.writes[0].values.StartsAt).toBe('1970-01-01T14:30:00.000Z');
+  });
+
+  it('leaves the value alone when the caller supplies no question types', async () => {
+    // Backwards-compatible: a caller that cannot say what the questions are gets today's behaviour
+    // rather than a guess.
+    const gateway = new FakeGateway({ writableFields: ['Notes'], temporalFields: [] });
+    await executeBinding({
+      config: mappingTo('Notes', 'q-time'),
+      answers: answersOf([timeRow]),
+      gateway,
+      allowedEntities: null,
+    });
+
+    expect(gateway.writes[0].values.Notes).toBe('1970-01-01T14:30:00.000Z');
   });
 });

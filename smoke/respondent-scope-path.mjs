@@ -46,9 +46,12 @@
  * distinguish "isolated" from "there was nothing else to see", and a check that passes for that
  * reason is worse than one that says it did not run.
  */
+import { sessionIdFor } from './lib/session.mjs';
+import { buildAnswers, resolveSlug } from './lib/fixture.mjs';
+import { smokeBaseUrl } from './lib/target.mjs';
 
-const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
-const SLUG = process.argv[2] || process.env.FORMS_SMOKE_SLUG || 'contact-us-e2e';
+const BASE = smokeBaseUrl();
+const SLUG = resolveSlug('respondent-scope-path.mjs');
 const OTHER_DISTRIBUTION_ID = process.argv[3] || process.env.FORMS_SMOKE_OTHER_DISTRIBUTION_ID || '';
 
 let failures = 0;
@@ -68,7 +71,13 @@ const check = (cond, m, detail) => (cond ? pass(m) : fail(m, detail));
 async function gql(token, query, variables) {
   const res = await fetch(`${BASE}/`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      // Mirrors the widget's per-instance correlator; without it every request shares one
+      // rate-limit bucket. See smoke/lib/session.mjs.
+      'x-session-id': sessionIdFor(token),
+    },
     body: JSON.stringify({ query, variables }),
   });
   const body = await res.json();
@@ -139,7 +148,11 @@ async function main() {
   // A real redeemed session, exactly as a respondent gets one. Everything below rides this token.
   const pageRes = await fetch(`${BASE}/f/${SLUG}`);
   if (pageRes.status !== 200) {
-    console.error(`\nSMOKE ERROR: GET /f/${SLUG} returned ${pageRes.status}. 409 means the distribution has no PublicLinkToken.`);
+    console.error(
+      `\nSMOKE ERROR: GET /f/${SLUG} returned ${pageRes.status}. 409 means either that the ` +
+        'distribution has no PublicLinkToken or that its form has no Published version; 503 means ' +
+        'its OpenAt is in the future (bizapps-forms#118). The page body says which.',
+    );
     process.exit(1);
   }
   const html = await pageRes.text();
@@ -186,17 +199,6 @@ async function main() {
   // Without this the file would prove only that something is broken. The deny-all create filter is
   // supposed to cost nothing, because `PublicFormResolver` elevates to the system user for every
   // response write; this is what makes that claim testable rather than asserted.
-  const answerFor = (type) => {
-    switch (type) {
-      case 'Number': case 'Rating': case 'NPS': return { numericValue: 7 };
-      case 'YesNo': return { booleanValue: true };
-      case 'Date': case 'Time': return { dateValue: new Date(0).toISOString() };
-      case 'MultiChoice': return { jsonValue: JSON.stringify(['smoke']) };
-      case 'Email': return { textValue: 'smoke@example.com' };
-      case 'Phone': return { textValue: '+1 555 010 1234' };
-      default: return { textValue: `scope smoke ${new Date(0).toISOString()}` };
-    }
-  };
   const submission = await gql(token, `
     mutation S($input: FormSubmissionInputType!) {
       SubmitFormResponse(input: $input) { success responseId status errors { message } }
@@ -207,7 +209,10 @@ async function main() {
       partial: false,
       startedAt: new Date(0).toISOString(),
       clientMeta: { referrer: '', userAgent: 'forms-scope-smoke' },
-      answers: questions.map((q) => ({ questionId: q.id, ...answerFor(q.type) })),
+      // `buildAnswers`, not a local copy of it — see the note in binding-path.mjs. This check is
+      // the one that proves the deny-all create filter costs the pipeline nothing, so a fixture
+      // that cannot produce an acceptable submission reports that claim as false.
+      answers: buildAnswers(questions, { email: 'scope-smoke@example.com', name: 'Scope Smoke' }),
     },
   });
   const result = submission.data?.SubmitFormResponse;

@@ -5,30 +5,73 @@
  * fully unit-testable without a GraphQL server.
  *
  * Order (fail-closed at each gate):
- *   scope check -> resolve definition -> Turnstile -> rate-limit -> quota
- *   -> server re-validation -> Save response+answers -> fire on-submit hooks.
+ *   scope check -> resolve definition (+ resolve the knockout) -> embed origin -> rate-limit
+ *   -> Turnstile -> dedupe -> quota -> server re-validation -> file provenance
+ *   -> Save response+answers -> fire on-submit hooks.
+ *
+ * The knockout is resolved before every gate because it is pure and because three of them — the
+ * completion rate ceiling, dedupe and the quota — police COMPLETIONS, which a knockout is not.
  */
+import { LogError, LogStatus } from '@memberjunction/core';
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
-import type {
-  FormAnswerInput,
-  FormSubmissionResult,
-  FieldError,
+
+import { getPublicSubmitConfig } from './config';
+import { createStageTimer, formatTimings } from './stage-timer';
+import {
+  CAPTCHA_NOT_CONFIGURED_MESSAGE,
+  endingMessage,
+  endingRedirectUrl,
+  hasUnreachableAutomations,
+  computeScore,
+  resolveFormOutcome,
+  resolveEndingScreen,
+  SCREENED_OUT_MESSAGE,
+  resolveVisibleQuestions,
+  resolveOnSubmitDispatch,
+  type AnswerValue,
+  type FormAnswerInput,
+  type FormSubmissionResult,
+  type FieldError,
+  type mjBizAppsFormsFormResponseEntityType,
+  type PublishedFormScreen,
+  type FormQuestionType,
+  type PublishedFormDefinition,
 } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition, type ResolvedDefinition } from './definition-loader.service';
 import { fireOnSubmitHooks, type HookFireResult } from './on-submit-hooks.service';
-import { persistSubmission } from './persistence.service';
+import { FOREIGN_RESPONSE_MESSAGE, persistSubmission, responseIsOurs } from './persistence.service';
 import { distributionQuotaExceeded, formQuotaExceeded } from './quota.service';
-import { FormsRateLimiter } from './rate-limit.service';
+import { FormsRateLimiter, rateLimitedMessage, type RateLimitGate } from './rate-limit.service';
 import {
-  findAdoptableResponseById,
+  countPartialResponses,
+  findResumableResponseById,
   findOwnedResponseById,
   findResponseById,
+  findScopedResponse,
   findSessionResponse,
 } from './response-lookup.service';
+import { InFlightLimiter } from '../http/in-flight-limiter';
+import { checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE } from '../http/embed-origin';
 import { checkRespondentScope } from './scope-check.service';
-import { buildSourceMetadata, rateLimitKey } from './source-metadata.service';
-import { captchaRequired, verifyTurnstile } from './turnstile.service';
-import { validateSubmission } from './validation.service';
+import { resolveScopedResponseId } from './scope-response.service';
+import { revokeResponseInvites } from '../magic-link/resume-invites.service';
+import {
+  RESUMABLE_RESPONSE_STATUSES,
+  TERMINAL_RESPONSE_STATUSES,
+  isTerminalResponseStatus,
+} from './response-status';
+import {
+  abuseIdentity,
+  buildSourceMetadata,
+  completionCeilingKey,
+  knockoutCeilingKey,
+  rateLimitKey,
+  sessionIdentity,
+  saveCeilingKey,
+  warnOnceIfAbuseKeyingDegraded,
+} from './source-metadata.service';
+import { captchaRequired, TURNSTILE_NOT_CONFIGURED, verifyTurnstile } from './turnstile.service';
+import { buildAnswerMap, validateSubmission, type ValidationMode } from './validation.service';
 import {
   evaluateProvenance,
   loadUploadLedger,
@@ -58,9 +101,16 @@ export interface PipelineSubmission {
    * primary key, and every repeat upserts THAT row — so autosave + submit collapse to ONE row
    * even when the anonymous session id is blank (the routine public-submit case).
    *
-   * Adopting an EXISTING row is guarded so a guessed/leaked id can never hijack another's partial:
-   * with a session, the row must be owned by it (`findOwnedResponseById`); with no session, the
-   * row must carry the same id in its SourceMetadata proof (`findAdoptableResponseById`).
+   * Adopting an EXISTING row is guarded at the WRITE so a guessed/leaked id can never hijack
+   * another's partial: `applyResponseIdentity` (persistence.service) refuses any row whose stored
+   * `AnonymousSessionID` is non-empty and is not this caller's. The lookups below only narrow
+   * which row is a candidate — putting the guard in them made it opt-in, because a caller chose
+   * which lookup ran by deciding whether to send `x-session-id` (issue #78).
+   *
+   * So this id is a CAPABILITY, not an identity, and only for a row that has no owner. Holding it
+   * is not grounds for being told anything about a row that has one — not even whether it is
+   * finished — which is what `checkDuplicate` now asks `responseIsOurs` before it answers
+   * (issues #100/#101).
    */
   clientResponseId?: string;
 }
@@ -81,21 +131,91 @@ export interface PipelineContext {
    * AFTER the anon scope check has authorized the request. See ON_SUBMIT_AUTOMATION_SPEC §7.
    */
   elevatedUser: UserInfo;
-  /** Anonymous magic-link session id (mj_sid) from the UserPayload. */
+  /**
+   * The caller's `x-session-id` request header, as `UserPayload.sessionId`.
+   *
+   * NOT `mj_sid` and not a JWT claim, whatever the name suggests — MJ reads it straight off the
+   * request in `extractAuthInputs`. It is a correlator the caller chooses, blank for any client
+   * that omits the header, and that is why it keys dedupe and the fine-grained per-session limit
+   * but nothing that has to hold against someone trying.
+   */
   sessionId: string;
+  /**
+   * Salted hash of the caller's resolved IP, from `RequestIdentityMiddleware` via
+   * `currentRequestIdentity()`. The ONLY caller attribute here that the caller did not choose, so
+   * it is what the abuse ceilings key on. Absent in unit tests and in a deployment that has not
+   * mounted the middleware, in which case those ceilings are dropped rather than re-keyed onto
+   * something weaker — see `rateLimitGatesFor`.
+   */
+  clientIpHash?: string;
+  /**
+   * The caller's `Origin` header, from `RequestIdentityMiddleware` via `currentRequestIdentity()`.
+   *
+   * UNLIKE `clientIpHash` beside it, this IS caller-chosen, so nothing keys an abuse ceiling on
+   * it. What makes it load-bearing anyway is what it is checked against: a list the form's AUTHOR
+   * wrote. A browser will not let a page lie about its own origin, and a non-browser client that
+   * forges one still has to pass every other gate on this path.
+   *
+   * Absent in unit tests, and absent for any client that sends no `Origin` — which is every
+   * non-browser caller. Absent is a REFUSAL once a distribution has authored a list and an
+   * ADMISSION when it has not; `checkEmbedOrigin` owns that asymmetry and the reasoning for it.
+   */
+  requestOrigin?: string;
+  /**
+   * The `mj_scopes[0].resourceId` claim of the caller's verified magic-link session, copied from
+   * `UserInfo.MagicLinkScope.ResourceID`.
+   *
+   * UNLIKE `sessionId` beside it, the caller did not choose this: the server minted it into the JWT
+   * when it redeemed an invite. That is the whole difference #138 turns on — a header can be
+   * replayed, a signed claim cannot — and it is why this, and never the header, is what lets a
+   * second sitting write to the first sitting's row.
+   *
+   * It is UNTYPED: the same field carries a distribution id for a public link and a FormResponse id
+   * for a resume link (and, once #137 lands, a recipient id). `resolveScopedResponseId` is the one
+   * place that decides which.
+   */
+  scopeResourceId?: string;
   /** Injectable for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /**
    * Injectable hook firing for tests; defaults to the real ActionEngine path. Hooks run under
-   * the system user (resolved inside {@link fireOnSubmitHooks}), NOT the anonymous respondent,
-   * so no context user is threaded here.
+   * the scoped automation principal (resolved inside {@link fireOnSubmitHooks}, fail-closed),
+   * NOT the anonymous respondent, so no context user is threaded here.
    */
   fireHooks?: (
     ctx: { responseId: string; formId: string; formVersionId: string; distributionId: string },
   ) => Promise<HookFireResult[]>;
+  /**
+   * Injectable invite revocation for tests; defaults to the real magic-link path.
+   *
+   * Injected the same way `fireHooks` is, and for the same reason: it runs after the row is
+   * written, touches core's tables, and a pipeline test has to be able to observe it without one.
+   */
+  revokeInvites?: (args: { responseId: string; deviceOnly: boolean }) => Promise<void>;
 }
 
 /** Convenience for a single-error failure result. */
+/**
+ * What to append to the submit log line when the pipeline refused.
+ *
+ * Without this a refusal logged its stage breakdown and nothing else, so the only way to learn
+ * WHY was to notice which stage came last and read this file to see which gate returns before
+ * its own `timer.mark`. That is a diagnosis the operator should never have to perform: five
+ * refusals in one real session were indistinguishable from each other in the log, and the
+ * respondent — who cannot fix anything — was the only party actually told what happened.
+ *
+ * The respondent's own message is reused verbatim rather than paraphrased, so the line an
+ * operator reads and the sentence the respondent saw are the same text, and neither can drift
+ * into describing a different refusal from the other.
+ */
+function refusalSuffix(result: FormSubmissionResult): string {
+  if (result.success) {
+    return '';
+  }
+  const reason = result.errors?.[0]?.message?.trim();
+  return ` — REFUSED: ${reason || 'no reason given'}`;
+}
+
 function fail(message: string, errors?: FieldError[]): FormSubmissionResult {
   return { success: false, status: undefined, errors: errors ?? [{ message }] };
 }
@@ -106,6 +226,24 @@ function fail(message: string, errors?: FieldError[]): FormSubmissionResult {
  * always gets a rendered error rather than a blank screen. This is the loud-failure backstop for
  * contract drift between the widget mapping, the GraphQL DTO, and this pipeline.
  */
+/**
+ * How much of the rulebook this submission is held to.
+ *
+ * A disqualified respondent legitimately stopped mid-form, so `isRequired` must not block the
+ * terminal write that records the screening — but the answers they DID give are final, and are
+ * held to their format. That distinction used to be a single boolean shared with autosave, which
+ * turned format checking off on the one path that writes a permanent, never-revalidated row.
+ */
+export function validationModeFor(
+  complete: boolean,
+  disqualifiedBy: PublishedFormScreen | undefined,
+): ValidationMode {
+  if (!complete) {
+    return 'draft';
+  }
+  return disqualifiedBy !== undefined ? 'screened-out' : 'complete';
+}
+
 export function validateSubmissionShape(submission: PipelineSubmission): FormSubmissionResult | undefined {
   if (!submission || typeof submission !== 'object') {
     return fail('Malformed submission.');
@@ -132,94 +270,397 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-/** The post-submit confirmation/redirect lifted from the form settings. */
-function confirmationFields(resolved: ResolvedDefinition): Pick<FormSubmissionResult, 'confirmationMessage' | 'redirectUrl'> {
-  const { settings } = resolved.definition;
+/**
+ * The post-submit confirmation/redirect for this response.
+ *
+ * `answers` is optional only for callers that genuinely have none. The IDEMPOTENT-RESUBMIT paths
+ * used to be such callers, on the reasoning that re-deriving the stored row's answers would cost
+ * a round trip — but the retry carries those answers in its own payload, so the round trip was
+ * never needed and the ending was simply being resolved against an empty map. That silently
+ * downgraded every conditionally-routed form: a retry (the first submit succeeded, its network
+ * response was lost) returned the DEFAULT ending's message and redirect, which is the one screen
+ * the author decided this respondent should not see. Since the retry is the only thing the
+ * respondent ever sees in that scenario, "they already followed the right redirect" is exactly
+ * what did not happen.
+ */
+/**
+ * The running score for these answers (C4): computed over exactly the questions the respondent
+ * could reach and see, so a hidden or jumped-over question's stale answer scores nothing. The
+ * widget folds over the same set from the same function, which is what makes "the same basis"
+ * a fact rather than a convention two files have to keep agreeing on.
+ */
+function scoreFor(resolved: ResolvedDefinition, answers: ReadonlyMap<string, AnswerValue>): number {
+  return computeScore(resolveVisibleQuestions(resolved.definition.pages, answers), answers);
+}
+
+/**
+ * An author-configured redirect URL, or `undefined` when its scheme cannot be trusted.
+ *
+ * The widget follows the echoed URL with `window.location.assign` on whatever site embeds it, so
+ * a `javascript:` (or `data:`) URL here is script injection into the embedding page's origin.
+ * The widget validates too, but a bespoke client consuming the mutation directly gets only this
+ * check — so any URL that names a scheme must name http(s). A RELATIVE URL (no scheme) is passed
+ * through: it cannot smuggle a scheme, and only the client knows the base to resolve it against.
+ */
+function safeRedirectUrl(raw: string | undefined): string | undefined {
+  const url = raw?.trim();
+  if (!url) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      console.warn(`[forms] dropping an ending-screen redirect URL with a disallowed scheme (${parsed.protocol}).`);
+      return undefined;
+    }
+  } catch {
+    // No absolute scheme — a relative URL. The WHATWG parser strips tabs/newlines and lowercases
+    // the scheme before this throw, so anything scheme-bearing lands in the branch above.
+    //
+    // THIS IS DELIBERATELY MORE PERMISSIVE THAN THE WIDGET, and the asymmetry is not an oversight.
+    // The widget parses WITH the page as base, so it can judge a relative URL and refuses anything
+    // that still fails to parse. The server has no base to resolve against — only the client knows
+    // what page the widget is embedded in — so "did not parse" here means "relative", and the only
+    // safe reading of an unparseable relative URL is to pass it on and let the client, which CAN
+    // resolve it, make the call. The consequence is real and bounded: a string like `http://[`
+    // is echoed by the server and refused by the widget. It cannot name a scheme (that is the
+    // branch above), so it cannot execute; the worst case is a client that fails to navigate.
+  }
+  return url;
+}
+
+function confirmationFields(
+  resolved: ResolvedDefinition,
+  answers?: ReadonlyMap<string, AnswerValue>,
+): Pick<FormSubmissionResult, 'confirmationMessage' | 'redirectUrl'> {
+  const { settings, endScreens } = resolved.definition;
+  const map = answers ?? new Map<string, AnswerValue>();
+  const ending = resolveEndingScreen(endScreens ?? [], map, { score: scoreFor(resolved, map) });
+  const redirectUrl = safeRedirectUrl(endingRedirectUrl(ending, settings));
   return {
-    confirmationMessage: settings.redirectUrl ? undefined : settings.confirmationMessage,
-    redirectUrl: settings.redirectUrl,
+    // A redirect and a confirmation message are alternatives, not companions: sending both lets
+    // a client that ignores the redirect show a message meant for a page nobody lands on.
+    confirmationMessage: redirectUrl ? undefined : endingMessage(ending, settings),
+    redirectUrl,
   };
 }
 
-/** Run the full pipeline and produce the client-facing result. */
+/**
+ * Process-wide in-flight cap on the submit pipeline, lazily built from config.
+ *
+ * Bounds CONCURRENT work, which the rate ceilings below do not: they limit how often a caller may
+ * act, not how many requests they may have in flight at once, so a caller inside every ceiling can
+ * still exhaust sockets and pool connections. Orthogonal to the per-caller ceilings rather than a
+ * replacement for them — see {@link InFlightLimiter}, whose header-rotation rationale is obsolete
+ * now that the ceilings key on the resolved peer IP. Module-level so the bound is one number for
+ * the whole process.
+ */
+let submitInFlight: InFlightLimiter | undefined;
+function submitInFlightLimiter(): InFlightLimiter {
+  if (!submitInFlight) {
+    submitInFlight = new InFlightLimiter(getPublicSubmitConfig().maxInFlight);
+  }
+  return submitInFlight;
+}
+
+/** Test-only: drop the memoized limiter so a fresh config takes effect. */
+export function resetSubmitInFlightForTests(): void {
+  submitInFlight = undefined;
+}
+
+/**
+ * What the respondent is told when a stage threw instead of returning a result. Authored, and
+ * deliberately says nothing about what happened: the exception's own words are for the log.
+ */
+export const SUBMIT_FAILED_MESSAGE = 'Something went wrong while submitting your response. Please try again.';
+
+/**
+ * Run the full pipeline behind the process-wide in-flight cap.
+ *
+ * The cap wraps the WHOLE pipeline in a `finally` so its slot releases on every exit — refusal or
+ * success. Over capacity we refuse immediately with a clean result (never a throw that would blank
+ * the widget), because holding the request would be the resource exhaustion this defends against.
+ *
+ * NEVER THROWS. Every gate returns a result, but a stage can still throw — a bug, a driver that
+ * throws where it should return false, `RangeError: Invalid time value` from a Date the validator
+ * could not parse (#116). An exception that escapes here reaches Apollo, which puts the exception's
+ * own words into `errors[].message`, and the widget renders that to the anonymous respondent — on a
+ * production host too, since nothing about it is a stack trace (#119). So the boundary is here: the
+ * exception goes to the log with the request it belonged to, and the respondent gets one sentence.
+ */
 export async function runSubmitPipeline(
   ctx: PipelineContext,
   submission: PipelineSubmission,
 ): Promise<FormSubmissionResult> {
+  if (!submitInFlightLimiter().TryEnter()) {
+    return fail('The form is receiving a lot of traffic right now. Please try again in a moment.');
+  }
+  try {
+    return await runSubmitPipelineInner(ctx, submission);
+  } catch (err: unknown) {
+    // Slug and version identify the request; the answers are deliberately not logged (they are
+    // the respondent's data, and the failure is not about their content).
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    LogError(
+      `[Forms] submit for ${submission.distributionSlug} (version ${submission.formVersionId}, ` +
+        `partial=${submission.partial === true}) threw: ${detail}`,
+    );
+    return fail(SUBMIT_FAILED_MESSAGE);
+  } finally {
+    submitInFlightLimiter().Exit();
+  }
+}
+
+/** The full pipeline body — see {@link runSubmitPipeline} for the in-flight cap that wraps it. */
+async function runSubmitPipelineInner(
+  ctx: PipelineContext,
+  submission: PipelineSubmission,
+): Promise<FormSubmissionResult> {
+  // Timed end to end. "The submit is slow" is a report nobody can act on across a dozen-odd
+  // stages, and the intuitive culprit (persistence) is often not the one — a captcha round
+  // trip or a dedupe query can each outweigh the write. `report` is called on every exit OF THIS
+  // FUNCTION, including refusals, because a slow rejection is still a slow request.
+  //
+  // The one exit it does not cover is an exception, which unwinds past it to `runSubmitPipeline`'s
+  // catch. That exit emits the `… threw:` line instead, which carries the exception and its stack —
+  // strictly more useful than a timing breakdown for a stage that did not finish. Said here because
+  // this comment used to claim EVERY exit, and an operator who greps for a `[Forms] submit` line to
+  // pair with a failure would otherwise conclude the request never arrived.
+  const timer = createStageTimer();
+  const report = <T extends FormSubmissionResult>(result: T): T => {
+    LogStatus(`[Forms] submit ${formatTimings(timer.finish())}${refusalSuffix(result)}`);
+    return result;
+  };
+
   // 0. Shape guard: the required transport fields must be present and well-formed. A drift or a
   //    malformed client payload fails LOUDLY here with a clear result — never a throw that would
   //    yield a blank screen, and never a silent partial write.
   const shape = validateSubmissionShape(submission);
   if (shape) {
-    return shape;
+    return report(shape);
   }
+  timer.mark('shape');
 
   // 1. Anonymous scope: CanCreate on responses only (no privilege accretion).
   const scope = checkRespondentScope(ctx.provider, ctx.contextUser);
   if (!scope.allowed) {
-    return fail(scope.reason ?? 'Not authorized.');
+    return report(fail(scope.reason ?? 'Not authorized.'));
   }
+
+  timer.mark('scope');
 
   // 2. Resolve slug -> distribution -> published version -> definition.
   const loaded = await resolvePublishedDefinition(ctx.provider, submission.distributionSlug, ctx.contextUser, {
     expectedVersionId: submission.formVersionId,
   });
   if (!loaded.ok || !loaded.value) {
-    return fail(`Form unavailable (${loaded.failure}).`);
+    return report(fail(`Form unavailable (${loaded.failure}).`));
   }
   const resolved = loaded.value;
   const complete = submission.partial !== true;
 
-  // 3. Turnstile (per form/distribution toggle).
-  const needCaptcha = captchaRequired(resolved.definition.settings.captchaRequired, resolved.distribution.CaptchaRequired);
-  const turnstile = await verifyTurnstile(needCaptcha, submission.turnstileToken, ctx.fetchImpl);
-  if (!turnstile.success) {
-    return fail(`Captcha verification failed (${turnstile.errorCode}).`);
-  }
-
-  // 4. Rate-limit (per session + distribution).
-  const limit = FormsRateLimiter.Instance.check(
-    rateLimitKey({ sessionId: ctx.sessionId, distributionId: resolved.distribution.ID }),
+  // Resolve the knockout HERE, before any gate charges anything. It is a pure function of the
+  // definition and the submitted answers, so nothing forces it to wait for I/O — and two gates
+  // below need to know: the completion rate ceiling and the response quota both exist to bound
+  // COMPLETIONS, which a knockout is not. Charged after the fact, a burst of knockouts from one
+  // address spent the tight completion bucket (20/min, justified by the automations a knockout
+  // explicitly never fires) and locked real completions out behind a NAT.
+  const preliminaryMap = buildAnswerMap(submission.answers);
+  // The flow's whole verdict in one call, shared with the widget so the two cannot disagree
+  // about it. `disqualified` is what every gate below keys off; an ending jump to an UNFLAGGED
+  // screen is an ordinary completion and deliberately indistinguishable from one here — quota
+  // counts it, automations fire, and only the screen the respondent sees differs.
+  const outcome = resolveFormOutcome(
+    resolved.definition.pages,
+    resolved.definition.endScreens ?? [],
+    preliminaryMap,
+    { score: scoreFor(resolved, preliminaryMap) },
   );
-  if (!limit.allowed) {
-    return fail('Too many submissions; please retry shortly.');
+  const knockout = outcome.disqualified ? outcome.screen : undefined;
+  // Computed ONCE, here, and read by every gate below that distinguishes the two. It was derived
+  // twice — the rate-limit gate said `complete && knockout === undefined` and the quota said
+  // `terminalCompletion` — which is the same decision written in two places, so a later change to
+  // one would have silently disagreed with the other.
+  const terminalCompletion = complete && knockout === undefined;
+
+  timer.mark('resolve-form');
+
+  // 2a. Embed origin. A distribution may name the browser origins permitted to use its link; this
+  //     refuses everyone else. NULL — every distribution until an author sets one — is
+  //     unrestricted, so nothing live changes behaviour here.
+  //
+  //     IT CANNOT RUN EARLIER. The policy is a column on the distribution row, and step 2 above is
+  //     what turns the slug into that row. There is nothing to consult before it.
+  //
+  //     IT MUST RUN BEFORE THE RATE LIMITER. The pipeline's standing rule is that a request one
+  //     gate refuses does not eat the respondent's budget in another — the reason `charge` consults
+  //     every bucket before spending any. This gate's verdict is a fact about the LINK, not about
+  //     the caller: nobody in that browser can influence it, and nothing they do will make the next
+  //     attempt land. Charging for it would let one mis-embedded page burn through a real
+  //     respondent's window on refusals neither of them caused.
+  //
+  //     THIS IS ONE OF TWO DOORS, and only one of them can see what an author actually authorised.
+  //     A legitimate embed frames our host page, so the widget's `fetch` reports OUR origin rather
+  //     than the customer's (measured — see `http/embed-origin.ts`). What this door can refuse is a
+  //     caller that is neither us nor a declared origin: a leaked link replayed from somebody
+  //     else's page. The door that judges the customer's own origin is
+  //     `Content-Security-Policy: frame-ancestors` on the respondent host page, which the browser
+  //     evaluates against the framing ancestor. #203 names both.
+  const embedOrigin = checkEmbedOrigin(resolved.distribution.AllowedOrigins, ctx.requestOrigin);
+  if (!embedOrigin.allowed) {
+    // The operator gets which origin, against which list, and why. The respondent gets one
+    // sentence that reads the same for every reason, so a prober cannot map the allowlist by
+    // reading refusals — see `FOREIGN_ORIGIN_MESSAGE`.
+    LogError(
+      `[Forms] submit refused for ${submission.distributionSlug}: ${embedOrigin.reason ?? 'origin not allowed'}`,
+    );
+    return report(fail(FOREIGN_ORIGIN_MESSAGE));
   }
 
-  // 5. Dedupe (Task 1) — only on completion. If this session (or this client response id)
-  //    already Completed this form, short-circuit rather than writing a second row.
+  timer.mark('embed-origin');
+
+  // 3. Rate-limit. `charge` consults every bucket before spending any of them, so a request one
+  //    gate refuses does not silently eat the respondent's budget in another.
+  warnOnceIfAbuseKeyingDegraded(ctx.clientIpHash);
+  const gates = rateLimitGatesFor(ctx, resolved.distribution.ID, terminalCompletion, complete && knockout !== undefined);
+  const limit = FormsRateLimiter.Instance.charge(gates);
+  if (!limit.allowed) {
+    return report(fail(rateLimitedMessage(limit.retryAfterMs)));
+  }
+
+  timer.mark('rate-limit');
+
+  // 4. Turnstile (per form/distribution toggle) — FINAL submits only.
+  //
+  //     A partial is exempt because a Turnstile token is single-use. The widget therefore
+  //     withholds it from autosaves (see `buildSubmission`), keeping it for the submit that
+  //     actually needs it — and verifying anyway meant every autosave and every submit-point
+  //     checkpoint on a captcha-enabled form was rejected. Autosave is fail-soft, so nothing
+  //     surfaced: the respondent simply had no saved progress, on exactly the forms whose authors
+  //     cared enough to turn a captcha on.
+  //
+  //     This is not a bypass. A partial can only ever write a `Partial` row; promoting one to
+  //     `Complete` runs this pipeline again with `partial` unset, and that pass is gated here. The
+  //     rate limiter ABOVE is what bounds partial writes, and it runs for every save either way.
+  //
+  //     Ordered after the rate limit for the same single-use reason. Verifying first meant a
+  //     submission the limiter was about to refuse had already spent its token at Cloudflare, so
+  //     the respondent's retry — the one thing they can actually do about a rate limit — came
+  //     back "Captcha verification failed" instead of the wait. It also let a caller who was
+  //     being refused anyway keep costing us an outbound round trip per attempt.
+  const needCaptcha =
+    complete && captchaRequired(resolved.definition.settings.captchaRequired, resolved.distribution.CaptchaRequired);
+  const turnstile = await verifyTurnstile(needCaptcha, submission.turnstileToken, ctx.fetchImpl);
+  if (!turnstile.success && turnstile.errorCode === TURNSTILE_NOT_CONFIGURED) {
+    // The one refusal here that is not the respondent's doing: this form or link asks for a
+    // captcha and the host never configured Turnstile. Said as such — to them, without blame,
+    // and to the operator, by setting name. The boot-time readiness check reports the same
+    // condition for whatever required a captcha at startup; this catches what was published
+    // after it. Same shape as every other refusal (a result, not a throw) so the widget renders
+    // it rather than a blank screen (#122).
+    LogError(
+      `[Forms] submit to '${submission.distributionSlug}' requires a captcha but FORMS_TURNSTILE_SECRET is ` +
+        `not set on this host. Set FORMS_TURNSTILE_SECRET and FORMS_TURNSTILE_SITE_KEY, or turn the captcha ` +
+        `off on that form or link. Refusing as a server misconfiguration.`,
+    );
+    return report(fail(CAPTCHA_NOT_CONFIGURED_MESSAGE));
+  }
+  if (!turnstile.success) {
+    return report(fail(`Captcha verification failed (${turnstile.errorCode}).`));
+  }
+
+  timer.mark('captcha');
+
+  // 5. Disqualification (C3) — evaluated on EVERY save. The widget's own detection is advisory;
+  //    THIS is the enforcement (the mutation is reachable without the widget, and a client that
+  //    "forgets" it was disqualified must still be disqualified). Evaluated on the raw answer
+  //    map: a knockout answer disqualifies whether or not later visibility would have kept it.
+  //
+  //    Resolved ABOVE, before any gate charges anything — see the block after the definition
+  //    loads. The order matters and the reason is not obvious: three of the gates (the completion
+  //    rate ceiling, dedupe and the quota) exist to police COMPLETIONS, which a knockout is not.
+  const disqualifiedBy = complete ? knockout : undefined;
+
+  // 5b. WHOSE session this is, settled ONCE (#138). Everything downstream reads this one value:
+  //     dedupe's ownership question, the row this save updates, and the write gate. Deriving it
+  //     more than once would be more than one place for a later change to disagree.
+  //
+  //     Costs nothing on the public path — see `scopeNamesDistribution`, which settles a public
+  //     link by comparing the claim to the distribution already in hand.
+  const scoped = await resolveScopedResponseId(
+    ctx.provider,
+    { scopeResourceId: ctx.scopeResourceId, distributionId: resolved.distribution.ID },
+    ctx.elevatedUser,
+  );
+  const scopedResponseId = scoped.responseId;
+
+  // 5c. A scoped session naming SOMEBODY ELSE'S response id.
+  //
+  //     The hint is ignored for row selection below (the scope wins), so without this the request
+  //     would quietly write to the caller's OWN row and answer success — which is not what a caller
+  //     who named a different row asked for, and reads to them as that row having been updated.
+  //     Refused with the one sentence every ownership failure gets, so it cannot be told apart from
+  //     the others.
+  //
+  //     No real client reaches it: a resumed widget adopts the row id from `resumeJSON` on every
+  //     load, including a retry, so the two always agree.
+  if (
+    scopedResponseId &&
+    submission.clientResponseId &&
+    submission.clientResponseId.trim().toLowerCase() !== scopedResponseId.trim().toLowerCase()
+  ) {
+    return report(fail(FOREIGN_RESPONSE_MESSAGE));
+  }
+
+  // 6. Dedupe (Task 1) — only on a completion. If this session (or this client response id)
+  //    already reached a TERMINAL status for this form, short-circuit rather than writing a
+  //    second row. Terminal is `Complete` OR `Disqualified`: both mean nothing more is coming,
+  //    and treating only the first as terminal let a retried knockout fall through to the quota
+  //    gate below and be refused on an attempt that had already succeeded.
   //    FAIL-CLOSED: a lookup-query error rejects the resubmit (never silently duplicates).
   if (complete) {
-    const dedupe = await checkDuplicate(ctx, resolved, submission);
+    const dedupe = await checkDuplicate(ctx, resolved, submission, disqualifiedBy, scopedResponseId);
     if (dedupe) {
-      return dedupe;
+      return report(dedupe);
     }
   }
 
-  // 6. Quota (distribution cap + optional form cap) — only enforced on completion.
-  if (complete) {
+  timer.mark('dedupe');
+
+  // 7. Quota (distribution cap + optional form cap) — enforced only on a submission that would
+  //    actually consume a slot. A disqualification never increments `ResponseCount`
+  //    (`countsCompletion` in persistence.service), so holding one to the cap refuses a response
+  //    that cannot fill it. A QUALIFYING respondent is still refused, which is the whole point
+  //    of the cap.
+  if (terminalCompletion) {
     const quotaResult = await checkQuotas(ctx, resolved);
     if (quotaResult) {
-      return quotaResult;
+      return report(quotaResult);
     }
   }
 
-  // 7. Server-side re-validation (conditional visibility + required + format).
-  const validation = validateSubmission(resolved.definition, submission.answers, !complete);
+  timer.mark('quota');
+
+  // 8. Server-side re-validation (conditional visibility + required + format). Which mode, and
+  //    why, is `validationModeFor`.
+  const validation = validateSubmission(resolved.definition, submission.answers, validationModeFor(complete, disqualifiedBy));
   if (validation.errors.length > 0) {
-    return { success: false, errors: validation.errors };
+    return report({ success: false, errors: validation.errors });
   }
 
-  // 7b. Every file answer must be one this respondent actually uploaded. `__mj.File` has no owner
+  // 8b. Every file answer must be one this respondent actually uploaded. `__mj.File` has no owner
   //     column, so the foreign key proves only that the file exists — without this a submission
   //     can name any file in the instance and it becomes their answer. Checked before persistence,
   //     so a foreign id never reaches the database, and on partial saves too, so it is caught at
   //     first sight rather than at promotion.
   const provenance = await checkFileProvenance(ctx, resolved, submission);
   if (provenance.errors.length > 0) {
-    return { success: false, errors: provenance.errors };
+    return report({ success: false, errors: provenance.errors });
   }
 
-  // 8. Find this session's in-flight Partial row so a partial autosave UPDATES it in place
+  timer.mark('validate');
+
+  // 9. Find this session's in-flight Partial row so a partial autosave UPDATES it in place
   //    (idempotent — no duplicate Partial rows) and a final submit PROMOTES it to Complete
   //    instead of creating a second row (Task 4). A lookup error here is non-fatal: we fall
   //    back to creating a fresh row (the dedupe gate above already guards double-Completes).
@@ -228,9 +669,41 @@ export async function runSubmitPipeline(
   //    Cross-session / link-based RESUME is Phase 2 — we key strictly on the current
   //    AnonymousSessionID and never adopt another session's row. We DO return the responseId
   //    so a same-session widget can continue editing its partial.
-  const existingPartial = await resolveExistingPartial(ctx, resolved, submission);
+  const existingPartial = await resolveExistingPartial(ctx, resolved, submission, scopedResponseId);
 
-  // 9. Persist response + answers (CREATE, UPDATE partial, or PROMOTE partial→complete).
+  timer.mark('find-partial');
+
+  // 9b. Hard ceiling on rows this version has accumulated that NO QUOTA bounds — the durable
+  //     bound on write abuse. It applies to any save that would CREATE a row the quota will not
+  //     count: an autosave, and a knockout. A save UPDATING an existing row adds none, and a
+  //     qualifying completion is the quota's business, not this one.
+  //
+  //     The condition used to be `!complete`, from when a final submit always meant a completion.
+  //     A DISQUALIFYING final submit is neither: `terminalCompletion` is false so the quota skips
+  //     it, and `!complete` was false so this skipped it too — leaving an anonymous caller who
+  //     answers a knockout able to create rows through every gate, with no session and no client
+  //     id. Both halves of that are closed here and in `countPartialResponses`.
+  //
+  //     This is the only DURABLE bound of the three: the ceilings above are per-window and
+  //     per-process, so a caller pacing themselves under all of them — or spread across addresses
+  //     — still accumulates rows without limit. This one counts what is actually in the table.
+  //     Fail-CLOSED (a count error refuses the save) — autosave is fail-soft, so the widget
+  //     simply retries.
+  //
+  //     A knockout IS refused once the ceiling is reached, and that is deliberate: it creates a
+  //     row like any other, so exempting it would reopen the hole above. The respondent still
+  //     sees their screen — the client's verdict does not wait on this save — but a saturated
+  //     form records nothing new, which is what a ceiling is for.
+  if (!existingPartial.response && !terminalCompletion) {
+    const capped = await partialCapExceeded(ctx, resolved);
+    if (capped) {
+      return report(capped);
+    }
+  }
+
+  timer.mark('partial-cap');
+
+  // 10. Persist response + answers (CREATE, UPDATE partial, or PROMOTE partial→complete).
   const persisted = await persistSubmission(
     ctx.provider,
     {
@@ -238,6 +711,7 @@ export async function runSubmitPipeline(
       formVersionId: resolved.version.ID,
       distributionId: resolved.distribution.ID,
       complete,
+      disqualified: disqualifiedBy !== undefined,
       startedAt: submission.startedAt,
       sessionId: ctx.sessionId,
       sourceMetadata: buildSourceMetadata({
@@ -245,51 +719,249 @@ export async function runSubmitPipeline(
         distributionId: resolved.distribution.ID,
         clientMeta: submission.clientMeta,
         clientResponseId: submission.clientResponseId,
+        // The screen, not merely the fact. On the zero-answer knockout path this is the row's
+        // entire content — see the field's note in `source-metadata.service.ts`.
+        disqualifiedByScreenId: disqualifiedBy?.id,
       }),
       answers: validation.answers,
       existingResponseId: existingPartial.response?.ID,
+      scopedResponseId,
       clientResponseId: submission.clientResponseId,
     },
     ctx.elevatedUser,
   );
-  if (!persisted.ok) {
-    return fail(persisted.message);
+  if (persisted.outcome === 'failed') {
+    return report(fail(persisted.message));
   }
 
-  // 10. Fire on-submit hooks (complete only; best-effort, never fails the submit). Skipped when
+  timer.mark('persist');
+
+  // 11. Fire on-submit hooks (complete only; best-effort, never fails the submit). Skipped when
   //     persistence reports a `deduped` no-op — a concurrent request already Completed this row
   //     and fired its hooks, so re-firing here would double-run on-submit automations.
-  if (complete && !persisted.deduped) {
-    await fireHooksSafely(ctx, resolved, persisted.responseId);
+  // Disqualified responses fire NO automations: OnComplete promised a completion this was not,
+  // and side effects on a screened-out respondent (confirmation emails, entity upserts) are the
+  // loud, hard-to-undo way to be wrong about a knockout.
+  // `terminalCompletion`, not a third spelling of it. This gate governs the irreversible side
+  // effects a knockout must never fire, and it was deriving the same decision the rate-limit and
+  // quota gates derive — a fourth reading of "is this a real completion" is a fourth place for a
+  // later change to disagree.
+  if (terminalCompletion && !persisted.deduped) {
+    // DETACHED, deliberately. The response row and its answers are already written by the
+    // time we get here, and nothing the respondent is shown comes from a hook — the
+    // confirmation is built from the definition. Awaiting the automation chain made every
+    // respondent wait for work that is not theirs: measured on a real form, hooks were
+    // 8070ms of an 8348ms submit, with persistence at 239ms. That is not a slow database,
+    // it is a respondent paying for someone else's integration.
+    //
+    // The trade is real and worth naming: a hook now runs AFTER the response is sent, so a
+    // process killed in that window loses it. That was already true of any hook that failed
+    // — the catch has always swallowed them as best-effort — so the change is to when they
+    // run, not to whether they are guaranteed. Anything needing an at-least-once guarantee
+    // wants a queue, not an awaited call inside a request.
+    const hooks = fireHooksSafely(ctx, resolved, persisted.responseId);
+    if (getPublicSubmitConfig().hooksBlocking) {
+      await hooks;
+    } else {
+      void hooks.then(
+        () => LogStatus(`[Forms] hooks finished for response ${persisted.responseId}`),
+        // fireHooksSafely already catches; this is the belt to its braces, because an
+        // unhandled rejection on a detached promise takes the API process down with it.
+        (err: unknown) => LogError(`[Forms] detached hooks threw for ${persisted.responseId}: ${String(err)}`),
+      );
+    }
   }
 
-  return {
+  // 11b. DECISION 3, as the review flipped it: a sealed response's resume links die with it.
+  //
+  //      As originally designed the emailed invite stayed Active and opened the sealed answers
+  //      read-only for the rest of its 30 days — so forwarding that mail was disclosure. And
+  //      "refusing tells the respondent nothing" turned out not to be true: once the links are
+  //      revoked, a later open can say the response was submitted, and when.
+  //
+  //      Every terminal status, not just a completion: a `Disqualified` row is sealed too, nothing
+  //      more is coming for it, and a bearer to a screened-out respondent's answers is no better
+  //      than a bearer to anyone else's. Skipped on `deduped`, because the request that actually
+  //      sealed the row already did this.
+  //
+  //      Detached and best-effort, like the hooks above: the response is already written, and
+  //      nothing the respondent is shown depends on it.
+  if (isTerminalResponseStatus(persisted.status) && !persisted.deduped) {
+    void revokeSealedResponseInvites(ctx, persisted.responseId);
+  }
+
+  timer.mark('hooks');
+
+  // The copy follows the PERSISTED status, not this request's own verdict. They can disagree: the
+  // row may have been sealed `Disqualified` by a concurrent save whose answers tripped a rule
+  // these answers do not, in which case `persistSubmission` returns the row's status while
+  // `disqualifiedBy` here is undefined. Reporting a `Disqualified` status alongside the QUALIFIED
+  // confirmation and redirect sent the screened-out respondent to the qualified destination —
+  // which is precisely the defect the widget was fixed for twice, arriving instead down the
+  // server's race path. `checkDuplicate` already branches on the row's own status; this was the
+  // one site that never adopted the pattern.
+  return report({
     success: true,
     responseId: persisted.responseId,
     status: persisted.status,
-    ...confirmationFields(resolved),
+    // ONE rule: the response describes the ROW. Not this request's verdict, and not a mixture.
+    //
+    // A previous version added `|| disqualifiedBy !== undefined` to cover the mirror race — a
+    // concurrent submit sealing the row `Complete` while THESE answers trip a knockout — and that
+    // made things worse rather than safer. It paired a `Complete` status with the knockout's copy,
+    // and the widget keys screened-out-ness on the STATUS alone: it therefore ignored the copy,
+    // resolved a qualified ending screen, and could follow that screen's redirect. A mismatched
+    // pair is not a safer pair; it is one the reader downstream resolves in whichever direction it
+    // happens to look.
+    //
+    // The row is the record. If a concurrent request completed this response, it IS complete, and
+    // saying so is accurate however these answers would have been judged on their own.
+    ...(persisted.status === 'Disqualified'
+      ? terminalRepeatFields(disqualifiedBy)
+      : confirmationFields(resolved, validation.answerMap)),
+  });
+}
+
+/**
+ * What a repeat of an already-disqualified submission is shown.
+ *
+ * The knockout screen when this attempt still trips the same rule (the normal case — the same
+ * answers were re-sent), and the neutral fallback when it does not, because we cannot honestly
+ * name a screen these answers no longer match. Never the form's confirmation message: the row
+ * is `Disqualified`, and "thanks, your response has been recorded" is untrue of it.
+ */
+function terminalRepeatFields(
+  disqualifiedBy: PublishedFormScreen | undefined,
+): Pick<FormSubmissionResult, 'confirmationMessage' | 'redirectUrl'> {
+  return disqualifiedBy ? disqualificationFields(disqualifiedBy) : { confirmationMessage: SCREENED_OUT_MESSAGE };
+}
+
+/**
+ * What a disqualified respondent is shown: the knockout screen's own copy and redirect ONLY.
+ * Deliberately not {@link confirmationFields} — the form-wide confirmation message and redirect
+ * are promises made to people who completed, and "thanks, your response has been recorded" to
+ * someone who was screened out is a lie on both counts.
+ */
+function disqualificationFields(
+  screen: PublishedFormScreen,
+): Pick<FormSubmissionResult, 'confirmationMessage' | 'redirectUrl'> {
+  const redirectUrl = safeRedirectUrl(screen.redirectURL);
+  const copy = [screen.title, screen.body].filter((t) => !!t?.trim()).join('\n\n');
+  return {
+    confirmationMessage: redirectUrl ? undefined : copy || SCREENED_OUT_MESSAGE,
+    redirectUrl,
   };
 }
 
 /**
+ * Which buckets this submission has to satisfy.
+ *
+ * Four, answering different questions. Only (a) is not an abuse control — it is keyed on a header
+ * the caller chooses, so it shapes a real widget's behaviour and bounds nothing. The other three
+ * are keyed on the resolved peer IP, and they are listed here in the order the body pushes them:
+ *   (a) per (session, distribution) — the fine-grained limit for a client that identifies itself
+ *       honestly. Keyed on the `x-session-id` header, which the caller chooses, so a caller who
+ *       wants a fresh bucket simply sends a new value. Useful for shaping a real widget's
+ *       behaviour, worthless as a ceiling — and treating it as one was the defect. Charged only
+ *       when the caller actually named a session: blank is not one caller, it is every
+ *       header-less caller at once (see `sessionIdentity`).
+ *   (b) per (caller, distribution) — keyed on the resolved peer IP, which the caller cannot
+ *       rotate. This is the ceiling. It does not make abuse impossible; it makes it cost
+ *       ADDRESSES, which is the only currency a public endpoint can charge.
+ *   (c) per (caller, distribution), completions only — the same identity against a much tighter
+ *       cap, because a completion fires the on-submit automations (a confirmation email to an
+ *       address the submission chose, an LLM run, entity upserts) and an autosave does not. One
+ *       counter over both could only be tight enough to interrupt someone still typing, or loose
+ *       enough to leave the expensive path effectively unlimited.
+ *   (d) per (caller, distribution), DISQUALIFYING submits only — its own counter, for the reason
+ *       spelled out at the push site below.
+ */
+function rateLimitGatesFor(
+  ctx: PipelineContext,
+  distributionId: string,
+  complete: boolean,
+  knockout: boolean,
+): RateLimitGate[] {
+  const config = getPublicSubmitConfig();
+  const identity = abuseIdentity(ctx.clientIpHash);
+  const gates: RateLimitGate[] = [];
+  // (a) is a per-CALLER gate, so it is charged only where it has a caller. A blank session is
+  // every header-less client at once, and this is the tightest bucket of the four — so charging
+  // them together refuses each of them for the others' traffic rather than for abuse, which is
+  // the shared kill switch `abuseIdentity` refuses to build for the ceilings. The exception is
+  // the case where nothing else can be keyed either: with no address, this coarse
+  // per-distribution circuit breaker is the only bound there is, and one is better than none.
+  // `warnOnceIfAbuseKeyingDegraded` has already announced that mode.
+  if (sessionIdentity(ctx.sessionId) || !identity) {
+    gates.push({ key: rateLimitKey({ sessionId: ctx.sessionId, distributionId }), max: config.rateLimitMax });
+  }
+  if (!identity) {
+    // No resolved IP, so (b), (c) and (d) have nothing to key on. They are omitted rather than
+    // keyed on something weaker — see `abuseIdentity`.
+    return gates;
+  }
+  gates.push({ key: saveCeilingKey(distributionId, identity), max: config.ipRateLimitMax });
+  if (complete) {
+    gates.push({ key: completionCeilingKey(distributionId, identity), max: config.completionMax });
+  }
+  // A knockout charges (d) and NOT (c): it fires none of the work (c) is tight for, so sharing
+  // that bucket let ineligible respondents crowd out real completions — but each knockout leaves
+  // a permanent row, so no bucket at all made the durable row ceiling fall far faster than it is
+  // sized for. Its own counter is the only reading that is neither of those.
+  if (knockout) {
+    gates.push({ key: knockoutCeilingKey(distributionId, identity), max: config.knockoutMax });
+  }
+  return gates;
+}
+
+/**
  * Locate the Partial row this submit should UPDATE/PROMOTE, honoring the widget's client-supplied
- * `responseId` autosave hint ONLY when it is proven to belong to the CURRENT anonymous session.
+ * `responseId` autosave hint.
  *
- * Two-step, ownership-first:
- *   1. If the client sent a `responseId`, adopt it iff `findOwnedResponseById` confirms it matches
- *      on (ID, AnonymousSessionID, FormVersionID) and is still Partial. A foreign/guessed id comes
- *      back empty here and is silently dropped — one session can never hijack another's partial.
- *   2. Otherwise (no hint, or the hint did not resolve to an owned row), fall back to the plain
- *      session-key lookup — the pre-existing same-session behavior.
+ * Two-step:
+ *   1. If the client sent a `responseId`, prefer the row `findOwnedResponseById` confirms matches
+ *      on (ID, AnonymousSessionID, FormVersionID) and is still Partial; with no session to key on,
+ *      fall back to the SourceMetadata client-id proof.
+ *   2. Otherwise (no hint, or the hint resolved to nothing), fall back to the plain session-key
+ *      lookup — the pre-existing same-session behavior.
  *
- * Both lookups fail-open: a query error yields "no owned row", so persistence creates a fresh row
- * rather than ever adopting an unverified one.
+ * NOTHING HERE DECIDES OWNERSHIP, and it is important that it does not try (issue #78). This
+ * function only proposes a candidate; `persistSubmission` refuses to write any row owned by
+ * another session, so a candidate that turns out to be foreign is refused rather than adopted.
+ * Enforcing it here instead meant the check applied only to the branch a caller chose to take —
+ * and a caller who matched no branch at all still collided into the row on its primary key.
+ *
+ * Both lookups fail-open: a query error yields "no row", so persistence creates a fresh row (or
+ * refuses, if the id is already taken by someone else) rather than adopting an unverified one.
  */
 async function resolveExistingPartial(
   ctx: PipelineContext,
   resolved: ResolvedDefinition,
   submission: PipelineSubmission,
+  scopedResponseId: string | undefined,
 ): Promise<{ response?: { ID: string } }> {
+  // 0. THE SCOPED ROW WINS, and it wins EXPLICITLY (#138).
+  //
+  //    Without this branch a resumed save missed all three lookups below — every one of them pins
+  //    `FormVersionID`, and the owner column still names the first sitting — fell through to CREATE
+  //    at the row's own id, collided on the primary key, and was rescued by `reconcileDuplicate`.
+  //    That recovery works, and relying on it would have been a mistake twice over: it decides
+  //    whether a failure was a collision by running a REGEX over the driver's error text, and it
+  //    issues a failed INSERT on every single autosave.
+  //
+  //    It also silently broke the draft ceiling. `partialCapExceeded` below runs whenever no
+  //    existing partial was resolved, so a resumed autosave — which adds no row — was counted as a
+  //    new draft and refused outright on a saturated form.
+  //
+  //    No version filter here, deliberately: see `findScopedResponse`.
+  if (scopedResponseId) {
+    const scopedRow = await findScopedResponse(ctx.provider, { responseId: scopedResponseId }, ctx.elevatedUser);
+    if (scopedRow.ok && scopedRow.response) {
+      return { response: scopedRow.response };
+    }
+    // The scope named a row that is gone or already sealed. Fall through rather than refuse: the
+    // respondent still gets to submit, and the write gate still decides what they may touch.
+  }
   if (submission.clientResponseId) {
     // 1a. Session present: adopt the client id only if the row is owned by THIS session.
     const owned = await findOwnedResponseById(
@@ -304,41 +976,64 @@ async function resolveExistingPartial(
     if (owned.ok && owned.response) {
       return { response: owned.response };
     }
-    // 1b. No usable session (the routine public-submit case — sessionId is blank): adopt the
-    //     row keyed by the client id itself, gated on the SourceMetadata client-id proof so a
-    //     guessed PK can never be adopted. THIS is what makes autosave upsert work with a blank
-    //     session (the original duplicate-row bug).
+    // 1b. No usable session (the routine public-submit case — sessionId is blank): propose the
+    //     row keyed by the client id itself, narrowed by the SourceMetadata client-id proof so a
+    //     merely-guessed PK matches nothing. THIS is what makes autosave upsert work with a blank
+    //     session (the original duplicate-row bug). It is NOT the ownership check — persistence
+    //     refuses the write if the row proposed here turns out to have an owner (issue #78).
     if (!ctx.sessionId) {
-      const adoptable = await findAdoptableResponseById(
+      const resumable = await findResumableResponseById(
         ctx.provider,
         { responseId: submission.clientResponseId, formVersionId: resolved.version.ID },
         ctx.elevatedUser,
       );
-      if (adoptable.ok && adoptable.response) {
-        return { response: adoptable.response };
+      if (resumable.ok && resumable.response) {
+        return { response: resumable.response };
       }
     }
-    // Hint did not resolve to an adoptable row (foreign id, wrong version, already Complete, or
+    // Hint did not resolve to a resumable row (unknown id, wrong version, already sealed, or a
     // lookup error): ignore it and fall through to the session-key lookup.
   }
   return findSessionResponse(
     ctx.provider,
     { formVersionId: resolved.version.ID, sessionId: ctx.sessionId },
-    'Partial',
+    RESUMABLE_RESPONSE_STATUSES,
     ctx.elevatedUser,
   );
 }
 
 /**
- * Detect a duplicate FINAL submission for this (session, published version). Returns a
- * success-shaped "already submitted" result (carrying the existing responseId) when a prior
- * Complete row exists, so the client sees a clean idempotent outcome rather than an error or
- * a second row. Returns a hard failure if the dedupe lookup itself errored (fail-closed).
+ * Detect a repeat of a submission this caller has already had sealed, and short-circuit to it.
+ *
+ * "Sealed" is any TERMINAL status — `Complete` or `Disqualified` — checked two ways, because the
+ * two identities a caller carries have different lifetimes. The client response id is per-load
+ * (the widget mints a fresh one every time, and a caller reaching this mutation directly sends
+ * whatever it likes); the session outlives it. Either one recognising the row is enough, and the
+ * result reports the row's OWN status and copy rather than a generic confirmation — a respondent
+ * whose first attempt was screened out must not be told on their retry that it was recorded.
+ *
+ * WHOSE REPEAT IT IS, though, is a question this has to ask (#100/#101). Reporting a row's status
+ * is disclosure, and the id is not on its own proof of anything: it is a capability only for a row
+ * that has no owner. The session branch narrows to the caller's own rows in SQL and needs nothing
+ * more; the by-id branch does not, so it asks `responseIsOurs` — THE ownership rule, imported from
+ * the persistence seam that enforces it rather than restated here as a second predicate.
+ *
+ * WHAT A STRANGER CAN STILL LEARN, recorded so it is a bound somebody chose. A caller naming an id
+ * that belongs to NOBODY is answered `success` — a row is created at that id, and it is theirs —
+ * so "this id is taken by someone else" stays distinguishable from "this id is free". That is
+ * structural: the client mints the primary key, and an endpoint that lets a caller create a row at
+ * an id of their choosing cannot also hide whether that id is in use. It is empty within the
+ * threat model these issues assume, where the caller has already observed the id in traffic. What
+ * is closed is everything ABOUT the response — sealed or not, `Complete` or `Disqualified`.
+ *
+ * Fail-CLOSED on a lookup error: a resubmit is refused rather than risking a second row.
  */
 async function checkDuplicate(
   ctx: PipelineContext,
   resolved: ResolvedDefinition,
   submission: PipelineSubmission,
+  disqualifiedBy: PublishedFormScreen | undefined,
+  scopedResponseId: string | undefined,
 ): Promise<FormSubmissionResult | undefined> {
   // First, an idempotent repeat of THIS client's final submit: the same client response id
   // already promoted to Complete. Keyed on the id (+ SourceMetadata proof), so it works even
@@ -352,20 +1047,39 @@ async function checkDuplicate(
     if (!byId.ok) {
       return fail('Could not verify submission status; please retry shortly.');
     }
-    if (byId.response && byId.response.Status === 'Complete') {
-      return {
-        success: true,
-        responseId: byId.response.ID,
-        status: 'Complete',
-        ...confirmationFields(resolved),
-      };
+    // Ownership BEFORE the terminal test — `reconcileDuplicate` orders it the same way, and for
+    // the same reason: the branch below reports the row's status while writing nothing, so a
+    // foreign row reaching it is disclosure the write seam never sees (#100/#101).
+    //
+    // A row that is not ours is simply NOT A REPEAT WE RECOGNISE, and we do not refuse it here.
+    // The submission carries on to persistence, collides on the primary key it named, and the one
+    // gate refuses it with the one message every ownership failure gets. Refusing here would add a
+    // second place that says no; declining to recognise adds none.
+    //
+    // THE COST, so it is a decision and not a surprise: a re-fire that presents an owned row's id
+    // under a blank or different session used to be answered here and is now refused. That caller
+    // is already refused everywhere else (issue #78 — an absent credential must not be more
+    // permissive than a wrong one), so this makes the read agree with the write rather than
+    // introducing a new refusal. No real widget reaches it: the session and the client id are
+    // minted together, so an id is only ever presented alongside the session that created it.
+    if (
+      byId.response &&
+      responseIsOurs(byId.response, { sessionId: ctx.sessionId, scopedResponseId }) &&
+      isTerminalResponseStatus(byId.response.Status)
+    ) {
+      return recognisedRepeat(resolved, byId.response, submission, disqualifiedBy);
     }
   }
 
+  // Every TERMINAL status, not just `Complete`. The client response id is not stable — the
+  // widget mints a fresh one on every load, and a caller reaching the mutation directly can send
+  // whatever they like — so the session is the only thing tying a retry back to the row it
+  // already has. Looking only for `Complete` meant a session sealed as `Disqualified` was not
+  // recognised as sealed at all, and the pipeline ran on to write a second terminal row for it.
   const existing = await findSessionResponse(
     ctx.provider,
     { formVersionId: resolved.version.ID, sessionId: ctx.sessionId },
-    'Complete',
+    TERMINAL_RESPONSE_STATUSES,
     ctx.elevatedUser,
   );
   if (!existing.ok) {
@@ -373,17 +1087,63 @@ async function checkDuplicate(
     return fail('Could not verify submission status; please retry shortly.');
   }
   if (existing.response) {
-    // Idempotent resubmit: surface the ORIGINAL response id + Complete status (and the same
-    // confirmation) so the client treats it as a successful (already-recorded) submission,
-    // without creating a second row. (No dedicated `duplicate` flag is added to the shared
-    // FormSubmissionResult contract — that lives in @mj-biz-apps/forms-entities, outside this
-    // change's scope; the existing responseId + Complete status is the client-visible signal.)
-    return {
-      success: true,
-      responseId: existing.response.ID,
-      status: 'Complete',
-      ...confirmationFields(resolved),
-    };
+    return recognisedRepeat(resolved, existing.response, submission, disqualifiedBy);
+  }
+  return undefined;
+}
+
+/**
+ * What a recognised repeat is answered: the ROW's own id, status and copy.
+ *
+ * Both branches of {@link checkDuplicate} built this object, identically, and the duplication was
+ * load-bearing rather than cosmetic — the two copies each carried their own comment explaining the
+ * `Disqualified` case, so a change to what a repeat may be told had two places to reach and the
+ * gate that decides WHOSE repeat it is now has one shape to protect.
+ *
+ * The status is not always `Complete`: a session sealed by a knockout must be told it was screened
+ * out rather than congratulated, which is why the copy follows the row's status and not the form's
+ * confirmation. (No dedicated `duplicate` flag is added to the shared `FormSubmissionResult` — that
+ * contract lives in @mj-biz-apps/forms-entities; the responseId plus the row's status is the
+ * client-visible signal.)
+ */
+function recognisedRepeat(
+  resolved: ResolvedDefinition,
+  row: Pick<mjBizAppsFormsFormResponseEntityType, 'ID' | 'Status'>,
+  submission: PipelineSubmission,
+  disqualifiedBy: PublishedFormScreen | undefined,
+): FormSubmissionResult {
+  return {
+    success: true,
+    responseId: row.ID,
+    status: row.Status,
+    ...(row.Status === 'Disqualified'
+      ? terminalRepeatFields(disqualifiedBy)
+      : confirmationFields(resolved, buildAnswerMap(submission.answers))),
+  };
+}
+
+/**
+ * Whether creating another `Partial` row for this version would breach the hard ceiling.
+ *
+ * Returns a failure result to short-circuit the pipeline, or undefined to proceed. Counts under the
+ * elevated principal (the anonymous respondent cannot read responses) and fails CLOSED — a count
+ * error refuses the partial rather than risk an unbounded-write hole. A disabled cap (<= 0) is a
+ * no-op, so an operator can turn it off deliberately.
+ */
+async function partialCapExceeded(
+  ctx: PipelineContext,
+  resolved: ResolvedDefinition,
+): Promise<FormSubmissionResult | undefined> {
+  const cap = getPublicSubmitConfig().maxPartialsPerVersion;
+  if (cap <= 0) {
+    return undefined;
+  }
+  const counted = await countPartialResponses(ctx.provider, { formVersionId: resolved.version.ID }, ctx.elevatedUser);
+  if (!counted.ok) {
+    return fail('Could not save your progress right now. Please try again shortly.');
+  }
+  if (counted.count >= cap) {
+    return fail('This form is not accepting new drafts right now. Please try again later.');
   }
   return undefined;
 }
@@ -409,17 +1169,43 @@ async function checkQuotas(ctx: PipelineContext, resolved: ResolvedDefinition): 
 async function fireHooksSafely(ctx: PipelineContext, resolved: ResolvedDefinition, responseId: string): Promise<void> {
   // A form that configures its own automations runs those; one that does not keeps the legacy
   // hard-coded hook list. That fallback is what makes this switch safe to land before any form has
-  // been re-published: every existing snapshot carries an empty `automations` array, so every
-  // existing form takes the legacy path and behaves exactly as it did. The constant list can only
-  // be deleted once a back-fill has given every form equivalent automations AND a parity test has
-  // shown the two produce the same effects.
-  if (resolved.definition.automations.length > 0 && !ctx.fireHooks) {
-    await runConfiguredAutomations(resolved, responseId);
-    return;
+  // been re-published: a snapshot published before automations existed carries an empty
+  // `automations` array, so it takes the legacy path and behaves exactly as it did.
+  //
+  // The decision itself lives in `resolveOnSubmitDispatch` rather than inline here, because
+  // inline it was an `automations.length > 0` test that could not tell "has never configured
+  // anything" from "deliberately runs nothing" — the two were the same snapshot. That cost a
+  // consumer owning its own subject identity a duplicate `Person` row on every submission
+  // (bizapps-forms#47), and it silently restored all four legacy hooks for any author who removed
+  // their last step in the builder.
+  const dispatch = resolveOnSubmitDispatch(resolved.definition);
+  if (dispatch.kind === 'configured') {
+    if (dispatch.automations.length === 0) {
+      // Declared authoritative and empty: nothing runs. Returning HERE rather than letting
+      // `runConfiguredAutomations` discover an empty plan also skips resolving the service
+      // principal and reading the response back — real work, on the hot path, for a form that has
+      // told us it wants none of it.
+      return;
+    }
+    if (!ctx.fireHooks) {
+      await runConfiguredAutomations(resolved, responseId);
+      return;
+    }
+    // A test injected a firer. Fall through to it, as this path always has: `runConfiguredAutomations`
+    // needs a database and a service principal, so the injected firer is what a pipeline test can
+    // actually observe.
   }
 
-  // Default firer runs under the system user internally; the anonymous ctx.contextUser is
-  // intentionally NOT passed (on-submit automations are privileged — see fireOnSubmitHooks).
+  if (hasUnreachableAutomations(resolved.definition)) {
+    console.warn(
+      `[forms] form ${resolved.definition.formId} declares onSubmitMode='Legacy' but carries ` +
+        `${resolved.definition.automations.length} automation(s); those will not run.`,
+    );
+  }
+
+  // Default firer resolves the scoped automation principal internally (fail-closed, like
+  // `runConfiguredAutomations`); the anonymous ctx.contextUser is intentionally NOT passed
+  // (on-submit automations are privileged — see fireOnSubmitHooks).
   const fire = ctx.fireHooks ?? ((hookCtx) => fireOnSubmitHooks(hookCtx));
   try {
     await fire({
@@ -514,7 +1300,11 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
     }
 
     const answers = buildConditionAnswers(resolved.definition, context.canonicalAnswers);
-    const plan = planAutomations(resolved.definition.automations, { complete: true, answers });
+    const plan = planAutomations(resolved.definition.automations, {
+      complete: true,
+      answers,
+      score: scoreFor(resolved, answers),
+    });
 
     await runAutomations({
       plan,
@@ -525,6 +1315,7 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
           formVersionId: resolved.version.ID,
           distributionId: resolved.distribution.ID,
           answers: context.canonicalAnswers,
+          questionTypes: questionTypesOf(resolved.definition),
           principal,
           allowedEntities: allowedBindingEntities(),
         }),
@@ -532,5 +1323,38 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[forms] automations failed for response ${responseId}: ${message}`);
+  }
+}
+/**
+ * Every question's type, keyed by id, for consumers that must write an answer onward in a shape
+ * the destination can hold. `CanonicalAnswers` carries values without types by design; entity
+ * binding needs both to decide whether a `Time` is an instant or a clock at its target column.
+ */
+function questionTypesOf(definition: PublishedFormDefinition): ReadonlyMap<string, FormQuestionType> {
+  const types = new Map<string, FormQuestionType>();
+  for (const page of definition.pages) {
+    for (const question of page.questions) {
+      types.set(question.id, question.type);
+    }
+  }
+  return types;
+}
+
+/**
+ * Retire every live invite that could reopen a response we have just sealed.
+ *
+ * Wrapped whole and never awaited by the caller: a submission that is already persisted must not
+ * fail, or slow down, because a credential could not be retired. The failure goes to the log with
+ * the response id — never with a token.
+ */
+async function revokeSealedResponseInvites(ctx: PipelineContext, responseId: string): Promise<void> {
+  try {
+    if (ctx.revokeInvites) {
+      await ctx.revokeInvites({ responseId, deviceOnly: false });
+      return;
+    }
+    await revokeResponseInvites(responseId, { deviceOnly: false }, ctx.elevatedUser);
+  } catch (err) {
+    LogError(`[Forms] could not retire the resume links of sealed response ${responseId}: ${String(err)}`);
   }
 }

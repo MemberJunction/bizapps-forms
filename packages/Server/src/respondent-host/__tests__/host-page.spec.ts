@@ -34,6 +34,58 @@ describe('renderRespondentHostPage', () => {
     expect(html()).toContain('name="robots" content="noindex"');
   });
 
+  // A distribution link is pasted into Slack / Teams / email / SMS, and every one of those builds
+  // its preview card from og:title / og:description without running any script. So the identity
+  // must be in the server-rendered <head>, not set later by the widget (bizapps-forms#120).
+  describe('link identity (title + Open Graph)', () => {
+    const identified = () =>
+      renderRespondentHostPage({
+        graphqlUrl: 'http://localhost:4121/',
+        widgetBundleUrl: '/forms/widget/mj-form.js',
+        pageTitle: 'Customer Satisfaction Survey',
+        pageDescription: 'Tell us how we did. Takes two minutes.',
+      });
+
+    it('puts the form name in the tab title AND og:title', () => {
+      const out = identified();
+      expect(out).toContain('<title>Customer Satisfaction Survey</title>');
+      expect(out).toContain('<meta property="og:title" content="Customer Satisfaction Survey" />');
+    });
+
+    it('emits og:description and a plain description from the form description', () => {
+      const out = identified();
+      expect(out).toContain('<meta property="og:description" content="Tell us how we did. Takes two minutes." />');
+      expect(out).toContain('<meta name="description" content="Tell us how we did. Takes two minutes." />');
+    });
+
+    it('still emits og:title, but no description tags, for a form with no description', () => {
+      const out = renderRespondentHostPage({
+        graphqlUrl: 'http://localhost:4121/',
+        widgetBundleUrl: '/forms/widget/mj-form.js',
+        pageTitle: 'Untitled Survey',
+      });
+      expect(out).toContain('<meta property="og:title" content="Untitled Survey" />');
+      expect(out).not.toContain('og:description');
+      expect(out).not.toContain('name="description"');
+    });
+
+    it('keeps noindex alongside the Open Graph tags (unfurlers are not search indexes)', () => {
+      expect(identified()).toContain('name="robots" content="noindex"');
+    });
+
+    it('escapes an author-controlled name and description in the meta attributes (XSS regression)', () => {
+      const out = renderRespondentHostPage({
+        graphqlUrl: 'http://localhost:4121/',
+        widgetBundleUrl: '/forms/widget/mj-form.js',
+        pageTitle: '"><script>alert(1)</script>',
+        pageDescription: 'a"b<c>&d',
+      });
+      expect(out).not.toContain('"><script>alert(1)');
+      expect(out).toContain('content="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"');
+      expect(out).toContain('content="a&quot;b&lt;c&gt;&amp;d"');
+    });
+  });
+
   it('reads both the query string and the fragment for slug + token', () => {
     const out = html();
     expect(out).toContain('window.location.search');
@@ -210,14 +262,24 @@ describe('getRespondentHostConfig', () => {
     expect(getRespondentHostConfig().widgetBundleUrl).toBe('/forms/widget/mj-form.js');
   });
 
-  it('derives the magic-link redeem url from MJAPI_PUBLIC_URL with the fixed mount path', () => {
+  // CHANGED DELIBERATELY (gauntlet #207, F2). These two used to assert that the redeem URL is
+  // derived from MJAPI_PUBLIC_URL — which is the defect, not the contract. That variable is the
+  // PUBLIC origin and has to stay so, because `graphqlUrl` comes from it and is handed to the
+  // respondent's browser; addressing the server-side redeem there sent a process-local call out
+  // through the deployment's proxy and back in, and the proxy appended MJAPI's own egress to the
+  // X-Forwarded-For the door had just set, so core read the egress instead of the respondent. The
+  // redeem now goes to loopback on this host's own port, where no hop can be appended. Full
+  // reasoning and the rest of the contract live in `config.spec.ts`.
+  it('does NOT derive the redeem url from the public origin', () => {
     process.env.MJAPI_PUBLIC_URL = 'https://forms.example.com';
     resetRespondentHostConfigForTests();
-    expect(getRespondentHostConfig().magicLinkRedeemUrl).toBe('https://forms.example.com/magic-link/redeem');
+    expect(getRespondentHostConfig().magicLinkRedeemUrl).not.toContain('forms.example.com');
   });
 
-  it('defaults the redeem url to the local MJAPI origin', () => {
-    expect(getRespondentHostConfig().magicLinkRedeemUrl).toBe('http://localhost:4121/magic-link/redeem');
+  it('defaults the redeem url to loopback on this host’s own port', () => {
+    process.env.GRAPHQL_PORT = '4121';
+    resetRespondentHostConfigForTests();
+    expect(getRespondentHostConfig().magicLinkRedeemUrl).toBe('http://127.0.0.1:4121/magic-link/redeem');
   });
 
   it('honors an explicit FORMS_MAGICLINK_REDEEM_URL', () => {

@@ -133,9 +133,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Forms','StyleID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Forms')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Forms','StyleID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsForms')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsForms', $event.totalRowCount)"
                 >

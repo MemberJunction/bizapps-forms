@@ -1,31 +1,82 @@
 import { Injectable } from '@angular/core';
-import { Metadata, RunView, LogError, type UserInfo } from '@memberjunction/core';
+import { EntitySaveOptions, Metadata, RunView, LogError, type UserInfo } from '@memberjunction/core';
+import {
+  ALLOWED_ORIGIN_GRAMMAR,
+  authorAllowedOrigins,
+  quoteSqlString,
+  serializeAllowedOrigins,
+} from '@mj-biz-apps/forms-entities';
 import type {
   mjBizAppsFormsFormDistributionEntity,
   mjBizAppsFormsFormDistributionEntityType,
 } from '@mj-biz-apps/forms-entities';
-import { FORMS_ENTITY } from './entity-names';
+import { FORMS_ENTITY } from '../shared/entity-names';
 import {
   shareUrl as buildShareUrl,
   embedSnippet as buildEmbedSnippet,
   slugify as buildSlug,
   randomSuffix,
 } from './distribution-links';
+import { SHARE_LINK_FIELDS, type ShareLinkFacts } from './share-state';
 
 /** The channel kinds the builder can mint (Phase 1: PublicLink / Embed / QR). */
 export type DistributionChannel = mjBizAppsFormsFormDistributionEntityType['ChannelType'];
+
+/**
+ * The channel every share link is created under.
+ *
+ * The builder no longer asks. `ChannelType` reads like a property of the link, but it is
+ * really a server switch: `FORMS_MAGICLINK_CHANNELS` decides which channels get an
+ * anonymous magic-link token minted, and the three the UI used to offer — PublicLink,
+ * Embed, QR — are all in the default allow-list and therefore behave identically. Nothing
+ * else in the product reads the column. So the question bought the author nothing and cost
+ * them a decision they had no basis to make, taken before they had seen a single artifact
+ * and impossible to change afterwards.
+ *
+ * `Email` is the one value that genuinely differs — it is deliberately NOT in the default
+ * allow-list, because an email campaign is individually addressed rather than an anonymous
+ * public link — which is why this default is a constant rather than a parameter. Creating
+ * links under a channel that gets no token would produce exactly the dead link this fixes.
+ */
+const DEFAULT_CHANNEL: DistributionChannel = 'PublicLink';
 
 /** Inputs for creating a distribution. */
 export interface CreateDistributionInput {
   formId: string;
   name: string;
-  channelType: DistributionChannel;
+  /** Defaults to {@link DEFAULT_CHANNEL}; see why the builder does not ask. */
+  channelType?: DistributionChannel;
   slug?: string;
   maxResponses?: number | null;
   openAt?: Date | null;
   closeAt?: Date | null;
   captchaRequired?: boolean;
 }
+
+/**
+ * The outcome of a write, carrying the reason when it fails.
+ *
+ * `Save()` and `Delete()` return a bare boolean, and the surface above needs the message
+ * to put in front of the person: this service used to log the failure and hand back
+ * `false`, so a rejected save looked exactly like a control that did nothing. A cap the
+ * database refused would silently revert on the next reload with no explanation.
+ */
+export interface MutationOutcome {
+  ok: boolean;
+  /** Present only when `ok` is false. Safe to show in the UI. */
+  error?: string;
+}
+
+/**
+ * The outcome of a read.
+ *
+ * A failed load is NOT an empty list. Collapsing the two — which is what returning `[]`
+ * on error does — renders "not shared anywhere yet" over a form that may have live links
+ * in the wild, and invites the author to create a duplicate.
+ */
+export type DistributionListResult =
+  | { ok: true; items: mjBizAppsFormsFormDistributionEntity[] }
+  | { ok: false; error: string };
 
 /**
  * Create + list FormDistribution records and derive the public artifacts (slug,
@@ -42,20 +93,64 @@ export class DistributionService {
   }
 
   /** List all distributions for a form, newest first. */
-  public async list(formId: string): Promise<mjBizAppsFormsFormDistributionEntity[]> {
+  public async list(formId: string): Promise<DistributionListResult> {
     const rv = new RunView();
     const result = await rv.RunView<mjBizAppsFormsFormDistributionEntity>(
       {
         EntityName: FORMS_ENTITY.FormDistribution,
-        ExtraFilter: `FormID='${formId}'`,
+        // Same escaping as every other filter this service builds. It was raw interpolation,
+        // which is a second spelling of one decision and the one that is wrong when it matters.
+        ExtraFilter: `FormID=${quoteSqlString(formId)}`,
         OrderBy: '__mj_CreatedAt DESC',
         ResultType: 'entity_object',
       },
       this.user,
     );
     if (!result.Success) {
-      LogError(`Failed to load distributions: ${result.ErrorMessage}`);
-      return [];
+      const error = result.ErrorMessage ?? 'unknown error';
+      LogError(`Failed to load distributions for form ${formId}: ${error}`);
+      return { ok: false, error };
+    }
+    return { ok: true, items: result.Results ?? [] };
+  }
+
+  /**
+   * Just enough of a form's share links to say whether a respondent could reach it.
+   *
+   * Deliberately NOT {@link list}. That one hands back `entity_object` rows because the
+   * Distribute tab edits them; a caller that only wants to KNOW something has no business
+   * holding five savable records, and this read runs on every builder load rather than only
+   * when someone opens the tab. Seven named columns, `ResultType: 'simple'`.
+   *
+   * `null` — never `[]` — when the read cannot be performed, for the reason
+   * {@link DistributionListResult} exists: "this form has no share links" is a real state
+   * with its own message, and a failed read is not it. Collapsing the two would send an
+   * author off to create a link that already exists.
+   */
+  public async shareLinkFacts(formId: string): Promise<ShareLinkFacts[] | null> {
+    if (!formId) {
+      // Not a data state — a caller asking about a form that has never been saved. Answering
+      // "no share links" would be a confident lie about a form that does not exist yet.
+      LogError('Refusing to read share links: no form id was supplied.');
+      return null;
+    }
+    const rv = new RunView();
+    const result = await rv.RunView<ShareLinkFacts>(
+      {
+        EntityName: FORMS_ENTITY.FormDistribution,
+        ExtraFilter: `FormID=${quoteSqlString(formId)}`,
+        // Owned by `share-state.ts`, not restated here: the field list and the facts the state
+        // machine reads have to be the same set, and only one of the two places can be right.
+        Fields: [...SHARE_LINK_FIELDS],
+        ResultType: 'simple',
+      },
+      this.user,
+    );
+    if (!result.Success) {
+      LogError(
+        `Failed to read share links for form ${formId}: ${result.ErrorMessage ?? 'unknown error'}`,
+      );
+      return null;
     }
     return result.Results ?? [];
   }
@@ -79,7 +174,7 @@ export class DistributionService {
     dist.NewRecord();
     dist.FormID = input.formId;
     dist.Name = input.name;
-    dist.ChannelType = input.channelType;
+    dist.ChannelType = input.channelType ?? DEFAULT_CHANNEL;
     // Create live, not Draft. A distribution is created to be shared, and the anonymous
     // magic-link token is only minted by the server-side lifecycle hook once the record
     // is Active (see provisioning-decision.ts). Leaving it Draft produces a public link
@@ -118,42 +213,247 @@ export class DistributionService {
     return `${base}-${randomSuffix()}`;
   }
 
-  /** Open a distribution for responses (Status -> Active). */
-  public async open(dist: mjBizAppsFormsFormDistributionEntity): Promise<boolean> {
-    return this.setStatus(dist, 'Active');
+  /**
+   * Open a distribution for responses (Status -> Active).
+   *
+   * The server mints a FRESH access token on the way through, because closing revoked the
+   * previous one. The slug is untouched, so every shared URL keeps working; only the
+   * credential behind it is new. The caller must reload afterwards — see {@link close}.
+   *
+   * "Open to responses" means `Status='Active'` AND `IsActive`, so this writes both — see
+   * {@link openForResponses} for why writing only `Status` made this do nothing at all on one
+   * of the two rows that reach it.
+   */
+  public async open(dist: mjBizAppsFormsFormDistributionEntity): Promise<MutationOutcome> {
+    return this.openForResponses(dist, 'reopen this share link');
   }
 
-  /** Close a distribution (Status -> Closed). */
-  public async close(dist: mjBizAppsFormsFormDistributionEntity): Promise<boolean> {
+  /**
+   * Close a distribution (Status -> Closed).
+   *
+   * The server-side hook revokes this link's magic-link credential and clears
+   * `PublicLinkToken` on the same save, so the token stops being redeemable rather than
+   * merely being refused by the Forms door. That second write is invisible to this
+   * client's copy of the record, which is why both this and {@link open} are paired with
+   * a reload at the call site.
+   */
+  public async close(dist: mjBizAppsFormsFormDistributionEntity): Promise<MutationOutcome> {
     return this.setStatus(dist, 'Closed');
   }
 
-  /** Persist a max-responses cap change. */
+  /** Persist a max-responses cap change. `null` clears the cap. */
   public async setMaxResponses(
     dist: mjBizAppsFormsFormDistributionEntity,
     max: number | null,
-  ): Promise<boolean> {
+  ): Promise<MutationOutcome> {
     dist.MaxResponses = max;
-    return this.saveDist(dist, 'set max responses');
+    return this.saveDist(dist, 'set the response limit');
+  }
+
+  /**
+   * Ask the server to issue this link's public web address.
+   *
+   * There is no "mint" API to call: the token is minted by a `Save()` lifecycle hook on
+   * the server-side `FormDistributionEntityServer` subclass, and only when the record is
+   * an active, linkable channel. So this makes the record eligible and saves it, which is
+   * both the trigger and the repair — a link created while the server could not mint (the
+   * hook's package not loaded, or magic links switched off) sits there with a null token
+   * forever otherwise, because nothing re-tries on its own.
+   *
+   * Success here means the SAVE succeeded, not that a token appeared. The hook is
+   * deliberately fail-soft — it logs and leaves the record standing rather than failing
+   * the save — so the caller has to re-read the record to find out, which is why this is
+   * paired with a reload at the call site.
+   */
+  public async issueLink(dist: mjBizAppsFormsFormDistributionEntity): Promise<MutationOutcome> {
+    return this.openForResponses(dist, 'issue a link for this share link');
+  }
+
+  /**
+   * Make this link open to responses, and make sure the server's provisioning hook runs.
+   *
+   * ONE implementation behind {@link open} and {@link issueLink}, because they are one operation.
+   * They were two, and the difference was a silent dead end: `open` wrote only `Status`, so a row
+   * sitting at `Status='Active', IsActive=false` was left completely unchanged, `Save()` skipped
+   * the clean record, and the control reported success having done nothing — permanently, since
+   * nothing else repairs it.
+   *
+   * That row is not hypothetical; it is what the new server produces. Provisioning requires
+   * `isActive`, so any `IsActive=0` distribution has its token cleared on its next save. Before
+   * bizapps-forms#104 reordered the badge cascade, such a row read `pending`, whose remedy is
+   * `issueLink` — which wrote both fields and forced the save, and so repaired it. After the
+   * reorder it reads `paused`, whose remedy was `open`. The reorder is right; routing the row to
+   * the weaker of two spellings of one operation is what broke, and the fix is to stop having two.
+   *
+   * `IgnoreDirtyState` is the other half. A record already `Active`/`IsActive` is unchanged by
+   * both assignments, and `Save()` skips a clean record outright (baseEntity.ts:
+   * `if (options.IgnoreDirtyState || initialDirtyState || ...)`), so the server-side hook would
+   * never run — in precisely the common case, a live link whose token the server failed to mint.
+   */
+  private async openForResponses(
+    dist: mjBizAppsFormsFormDistributionEntity,
+    action: string,
+  ): Promise<MutationOutcome> {
+    dist.Status = 'Active';
+    dist.IsActive = true;
+    const options = new EntitySaveOptions();
+    options.IgnoreDirtyState = true;
+    return this.saveDist(dist, action, options);
+  }
+
+  /**
+   * Give this link a brand-new access token, keeping its web address.
+   *
+   * The recourse for a leaked or over-shared credential, and the reason bizapps-forms#104
+   * exists: before it, the only way to stop a token being redeemable was to delete the
+   * distribution, which changes the slug and breaks every poster, QR code and embed
+   * already in the wild.
+   *
+   * There is no "reissue" API to call, and deliberately so. Clearing `PublicLinkToken`
+   * IS the request: the server-side hook reads a live link with no usable token as "this
+   * credential is gone, and one is warranted", so it revokes the old invite and mints a
+   * replacement in the same save. That keeps ONE enforcement point — a builder that
+   * cleared the columns itself would leave the old invite Active and unreferenced, which
+   * is precisely the orphaned-credential defect being fixed.
+   *
+   * `MagicLinkInviteID` is deliberately left alone: it is what tells the server WHICH
+   * invite to revoke. Success here means the SAVE succeeded, not that a new token
+   * appeared — the hook is fail-soft — so this is paired with a reload at the call site.
+   */
+  public async reissueLink(dist: mjBizAppsFormsFormDistributionEntity): Promise<MutationOutcome> {
+    dist.PublicLinkToken = null;
+    return this.saveDist(dist, 'reissue this link');
+  }
+
+  /**
+   * Turn this link's captcha requirement on or off.
+   *
+   * One column, one save, in the shape of {@link setName} — but the cost is not symmetric with
+   * its neighbours, which is why the switch's hint says more than theirs do. Turnstile is
+   * fail-closed: with this on and no server-side Turnstile secret configured, every completed
+   * submission through this link is refused, and nothing visible from the builder says whether
+   * the host has keys.
+   *
+   * The server ORs this with the form's own `settings.captchaRequired`, so turning it OFF here
+   * does not turn a captcha off for a form that asks for one itself.
+   */
+  public async setCaptchaRequired(
+    dist: mjBizAppsFormsFormDistributionEntity,
+    required: boolean,
+  ): Promise<MutationOutcome> {
+    dist.CaptchaRequired = required;
+    return this.saveDist(dist, required ? 'turn on the captcha' : 'turn off the captcha');
+  }
+
+  /**
+   * Replace the list of sites permitted to show this link.
+   *
+   * Refuses the WHOLE edit when any entry fails the grammar, and saves nothing. Accepting the
+   * good entries and dropping the bad one is the tempting behaviour and the wrong one: an author
+   * who writes `*.acme.com`, sees the panel settle, and is told nothing believes they restricted
+   * something. They did not, and they will not look again. `authorAllowedOrigins` hands the
+   * refusals back separately for exactly this — so the offending string can be named on the screen
+   * where it was typed, instead of disappearing.
+   *
+   * An empty box clears the column to NULL, which means unrestricted — the state every link is in
+   * until somebody sets one, and the state that keeps existing embeds working.
+   *
+   * Unlike {@link setCaptchaRequired} beside it, turning this on has a cost nothing else on the
+   * panel makes visible: once ANY site is named the link is fail-closed. The respondent host page
+   * is served with a `frame-ancestors` directive naming exactly those origins, and the public form
+   * API refuses a caller whose `Origin` is neither one of them nor this API's own. A link already
+   * pasted into a page nobody listed stops working, with no warning beforehand — which is why the
+   * hint beside the box says so rather than describing the column.
+   */
+  public async setAllowedOrigins(
+    dist: mjBizAppsFormsFormDistributionEntity,
+    authored: string,
+  ): Promise<MutationOutcome & { rejected: string[] }> {
+    const { origins, rejected } = authorAllowedOrigins(authored);
+    if (rejected.length > 0) {
+      // Deliberately before any write: the record must be left exactly as it was, so a refusal
+      // cannot leave a half-applied list behind for the next save to pick up.
+      return {
+        ok: false,
+        error: `Not a usable site address: ${rejected.join(', ')}. Each one must be ${ALLOWED_ORIGIN_GRAMMAR}`,
+        rejected,
+      };
+    }
+    dist.AllowedOrigins = serializeAllowedOrigins(origins);
+    return {
+      ...(await this.saveDist(dist, 'change which sites may show this form')),
+      rejected: [],
+    };
+  }
+
+  /** Rename a distribution. The caller is responsible for trimming and rejecting blanks. */
+  public async setName(
+    dist: mjBizAppsFormsFormDistributionEntity,
+    name: string,
+  ): Promise<MutationOutcome> {
+    dist.Name = name;
+    return this.saveDist(dist, 'rename this share link');
+  }
+
+  /**
+   * Persist the open/close window. Either side may be `null`, meaning "no bound".
+   *
+   * Both go in one save because they are one decision: writing them separately makes a
+   * window briefly inverted (a close date before the open date) between two round trips,
+   * and that intermediate state is the one the server would read if it looked.
+   */
+  public async setSchedule(
+    dist: mjBizAppsFormsFormDistributionEntity,
+    openAt: Date | null,
+    closeAt: Date | null,
+  ): Promise<MutationOutcome> {
+    dist.OpenAt = openAt;
+    dist.CloseAt = closeAt;
+    return this.saveDist(dist, 'set the schedule');
+  }
+
+  /**
+   * Delete a distribution permanently.
+   *
+   * Fails rather than cascades when anything references it — `FormUpload.DistributionID`
+   * is a required FK, so a link people have already uploaded files through cannot be
+   * removed. That refusal is the right outcome and the message says so; the caller offers
+   * pausing instead, which stops responses without breaking a URL already in the wild.
+   */
+  public async remove(dist: mjBizAppsFormsFormDistributionEntity): Promise<MutationOutcome> {
+    const ok = await dist.Delete();
+    if (ok) {
+      return { ok: true };
+    }
+    const error = dist.LatestResult?.CompleteMessage ?? 'unknown error';
+    LogError(`Failed to delete distribution ${dist.ID}: ${error}`);
+    return { ok: false, error };
   }
 
   private async setStatus(
     dist: mjBizAppsFormsFormDistributionEntity,
     status: mjBizAppsFormsFormDistributionEntityType['Status'],
-  ): Promise<boolean> {
+  ): Promise<MutationOutcome> {
     dist.Status = status;
-    return this.saveDist(dist, `set status ${status}`);
+    return this.saveDist(dist, status === 'Active' ? 'reopen this share link' : 'pause this share link');
   }
 
   private async saveDist(
     dist: mjBizAppsFormsFormDistributionEntity,
     action: string,
-  ): Promise<boolean> {
-    const ok = await dist.Save();
-    if (!ok) {
-      LogError(`Failed to ${action}: ${dist.LatestResult?.CompleteMessage ?? 'unknown'}`);
+    options?: EntitySaveOptions,
+  ): Promise<MutationOutcome> {
+    if (await dist.Save(options)) {
+      return { ok: true };
     }
-    return ok;
+    const error = dist.LatestResult?.CompleteMessage ?? 'unknown error';
+    LogError(`Failed to ${action} (distribution ${dist.ID}): ${error}`);
+    // A refused save leaves the rejected value sitting on the in-memory record, and every
+    // surface above renders from that record — so a limit the database bounced went on
+    // being displayed as though it had been stored, until something forced a reload.
+    // Revert puts the record back to its last saved state, making the screen honest again.
+    dist.Revert();
+    return { ok: false, error: `Could not ${action}. ${error}` };
   }
 
   /**
@@ -182,7 +482,7 @@ export class DistributionService {
     const result = await rv.RunView(
       {
         EntityName: FORMS_ENTITY.FormDistribution,
-        ExtraFilter: `Slug='${slug.replace(/'/g, "''")}'`,
+        ExtraFilter: `Slug=${quoteSqlString(slug)}`,
         ResultType: 'count_only',
       },
       this.user,

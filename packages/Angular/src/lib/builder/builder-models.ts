@@ -3,6 +3,7 @@ import type {
   mjBizAppsFormsFormPageEntity,
   mjBizAppsFormsFormQuestionEntity,
   mjBizAppsFormsFormQuestionOptionEntity,
+  mjBizAppsFormsFormScreenEntity,
 } from '@mj-biz-apps/forms-entities';
 
 /**
@@ -24,10 +25,29 @@ export interface PageNode {
   questions: QuestionNode[];
 }
 
-/** The full loaded form tree the builder operates over. */
+/**
+ * The full loaded form tree the builder operates over.
+ *
+ * `screens` sits BESIDE `pages`, not inside it, which is the whole modelling decision: a screen
+ * has no page, no display position among questions and no answer. Every helper below that walks
+ * questions therefore cannot accidentally reach one.
+ */
 export interface FormTree {
   form: mjBizAppsFormsFormEntity;
   pages: PageNode[];
+  screens: mjBizAppsFormsFormScreenEntity[];
+}
+
+/** The single Welcome screen, if the form has one. */
+export function welcomeScreenOf(tree: FormTree): mjBizAppsFormsFormScreenEntity | undefined {
+  return tree.screens.find((s) => s.ScreenType === 'Welcome');
+}
+
+/** The Ending screens in display order. */
+export function endScreensOf(tree: FormTree): mjBizAppsFormsFormScreenEntity[] {
+  return tree.screens
+    .filter((s) => s.ScreenType === 'Ending')
+    .sort((a, b) => a.DisplayOrder - b.DisplayOrder);
 }
 
 /** Flatten every question across all pages in page-then-question display order. */

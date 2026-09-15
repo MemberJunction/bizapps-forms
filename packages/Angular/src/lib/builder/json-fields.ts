@@ -3,6 +3,7 @@ import type {
   ValidationRule,
   FormSettings,
   FormStyleTokens,
+  OnSubmitMode,
 } from '@mj-biz-apps/forms-entities';
 import type { JSONValue } from '@mj-biz-apps/forms-entities';
 
@@ -34,25 +35,35 @@ function parseObject<T>(raw: string | null | undefined): T | undefined {
   }
 }
 
-/** Serialize an object for storage, or `null` when the object is empty/absent. */
+/**
+ * Serialize an object for storage, or `null` when it carries nothing.
+ *
+ * "Carries nothing" counts DEFINED values only. `JSON.stringify({ show: undefined })` is
+ * `'{}'`, so counting raw keys would store a phantom "this item has a rule" marker that every
+ * reader then has to see through — the exact shape `withVerbGroup` deletes keys to avoid.
+ */
 function serializeObject(value: object | undefined): string | null {
   if (value === undefined) {
     return null;
   }
-  if (Object.keys(value).length === 0) {
-    return null;
-  }
-  return JSON.stringify(value);
+  const populated = Object.values(value).some((v) => v !== undefined);
+  return populated ? JSON.stringify(value) : null;
 }
 
 export function parseConditionalRule(raw: string | null | undefined): ConditionalRule | undefined {
   return parseObject<ConditionalRule>(raw);
 }
 
+/**
+ * Serialize a {@link ConditionalRule}, or `null` when it carries no verb.
+ *
+ * Deliberately verb-agnostic. This used to short-circuit on `!rule.show`, written when `show`
+ * was the only verb there was — so once `require` and `jump` arrived, a rule carrying only one
+ * of them serialized to `null` and was discarded on save: a page's jump never persisted, and
+ * deleting an unrelated "Show only if" card from an item that also had a jump wiped the jump
+ * with it. Any new verb is covered here by construction rather than by remembering to add it.
+ */
 export function serializeConditionalRule(rule: ConditionalRule | undefined): string | null {
-  if (!rule || !rule.show) {
-    return null;
-  }
   return serializeObject(rule);
 }
 
@@ -82,7 +93,27 @@ export function parseFormSettings(raw: string | null | undefined): FormSettings 
     closesAt: parsed?.closesAt,
     confirmationMessage: parsed?.confirmationMessage,
     redirectUrl: parsed?.redirectUrl,
+    // A whitelist drops what it does not name, so omitting this would silently revert a form to
+    // inferring its dispatch on the next save of ANY setting — see json-fields.spec.ts.
+    //
+    // Validated rather than copied, unlike every other field here. The rest are the author's own
+    // free-form values; this one is a closed set the SERVER reads to decide what runs on submit,
+    // and the builder writing a value nothing recognises would put it straight into the next
+    // published snapshot.
+    onSubmitMode: recognisedOnSubmitMode(parsed?.onSubmitMode),
   };
+}
+
+/**
+ * The mode if it is one of the two the contract defines, otherwise absent.
+ *
+ * Absent means "infer", which is what every form did before the field existed — so dropping an
+ * unreadable value costs nothing and keeps the stored data honest. Deliberately exact rather than
+ * case-insensitive: accepting `configured` here would write a value back that only this parser
+ * understands, which is the drift it exists to prevent.
+ */
+function recognisedOnSubmitMode(value: unknown): OnSubmitMode | undefined {
+  return value === 'Legacy' || value === 'Configured' ? value : undefined;
 }
 
 export function serializeFormSettings(settings: FormSettings): string {

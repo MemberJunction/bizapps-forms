@@ -12,6 +12,7 @@ import {
   parseStyleTokens,
   buildStyleTokens,
 } from './json-fields';
+import { withVerbGroup } from './rules-panel-model';
 
 describe('conditional rule round-trip', () => {
   it('parses valid JSON', () => {
@@ -26,9 +27,30 @@ describe('conditional rule round-trip', () => {
     expect(parseConditionalRule('not json')).toBeUndefined();
   });
 
-  it('serializes to null when there is no show group', () => {
+  it('serializes to null only when the rule carries no verb at all', () => {
     expect(serializeConditionalRule(undefined)).toBeNull();
     expect(serializeConditionalRule({})).toBeNull();
+  });
+
+  it('keeps a rule whose only verb is jump', () => {
+    // The guard used to be `!rule.show`, written when `show` was the only verb. A page whose
+    // author added a jump and no show rule therefore serialized to `null`: the jump was
+    // discarded on save and no respondent ever skipped anything.
+    const rule: ConditionalRule = {
+      jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'skip' }] }, target: { kind: 'page', id: 'p3' } }],
+    };
+    expect(parseConditionalRule(serializeConditionalRule(rule))).toEqual(rule);
+  });
+
+  it('removing the show verb leaves the other verbs standing', () => {
+    // The destructive half of the same defect: `withVerbGroup` correctly returns the remaining
+    // verbs, and the serializer then threw them away because `show` was gone.
+    const rule: ConditionalRule = {
+      show: { all: [{ questionId: 'q1', op: 'isAnswered' }] },
+      jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'skip' }] }, target: { kind: 'page', id: 'p3' } }],
+    };
+    const withoutShow = withVerbGroup(rule, 'show', undefined);
+    expect(parseConditionalRule(serializeConditionalRule(withoutShow))).toEqual({ jump: rule.jump });
   });
 
   it('serializes a real rule', () => {
@@ -57,6 +79,31 @@ describe('form settings', () => {
     const settings = parseFormSettings(null);
     expect(settings.anonymousAllowed).toBe(true);
     expect(settings.captchaRequired).toBe(false);
+  });
+
+  it('drops an on-submit mode it does not recognise rather than passing it on', () => {
+    // This parser is a whitelist with no validation, so it used to copy whatever sat in
+    // `Form.Settings` straight into the next published snapshot. The server then rejected the
+    // whole snapshot over it and served "Form unavailable" — the server is tolerant now, but the
+    // builder should not be the thing manufacturing a value nothing can read.
+    for (const bad of ['configured', 'Legcy', '', 'null']) {
+      expect(parseFormSettings(JSON.stringify({ anonymousAllowed: true, captchaRequired: false, onSubmitMode: bad })).onSubmitMode)
+        .toBeUndefined();
+    }
+  });
+
+  it('preserves an on-submit mode through a round-trip', () => {
+    // The builder marks a form `Configured` the moment it writes its first automation row. This
+    // parser is a whitelist, so a field missing from it is dropped on the next save — the form
+    // would silently revert to inferring its dispatch, and deleting the last step would bring all
+    // four legacy hooks back (bizapps-forms#47).
+    const raw = serializeFormSettings({
+      anonymousAllowed: true,
+      captchaRequired: false,
+      onSubmitMode: 'Configured',
+    });
+
+    expect(parseFormSettings(raw).onSubmitMode).toBe('Configured');
   });
 
   it('round-trips', () => {

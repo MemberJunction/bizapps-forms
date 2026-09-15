@@ -14,9 +14,17 @@
  * Input params:
  *   - `Brief` (string, required) — the natural-language description.
  *   - `OwnerUserID` (string, optional) — stamped on the created Form.
+ *   - `OnSubmitMode` ('Legacy' | 'Configured', optional) — whether this form's own automations
+ *      are what run on submit. `Configured` with no `Automations` is the supported way to run
+ *      NOTHING, which is how a consumer that owns its own subject identity declines
+ *      `Forms: Upsert Respondent Person` (bizapps-forms#47). Omitted keeps the historical
+ *      inference, so an existing caller's forms are unaffected.
+ *   - `Automations` (JSON array, optional) — the on-submit steps this form runs, in order, each
+ *      naming an MJ Action. Supplying it implies `Configured`. These are the CALLER's, not the
+ *      Designer's: the LLM authors questions, never side effects.
  * Output params:
  *   - `FormID`, `FormVersionID` (created ids)
- *   - `PageCount`, `QuestionCount`, `OptionCount`
+ *   - `PageCount`, `QuestionCount`, `OptionCount`, `AutomationCount`
  *   - `Blueprint` (the validated blueprint object, for inspection/preview)
  *
  * The blueprint→persist path is unit-testable with a stubbed {@link FormDesignerModel}
@@ -26,7 +34,8 @@ import { BaseAction } from '@memberjunction/actions';
 import type { ActionResultSimple, RunActionParams } from '@memberjunction/actions-base';
 import { RegisterClass } from '@memberjunction/global';
 import type { UserInfo } from '@memberjunction/core';
-import { getStringParam, setOutputParam } from '../shared/action-params';
+import { findParam, getStringParam, setOutputParam } from '../shared/action-params';
+import { applyOnSubmitConfig, OnSubmitConfigError } from './on-submit-config';
 import { buildFormFromBlueprint, FormPersistError } from './form-blueprint-builder';
 import {
   AIPromptFormDesignerModel,
@@ -70,12 +79,27 @@ export async function runAuthoring(
   }
 
   try {
+    // The caller's on-submit configuration, applied to what the Designer produced. Done before any
+    // row is written, so a mis-specified step is an error rather than a form that silently runs
+    // the four built-ins the caller was trying to replace.
+    blueprint = applyOnSubmitConfig(
+      blueprint,
+      getStringParam(params, 'OnSubmitMode'),
+      findParam(params, 'Automations')?.Value,
+    );
+  } catch (error) {
+    const code = error instanceof OnSubmitConfigError ? 'INVALID_ON_SUBMIT_CONFIG' : 'FAILED';
+    return fail(asText(error), code);
+  }
+
+  try {
     const built = await buildFormFromBlueprint(blueprint, contextUser, ownerUserId);
     setOutputParam(params, 'FormID', built.formId);
     setOutputParam(params, 'FormVersionID', built.formVersionId);
     setOutputParam(params, 'PageCount', built.pageCount);
     setOutputParam(params, 'QuestionCount', built.questionCount);
     setOutputParam(params, 'OptionCount', built.optionCount);
+    setOutputParam(params, 'AutomationCount', built.automationCount);
     setOutputParam(params, 'Blueprint', blueprint);
     return {
       Success: true,

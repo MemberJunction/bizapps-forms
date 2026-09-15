@@ -3,12 +3,11 @@ name: Build and Publish
 on:
   push:
     branches: [main]
+  # No `targetVersion` input any more. It existed to override a version this workflow computed
+  # itself with `changeset version`; since #177 the bump arrives already committed on the release
+  # pull request, so the version is read from packages/Entities/package.json and there is nothing
+  # here to override. A dispatch re-runs the publish for whatever version the ref carries.
   workflow_dispatch:
-    inputs:
-      targetVersion:
-        description: 'Target version (e.g., 5.27.2). Leave empty for auto-detection.'
-        required: false
-        type: string
 
 permissions:
   contents: write
@@ -30,7 +29,13 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # Must precede setup-node: `cache: 'pnpm'` needs pnpm already on PATH.
-      - uses: pnpm/action-setup@v4
+      # Pinned to an immutable SHA, unlike the copy in build.yml, and the difference is deliberate:
+      # this job mints a GitHub App installation token later in the same runner, so a compromised
+      # release of this action would share a process with a credential that can write to the
+      # repository. build.yml handles no credential and stays on the tag, matching MJ and the twelve
+      # sibling repos. Rule: third-party actions are pinned in workflows that hold a secret key.
+      # Re-resolve with: git ls-remote https://github.com/pnpm/action-setup refs/tags/v4^{}
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - uses: actions/setup-node@v4
         with:
@@ -59,157 +64,127 @@ jobs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
 
-      - name: Check for pending changesets
-        id: changeset_check
+      # #177: this workflow no longer writes to the repository. Required status checks are
+      # evaluated against the check runs on the SHA being introduced, and a direct push introduces
+      # a SHA the remote has never seen — so no check run can exist for it and the push is rejected
+      # permanently (GH013). That is not a race a retry wins, which is why the version bump moved
+      # onto the release pull request (docs/release.md) instead of being worked around here.
+      #
+      # What is left is a pure reader of the tree it was handed, plus one tag push. Tags are
+      # untouched: both rulesets are `target: branch`, scoped to refs/heads/main and refs/heads/next.
+      #
+      # The gate below replaces "are there changesets to consume?", which was the right question
+      # only while this workflow ran `changeset version` itself:
+      #
+      #   pending changesets | version on npm | what it means
+      #   -------------------|----------------|-----------------------------------------------
+      #   > 0                | —              | the release PR never ran `pnpm run version` — FAIL
+      #   0                  | yes            | already released; nothing to do
+      #   0                  | no             | publish and tag
+      - name: The bump has to have happened before this branch was merged
         run: |
           PENDING=$(find .changeset -name "*.md" -not -name "README.md" 2>/dev/null | wc -l | tr -d ' ')
-          echo "pending=$PENDING" >> "$GITHUB_OUTPUT"
-          if [ "$PENDING" -eq 0 ]; then
-            echo "No pending changesets — nothing to publish"
-          else
-            echo "Found $PENDING pending changeset(s)"
+          if [ "$PENDING" -ne 0 ]; then
+            VERSION=$(jq -r .version packages/Entities/package.json)
+            echo "::error::$PENDING changeset(s) are still on this branch, so the version was never bumped. Publishing now would republish $VERSION. Cut the release on a branch off next with 'pnpm run version' and open the release PR — see docs/release.md."
+            exit 1
           fi
 
-      - name: Determine declared version bump
-        if: steps.changeset_check.outputs.pending != '0'
-        id: declared_bump
-        run: |
-          # Current version from the entities package — any of them works, since `fixed` in
-          # .changeset/config.json moves every @mj-biz-apps package together.
-          CURRENT_VERSION=$(jq -r .version packages/Entities/package.json)
+      # Answers `publish` and `tag` SEPARATELY. They used to be one output derived from a single
+      # question — is packages/Entities' version on npm? — which reads a partially published release
+      # as a finished one: `changeset publish` publishes concurrently, so one package landing while a
+      # sibling fails is a state it produces by design and expects a retry to finish. That retry
+      # skipped publish AND tag and reported success. See scripts/release-plan.mjs for the whole
+      # argument; its spec pins the three states, and both run in build-and-test.
+      - name: What is there to release?
+        id: release_check
+        run: node scripts/release-plan.mjs
 
-          # What the release will be is whatever the changesets declare, because that is what
-          # `changeset version` will actually do. Nothing else may move this number — see the
-          # policy gate below for why the schema-change rule cannot be enforced by nudging it.
-          # `@changesets/write` always double-quotes the package name; single quotes are matched too
-          # because changesets accepts them, so a hand-authored file is not silently passed over.
-          DECLARED_BUMP=patch
-          for f in .changeset/*.md; do
-            [ "$f" = ".changeset/README.md" ] && continue
-            [ ! -f "$f" ] && continue
-            if grep -qE "^['\"]@mj-biz-apps/[^'\"]+['\"]:[[:space:]]*major" "$f"; then
-              DECLARED_BUMP=major
-              break
-            fi
-            if grep -qE "^['\"]@mj-biz-apps/[^'\"]+['\"]:[[:space:]]*minor" "$f"; then
-              DECLARED_BUMP=minor
-            fi
-          done
+      # The derivation used to happen here, in bash, and was persisted by the push #177 removed.
+      # It happens on the release PR now (`pnpm run version`), so this end only verifies — a
+      # hand-edited mj-app.json, or a release PR that skipped the script, stops the release before
+      # anything reaches npm.
+      - name: mj-app.json agrees with the packages being published
+        if: steps.release_check.outputs.work == 'true'
+        run: node scripts/sync-app-version.mjs --check
 
-          echo "Current version: $CURRENT_VERSION"
-          echo "Highest bump declared across changesets: $DECLARED_BUMP"
-          echo "CURRENT_VERSION=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
-          echo "DECLARED_BUMP=$DECLARED_BUMP" >> "$GITHUB_OUTPUT"
-
-      # Deliberately carries NO ref or targetVersion condition: this must hold on every path
-      # that can cut a release. See the comment inside for what happens when it does not.
+      # A migration is a schema change, so it must not ship as a patch. changes.yml enforces the
+      # rule on PRs into `next` by reading the changeset; by the time a release runs, the changesets
+      # are consumed and gone, so this backstop asks the same question of the artifacts instead:
+      # did migrations/ move since the last release, and did the version move by more than a patch?
+      #
+      # Deliberately carries NO ref condition — it must hold on every path that can cut a release,
+      # including workflow_dispatch. A dry run of this workflow dispatched from `next` once shipped
+      # 0.3.1 — a patch — carrying a new migration, and tagged it, because the gate lived inside a
+      # step that path never reaches.
+      #
+      # It reads the shipped artifacts rather than `.changeset/*.md` for the same reason it now runs
+      # at all: the changesets are gone by this point, and a gate that reads a file which is always
+      # empty is a gate that always passes.
       - name: Enforce schema-change version policy
-        if: steps.changeset_check.outputs.pending != '0'
+        if: steps.release_check.outputs.work == 'true'
         env:
-          CURRENT_VERSION: ${{ steps.declared_bump.outputs.CURRENT_VERSION }}
-          DECLARED_BUMP: ${{ steps.declared_bump.outputs.DECLARED_BUMP }}
+          VERSION: ${{ steps.release_check.outputs.VERSION }}
         run: |
-          # A migration is a schema change, so it must not ship as a patch. This is a POLICY GATE,
-          # kept as its own step rather than folded into the prediction below, for two reasons.
-          #
-          # 1. The rule CANNOT be enforced by adjusting the predicted bump. `changeset version`
-          #    reads only `.changeset/*.md` and knows nothing about `migrations/`, so raising the
-          #    prediction moves the expectation away from what will actually happen, and the
-          #    mismatch guard then aborts the release reporting a predictor error instead of the
-          #    missing changeset — the exact failure this step exists to remove.
-          # 2. It has to hold on every path that releases. The prediction below only runs for an
-          #    auto-detected release from `main`; a `workflow_dispatch` skips it and publishes
-          #    anyway. A dry run of this workflow dispatched from `next` shipped 0.3.1 — a patch —
-          #    carrying a new migration, and tagged it, because the gate lived inside a step that
-          #    path never reaches.
-          #
-          # (changes.yml enforces the same rule on PRs into `next`; this is the backstop for
-          # anything that reached a release another way.)
-          if [ -z "$DECLARED_BUMP" ] || [ -z "$CURRENT_VERSION" ]; then
-            echo "::error::Determine declared version bump produced no result — refusing to release blind."
-            exit 1
-          fi
-
-          if [ "$DECLARED_BUMP" != "patch" ]; then
-            echo "Declared bump is '$DECLARED_BUMP' — a schema change is allowed to ship in it"
+          LAST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous v* tag — first release, no previously-shipped schema to have changed"
             exit 0
           fi
 
-          # No tag to diff against means a first release, which has no previously-shipped schema
-          # for a migration to have changed.
-          if ! git rev-parse "v${CURRENT_VERSION}" >/dev/null 2>&1; then
-            echo "No v${CURRENT_VERSION} tag to diff against — first release, nothing to enforce"
+          NEW_MIGRATIONS=$(git --no-pager diff --name-only "$LAST_TAG" "$GITHUB_SHA" -- migrations/ || true)
+          if [ -z "$NEW_MIGRATIONS" ]; then
+            echo "No migrations changed since $LAST_TAG — a patch release is in policy"
             exit 0
           fi
 
-          NEW_MIGRATION_FILES=$(git --no-pager diff --name-only "v${CURRENT_VERSION}" "$GITHUB_SHA" -- migrations/ || true)
-          if [ -n "$NEW_MIGRATION_FILES" ]; then
-            echo "$NEW_MIGRATION_FILES"
-            echo "::error::migrations/ changed since v${CURRENT_VERSION} but every pending changeset declares only 'patch'. A schema change must ship as at least a minor. Add a changeset with a 'minor' bump for an @mj-biz-apps/* package, then re-run."
-            exit 1
-          fi
-          echo "No migrations changed since v${CURRENT_VERSION} — a patch release is in policy"
-
-      - name: Determine next expected version
-        if: steps.changeset_check.outputs.pending != '0' && github.ref == 'refs/heads/main' && !github.event.inputs.targetVersion
-        id: version_check
-        env:
-          CURRENT_VERSION: ${{ steps.declared_bump.outputs.CURRENT_VERSION }}
-          DECLARED_BUMP: ${{ steps.declared_bump.outputs.DECLARED_BUMP }}
-        run: |
-          # Purely a prediction of what `changeset version` is about to do, so that the guard in
-          # the next step can catch the two disagreeing. It is a function of DECLARED_BUMP and
-          # nothing else — any other input here would be predicting a different program.
-          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
-          NEXT_MAJOR_VERSION="$(( ${VERSION_PARTS[0]} + 1 )).0.0"
-          NEXT_MINOR_VERSION="${VERSION_PARTS[0]}.$(( ${VERSION_PARTS[1]} + 1 )).0"
-          NEXT_PATCH_VERSION="${VERSION_PARTS[0]}.${VERSION_PARTS[1]}.$(( ${VERSION_PARTS[2]} + 1 ))"
-
-          case "$DECLARED_BUMP" in
-            major) EXPECTED_NEXT_VERSION="$NEXT_MAJOR_VERSION" ;;
-            minor) EXPECTED_NEXT_VERSION="$NEXT_MINOR_VERSION" ;;
-            *)     EXPECTED_NEXT_VERSION="$NEXT_PATCH_VERSION" ;;
-          esac
-          echo "Expected next version: $EXPECTED_NEXT_VERSION"
-          echo "EXPECTED_NEXT_VERSION=$EXPECTED_NEXT_VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Update version
-        if: steps.changeset_check.outputs.pending != '0'
-        run: |
-          EXPECTED_NEXT_VERSION="${{ github.event.inputs.targetVersion || steps.version_check.outputs.EXPECTED_NEXT_VERSION }}"
-          echo "Expected next version: $EXPECTED_NEXT_VERSION"
-
-          pnpm run version
-
-          NEXT_VERSION=$(jq -r .version packages/Entities/package.json)
-          echo "Actual next version: $NEXT_VERSION"
-
-          if [ -n "$EXPECTED_NEXT_VERSION" ] && [ "$NEXT_VERSION" != "$EXPECTED_NEXT_VERSION" ]; then
-            echo "::error::Version mismatch! Expected $EXPECTED_NEXT_VERSION but got $NEXT_VERSION"
-            exit 1
+          PREV="${LAST_TAG#v}"
+          IFS='.' read -r PREV_MAJOR PREV_MINOR _ <<< "$PREV"
+          IFS='.' read -r NEW_MAJOR NEW_MINOR _ <<< "$VERSION"
+          if [ "$NEW_MAJOR" -gt "$PREV_MAJOR" ] || [ "$NEW_MINOR" -gt "$PREV_MINOR" ]; then
+            echo "migrations/ changed since $LAST_TAG and $PREV -> $VERSION is at least a minor — in policy"
+            exit 0
           fi
 
-      - name: Sync mj-app.json version and MJ version range
-        if: steps.changeset_check.outputs.pending != '0'
-        run: |
-          # Sync app version from entities package
-          VERSION=$(jq -r .version packages/Entities/package.json)
-          jq --arg v "$VERSION" '.version = $v' mj-app.json > mj-app.json.tmp
-          mv mj-app.json.tmp mj-app.json
-          echo "Updated mj-app.json version to $VERSION"
+          echo "$NEW_MIGRATIONS"
+          echo "::error::migrations/ changed since $LAST_TAG but $PREV -> $VERSION is only a patch. A schema change must ship as at least a minor. Redo the release PR with a 'minor' changeset."
+          exit 1
 
-          # Derive mjVersionRange from the @memberjunction/core dependency
-          MJ_DEP=$(jq -r '.dependencies["@memberjunction/core"] // .peerDependencies["@memberjunction/core"] // empty' packages/Entities/package.json)
-          if [ -n "$MJ_DEP" ]; then
-            # Strip semver range prefix (^, ~, >=, etc.) to get the base version
-            MJ_MIN=$(echo "$MJ_DEP" | sed 's/^[^0-9]*//')
-            # Next major = current major + 1
-            MJ_NEXT_MAJOR="$(( $(echo "$MJ_MIN" | cut -d. -f1) + 1 )).0.0"
-            MJ_RANGE=">=${MJ_MIN} <${MJ_NEXT_MAJOR}"
-            jq --arg r "$MJ_RANGE" '.mjVersionRange = $r' mj-app.json > mj-app.json.tmp
-            mv mj-app.json.tmp mj-app.json
-            echo "Updated mj-app.json mjVersionRange to $MJ_RANGE"
-          fi
+      # RELEASE READINESS, and the only place this runs. PRs contribute declarative JSON under
+      # metadata/ and no Metadata_Sync migration; the build engineer generates ONE consolidated seed
+      # per release from a clean database (MJ/metadata/CLAUDE.md §1b and §10). Nothing on a feature
+      # PR can tell whether that has happened yet, and asking every PR would re-impose the per-PR
+      # cadence MJ rules out — so the question is asked HERE, at the release, where the answer is
+      # actionable: does every primaryKey declared under metadata/ appear in a shipped migration?
+      #
+      # A red step means the release seed has not been regenerated. Fix it by generating the
+      # Metadata_Sync (migrations/README.md) — never by editing this step. It sits before `Publish
+      # to npm` and the tag, so a failure here costs nothing but a re-run.
+      #
+      # The self-test runs first, for the reason the check exists at all: a gate nobody has watched
+      # fail is indistinguishable from one that returns "pass" unconditionally, which is precisely
+      # how its predecessor went green over a record that shipped nowhere (#105). Node stdlib only,
+      # so neither needs anything installed.
+      - name: Release readiness (every metadata record is in the shipped seed)
+        if: steps.release_check.outputs.work == 'true'
+        run: |
+          node scripts/check-release-seed-coverage.spec.mjs
+          npm run check:release-seed
+
+      # The OTHER half of #105, and the one coverage structurally cannot ask. Coverage answers "is
+      # this ID named by some shipped migration?" — a per-PR seed delta satisfies that perfectly
+      # while being exactly the cadence #105 abolished, so coverage would go green over it forever.
+      # This asks whether the release ships ONE consolidated seed or a pile of per-PR deltas.
+      #
+      # Separate step, not folded into the one above, so a red run names the rule that broke. It is
+      # also a separate SCRIPT because it needs git tags to know what has shipped, and the coverage
+      # check is deliberately pure-fs so it runs on any checkout — `fetch-depth: 0` and
+      # `fetch-tags: true` on this job's checkout are what make the tags available here.
+      - name: Release readiness (one consolidated seed, not per-PR deltas)
+        if: steps.release_check.outputs.work == 'true'
+        run: |
+          node scripts/check-release-seed-cadence.spec.mjs
+          npm run check:seed-cadence
 
       - name: Build all packages
         run: pnpm run build:packages
@@ -222,26 +197,239 @@ jobs:
         run: ./.github/scripts/validate-widget-bundle.sh
 
       - name: Publish to npm
-        if: steps.changeset_check.outputs.pending != '0'
+        if: steps.release_check.outputs.publish == 'true'
         run: pnpm exec changeset publish
 
-      - name: Get version and create tag
-        if: steps.changeset_check.outputs.pending != '0'
-        id: get_version
-        run: |
-          git pull
-          VERSION="v$(jq -r .version packages/Entities/package.json)"
-          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "## Published $VERSION" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Commit and push
-        if: steps.changeset_check.outputs.pending != '0'
+      # The one remote write this workflow still makes. Tags are outside both rulesets — they are
+      # `target: branch`, scoped to refs/heads/main and refs/heads/next — so this is not the push
+      # #177 is about, and check-release-pushes.mjs allows it for that reason.
+      #
+      # `changeset publish` has already created its own per-package tags locally; this adds the
+      # single repo-wide `v<version>` that the release-readiness checks and the schema-policy gate
+      # above both read, and pushes only that one.
+      #
+      # Gated on `tag`, NOT on `publish`. The two are different questions and a release can fail
+      # between them: if every package published and only the tag push failed, `publish` is false on
+      # the retry while the tag is still missing — and check-release-seed-cadence.mjs reads the
+      # newest `v*` tag to decide what has shipped, so the missing tag would fail the NEXT release.
+      - name: Tag the release
+        if: steps.release_check.outputs.tag == 'true'
         env:
-          VERSION: ${{ steps.get_version.outputs.VERSION }}
-        run: pnpm run commitpush
-
-      - name: Merge main into next and update lockfile
-        if: steps.changeset_check.outputs.pending != '0'
+          VERSION: ${{ steps.release_check.outputs.VERSION }}
         run: |
-          git checkout next
-          pnpm run mergemain:update-lock
+          git tag "v$VERSION"
+          git push origin "refs/tags/v$VERSION"
+          echo "## Published v$VERSION" >> "$GITHUB_STEP_SUMMARY"
+
+      # ----------------------------------------------------------------------------------------
+      # The back-merge: carry `main` back into `next`, as a pull request.
+      #
+      # `protect-main` sets `strict: true` — "branch must be up to date with base" — so the merge
+      # commit this release just left on `main` has to reach `next` before the NEXT release PR can
+      # merge. That asymmetry is what makes forgetting it expensive: skipping it costs THIS release
+      # nothing at all, and silently blocks the following one, weeks later, in someone else's pull
+      # request. The step summary here used to ask a human to open that PR by hand. Nobody has.
+      #
+      # A PR and not a push, and the distinction is the whole design. `next` carries required status
+      # checks, so a direct push to it is rejected permanently (#177; check-release-pushes.mjs
+      # enforces that it stays gone). `chore/backmerge-*` is covered by no ruleset — both are
+      # `target: branch` with conditions naming refs/heads/main and refs/heads/next and nothing else
+      # — so pushing THAT branch is an ordinary write rather than a bypass, and both rulesets keep
+      # `bypass_actors: []`. Nothing below asks for an exception to anything.
+      #
+      # It has to be a GitHub App rather than GITHUB_TOKEN for exactly one reason: GitHub does not
+      # start workflow runs from GITHUB_TOKEN-authored events, so none of the seven required checks
+      # would ever report on the branch or the PR and it could never merge. That is #177's trap, and
+      # it is the entire justification for the credential. `verify-release-app-token.yml` proves the
+      # credential is live without writing anything.
+      # ----------------------------------------------------------------------------------------
+
+      # Deliberately not gated on `work`/`tag`. If a previous run published, tagged, and then failed
+      # to open this PR, a re-run has `tag == 'false'` — gating on it would skip the back-merge on
+      # precisely the run that exists to finish it. Ancestry is the real question and it is cheap, so
+      # it is the only condition.
+      - name: Is there anything to back-merge?
+        id: backmerge_scope
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          MAIN_SHA=$(git rev-parse FETCH_HEAD)
+          git fetch --no-tags origin next
+          NEXT_SHA=$(git rev-parse FETCH_HEAD)
+          # Ancestry, not a tip comparison: `next` legitimately carries commits `main` does not, and
+          # only the other direction is a back-merge. The exit code is read explicitly because
+          # `--is-ancestor` answers "no" with 1 and reports a broken repository state with anything
+          # else — and "I could not tell" must never be read as "nothing to do".
+          set +e
+          git merge-base --is-ancestor "$MAIN_SHA" "$NEXT_SHA"
+          RC=$?
+          set -e
+          case "$RC" in
+            0) NOTHING=true ;;
+            1) NOTHING=false ;;
+            *) echo "::error::git merge-base --is-ancestor exited $RC — cannot tell whether a back-merge is outstanding."; exit 1 ;;
+          esac
+          echo "main=$MAIN_SHA next=$NEXT_SHA nothing_to_merge=$NOTHING"
+          {
+            echo "main_sha=$MAIN_SHA"
+            echo "nothing_to_merge=$NOTHING"
+          } >> "$GITHUB_OUTPUT"
+
+      # Minted HERE rather than at the top of the job, and that is load-bearing: an installation
+      # token lives one hour, and everything above it — a cold install, a full build, `changeset
+      # publish` against npm — routinely runs for tens of minutes. A token minted at checkout is one
+      # that will eventually expire at exactly this step, on a day nobody changed anything.
+      - name: Mint the App token for the back-merge branch
+        if: steps.backmerge_scope.outputs.nothing_to_merge == 'false'
+        id: backmerge_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          # Least privilege, named at the call site rather than inherited from whatever the App
+          # happens to hold. Its blast radius is legible right here, and a trimmed grant fails HERE
+          # with a clear error instead of surfacing as a push that dies looking like the branch
+          # protection this design works around.
+          # contents -> the push of `chore/backmerge-*`; pull-requests -> the PR into `next`.
+          permission-contents: write
+          permission-pull-requests: write
+
+      # continue-on-error, paired with the explicit failure step at the end of the job. The summary
+      # below must still be written when this fails — a run that dies here with no summary is how a
+      # released-but-unmerged state becomes invisible — and the failure is expressed once, in one
+      # place, where it can say which of the two states the run is in.
+      - name: Open the back-merge pull request
+        if: steps.backmerge_scope.outputs.nothing_to_merge == 'false'
+        id: backmerge_pr
+        continue-on-error: true
+        env:
+          APP_TOKEN: ${{ steps.backmerge_token.outputs.token }}
+          GH_TOKEN: ${{ steps.backmerge_token.outputs.token }}
+          VERSION: ${{ steps.release_check.outputs.VERSION }}
+          MAIN_SHA: ${{ steps.backmerge_scope.outputs.main_sha }}
+        run: |
+          set -euo pipefail
+          BRANCH="chore/backmerge-v${VERSION}"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+          # Version-stamped rather than timestamped, so re-running a half-finished publish lands on
+          # the same branch instead of stacking a second one beside it.
+          #
+          # An open PR is the deliverable, so an existing one ends this step. Re-pushing over the
+          # branch behind it would discard conflict resolutions a human may have committed there,
+          # which is the one outcome worse than not opening the PR at all.
+          EXISTING=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base next --state open --json url --jq '.[0].url // ""')
+          if [ -n "$EXISTING" ]; then
+            echo "::notice::back-merge PR already open: $EXISTING"
+            echo "pr_url=$EXISTING" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # A second remote rather than re-pointing `origin`: `origin` keeps the job's own token for
+          # the fetches and the tag push above, and the App credential stays attached to the one
+          # write that needs it.
+          git remote remove app-push 2>/dev/null || true
+          git remote add app-push "https://x-access-token:$APP_TOKEN@github.com/$GITHUB_REPOSITORY"
+
+          # No `--exit-code`: an absent branch is empty output and a zero exit, while an unreachable
+          # remote still exits 128 and, with pipefail, stops the step. Conflating the two would read
+          # a dead credential as "the branch does not exist yet" and then attempt a push that cannot
+          # succeed — a misleading error from the step whose job is to report one clearly.
+          REMOTE_SHA=$(git ls-remote app-push "refs/heads/$BRANCH" | cut -f1)
+          if [ -z "$REMOTE_SHA" ]; then
+            # Push main's tip straight to the new ref — no checkout, so nothing here depends on
+            # what the working tree looks like after a build and a publish.
+            git push app-push "$MAIN_SHA:refs/heads/$BRANCH"
+            echo "pushed $BRANCH at $MAIN_SHA"
+          elif [ "$REMOTE_SHA" != "$MAIN_SHA" ]; then
+            # Branch present, no PR open, and it is not what we would push. Every way out of this is
+            # a guess — force-push over whatever is there, or open a PR that back-merges the wrong
+            # commit — so it stops instead and says what it found. Reached only when a release
+            # repeats a version, which is itself worth knowing about.
+            echo "::error::$BRANCH exists at $REMOTE_SHA, which is not main's tip ($MAIN_SHA), and no pull request is open for it. Refusing to force-push over it — delete the branch, or open the PR by hand."
+            exit 1
+          fi
+
+          {
+            echo "Opened by \`publish.yml\` after publishing **v$VERSION**."
+            echo
+            echo "\`main\` at \`${MAIN_SHA:0:10}\` is not an ancestor of \`next\`. This carries the release merge"
+            echo "commit and the version bump back, and it is not bookkeeping: \`protect-main\` requires a branch to"
+            echo "be up to date with its base, so until this merges the **next** release PR cannot merge either."
+            echo
+            echo "**The release itself is finished.** The packages are on npm and \`v$VERSION\` is tagged, and the"
+            echo "publish run that opened this is green. Do not re-run the publish; resolve any conflicts here and"
+            echo "merge. Until this lands, \`release-prep.yml\` will refuse to cut the next release and say why."
+          } > "$RUNNER_TEMP/backmerge-body.md"
+
+          PR_URL=$(gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base next \
+            --head "$BRANCH" \
+            --title "chore: back-merge main into next after v$VERSION" \
+            --body-file "$RUNNER_TEMP/backmerge-body.md")
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "::notice::back-merge PR: $PR_URL"
+
+      - name: Summarise the back-merge
+        if: always() && steps.backmerge_scope.conclusion == 'success'
+        env:
+          VERSION: ${{ steps.release_check.outputs.VERSION }}
+          NOTHING: ${{ steps.backmerge_scope.outputs.nothing_to_merge }}
+          BRANCH: ${{ steps.backmerge_pr.outputs.branch }}
+          PR_URL: ${{ steps.backmerge_pr.outputs.pr_url }}
+        run: |
+          set -euo pipefail
+          if [ "$NOTHING" = "true" ]; then
+            echo "::notice::main is already an ancestor of next — nothing to back-merge."
+            {
+              echo ""
+              echo "\`main\` is already an ancestor of \`next\` — nothing to back-merge, and the release is complete."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo ""
+            echo "### The back-merge is outstanding"
+            echo ""
+            if [ -n "${PR_URL:-}" ]; then
+              echo "$PR_URL"
+              echo ""
+              echo "**v$VERSION published successfully.** The packages are on npm and the tag is pushed; the only"
+              echo "thing left is merging that pull request, which carries \`main\` back into \`next\`."
+              echo ""
+              echo "Nothing here is chasing you to do it today. \`protect-main\` requires a branch to be up to date"
+              echo "with its base, so the cost of leaving it lands on the NEXT release — and that is where it is"
+              echo "enforced: \`release-prep.yml\` refuses to cut a release while \`main\` is not an ancestor of"
+              echo "\`next\`, and names this pull request when it does."
+            else
+              echo "**v$VERSION published successfully, but the back-merge PR could not be opened.** The packages are"
+              echo "on npm and the tag is pushed. Read the failed step above — a rejected push means the App"
+              echo "credential needs attention (\`verify-release-app-token.yml\` diagnoses it read-only), anything else"
+              echo "is in its error. Until \`main\` reaches \`next\`, the following release PR cannot merge."
+              echo ""
+              echo "By hand: branch \`${BRANCH:-chore/backmerge-v$VERSION}\` from \`main\`'s tip and open a PR into"
+              echo "\`next\` — see [\`docs/release.md\`](docs/release.md)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # RED means the automation could not do its job — nothing else.
+      #
+      # An earlier draft of this step failed the run whenever a back-merge was merely OUTSTANDING,
+      # copied from MJ. It does not transfer: there the back-merge MERGES, so a pull request existing
+      # at all means a human is needed and red is the honest signal. Here the pull request IS the
+      # designed path, so that rule would paint every good release red — and a workflow that is red
+      # on success cannot distinguish "published cleanly" from "published, then broke", which is the
+      # one question a release engineer asks this run.
+      #
+      # The outstanding merge is not unenforced, it is enforced somewhere it can actually stop
+      # damage: `release-prep.mjs` blocks the next release while `main` is not an ancestor of
+      # `next`, and names this pull request. A red check mark is a worse instrument than a refusal
+      # at the point of harm.
+      - name: The back-merge pull request could not be opened
+        if: always() && steps.backmerge_scope.outputs.nothing_to_merge == 'false' && steps.backmerge_pr.outputs.pr_url == ''
+        env:
+          VERSION: ${{ steps.release_check.outputs.VERSION }}
+        run: |
+          echo "::error::v$VERSION is published and tagged, but the main -> next back-merge PR could not be opened. See the failed step above; verify-release-app-token.yml diagnoses a credential problem read-only. Until main reaches next, the following release PR cannot merge."
+          exit 1

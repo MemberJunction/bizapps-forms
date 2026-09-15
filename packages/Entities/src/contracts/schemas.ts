@@ -9,7 +9,15 @@
  * schema ever drifts from its interface.
  */
 import { z } from 'zod';
-import type { ConditionalCondition, ConditionalGroup, ConditionalOperator, ConditionalRule, ValidationRule } from './conditional-rule';
+import {
+  MAX_CONDITIONS_PER_GROUP,
+  MAX_JUMP_RULES,
+  type ConditionalCondition,
+  type ConditionalGroup,
+  type ConditionalOperator,
+  type ConditionalRule,
+  type ValidationRule,
+} from './conditional-rule';
 import type { FormSettings } from './form-definition';
 
 // --- ConditionalRule -------------------------------------------------------
@@ -20,9 +28,9 @@ const conditionalOperatorSchema = z.enum([
   'in',
   'notIn',
   'isAnswered',
+  'isNotAnswered',
   'greaterThan',
   'lessThan',
-  'contains',
 ]);
 
 const conditionValueSchema = z.union([
@@ -33,19 +41,80 @@ const conditionValueSchema = z.union([
   z.array(z.number()),
 ]);
 
-export const conditionalConditionSchema = z.object({
-  questionId: z.string(),
-  op: conditionalOperatorSchema,
-  value: conditionValueSchema.optional(),
-});
+export const conditionalConditionSchema = z
+  .object({
+    source: z.enum(['question', 'score']).optional(),
+    questionId: z.string().optional(),
+    op: conditionalOperatorSchema,
+    value: conditionValueSchema.optional(),
+  })
+  .superRefine((condition, ctx) => {
+    // A question condition that names no question is malformed — rejected here at the
+    // untrusted boundary; the evaluator additionally treats it as never-firing (defense in
+    // depth for pre-validation callers).
+    if ((condition.source ?? 'question') === 'question' && !condition.questionId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'questionId is required unless source is "score"',
+      });
+    }
+  });
 
 export const conditionalGroupSchema = z.object({
-  all: z.array(conditionalConditionSchema).optional(),
-  any: z.array(conditionalConditionSchema).optional(),
+  all: z.array(conditionalConditionSchema).max(MAX_CONDITIONS_PER_GROUP).optional(),
+  any: z.array(conditionalConditionSchema).max(MAX_CONDITIONS_PER_GROUP).optional(),
 });
+
+/**
+ * A tagged jump target. Discriminated on `kind` so a malformed one reports the arm it failed
+ * rather than "no union member matched", which for a four-arm union is not a usable message.
+ */
+const jumpTargetSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('submit') }),
+  z.object({ kind: z.literal('question'), id: z.string().min(1) }),
+  z.object({ kind: z.literal('page'), id: z.string().min(1) }),
+  z.object({ kind: z.literal('ending'), id: z.string().min(1) }),
+]);
+
+/**
+ * A jump rule, accepting the legacy page-only shape and emitting only the tagged one.
+ *
+ * THIS IS THE ONLY PLACE the two shapes coexist. A published snapshot is a frozen blob that no
+ * migration rewrites, so rules authored before targets were tagged carry `{ when, toPageId }`
+ * forever; normalizing here means every resolver, every consumer and every test downstream sees
+ * exactly one shape. Tolerance at the boundary, one shape inside.
+ *
+ * A rule carrying BOTH is rejected rather than resolved. There is no reading of "go to page 3
+ * and also go to question 8" that is more likely to be what the author meant than the other, so
+ * picking one would be guessing about branching — and a wrong guess hides questions from
+ * respondents silently.
+ */
+const conditionalJumpRuleSchema = z
+  .object({
+    when: conditionalGroupSchema,
+    target: jumpTargetSchema.optional(),
+    /** Legacy only — normalized away by the transform below, never surfaced. */
+    toPageId: z.string().min(1).optional(),
+  })
+  .superRefine((rule, ctx) => {
+    if (rule.target !== undefined && rule.toPageId !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'a jump rule carries either `target` or the legacy `toPageId`, never both',
+      });
+    }
+    if (rule.target === undefined && rule.toPageId === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'a jump rule needs a target' });
+    }
+  })
+  .transform((rule) => ({
+    when: rule.when,
+    target: rule.target ?? { kind: 'page' as const, id: rule.toPageId as string },
+  }));
 
 export const conditionalRuleSchema = z.object({
   show: conditionalGroupSchema.optional(),
+  jump: z.array(conditionalJumpRuleSchema).max(MAX_JUMP_RULES).optional(),
 });
 
 // --- ValidationRule --------------------------------------------------------
@@ -69,6 +138,21 @@ export const formSettingsSchema = z.object({
   closesAt: z.string().optional(),
   confirmationMessage: z.string().optional(),
   redirectUrl: z.string().optional(),
+  // Optional, and therefore NOT protected by `_settingsMatch` below: `AssertExtends` compares
+  // assignability, and an optional property present on one side only is assignable both ways, so
+  // the guard passes vacuously for every optional field. `form-settings-schema.spec.ts` is what
+  // actually holds this in step with `FormSettings`.
+  //
+  // `.catch(undefined)` is load-bearing, and it is the ONLY tolerant field in this schema. Every
+  // other setting here describes the form a respondent is about to fill in, so a value we cannot
+  // read is a form we only half understand and refusing is right. This one is side-effect
+  // configuration — invisible to the respondent, exactly like `automations`, which the snapshot
+  // parser is deliberately lenient about for the same reason. Without this, one unrecognised
+  // value (a typo, the wrong case, a null) failed the whole settings parse, which failed the
+  // whole snapshot, which served every respondent "Form unavailable" — taking the form down to
+  // protect a side effect. Degrading to absent means "infer", which is what every form did before
+  // this field existed.
+  onSubmitMode: z.enum(['Legacy', 'Configured']).optional().catch(undefined),
 });
 
 // --- Parse helpers ---------------------------------------------------------
@@ -107,7 +191,14 @@ function coerceJSON(json: string | object): object {
 // These assignments do nothing at runtime but fail `tsc` if a zod schema's
 // inferred type diverges from the hand-written interface in either direction.
 
-type AssertExtends<A, B> = A extends B ? (B extends A ? true : never) : never;
+// `[A] extends [B]`, not `A extends B`. A naked type parameter on the left of a conditional
+// DISTRIBUTES over its union, so the bare form checked each member of A separately and collapsed
+// the result back to `true` — it could not fail in either direction, so every guard below had
+// been passing vacuously since the day it was written. Wrapping both sides in one-tuples
+// suppresses distribution and makes the comparison the whole-union one it reads as.
+// Verified by construction: with the bare form neither a widened nor a narrowed union errors;
+// with this form both do, and identical unions still pass.
+type AssertExtends<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 
 const _operatorMatch: AssertExtends<z.infer<typeof conditionalOperatorSchema>, ConditionalOperator> = true;
 const _conditionMatch: AssertExtends<z.infer<typeof conditionalConditionSchema>, ConditionalCondition> = true;

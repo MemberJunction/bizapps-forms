@@ -1,83 +1,64 @@
 import { describe, it, expect } from 'vitest';
 import type {
   PublishedFormDefinition,
-  PublishedFormQuestion,
   mjBizAppsFormsFormResponseEntityType,
   mjBizAppsFormsFormResponseAnswerEntityType,
 } from '@mj-biz-apps/forms-entities';
+
+// The service keeps these two aliases module-private; the spec derives them from the same entity
+// types rather than importing what is not exported. Nothing here compiled before, so the bare
+// names resolved to nothing and Vitest — which does not type-check — never noticed.
+type ResponseRow = mjBizAppsFormsFormResponseEntityType;
+type AnswerRow = mjBizAppsFormsFormResponseAnswerEntityType;
 import {
-  flattenQuestions,
-  breakdownKindFor,
   buildSummary,
   buildBreakdowns,
   buildFunnel,
-  buildResponseRows,
-  buildResponseDetail,
-  renderAnswer,
 } from './reporting-aggregations';
+import { insightRoleFor } from './question-insight-roles';
+import { flattenQuestions } from '../../shared/published-questions';
+import { q, response, answer } from '../../shared/testing/entity-row-fixtures';
 
-type ResponseRow = mjBizAppsFormsFormResponseEntityType;
-type AnswerRow = mjBizAppsFormsFormResponseAnswerEntityType;
+describe('insightRoleFor', () => {
+  it('charts the questions that have a genuine aggregate form', () => {
+    expect(insightRoleFor('SingleChoice')).toBe('choice');
+    expect(insightRoleFor('MultiChoice')).toBe('choice');
+    expect(insightRoleFor('Dropdown')).toBe('choice');
+    expect(insightRoleFor('Number')).toBe('scale');
+    expect(insightRoleFor('Rating')).toBe('scale');
+    expect(insightRoleFor('NPS')).toBe('scale');
+    expect(insightRoleFor('YesNo')).toBe('sentiment');
+  });
 
-function q(
-  id: string,
-  type: PublishedFormQuestion['type'],
-  displayOrder = 0,
-  options: { id: string; label: string; value: string; displayOrder: number }[] = [],
-): PublishedFormQuestion {
-  return { id, type, prompt: `Prompt ${id}`, isRequired: false, displayOrder, options };
-}
+  it('treats contact fields as identity, not as free text', () => {
+    // THE defect this taxonomy exists for. These are `analysis: 'text'` in the contract, so
+    // reading the contract as an analytical plan rendered a column of real email addresses
+    // and names at the top of the dashboard — useless as analysis, and personal data on a
+    // screen that did not need it.
+    expect(insightRoleFor('Email')).toBe('identity');
+    expect(insightRoleFor('Phone')).toBe('identity');
+    expect(insightRoleFor('Website')).toBe('identity');
+    expect(insightRoleFor('Address')).toBe('identity');
+    expect(insightRoleFor('ContactInfo')).toBe('identity');
+  });
 
-function response(id: string, status: 'Complete' | 'Partial', started: Date | null, submitted: Date | null): ResponseRow {
-  return {
-    ID: id,
-    FormID: 'f1',
-    FormVersionID: 'v1',
-    Status: status,
-    AnonymousSessionID: `s-${id}`,
-    RespondentPersonID: null,
-    StartedAt: started,
-    SubmittedAt: submitted,
-    SourceMetadata: null,
-    __mj_CreatedAt: started ?? new Date(),
-    __mj_UpdatedAt: submitted ?? new Date(),
-    Form: 'Test Form',
-    RespondentPerson: null,
-  };
-}
+  it('separates consent from opinion, though both store one boolean', () => {
+    // Identical in shape to YesNo, and nobody reads a terms box as a fifty-fifty split.
+    expect(insightRoleFor('Checkbox')).toBe('consent');
+    expect(insightRoleFor('Legal')).toBe('consent');
+    expect(insightRoleFor('YesNo')).toBe('sentiment');
+  });
 
-function answer(responseId: string, questionId: string, vals: Partial<AnswerRow>): AnswerRow {
-  const now = new Date();
-  return {
-    ID: `${responseId}-${questionId}`,
-    ResponseID: responseId,
-    QuestionID: questionId,
-    TextValue: null,
-    NumericValue: null,
-    DateValue: null,
-    BooleanValue: null,
-    JSONValue: null,
-    FileID: null,
-    Score: null,
-    ScoreRationale: null,
-    __mj_CreatedAt: now,
-    __mj_UpdatedAt: now,
-    File: null,
-    ...vals,
-  };
-}
+  it('makes dates analysable by period, which the contract calls unanalysable by value', () => {
+    expect(insightRoleFor('Date')).toBe('temporal');
+    expect(insightRoleFor('Time')).toBe('temporal');
+  });
 
-describe('breakdownKindFor', () => {
-  it('maps types to kinds', () => {
-    expect(breakdownKindFor('SingleChoice')).toBe('distribution');
-    expect(breakdownKindFor('MultiChoice')).toBe('distribution');
-    expect(breakdownKindFor('Dropdown')).toBe('distribution');
-    expect(breakdownKindFor('YesNo')).toBe('boolean');
-    expect(breakdownKindFor('Number')).toBe('numeric');
-    expect(breakdownKindFor('Rating')).toBe('numeric');
-    expect(breakdownKindFor('NPS')).toBe('numeric');
-    expect(breakdownKindFor('LongText')).toBe('freeText');
-    expect(breakdownKindFor('Email')).toBe('freeText');
+  it('routes written answers and attachments to their own panels', () => {
+    expect(insightRoleFor('ShortText')).toBe('openText');
+    expect(insightRoleFor('LongText')).toBe('openText');
+    expect(insightRoleFor('FileUpload')).toBe('attachment');
+    expect(insightRoleFor('Doodle')).toBe('attachment');
   });
 });
 
@@ -90,6 +71,8 @@ describe('flattenQuestions', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         { id: 'p2', displayOrder: 1, questions: [q('q3', 'Number', 0)] },
         { id: 'p1', displayOrder: 0, questions: [q('q2', 'Email', 1), q('q1', 'ShortText', 0)] },
@@ -114,14 +97,47 @@ describe('buildSummary', () => {
     expect(s.partialResponses).toBe(1);
     // completionRate keeps the started (complete + partial) denominator as the drop-off signal.
     expect(s.completionRate).toBeCloseTo(2 / 3);
-    expect(s.averageCompletionSeconds).toBe(90); // (60 + 120) / 2
+    expect(s.typicalCompletionSeconds).toBe(90); // median of [60, 120]
+  });
+
+  it('is the MEDIAN, so one absurd session cannot define "typical"', () => {
+    // Fill times are right-skewed even in clean data: most people take two minutes and one
+    // leaves the tab open over lunch. A mean of [60, 90, 120, 20000] is 5067s — over an
+    // hour — which is not what any of these four people experienced.
+    const start = new Date('2026-01-01T00:00:00Z');
+    const at = (secs: number) => new Date(start.getTime() + secs * 1000);
+    const rows: ResponseRow[] = [
+      response('r1', 'Complete', start, at(60)),
+      response('r2', 'Complete', start, at(90)),
+      response('r3', 'Complete', start, at(120)),
+      response('r4', 'Complete', start, at(20_000)),
+    ];
+    expect(buildSummary(rows).typicalCompletionSeconds).toBe(105); // median of [60,90,120,20000]
+  });
+
+  it('discards a gap too long to have been one sitting', () => {
+    // The live defect: a response whose StartedAt is the Unix epoch reported the form's
+    // typical completion time as "212759h 19m" — about twenty-four years — to its owner.
+    // The broken pair leaves the sample entirely rather than merely being out-voted.
+    const rows: ResponseRow[] = [
+      response('good', 'Complete', new Date('2026-01-01T00:00:00Z'), new Date('2026-01-01T00:02:00Z')),
+      response('epoch', 'Complete', new Date('1970-01-01T00:00:00Z'), new Date('2026-01-01T00:00:00Z')),
+    ];
+    expect(buildSummary(rows).typicalCompletionSeconds).toBe(120);
+  });
+
+  it('reports nothing rather than a wrong number when every pair is implausible', () => {
+    const rows: ResponseRow[] = [
+      response('epoch', 'Complete', new Date('1970-01-01T00:00:00Z'), new Date('2026-01-01T00:00:00Z')),
+    ];
+    expect(buildSummary(rows).typicalCompletionSeconds).toBeNull();
   });
 
   it('handles zero responses', () => {
     const s = buildSummary([]);
     expect(s.totalResponses).toBe(0);
     expect(s.completionRate).toBe(0);
-    expect(s.averageCompletionSeconds).toBeNull();
+    expect(s.typicalCompletionSeconds).toBeNull();
     expect(s.lastSubmittedAt).toBeNull();
   });
 
@@ -145,6 +161,7 @@ describe('buildBreakdowns', () => {
   const nps = q('qn', 'NPS', 2);
   const yn = q('qy', 'YesNo', 3);
   const text = q('qt', 'LongText', 4);
+  const email = q('qe', 'Email', 5);
 
   const answers: AnswerRow[] = [
     answer('r1', 'qc', { TextValue: 'red' }),
@@ -158,15 +175,33 @@ describe('buildBreakdowns', () => {
     answer('r1', 'qy', { BooleanValue: true }),
     answer('r2', 'qy', { BooleanValue: false }),
     answer('r1', 'qt', { TextValue: 'hello' }),
+    answer('r1', 'qe', { TextValue: 'someone@example.com' }),
   ];
 
-  const breakdowns = buildBreakdowns([choice, multi, nps, yn, text], answers);
+  const breakdowns = buildBreakdowns([choice, multi, nps, yn, text, email], answers);
 
   it('builds choice distribution with option labels, sorted by count', () => {
     const b = breakdowns.find((x) => x.questionId === 'qc')!;
-    expect(b.kind).toBe('distribution');
+    expect(b.role).toBe('choice');
     expect(b.buckets[0]).toMatchObject({ label: 'Red', count: 2 });
     expect(b.buckets[1]).toMatchObject({ label: 'Blue', count: 1 });
+  });
+
+  it('does not count a multi-select that selected nothing as an answer', () => {
+    // A stored `[]` means the respondent reached the question and picked nothing, which is a
+    // skip in substance. Counting the row as an answer inflated `answeredCount` and so
+    // understated the "% skipped" figure printed on every card header — and left the card
+    // claiming two answers above bars totalling one selection.
+    const mc = q('qz', 'MultiChoice', 0, [{ id: 'o1', label: 'A', value: 'a', displayOrder: 0 }]);
+    const b = buildBreakdowns(
+      [mc],
+      [
+        answer('r1', 'qz', { JSONValue: JSON.stringify([]) }),
+        answer('r2', 'qz', { JSONValue: JSON.stringify(['a']) }),
+      ],
+    )[0];
+    expect(b.answeredCount).toBe(1);
+    expect(b.buckets.find((x) => x.label === 'A')!.count).toBe(1);
   });
 
   it('counts multi-select selections from JSON', () => {
@@ -185,19 +220,110 @@ describe('buildBreakdowns', () => {
     expect(b.numeric!.npsScore).toBe(0);
   });
 
+  it('scores NPS only from ratings that are on the NPS scale', () => {
+    // NPS is defined on 0–10. A value outside it is not a rating that came from an NPS
+    // control — a widened question, an import, a bad payload — and bucketing it anyway lets
+    // `50` count as a promoter and `-20` as a detractor, producing a confident score from
+    // data that is not NPS data at all. Out-of-range values are excluded from the score and
+    // its segments; min/max/average still report them, because those describe the numbers
+    // that are actually stored.
+    const npsQ = q('qx', 'NPS', 0);
+    const b = buildBreakdowns(
+      [npsQ],
+      [
+        answer('r1', 'qx', { NumericValue: 50 }),
+        answer('r2', 'qx', { NumericValue: -20 }),
+        answer('r3', 'qx', { NumericValue: 9 }),
+        answer('r4', 'qx', { NumericValue: 3 }),
+      ],
+    )[0];
+    expect(b.numeric!.npsSegments).toEqual({ detractors: 1, passives: 0, promoters: 1 });
+    // One promoter, one detractor, over the two ratings that were on the scale.
+    expect(b.numeric!.npsScore).toBe(0);
+    expect(b.numeric!.answered).toBe(4);
+    expect(b.numeric!.max).toBe(50);
+  });
+
+  it('reports no NPS score at all when nothing was on the scale', () => {
+    // Better than a score computed from an empty numerator, which renders as a confident 0.
+    const npsQ = q('qy', 'NPS', 0);
+    const b = buildBreakdowns([npsQ], [answer('r1', 'qy', { NumericValue: 99 })])[0];
+    expect(b.numeric!.npsScore).toBeNull();
+  });
+
   it('builds boolean buckets for YesNo', () => {
     const b = breakdowns.find((x) => x.questionId === 'qy')!;
-    expect(b.kind).toBe('boolean');
+    expect(b.role).toBe('sentiment');
     expect(b.buckets).toEqual([
       { label: 'Yes', count: 1, fraction: 0.5 },
       { label: 'No', count: 1, fraction: 0.5 },
     ]);
   });
 
-  it('lists free-text answers', () => {
-    const b = breakdowns.find((x) => x.questionId === 'qt')!;
-    expect(b.kind).toBe('freeText');
-    expect(b.textAnswers).toEqual(['hello']);
+  it('does not chart written answers at all', () => {
+    // They get the "What they wrote" panel instead — rates, lengths and themes. A card here
+    // could only ever quote three arbitrary answers, which is not a summary of the rest.
+    expect(breakdowns.find((x) => x.questionId === 'qt')).toBeUndefined();
+  });
+
+  it('does not chart contact fields at all', () => {
+    // The regression guard for the whole change: an Email question must never produce a
+    // card, because the only thing a card could show is the addresses themselves.
+    expect(breakdowns.find((x) => x.questionId === 'qe')).toBeUndefined();
+  });
+});
+
+describe('buildFunnel: pages that cannot be "reached"', () => {
+  const page = (id: string, order: number, questions: ReturnType<typeof q>[]) => ({
+    id,
+    title: `Page ${order + 1}`,
+    displayOrder: order,
+    questions,
+  });
+  const def = (pages: ReturnType<typeof page>[]): PublishedFormDefinition =>
+    ({ formId: 'f', formVersionId: 'v', name: 'F', renderMode: 'Scroll', pages }) as PublishedFormDefinition;
+
+  it('does not let a welcome page zero out the whole funnel', () => {
+    // Reach is measured by whether a response ANSWERED something on the page, so a page of
+    // display-only content can never be reached — it collects no answers by definition.
+    // As the first page that made `firstReached` zero, and every retention after it divides
+    // by that: a form opening with a welcome statement showed 0% retention on every step
+    // while the reached counts beside them were non-zero. An intro page is the single most
+    // common first page there is.
+    const steps = buildFunnel(
+      def([page('p1', 0, [q('s1', 'Statement', 0)]), page('p2', 1, [q('a1', 'ShortText', 0)])]),
+      [answer('resp1', 'a1', { TextValue: 'x' }), answer('resp2', 'a1', { TextValue: 'y' })],
+    );
+    const real = steps.find((s) => s.pageId === 'p2')!;
+    expect(real.reached).toBe(2);
+    expect(real.retention).toBe(1);
+  });
+
+  it('does not invent a total drop-off at a page nobody could answer', () => {
+    // A statement page BETWEEN two question pages reported reached 0, which the step before
+    // it read as a 100% loss — the severe-warning treatment, on a page that is working
+    // exactly as designed — and then the next page showed everyone back again.
+    const steps = buildFunnel(
+      def([
+        page('p1', 0, [q('a1', 'ShortText', 0)]),
+        page('p2', 1, [q('s1', 'Statement', 0)]),
+        page('p3', 2, [q('a2', 'ShortText', 0)]),
+      ]),
+      [answer('r1', 'a1', { TextValue: 'x' }), answer('r1', 'a2', { TextValue: 'y' })],
+    );
+    expect(steps.map((s) => s.pageId)).toEqual(['p1', 'p3']);
+    expect(steps.every((s) => s.dropOff === 0)).toBe(true);
+  });
+
+  it('still reports a real zero on a page that asks questions nobody answered', () => {
+    // The distinction that matters: a page with answerable questions and no answers IS a
+    // total drop-off, and must keep saying so.
+    const steps = buildFunnel(
+      def([page('p1', 0, [q('a1', 'ShortText', 0)]), page('p2', 1, [q('a2', 'ShortText', 0)])]),
+      [answer('r1', 'a1', { TextValue: 'x' })],
+    );
+    expect(steps[1].reached).toBe(0);
+    expect(steps[1].dropOff).toBe(1);
   });
 });
 
@@ -210,6 +336,8 @@ describe('buildFunnel', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         { id: 'p1', title: 'One', displayOrder: 0, questions: [q('q1', 'ShortText', 0)] },
         { id: 'p2', title: 'Two', displayOrder: 1, questions: [q('q2', 'ShortText', 0)] },
@@ -226,44 +354,5 @@ describe('buildFunnel', () => {
     expect(funnel[1].reached).toBe(1);
     expect(funnel[1].retention).toBe(0.5);
     expect(funnel[1].dropOff).toBe(0.5);
-  });
-});
-
-describe('buildResponseRows', () => {
-  it('counts answers per response', () => {
-    const rows = buildResponseRows(
-      [response('r1', 'Complete', new Date(), new Date())],
-      [answer('r1', 'q1', { TextValue: 'x' }), answer('r1', 'q2', { TextValue: 'y' })],
-    );
-    expect(rows[0].answeredCount).toBe(2);
-    expect(rows[0].respondent).toBe('Anonymous');
-  });
-
-  it('lists COMPLETE responses only — in-progress partials are excluded from the list', () => {
-    const rows = buildResponseRows(
-      [
-        response('r1', 'Complete', new Date(), new Date()),
-        response('r2', 'Partial', new Date(), null),
-      ],
-      [answer('r1', 'q1', { TextValue: 'x' })],
-    );
-    expect(rows.map((r) => r.responseId)).toEqual(['r1']);
-  });
-});
-
-describe('renderAnswer / buildResponseDetail', () => {
-  it('maps choice values to labels and renders booleans', () => {
-    const choice = q('qc', 'SingleChoice', 0, [{ id: 'o1', label: 'Red', value: 'red', displayOrder: 0 }]);
-    const yn = q('qy', 'YesNo', 1);
-    expect(renderAnswer(choice, answer('r1', 'qc', { TextValue: 'red' }))).toBe('Red');
-    expect(renderAnswer(yn, answer('r1', 'qy', { BooleanValue: false }))).toBe('No');
-
-    const detail = buildResponseDetail(
-      response('r1', 'Complete', new Date(), new Date()),
-      [answer('r1', 'qc', { TextValue: 'red' })],
-      [choice, yn],
-    );
-    expect(detail.answers).toHaveLength(1);
-    expect(detail.answers[0]).toMatchObject({ prompt: 'Prompt qc', displayValue: 'Red' });
   });
 });

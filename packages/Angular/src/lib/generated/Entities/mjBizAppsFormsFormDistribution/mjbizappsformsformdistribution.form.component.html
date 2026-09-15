@@ -132,6 +132,22 @@
             [EditMode]="EditMode"
             [FormContext]="formContext"
         ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="AllowDeviceResume"
+            Type="checkbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="AllowedOrigins"
+            Type="textarea"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
 
     </mj-collapsible-panel>
 
@@ -181,11 +197,36 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Uploads','DistributionID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Uploads')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Uploads','DistributionID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormUploads')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormUploads', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Form Responses Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsFormsFormResponses"
+        SectionName="Form Responses"
+        Icon="fa fa-file-signature"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsFormsFormResponses')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Responses','FormDistributionID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Responses','FormDistributionID')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormResponses')"
+                [ShowToolbar]="true"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormResponses', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>

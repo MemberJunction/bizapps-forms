@@ -3,7 +3,7 @@ Don't say "You're absolutely right" each time I correct you. Mix it up, that's s
 
 # MJ Forms Development Guide
 
-**MJ Forms** is a free, open-source [MemberJunction](https://github.com/MemberJunction/MJ) **Open App** for **forms, surveys, and intake**. It works for **anonymous internet users** (public links / embeds), is **mobile-first** (published as an Angular custom-element widget, not the Explorer shell), is **easy to set up** (visual builder or AI-authored), and makes responses **first-class records in your MemberJunction database** — optionally projected into real, query-able, Skip-accessible entities.
+**MJ Forms** is a source-available [MemberJunction](https://github.com/MemberJunction/MJ) **Open App** for **forms, surveys, and intake**. It works for **anonymous internet users** (public links / embeds), is **mobile-first** (published as an Angular custom-element widget, not the Explorer shell), is **easy to set up** (visual builder or AI-authored), and makes responses **first-class records in your MemberJunction database** — optionally projected into real, query-able, Skip-accessible entities.
 
 **The single source of truth for building MJ Forms is [`plans/FORMS_BUILD_PLAN.md`](plans/FORMS_BUILD_PLAN.md).** Read its Status Snapshot + Progress Log at the start of every session, pick up the first unfinished task in dependency order, and update task state there as you work.
 
@@ -14,17 +14,24 @@ MJ Forms reuses ~70% of what it needs from MJ core (the heart of the plan — se
 - **RSU** (`RuntimeSchemaManager` + `SchemaEvolution`) for promoting responses to first-class entities.
 - **bizapps-common** Person / Organization for known-respondent identity (optional, loose coupling).
 
-These capabilities are all present in published **MJ 5.51.0**. We pin `@memberjunction/*` to **exactly `5.51.0`** and rev that pin upward over time (do not loosen to a caret range without a reason — the caret ranges in `peerDependencies` are correct and deliberate; the `dependencies` pins are the ones that must stay exact).
+These capabilities all come from MJ core. We pin `@memberjunction/*` to the **`lts-6.1`** line and rev that pin upward over time (do not loosen an app's exact pin to a caret range without a reason — the caret ranges in `peerDependencies` are correct and deliberate; the `dependencies` pins are the ones that must stay exact).
 
-**Why 5.51.0 (2026-08-01).** Nothing in 5.51.0 is *required* by Forms — this is a routine rev to the current `latest`, taken to keep the delta to MJ small rather than to obtain a capability. Do not go looking for a feature justification in the changelog; there isn't one, and inventing one is how the 5.43.0 note went wrong. The 50 commits it carries include a scoped-anonymous elevation fix (MJ #3371) that *sounds* like our threat model but lives in `@memberjunction/realtime`, the voice stack, which Forms does not depend on. What it does carry that matters: **two core `__mj` migrations** (`V202607302040__v5.51.x__Fix_spDeleteAIPrompt…`, `V202607311852__v5.51.x__Metadata_Sync`), so the Phase 3 database step below is mandatory, not a no-op.
+**The exact version is not written here, on purpose.** It lives in `apps/MJAPI/package.json` and `mj-app.json`, which are the files an upgrade actually edits; restating it in prose is how this section came to claim a pin two majors behind the one the repo was building against. Read it, don't recall it:
 
-**Why the floor is 5.44.0+, and why the old 5.43.0 pin was wrong.** The floor is set by our own dependencies, not by preference: `bizapps-common` and `bizapps-tasks` both declare `>=5.44.0` and are hard `mj-app.json` dependencies, so a 5.43.0 pin promised a configuration that could not exist. The reason originally given for choosing 5.43.0 over 5.44.0 — that 5.44.0 was not published to npm — was simply false. **5.50.0** is the release that first carried CodeGen's `includeSchemas` allow-list, which is what lets us scope CodeGen positively instead of maintaining a deny-list that can never name an Open App we have not heard of.
+```bash
+node -p "require('./mj-app.json').mjVersionRange"                                  # supported range
+node -p "require('./apps/MJAPI/package.json').dependencies['@memberjunction/core']" # the exact pin
+```
 
-The 5.50.0 upgrade required adding `@workos-inc/authkit-js` to MJExplorer: 5.50's `@memberjunction/ng-auth-services` added a WorkOS provider and declares it as a **required** peer (empty `peerDependenciesMeta`), so the Angular build cannot resolve it otherwise. This matches how the repo already carries Okta and Amplify without using them. **5.51.0 needed nothing new** — its `ng-auth-services` peer set is byte-identical to 5.50's. Diff that peer set on every upgrade; it is the trap most likely to break the Angular build.
+**Pinning model** (matches the sibling repos'): `apps/*` use **exact** `X.Y.Z` in `dependencies`; `packages/*` declare MJ only as **caret** `^X.Y.Z` `peerDependencies` and carry no MJ `dependencies` at all; `mj-app.json` `mjVersionRange` is `>=X.Y.Z <(major+1).0.0`.
 
-**Pinning model** (verified 2026-07-30, re-verified on the 5.51.0 bump 2026-08-01; matches the sibling repos'): `apps/*` use **exact** `X.Y.Z` in `dependencies`; `packages/*` declare MJ only as **caret** `^X.Y.Z` `peerDependencies` and carry no MJ `dependencies` at all; `mj-app.json` `mjVersionRange` is `>=X.Y.Z <(major+1).0.0`.
+**On every MJ upgrade, diff `@memberjunction/ng-auth-services`'s peer set.** It is the trap most likely to break the Angular build. That package has added auth providers as **required** peers (empty `peerDependenciesMeta`), and the Angular build cannot resolve a peer that is not installed — which is why MJExplorer carries auth SDKs this repo never authenticates with. A version bump that needs a new one fails at build time with a bare module-resolution error that says nothing about auth.
 
-**Angular pinning model** (family-wide, 2026-08-07, with MemberJunction/MJ#3580): `@angular/*` peers in `packages/*` are **caret ranges at the platform pin** (`^21.1.3`) — compatibility claims, never exact. Each package that consumes Angular **anchors** the concrete version with exact `21.1.3` entries in its own `devDependencies`; the anchor is what actually installs. In the shared pnpm dev workspace `auto-install-peers=true` turns unanchored peer ranges into install instructions, which is how two copies of `@angular/core` ended up installed family-wide. Rev anchors with the era platform pin, never with MJ pins.
+**Angular pinning model** (family-wide, 2026-08-07, with MemberJunction/MJ#3580; platform pin revved to the MJ 6.1.0 era on 2026-09-14): `@angular/*` peers in `packages/*` are **caret ranges at the platform pin** (`^21.2.22`) — compatibility claims, never exact. Each package that consumes Angular **anchors** the concrete version with exact `21.2.22` entries in its own `devDependencies`; the anchor is what actually installs. **A patch on the MJ line does not imply an Angular rev** — 6.1.1's `@angular/*` requirements are byte-identical to 6.1.0's, so that upgrade moved no Angular pin. Diff the two tags rather than assuming either way.
+
+**Three Angular version lines, not one — do not collapse them.** `@angular/cdk` moves independently of `@angular/core` and is at **21.2.14**, the build tooling (`@angular/cli`, `@angular/build`, `@angular-devkit/build-angular`) at **21.2.23**, everything else at **21.2.22**. Taking one number for all three is what #211 was: an anchor written at the core version that no host's CDK could satisfy.
+
+**The pin that actually binds is `pnpm.overrides` in the root `package.json`, not the `devDependencies` anchor.** An override outranks every manifest in the tree, so bumping the anchor alone changes nothing — on the 6.1.0 upgrade the regenerated lockfile silently kept `@angular/core` at 21.1.3 while moving `@angular/cdk` to 21.2.14, and the only reason CDK moved is that it is the one package the override list omits. Bump the overrides and the anchors together, then confirm with `grep -c '21\.1\.3' pnpm-lock.yaml` returning 0. In the shared pnpm dev workspace `auto-install-peers=true` turns unanchored peer ranges into install instructions, which is how two copies of `@angular/core` ended up installed family-wide. Rev anchors with the era platform pin, never with MJ pins.
 
 **Upgrading MJ is a database operation, not just a pin bump.** Bumping npm versions leaves the `__mj` core schema behind, and a partially-migrated core still installs, builds, tests and boots cleanly — the damage surfaces later and nowhere near its cause (`AIEngine.Config()` hits a core entity the metadata lacks, throws `Entity <name> not found in metadata`, and aborts loading its entire agent set). The core migration is run **version-tagged**:
 
@@ -32,7 +39,7 @@ The 5.50.0 upgrade required adding `@workos-inc/authkit-js` to MJExplorer: 5.50'
 npx mj migrate -t v<version>      # NOT `npm run mj:migrate`, which only targets __mj_BizAppsForms
 ```
 
-Read the first line of its output. A real core run prints `Detected installed migration version: <N> — fetching only migrations newer than it.` — that `<N>` must equal the frontier you recorded beforehand (`SELECT MAX(version) FROM __mj.flyway_schema_history WHERE version IS NOT NULL AND success = 1`). A higher `<N>` means a poisoned watermark that will silently hide every migration below it. No watermark line at all means you are not migrating core. Judge success by the **frontier advancing**, never by the `N applied` count — `R__RefreshMetadata.sql` is repeatable, so an already-current run and a fully-skipped run both report `1 applied` and exit 0. Finish by restarting MJAPI and grepping its startup log for `not found in metadata`; it must be clean, because MJAPI starts fine either way.
+Read the first line of its output. A real core run prints `Detected installed migration version: <N> — fetching only migrations newer than it.` — that `<N>` must equal the frontier you recorded beforehand (`SELECT MAX(version) FROM __mj.flyway_schema_history WHERE version IS NOT NULL AND success = 1`). A higher `<N>` means a poisoned watermark that will silently hide every migration below it. No watermark line at all means you are not migrating core. Judge success by the **frontier reaching the target tag's own top migration version**, never by the `N applied` count — `R__RefreshMetadata.sql` is repeatable, so an already-current run and a fully-skipped run both report `1 applied` and exit 0. Note that *advancing* is the usual case, not the rule: a patch release on a line may ship **no new versioned migration at all** (6.1.1 amended an already-applied file in place and added none), so the frontier correctly stands still. Compare it against the tag, not against where it was — `git ls-tree -r --name-only v<version> -- migrations/ | grep -oE 'V[0-9]+' | sort -n | tail -1` in the MJ checkout says what the target band's top is. An amended file below the watermark is never re-fetched, so it raises no checksum conflict — and its fix never reaches a database that is already past it. Finish by restarting MJAPI and grepping its startup log for `not found in metadata`; it must be clean, because MJAPI starts fine either way.
 
 `bizapps-caliber` carries a full `mj-upgrade` skill covering this end to end (watermark repair, `TURBO_FORCE` builds, post-migration verification). Port it here rather than re-deriving it.
 
@@ -55,6 +62,8 @@ several details in the originals are wrong here, and each file says where and wh
 | `.claude/rules/typescript-style.md` | `**/*.ts` | No `any`, no weak typing, no cross-package re-exports, `BaseSingleton`, decomposition |
 | `.claude/rules/testing.md` | tests | Vitest conventions **here** (`.spec.ts`, no `test-utils`), and what unit tests structurally cannot catch |
 | `.claude/rules/design-tokens.md` | `**/*.css` | No hardcoded colours; `--mj-*` / `--mjf-*` tokens; the shadow-root constraint |
+| `.claude/rules/changesets.md` | `.changeset/*.md` | **`patch` unless the change ships a migration or metadata.** Why the fixed group makes the level a release-wide decision, not a local one |
+| `.claude/rules/generated-code.md` | `packages/*/src/**/generated/**` | **Never hand-edit CodeGen output** — why the rule survived being followed-in-spirit, and what the durable check would be. Enforced by `.claude/hooks/block-generated-edits.mjs` |
 | `.claude/skills/mj-upgrade/` | on request | Full MJ version-upgrade runbook, including the core `__mj` migration that the pin bump alone does **not** do |
 
 Known corrections applied during the port, so nobody re-derives them: this repo uses `.spec.ts` not
@@ -67,7 +76,7 @@ repo has.
 mj-app.json   package.json   mj.config.cjs   turbo.json
 migrations/   migrations-pg/   metadata/   plans/
 packages/{Entities,Actions,Server,Angular}
-apps/{MJAPI,MJExplorer}
+apps/MJAPI            # API-only harness; there is no MJExplorer here
 ```
 
 ---
@@ -103,21 +112,64 @@ apps/{MJAPI,MJExplorer}
 - Cut feature branches **from `next`**, push, open a PR → `next`. A single coordinating PR promotes `next` → `main`.
 - **Feature branches MUST track the same-named remote** (`origin/<branch>`), never `origin/next` or `origin/main`. Verify with `git branch -vv` before every push.
 - Never commit directly to `main`. Never hand-author the `chore: Update package-lock.json` commit — the publish workflow creates it.
+- **CI is blocking (since #173).** Both rulesets require these seven **job** names — `build-and-test`,
+  `changes_and_migrations`, `codegen-append-gate`, `distribution-gate`, `generated-scope-gate`,
+  `migration-order-gate`, `ui-token-gate` — with "branch must be up to date with base" on, so a stale
+  branch must be updated before it can merge. **Nobody can bypass it, including repo admins**
+  (`current_user_can_bypass: never`, `bypass_actors: []`).
+- **Every gate reports on every PR, by design.** Path filtering lives in a job- or step-level `if:`
+  fed by `scripts/check-paths-touched.mjs` — **never** in `on: paths:` (`distribution-gate.yml` is
+  the one gate that filters at the step level rather than the job level, since only its 7-minute
+  mutant suite is expensive enough to be worth the condition). A workflow skipped by `on: paths:`
+  creates *no check run*, so a required check that never reports blocks the PR forever ("Expected —
+  Waiting for status"); a job or step skipped by an `if:` reports `skipped`, which counts as passing.
+  Both halves were verified on live PRs. Do not move a path filter back up into `on:`.
+- **Nothing pushes to `main` or `next` — the release opens pull requests instead** (#177, then
+  #218). Required status checks are evaluated against the check runs present on the SHA being
+  *introduced*, so a direct push — which introduces a SHA the remote has never seen — can never
+  satisfy them; no retry wins that race. That finding is permanent and `npm run lint:release-pushes`
+  (inside `build-and-test`) keeps it enforced.
+  What changed is everything built on top of it. The release is now **one dispatch and two merges**:
+  *Prepare a release* cuts `release/vX.Y.Z`, bumps, and opens the PR into `main`; `publish.yml`
+  publishes, tags, and opens the `main` → `next` back-merge PR. Runbook:
+  [`docs/release.md`](docs/release.md); `npm run release:plan` answers "is a release due?" read-only
+  from any checkout.
+  - **The pull requests are opened by a GitHub App, and that is not a bypass.** It writes only to
+    `release/*` and `chore/backmerge-*`, which are covered by no ruleset
+    (`gh api repos/MemberJunction/bizapps-forms/rules/branches/<branch>` returns `[]` for those and
+    three rules for `main`/`next`). Both rulesets keep `bypass_actors: []`. The App is needed for one
+    reason only: GitHub does not start workflow runs from `GITHUB_TOKEN`-authored events, so the
+    seven required contexts would never report on a PR the default token opened.
+  - **#177's "we lack the permission" conclusion was true when written and is now false** — do not
+    re-derive it. `vars.APP_CLIENT_ID` and `secrets.APP_PRIVATE_KEY` are org-level and already
+    visible to this repo; MJ core uses the same pair. The separate `422 — Actor GitHub Actions
+    integration must be part of the ruleset source or owner organization` refusal was about the
+    *GitHub Actions* integration specifically, and is irrelevant here because this design asks for no
+    bypass at all. Dispatch **Verify the release App token** to confirm the credential is live; it is
+    read-only.
+  - Between #177 and #218 the release was a hand-run runbook that **was never once executed** —
+    `v0.10.0` (2026-08-14) was cut by the automation #177 removed, and nothing shipped after it.
 
 ## Build & dev commands
-- `npm install` (repo root only — never inside a package dir)
-- `npm run build` (turbo, all packages/apps) · `npm run build:packages` · `npm run build:api` · `npm run build:explorer`
-- `npm run start:api` (4121) · `npm run start:explorer` (4321)
-- `npm run mj:migrate` (apply migrations to `__mj_BizAppsForms`) · `npm run mj:codegen` · `npm run mj:migrate:convert` (PG)
-- After changing a package's source, build that package (`cd packages/<Pkg> && npm run build`) and run its tests. Fix/update tests rather than leaving them broken.
+- `pnpm install` (repo root only — never inside a package dir)
+- `pnpm run build` (turbo, all `@mj-biz-apps/*`) · `pnpm run build:packages` · `pnpm run build:widget`
+- `pnpm run mj:migrate` (apply migrations to `__mj_BizAppsForms`) · `pnpm run mj:codegen` · `pnpm run mj:migrate:convert` (PG)
+- After changing a package's source, build that package (`cd packages/<Pkg> && pnpm run build`) and run its tests. Fix/update tests rather than leaving them broken.
+
+### Running it — **[docs/local-host.md](docs/local-host.md)**
+⚠️ **`start:api` / `start:explorer` / `build:api` / `build:explorer` do not exist** (they did not survive the pnpm migration; `4121`/`4321` describe a host convention, not something this repo serves). Two different answers depending on what you are working on:
+- **Server side** (submit endpoint, actions, resolvers, smoke tests) → this repo's own API harness: `cd apps/MJAPI && node server.mjs`. It is API-only, `private: true`, and a deliberate workspace member — see the comment in `pnpm-workspace.yaml` for why that membership is load-bearing.
+- **Builder / admin UI in Explorer, or `forms-ng` components** → **MJ's host**: `cd ../MJ && pnpm start` (Explorer `:4201`, API `:4000`) — MJ is checked out beside this repo under a shared workspace parent, with this repo linked in via `mj dev workspace`. There is no Explorer in this repo. Caliber and ATS use the same host; one serves all three.
 
 ## CodeGen
-- Generated code lives in `packages/*/src/generated/` (entities, actions, resolvers, Angular forms). **Never hand-edit generated files.** Run `npm run mj:codegen` after any schema change. Write TypeScript against generated types **only after** CodeGen runs.
+- **Running CodeGen, `mj migrate`, or an MJ upgrade → [`docs/database-operations.md`](docs/database-operations.md).** It covers the three commands whose failure modes report success: which `mj migrate` targets core vs this app's schema, what `--skipfiles`/`--skipdb` really do, the ordering trap on a fresh database, the `IsHierarchy` opt-in for self-referencing FKs, and the clean-room build.
+- Generated code lives in `packages/*/src/**/generated/` (entities, actions, resolvers, Angular forms — Angular's is under `src/lib/generated/`, and at MJ 6.1 the entity and GraphQL output moved into per-schema modules with a barrel left behind). **Never hand-edit generated files** — `.claude/hooks/block-generated-edits.mjs` now refuses it, and `.claude/rules/generated-code.md` explains why a hand edit that produces byte-identical *lines* is still wrong. Run `npm run mj:codegen` after any schema change, against a clean-room database rather than the shared one ([`docs/database-operations.md`](docs/database-operations.md)). Write TypeScript against generated types **only after** CodeGen runs.
 - The scaffold ships **placeholder** `generated/` files so the packages compile before the first CodeGen run; CodeGen overwrites them.
 
 ## Migrations
-- Highest `migrations/` version folder; `VYYYYMMDDHHMM__v<ver>__<Description>.sql`; hardcoded UUIDs; no `__mj_*` timestamp columns (CodeGen adds them); no FK indexes (CodeGen adds them); `sp_addextendedproperty` on every business column; single multi-`ADD` `ALTER`s; new tables in schema `__mj_BizAppsForms`; use the `${flyway:defaultSchema}` placeholder.
-- **`migrations/` is the only thing that ships.** `mj-app.json`'s `metadata.directory` is a dev-time pointer MJ's install engine **never reads** (it says so in `manifest-schema.ts`); seeding happens exclusively through migrations. So a `mj sync push` whose result exists only in your dev DB is an **unshipped change** — regenerate `V…__Metadata_Sync.sql` and run `npm run seed:manifest`. `npm run lint:distribution` enforces both this and the placeholder rule below; see `migrations/README.md` for the regeneration recipe (it is not a plain re-push — the generator's output needs two schema substitutions).
+- **`migrations/` is flat** — there are no `vN/` era subfolders here (MJ core has them; we do not, and `migrations/codegen/` is gitignored CodeGen staging, not a migration folder). `VYYYYMMDDHHMM__v<ver>__<Description>.sql`; hardcoded UUIDs; no `__mj_*` timestamp columns (CodeGen adds them); no FK indexes (CodeGen adds them); `sp_addextendedproperty` on every business column; single multi-`ADD` `ALTER`s; new tables in schema `__mj_BizAppsForms`; use the `${flyway:defaultSchema}` placeholder.
+- **`migrations/` is the only thing that ships.** `mj-app.json`'s `metadata.directory` is a dev-time pointer MJ's install engine **never reads** (it says so in `manifest-schema.ts`); seeding happens exclusively through migrations. So a `mj sync push` whose result exists only in your dev DB is an **unshipped change**.
+- **Metadata seeding is release work, not PR work** (MJ's model — `MJ/metadata/CLAUDE.md` §1b and §10). A feature PR contributes **only** the declarative JSON under `metadata/`: fields, `@lookup`/`@file`/`@parent` references, a `primaryKey` UUID from `uuidgen`, **no `sync` block, and no `*__Metadata_Sync.sql`**. The build engineer generates **one consolidated `Metadata_Sync` per release** against a clean database — recipe in `migrations/README.md`; it is not a plain re-push, the generator's output needs documented schema substitutions. Two release-readiness checks run in `publish.yml`, not on PRs: `npm run check:release-seed` (every declared `primaryKey` appears in a shipped migration) and `npm run check:seed-cadence` (**one consolidated `Metadata_Sync` per release**: at most one unreleased seed — one not in any release tag has reached no host, so it is not append-only history — and **not zero when `metadata/` moved since the last tag**, which is the only check that sees an *edited* record, since coverage compares ids and an edit keeps its id). `npm run lint:distribution` is a different thing and covers only the shipped-SQL hazards, including the placeholder rule below.
 - **Only `${flyway:defaultSchema}` and `${mjSchema}` may appear in shipped SQL** (teardown scripts: `${mjSchema}` only). `mj migrate` builds its placeholder map from *this* repo's `mj.config.cjs`, but `mj app install` builds it from the *host's* — and Skyway leaves an unknown `${…}` untouched instead of failing, so a third placeholder ships as a literal string and fails silently on someone else's database.
 
 ## MJ entity & data patterns (must follow)
@@ -133,7 +185,7 @@ apps/{MJAPI,MJExplorer}
 - Net-new server work is the **public-write hardening layer**: Cloudflare Turnstile (per-form toggle) + rate-limit + quota + dedupe + IP-hash/UA capture, then Save response/answers and fire on-submit Actions/Agents.
 
 ## UI / design tokens
-- All component CSS uses semantic `--mj-*` design tokens — **no hardcoded colors** (breaks dark mode). Use `@memberjunction/ng-ui-components` + AG Grid + `angular-split` + `<mj-loading>`. Dialog buttons: confirm LEFT, cancel RIGHT. Font Awesome for icons. **Mobile-first or it doesn't ship** — hold every respondent-facing surface to the plan's §2 UX Quality Bar (WCAG AA, per-field mobile keyboards, large tap targets, progress signal).
+- All component CSS uses semantic `--mj-*` design tokens — **no hardcoded colors** (breaks dark mode). Use `@memberjunction/ng-ui-components` + AG Grid + `angular-split` + `<mj-loading>`. Dialog buttons: confirm LEFT, cancel RIGHT. Font Awesome for icons in Explorer-hosted surfaces (builder, dashboards); the **respondent widget draws its own inline SVG via `<mjf-icon name="…">`** (`packages/Angular/src/lib/widget/components/icon-glyphs.ts`) because its host page loads no icon font — a `fa-*` class there renders 0 × 0 (#115), and `icon.spec.ts` fails `pnpm test` on one. **Mobile-first or it doesn't ship** — hold every respondent-facing surface to the plan's §2 UX Quality Bar (WCAG AA, per-field mobile keyboards, large tap targets, progress signal).
 
 ## Functional decomposition
 - Small, focused functions (~30–40 lines max). Decompose complex logic. DRY via base classes/shared utilities.

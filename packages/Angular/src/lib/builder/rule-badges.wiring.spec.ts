@@ -1,0 +1,392 @@
+/**
+ * Structural guards for how a form's logic is made visible on the canvas.
+ *
+ * There was a Rules tab: a hub listing every rule on the form in reading order, with the broken
+ * ones badged. It read well and it was in the wrong place — it said things about a question that
+ * belonged BESIDE that question, and an author had to know the tab existed to find out a question
+ * was conditional at all. The sentences it composed are still composed (`rules-inventory.ts`);
+ * what changed is where they are shown.
+ *
+ * The one thing that MUST survive the tab is its warning. A condition whose question is not in
+ * the answer map reads `undefined` — `false` under the equality family, TRUE under
+ * `isNotAnswered` / `notEquals` — so the item it guards is shown to everyone or to nobody,
+ * silently, with the form still looking correct in the builder. Nothing else in the builder says
+ * so, which is why the tab was worth opening and why the badge is worth rendering.
+ *
+ * The component uses decorated inputs and cannot be instantiated in this suite's node
+ * environment, so what is checkable is the source. Comments are stripped before every assertion:
+ * the source explains these decisions in prose, and a guard that matches its own documentation
+ * proves nothing.
+ */
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const stripped = (file: string): string =>
+  readFileSync(join(__dirname, file), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\/\/[^\n]*/g, '');
+
+const builder = (): string => stripped('form-builder.component.ts');
+const builderHtml = (): string => stripped('form-builder.component.html');
+/** Where the rule sentences — and the one source-list definition — actually live. */
+const inventory = (): string => stripped('rules-inventory.ts');
+
+/**
+ * Just the shared reorder path, so a guard about it cannot be satisfied by another method.
+ *
+ * Bounded by the method's OWN closing brace rather than by whatever symbol follows it. Slicing to
+ * the next declaration is only isolation while nothing is ever inserted between the two, and #149
+ * inserted `moveQuestionAcrossPages` exactly there — which quietly doubled this slice and let the
+ * busy-flag guard below be satisfied by that method's try/finally instead of this one's. The
+ * damage runs one way only: assertions that MATCH get easier as the haystack grows, so the slice
+ * widening produces no failure to notice. `\n  }` is the same bound `crossPageMethod` and
+ * `undoMethod` use, and the test directly below pins it.
+ */
+const reorderMethod = (): string => {
+  const source = builder();
+  const start = source.indexOf('private async reorderQuestion(');
+  const end = source.indexOf('\n  }', start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  return source.slice(start, end);
+};
+
+describe('the Rules tab is gone, not hidden', () => {
+  it('leaves no tab to open', () => {
+    // A tab left in the union but unreachable in the template is a state the component can still
+    // be put into — by a restored preference, by a deep link, by the next person reading the
+    // union and wiring a button to it.
+    expect(builder()).not.toMatch(/'rules'/);
+    expect(builderHtml()).not.toMatch(/mjf-rules-tab|activeTab === 'rules'/);
+  });
+
+  it('takes its component with it rather than orphaning the file', () => {
+    expect(existsSync(join(__dirname, 'rules-tab.component.ts'))).toBe(false);
+    expect(builder()).not.toMatch(/RulesTabComponent/);
+  });
+});
+
+describe('a rule is visible on the item it is about', () => {
+  it('badges the question and the page, which are the two the canvas draws', () => {
+    // An ending already says "Conditional ending" in words of its own; a page said nothing at
+    // all, and a page rule hides every question on it.
+    const html = builderHtml();
+    expect(html).toMatch(/badges\.get\(node\.entity\.ID\)/);
+    expect(html).toMatch(/badges\.get\(page\.entity\.ID\)/);
+  });
+
+  it('reads the whole form once per render, not once per question', () => {
+    // `ruleBadges` walks every rule on the form. Called from inside the question loop it would
+    // do that once per question, on exactly the forms long enough for it to hurt.
+    const html = builderHtml();
+    expect(html).toMatch(/@let badges = ruleBadges;/);
+    expect(html).not.toMatch(/@for \(badge of ruleBadges/);
+  });
+
+  it('says what is wrong in words, never in colour alone', () => {
+    // The warning token turns a badge amber. Amber is not a message, and it is not one at all to
+    // a colourblind author or a screen reader.
+    const badge = stripped('rule-badge.component.ts');
+    expect(badge).toMatch(/\[class\.mjf-badge--warning\]="badge\.broken"/);
+    expect(badge).toMatch(/\{\{ badge\.label \}\}/);
+  });
+
+  it('shows that message on hover, rather than promising one a native tooltip withholds', () => {
+    // `[title]` is technically a tooltip and practically a dead icon: the browser waits about a
+    // second, so the honest reading of a hover that does nothing is that the badge is broken —
+    // which is exactly the wrong impression for the badge that reports a broken rule.
+    // `setting-row.component.ts` reached this conclusion first and its CSS says so; this is the
+    // one place that kept the mechanism that was rejected there.
+    const badge = stripped('rule-badge.component.ts');
+    expect(badge).toMatch(/role="tooltip"/);
+    expect(badge).toMatch(/\{\{ badge\.detail \}\}/);
+    expect(badge).not.toMatch(/\[title\]="badge\.detail"/);
+    // The bubble overlaps whatever sits below it. Without this it swallows that row's clicks.
+    expect(badge).toMatch(/pointer-events:\s*none/);
+    // Amber plus a hover bubble is still nothing to a screen reader.
+    expect(badge).toMatch(/\[attr\.aria-label\]="badge\.label \+ ': ' \+ badge\.detail"/);
+  });
+
+  it('shows it to a keyboard and a touch screen too, not to a mouse alone', () => {
+    // `:hover` is the one input a phone does not have, and this app is mobile-first. Without a
+    // tab stop the detail was unreachable by keyboard as well: the aria-label carries it to a
+    // screen reader, and a sighted author who does not use a mouse had nowhere to read it.
+    const badge = stripped('rule-badge.component.ts');
+    expect(badge).toMatch(/tabindex="0"/);
+    expect(badge).toMatch(/:host\(:focus-within\) \.rb-tip/);
+    // A focusable thing that shows nothing on focus is worse than one that cannot be focused.
+    expect(badge).toMatch(/:host\(:focus-visible\)/);
+  });
+
+  it('is rendered from ONE component, not copied to each place a badge appears', () => {
+    // Three sites carried the same span — a question, a section header and an ending screen — so
+    // the tooltip would have been written three times and drifted twice.
+    const html = builderHtml();
+    expect(html.match(/<mjf-rule-badge/g) ?? []).toHaveLength(3);
+    expect(html).not.toMatch(/<span[^>]*fb-rule-badge/);
+  });
+
+  it('is a label, not a second way to write a rule', () => {
+    // Two write paths for one thing is how a summary and a panel come to disagree about what a
+    // rule says. The badge has no click handler; selecting the row opens the panel that owns it.
+    expect(stripped('rule-badge.component.ts')).not.toMatch(/\(click\)/);
+  });
+});
+
+describe('what the builder offers a rule to read', () => {
+  it('builds every source list through one helper, so the same questions are excluded everywhere', () => {
+    // There were six places assembling a source list — a page's show gate, its jump, a
+    // question's show gate, its jump, an ending's, and the Rules tab's — each mapping the tree
+    // itself. Six copies of "which questions can a rule read" is six places for the answer to
+    // drift, and the first thing that had to be excluded (a Statement, which collects no
+    // answer) would have needed adding to all six.
+    //
+    // The helper moved OUT of the component with issue #79: publish has to read the same list
+    // the badges resolve against, and a private method on a component is not somewhere a service
+    // can reach. The invariant did not move — it got wider — so it is now asserted where the one
+    // definition lives, plus the fact that the component no longer keeps a copy.
+    expect(inventory()).toMatch(/export function conditionSourcesOf\(/);
+    expect(inventory().match(/toConditionalSource\(/g) ?? []).toHaveLength(1);
+    expect(builder()).not.toMatch(/toConditionalSource\(/);
+    expect(builder()).toMatch(/conditionSourcesOf\(/);
+  });
+
+  it('drops a question that cannot be a source rather than rendering a ghost', () => {
+    // `toConditionalSource` returns undefined for a question that collects no answer. Mapping
+    // it straight into the array would put `undefined` in a list every consumer then indexes.
+    expect(inventory()).toMatch(
+      /conditionSourcesOf\([\s\S]{0,220}?toConditionalSource\([\s\S]{0,80}?\?\?\s*\[\]/,
+    );
+  });
+});
+
+describe('a reorder that breaks a rule says so at the drag', () => {
+  it('diffs the rules around the move rather than checking them itself', () => {
+    // A drag-time rule checker is a second implementation of "is this rule broken", free to
+    // disagree with the badge — and then the author is told two things about one rule. The
+    // difference over `collectRuleEntries` cannot disagree with the badge because it IS the
+    // badge, and every breakage class added there later is warned about here for free.
+    const source = builder();
+    expect(source).toMatch(/const before = this\.ruleEntries;[\s\S]{0,120}moveItemInArray\(/);
+    expect(source).toMatch(/newlyBrokenRules\(before, this\.ruleEntries\)/);
+  });
+
+  it('remembers WHICH question moved, not which index it left', () => {
+    // An index pair is only correct while nothing else has shifted the page. Resolving by id at
+    // click time makes moving the wrong question unrepresentable rather than merely unlikely.
+    //
+    // The call now takes TWO id lists (#149): the page the question is on, and the page it has
+    // to go home to. They are the same page for an in-page undo and different ones once a move
+    // can cross a section — which is the whole reason the second list exists, since the anchor
+    // `wasBefore` names a question on the page it LEFT.
+    //
+    // It also takes the CURRENT PAGE'S ID, and passing `current.entity.ID` is the point: that
+    // page was found by looking for the question, so the id and the list beside it are the same
+    // page by construction. Passing an id from anywhere else — the band, a variable resolved
+    // earlier — is how the two come apart.
+    const source = builder();
+    expect(source).toMatch(/questionId: moved\.entity\.ID/);
+    expect(source).toMatch(
+      /undoReorderMove\(\s*notice,\s*current\.entity\.ID,\s*this\.questionIds\(current\),\s*this\.questionIds\(home\),\s*\)/,
+    );
+    expect(source).toMatch(/private questionIds\(page: PageNode\): string\[\] \{/);
+  });
+
+  it('slices ONE method, so a guard about the reorder path cannot be met by another', () => {
+    // `reorderMethod`'s docstring promises this isolation, and the promise held only while the
+    // symbol it slices TO was the next thing in the file. #149 inserted `moveQuestionAcrossPages`
+    // between the two markers, and the guard below silently started matching THAT method's
+    // try/finally: a `reorderQuestion` that sets `busy` and never releases it passed all three
+    // of its assertions. An assertion that MATCHES only gets easier as the haystack grows, so
+    // the boundary has to be asserted too and not just the contents.
+    const method = reorderMethod();
+    expect(method).toMatch(/private async reorderQuestion\(/);
+    expect(method).not.toMatch(/private async moveQuestionAcrossPages\(/);
+    expect(method.match(/this\.busy = true/g) ?? []).toHaveLength(1);
+  });
+
+  it('holds the busy flag across the write it awaits', () => {
+    // The method GUARDS on `busy` and nothing here ever set it, so the guard read a flag that
+    // was false for the whole write and the Undo button's `[disabled]="busy"` was decoration.
+    // Two reorders could then interleave over one `DisplayOrder` column — the lost update
+    // `builder-state.service.ts` documents. try/finally because a stuck flag freezes every
+    // guarded handler on the screen with nothing on screen to explain it.
+    const method = reorderMethod();
+    expect(method).toMatch(/this\.busy = true;/);
+    expect(method).toMatch(/finally \{\s*this\.busy = false;/);
+    expect(method.indexOf('this.busy = true')).toBeLessThan(method.indexOf('persistQuestionOrder'));
+  });
+
+  it('checks that the new order was actually written', () => {
+    // `persistQuestionOrder` writes one question at a time and returns false when a write is
+    // refused halfway — a third state matching neither the order before the move nor after it.
+    expect(builder()).toMatch(/if \(!\(await this\.state\.persistQuestionOrder\(page\)\)\)/);
+  });
+
+  it('is its own band, not the failure band, and carries an Undo that outlives the tick', () => {
+    // `lastFailure` means one thing: the database refused a write. Widening it to "and also,
+    // consequences of things that succeeded" makes a clear signal vague, and the two co-occur.
+    const html = builderHtml();
+    expect(html).toMatch(/class="fb-reorder-notice" role="alert"/);
+    expect(html).toMatch(/\(click\)="undoReorder\(\)"/);
+    expect(html).toMatch(/\(click\)="dismissReorderNotice\(\)"/);
+    // Undo LEFT of dismiss — the repo's confirm-left convention, and the one action here that is
+    // not "make this go away".
+    expect(html.indexOf('undoReorder()')).toBeLessThan(html.indexOf('dismissReorderNotice()'));
+    // Warning-toned, a step down from the error band above it: nothing is broken about the
+    // form's data, a rule on it stopped being readable.
+    expect(stripped('form-builder.styles.ts')).toMatch(
+      /\.fb-reorder-notice \{[\s\S]{0,400}?--mj-status-warning-bg/,
+    );
+  });
+
+  it('does not hide itself on a timer', () => {
+    // An auto-hiding warning about something otherwise silent is the failure this issue is
+    // about. The notice stands until it is undone, dismissed, or superseded by another move.
+    expect(builder()).not.toMatch(/setTimeout[\s\S]{0,120}reorderNotice/);
+    expect(builder()).not.toMatch(/reorderNotice[\s\S]{0,120}setTimeout/);
+  });
+
+  it('is not a toast, because the toast cannot carry the Undo', () => {
+    // `MJNotificationService.CreateSimpleNotification` takes (message, style, hideAfter) and
+    // renders a close button and nothing else — no action slot — and would add a peer this
+    // package does not carry. Adopting an MJ package to get a control that cannot do the job is
+    // the wrong reading of "use the built-in where one exists".
+    expect(builder()).not.toMatch(/MJNotificationService/);
+  });
+});
+
+describe('every write that can invert a pair is watched', () => {
+  /** The cross-page write path, comments stripped — what actually runs. */
+  const crossPageMethod = (): string => {
+    const source = builder();
+    const start = source.indexOf('private async moveQuestionAcrossPages(');
+    expect(start, 'no moveQuestionAcrossPages in the builder').toBeGreaterThan(-1);
+    const end = source.indexOf('\n  }', start);
+    expect(end).toBeGreaterThan(start);
+    return source.slice(start, end);
+  };
+
+  /** Just the Undo handler, so a guard about it cannot be satisfied by another method. */
+  const undoMethod = (): string => {
+    const source = builder();
+    const start = source.indexOf('protected async undoReorder(');
+    expect(start, 'no undoReorder in the builder').toBeGreaterThan(-1);
+    const end = source.indexOf('\n  }', start);
+    expect(end).toBeGreaterThan(start);
+    return source.slice(start, end);
+  };
+
+  it('runs the damage diff over the cross-section write, not just the in-page one', () => {
+    // WHAT THIS REPLACED. This block used to BAN transferArrayItem and cdkDropListConnectedTo
+    // outright, as a tripwire: `reorderQuestion` claimed to be the only path that can invert a
+    // pair of surviving questions, and the ban is where that claim said so out loud rather than
+    // letting the notice quietly under-report. Issue #149 shipped the move it was watching for,
+    // so the obligation is DISCHARGED here instead of deleted — the new write runs the same
+    // `newlyBrokenRules` set difference, which is what the ban existed to guarantee. Deleting it
+    // would have left the band under-reporting in silence, the one outcome it was written to
+    // make impossible.
+    const method = crossPageMethod();
+    expect(method).toMatch(/newlyBrokenRules\(/);
+    expect(method).toMatch(/damageKeys\(/);
+    expect(method).toMatch(/reorderNoticeText\(/);
+  });
+
+  it('keeps the cross-section move to ONE write path', () => {
+    // The diff is hooked per method, so a second place that transfers between lists is a second
+    // place to forget it. One call site is what makes the guard above sufficient.
+    const occurrences = builder().match(/transferArrayItem\(/g) ?? [];
+    expect(occurrences).toHaveLength(1);
+    expect(crossPageMethod()).toMatch(/transferArrayItem\(/);
+  });
+
+  it('records the section the question came FROM, so Undo returns it there', () => {
+    // Only the SOURCE page is recorded. Where the question is NOW is deliberately not on the
+    // band — see the guard below.
+    expect(crossPageMethod()).toMatch(/fromPageId: source\.entity\.ID/);
+  });
+
+  it('does not remember where the question IS, because that can stop being true', () => {
+    // A move that breaks nothing new leaves a standing band alone, on purpose. Since #149 such
+    // a move can also change the question's PAGE — so a page id stored on the band when it was
+    // raised can name a section the question has since left, while every id on it still exists.
+    // Reproduced: the band's Undo then resolved the question inside a section it was no longer
+    // in, found nothing, and took the "it must have been deleted" branch — silently dropping a
+    // warning whose rule was still broken.
+    //
+    // The fix is to resolve it the way everything else on this band is already resolved: by id,
+    // at click time, against the tree. These two guards are what stop the cache coming back.
+    expect(undoMethod()).not.toMatch(/notice\.pageId/);
+    expect(undoMethod()).toMatch(/q\.entity\.ID === notice\.questionId/);
+  });
+
+  it('renumbers both sections through the one method that orders the writes', () => {
+    // Not two `persistQuestionOrder` calls here: the ORDER is the integrity story, and spreading
+    // it across the component would put it somewhere no spec can hold it.
+    expect(crossPageMethod()).toMatch(/state\.persistCrossPageMove\(/);
+    expect(crossPageMethod()).not.toMatch(/persistQuestionOrder\(/);
+  });
+
+  it('still refuses a page-order write, because sections cannot be reordered', () => {
+    // Unchanged and still in scope: #149 moves a question between sections; it does not move a
+    // section. No page's questions can change position relative to another page's.
+    expect(builder()).not.toMatch(/persistPageOrder/);
+  });
+});
+
+/**
+ * A publish refusal must not outlive the rules it names.
+ *
+ * THE DEFECT, found smoke-testing the gate. Publish is refused, the toolbar reads *Publish
+ * refused — 4 broken rules would ship with this form*, the author fixes all four, the badges go
+ * green — and that line is still on screen, now beside the "Published" pill. Two answers on one
+ * toolbar, one of them false, which is precisely the failure the gate exists to remove: the
+ * message that enforces "the badge and the gate agree" must not itself start disagreeing with
+ * the badges.
+ *
+ * Retired on TRUTH, not on identity, and from the same clock as the reorder band — `markDirty`
+ * fires wherever an edit lands, and a spurious call can only re-confirm a still-broken form; it
+ * can never retract a refusal that still applies. Asked of `brokenRuleLines`, the function the
+ * refusal came from, so the message and its retraction cannot answer differently.
+ */
+describe('a publish refusal is retracted when its rules are fixed', () => {
+  /** The component's retirement method, comments stripped — what actually runs. */
+  const retireStaleRefusal = (): string => {
+    const source = builder();
+    const start = source.indexOf('private retireStaleRefusal(');
+    expect(start).toBeGreaterThan(-1);
+    return source.slice(start, source.indexOf('\n  }', start));
+  };
+
+  it('retires the refusal from the same clock that retires the reorder band', () => {
+    // `markDirty()` is the one seam every edit already passes through — the same reason
+    // `retireStaleNotice` is called there. Hanging this off any single edit path instead would
+    // retract the refusal for the ways of fixing a rule that path knows about, and strand it for
+    // every other way the author might have fixed it.
+    const source = builder();
+    const markDirty = source.slice(
+      source.indexOf('private markDirty()'),
+      source.indexOf('\n  }', source.indexOf('private markDirty()')),
+    );
+    expect(markDirty).toMatch(/this\.retireStaleRefusal\(\)/);
+    expect(markDirty).toMatch(/this\.retireStaleNotice\(\)/);
+  });
+
+  it('asks brokenRuleLines, not a second opinion assembled here', () => {
+    // The whole point of issue #79 is that "is this rule broken" has ONE answer. A retraction
+    // computed from its own walk of the tree is a third reader that can disagree with both the
+    // badge and the gate, and the disagreement would be silent.
+    expect(retireStaleRefusal()).toMatch(/brokenRuleLines\(/);
+  });
+
+  it('clears only a refusal that was about rules', () => {
+    // "Could not read the form's settings" is not something fixing a rule repairs, so it must
+    // survive the next edit. The guard is the stored `brokenRules` from the result, which the
+    // service sets on that refusal and no other.
+    const method = retireStaleRefusal();
+    expect(method).toMatch(/refusedRules/);
+    expect(method).toMatch(/statusMessage = ''/);
+  });
+});

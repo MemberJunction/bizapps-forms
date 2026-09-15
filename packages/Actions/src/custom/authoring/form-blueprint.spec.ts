@@ -5,6 +5,7 @@ import {
   formQuestionTypeSchema,
   CHOICE_QUESTION_TYPES,
 } from './form-blueprint';
+import { FORM_QUESTION_TYPES, questionTypeBehavior } from '@mj-biz-apps/forms-entities';
 
 describe('parseFormBlueprint', () => {
   it('parses a valid blueprint object', () => {
@@ -16,11 +17,15 @@ describe('parseFormBlueprint', () => {
     expect(bp.pages[0].questions[0].type).toBe('Email');
   });
 
-  it('rejects an unknown question type (enforces the §5.3 taxonomy)', () => {
+  it('rejects a question type outside the contract taxonomy', () => {
+    // Was `Signature`, which the taxonomy grew to include and has since retired — a rejection
+    // test whose
+    // example became valid stops testing rejection and starts asserting nothing. `Payment` is a
+    // type we have deliberately NOT implemented, so it is a stable stand-in for "not a type".
     expect(() =>
       parseFormBlueprint({
         name: 'Bad',
-        pages: [{ questions: [{ type: 'Signature', prompt: 'Sign here' }] }],
+        pages: [{ questions: [{ type: 'Payment', prompt: 'Pay here' }] }],
       }),
     ).toThrow();
   });
@@ -53,10 +58,54 @@ describe('extractJSON', () => {
 });
 
 describe('taxonomy', () => {
-  it('choice types are exactly Single/Multi/Dropdown', () => {
-    expect([...CHOICE_QUESTION_TYPES].sort()).toEqual(['Dropdown', 'MultiChoice', 'SingleChoice']);
+  // Both assertions now check that the blueprint DERIVES from the contract rather than pinning
+  // the numbers it derived to. Pinning is what let the enum sit at 15 while the contract moved
+  // to 25: the test kept passing and the AI Designer quietly could not author the new types.
+  it('offers exactly the contract\'s question types', () => {
+    expect([...formQuestionTypeSchema.options].sort()).toEqual([...FORM_QUESTION_TYPES].sort());
   });
-  it('the question-type enum has the 15 Phase-1 types', () => {
-    expect(formQuestionTypeSchema.options).toHaveLength(15);
+
+  it('treats every option-carrying type as a choice type, not just the original three', () => {
+    const expected = FORM_QUESTION_TYPES.filter((t) => questionTypeBehavior(t).optionMode !== 'none');
+    expect([...CHOICE_QUESTION_TYPES].sort()).toEqual([...expected].sort());
+    // The ones the hand-written set missed, named explicitly so a regression is legible.
+    for (const type of ['Ranking', 'Matrix', 'PictureChoice'] as const) {
+      expect(CHOICE_QUESTION_TYPES.has(type), type).toBe(true);
+    }
+  });
+});
+
+/**
+ * The one combination that cannot mean anything: `Legacy` says the built-in steps run, and
+ * `automations` names steps that then never would. Rejecting it in `applyOnSubmitConfig` covers
+ * both shipping actions, but `buildFormFromBlueprint` is exported and `parseFormBlueprint` is the
+ * boundary LLM output crosses — so the invariant belongs on the schema, where nothing can route
+ * around it.
+ */
+describe('formBlueprintSchema — Legacy with authored steps', () => {
+  const base = {
+    name: 'Intake',
+    pages: [{ title: 'p', questions: [{ type: 'Email', prompt: 'Email' }] }],
+  };
+
+  it('rejects an explicit Legacy mode alongside authored steps', () => {
+    expect(() =>
+      parseFormBlueprint({
+        ...base,
+        onSubmitMode: 'Legacy',
+        automations: [{ actionName: 'Forms: Send Confirmation Email' }],
+      }),
+    ).toThrow();
+  });
+
+  it('accepts Legacy when no steps are authored', () => {
+    expect(parseFormBlueprint({ ...base, onSubmitMode: 'Legacy' }).onSubmitMode).toBe('Legacy');
+    expect(parseFormBlueprint({ ...base, onSubmitMode: 'Legacy', automations: [] }).automations).toEqual([]);
+  });
+
+  it('accepts steps with Configured, and with no mode at all', () => {
+    const steps = [{ actionName: 'Forms: Send Confirmation Email' }];
+    expect(parseFormBlueprint({ ...base, onSubmitMode: 'Configured', automations: steps }).automations).toHaveLength(1);
+    expect(parseFormBlueprint({ ...base, automations: steps }).automations).toHaveLength(1);
   });
 });

@@ -1,0 +1,827 @@
+#!/usr/bin/env node
+/**
+ * Gate: CodeGen's SQL ships inside the migration that caused it, and the standalone run file does not
+ * ship at all.
+ *
+ * ── WHY THIS IS NOT A STYLE RULE ────────────────────────────────────────────────────────────────
+ * MJ Forms is an Open App. `mj app install` writes `__mj_BizAppsForms` into the host's
+ * `excludeSchemas` (MJ/packages/OpenApp/Engine/src/install/install-orchestrator.ts:1980-1983), so the
+ * host's CodeGen never runs against our schema. `migrations/` is the only channel we have: if a
+ * table, a base view, an spCreate/spUpdate/spDelete, an EntityField row or a column description is
+ * not in a migration, it does not exist on the host. Locally everything works, because `mj codegen`
+ * both LOGS and EXECUTES each statement in one call (CodeGenLib/src/Misc/sql_logging.ts:212-216) —
+ * the authoring database is already current when CodeGen exits, and the run file exists solely to
+ * replay that effect somewhere else.
+ *
+ * The specific damage, observed here on 2026-08-19: V202608182100 created FormScreen and three
+ * columns and shipped no CodeGen output. `BaseEntity.Set` on a field with no EntityField row is a
+ * NO-OP, so the entity never goes dirty and the save reports success having written nothing. An hour
+ * went into that before anyone noticed the column and the metadata lived in different databases;
+ * V202608191300 is the repair, and V202608191200/V202608191400 are the same pair a second time.
+ *
+ * ── THE TWO CHECKS, AND WHY THEIR SCOPES DIFFER ─────────────────────────────────────────────────
+ * CHECK 1 (capture files) is WHOLE-TREE. `git ls-files migrations/codegen` is 0 today, so a
+ * whole-tree check can never be permanently red, and whole-tree is the only scope that catches the
+ * commit that motivated this gate: a23b598 committed 14 run files and touched no top-level
+ * migration at all.
+ *
+ * CHECK 2 (DDL ↔ output) is DIFF-SCOPED, for the reason bizapps-caliber documents: nine merged
+ * migrations predate the rule and cannot be repaired in place — history is append-only
+ * (migrations/README.md, "Add a NEW seed migration; never edit an existing one") — so a whole-tree
+ * version would be permanently red and would get turned off. The diff is also the only thing the
+ * PR's author can act on.
+ *
+ * Node stdlib only, deliberately: a dependency problem must never be the reason nobody finds out.
+ */
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * A migration that ships its CodeGen output is large — B202606281200 is 15k lines — and node's
+ * default maxBuffer is 1 MB, so `git show` on exactly the files this gate exists to read would throw
+ * ENOBUFS and be indistinguishable from "the path does not exist".
+ */
+const GIT_OUTPUT_LIMIT = 256 * 1024 * 1024;
+
+/** The banner this repo already uses (V202606301305, V202608211000, V202608211600, V202608252340). */
+export const BANNER_PATTERN = /--\s*CodeGen output \(appended\)/i;
+
+/** A deliberate, stated claim that this DDL yields no CodeGen output. */
+export const CODEGEN_NONE_MARKER = '@codegen-none';
+
+/**
+ * Migrations whose CodeGen output legitimately shipped in a LATER migration.
+ *
+ * Each was already merged — and therefore immutable — when the omission was found, so the only
+ * available remedy was a new migration.
+ *
+ * Verified, never trusted, and verified per OBLIGATION rather than per file: `main()` reads every
+ * named remedy at the diff's head and asks `remedyCovers` whether they actually supply each column's
+ * EntityField row and each added foreign key's EntityRelationship row. Checking only that a remedy
+ * exists and carries *some* CodeGen output is what let one entry silently excuse an obligation the
+ * named file does not contain — V202609091600 owes both, and they ship in two different migrations,
+ * which is why a value may be a LIST.
+ *
+ * NOT a general escape hatch. For a migration that is still editable, append the output to it.
+ */
+export const OUTPUT_SHIPPED_LATER = new Map([
+  // Created FormScreen + FormPage.IsPartialSubmitPoint + FormQuestionOption.ImageURL/MatrixAxis
+  // with no output. V202608191300's header documents the repair and the debugging it cost.
+  ['V202608182100__v0.11.x__Element_Parity_And_Screens.sql',
+   'V202608191300__v0.11.x__Element_Parity_Metadata_Backfill.sql'],
+  // Added FormScreen.SocialLinks. Its EntityField row could not be inserted in the same file — the
+  // Entity row for Form Screens is created by V202608191300, which sorts AFTER it. V202608191400
+  // calls itself "the second half of V202608191200".
+  ['V202608191200__v0.11.x__Ending_Screen_Social_Links.sql',
+   'V202608191400__v0.11.x__Form_Screen_Social_Links_Metadata.sql'],
+  // Added FormDistribution.AllowDeviceResume and FormResponse.FormDistributionID, shipped views,
+  // procedures and indexes for both, and no EntityField row for either -- so `generated` was true
+  // and the all-or-nothing check passed while every Form Response save failed on a host (#201).
+  // V202609121200 ships all four EntityField rows (the two columns, AllowedOrigins, and the
+  // virtual FormDistribution field), each guarded on the natural key, with Sequence computed as
+  // MAX+1 -- but suppression here is per-file, and that remedies only the EntityField half of
+  // V202609091600's two violations. The FK column's EntityRelationship row -- V202609091600's
+  // other omission -- ships no relationship at all until this branch's own
+  // V202609141900__v0.12.x__Form_Response_Distribution_Metadata.sql, not here.
+  ['V202609091600__v0.12.x__Resume_Own_Response.sql',
+   ['V202609121200__v0.12.x__Distribution_Allowed_Origins.sql',
+    'V202609141900__v0.12.x__Form_Response_Distribution_Metadata.sql']],
+]);
+
+/**
+ * The branch every migration is introduced on.
+ *
+ * A change into `main` is a release or a back-merge: by construction it carries nothing `next` does
+ * not already have. So `main` is the wrong commit to ask "what does this introduce?" from -- see
+ * resolveCheckBase.
+ */
+export const INTEGRATION_BRANCH = 'next';
+
+/**
+ * The commit CHECK 2 diffs FROM.
+ *
+ * Identity for anything aimed at `next`: a feature pull request's base and a push range both start
+ * somewhere already on the branch, which is the invariant the `isNew` rule needs.
+ *
+ * For anything aimed at `main` it is the tip of `next` instead. `main` is hundreds of commits
+ * behind, and `--diff-filter=A` against it reports every migration merged since the last release as
+ * newly ADDED -- relighting the four that predate this gate and cannot be repaired in place, because
+ * migrations/README.md forbids editing a merged migration. Diffing from
+ * `next` asks the question that is actually under review: what does this ref introduce that the
+ * integration branch does not already carry? For a release or a back-merge that is nothing. For a
+ * hotfix committed straight onto `main` it is the hotfix's own migration, which still fires.
+ */
+export function resolveCheckBase(baseSha, targetBranch, cwd) {
+  if (targetBranch !== 'main') return baseSha;
+  for (const ref of [`refs/remotes/origin/${INTEGRATION_BRANCH}`, `refs/heads/${INTEGRATION_BRANCH}`]) {
+    try {
+      return execFileSync('git', ['rev-parse', '--verify', ref], {
+        cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    } catch {
+      // Deliberate: an absent spelling is not an error, it is the reason to try the next one. The
+      // exhausted case throws below, with both spellings and the remedy named.
+    }
+  }
+  throw new Error(
+    `This ref is aimed at main, so CHECK 2's base must be the tip of '${INTEGRATION_BRANCH}' -- and ` +
+      `neither refs/remotes/origin/${INTEGRATION_BRANCH} nor refs/heads/${INTEGRATION_BRANCH} ` +
+      `resolves in ${cwd}. Fetch it first (\`git fetch --no-tags origin ${INTEGRATION_BRANCH}\`). ` +
+      `Diffing against main instead would report every migration merged since the last release as ` +
+      `newly added and relight the ones that predate this gate.`
+  );
+}
+
+/** Strip line and block comments so prose naming a table never trips a check. */
+export function stripSqlComments(sql) {
+  return sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '');
+}
+
+/**
+ * This app's schema, literally (CLAUDE.md's "Database schema" line, `mj.config.cjs`).
+ * `${flyway:defaultSchema}` is the placeholder every migration should use, but a DDL statement
+ * written against the literal name is still real DDL against our schema -- it must not be
+ * invisible to this gate just because it skipped the convention. Several pre-convention
+ * migrations (B202606281200 and others) do exactly this for their original CREATE TABLEs.
+ */
+const APP_SCHEMA_LITERAL = '__mj_BizAppsForms';
+const APP_SCHEMA = String.raw`(?:\[?\$\{flyway:defaultSchema\}\]?|\[?${APP_SCHEMA_LITERAL}\]?)`;
+const DDL_PATTERNS = [
+  ['CREATE TABLE', new RegExp(String.raw`\bCREATE\s+TABLE\s+${APP_SCHEMA}\s*\.\s*\[?(\w+)\]?`, 'gi')],
+  ['ALTER TABLE',  new RegExp(String.raw`\bALTER\s+TABLE\s+${APP_SCHEMA}\s*\.\s*\[?(\w+)\]?`, 'gi')],
+  ['DROP TABLE',   new RegExp(String.raw`\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?${APP_SCHEMA}\s*\.\s*\[?(\w+)\]?`, 'gi')],
+];
+
+/**
+ * Schema changes CodeGen owns, and therefore that oblige output.
+ *
+ * Scoped to `${flyway:defaultSchema}` — our own schema — because CodeGen generates for our entities
+ * and nothing else. A migration that only grants a core role or writes `${mjSchema}` rows
+ * (V202608131600, V202608181030 and the other Automation_Runner grants) produces no Forms CodeGen
+ * output and must not be nagged.
+ *
+ * Deliberately NOT here: CREATE INDEX and INSERTs into app tables — neither changes entity metadata.
+ * Extended properties are handled separately, by `classifyMigration`.
+ */
+export function findAppSchemaDDL(sql) {
+  const code = stripSqlComments(sql);
+  const found = [];
+  for (const [what, re] of DDL_PATTERNS) {
+    for (const m of code.matchAll(re)) found.push(`${what} ${m[1]}`);
+  }
+  return found;
+}
+
+/**
+ * Every `ALTER TABLE <app schema>.<table> ADD ...` statement's body, split into its comma-
+ * separated parts (each one either a column definition or an inline `CONSTRAINT ...` clause).
+ *
+ * Shared by `findAddedColumns` and `findAddedForeignKeyColumns` so a column's own part is judged
+ * in isolation from its neighbours, and the two functions read from one parse instead of two
+ * regexes that must independently agree on what "this ADD's columns" means. `ADD` may carry
+ * several comma-separated columns in one statement — CLAUDE.md asks for exactly that ("single
+ * multi-`ADD` `ALTER`s") — so a whole-body view of the ADD is the wrong grain for anything that
+ * needs to know which column a clause belongs to.
+ */
+function parseAddStatements(code) {
+  const re = new RegExp(String.raw`\bALTER\s+TABLE\s+${APP_SCHEMA}\s*\.\s*\[?\w+\]?\s+ADD\s+([^;]*)`, 'gi');
+  const statements = [];
+  for (const m of code.matchAll(re)) statements.push(splitTopLevel(m[1]));
+  return statements;
+}
+
+/**
+ * The column name a `parseAddStatements` part defines, or null for an inline `CONSTRAINT ...`
+ * clause (not a column).
+ */
+function partColumnName(part) {
+  const m = part.match(/^\s*\[?(\w+)\]?/);
+  return m && !/^CONSTRAINT$/i.test(m[1]) ? m[1] : null;
+}
+
+/**
+ * Columns an `ALTER TABLE … ADD` introduces, in our schema.
+ *
+ * `ADD CONSTRAINT` is deliberately excluded: a constraint is not a column and owes no EntityField
+ * row.
+ *
+ * `CREATE TABLE` is out of scope for this function and for both checks built on it — a table's
+ * own columns are never `ALTER … ADD`ed, so a `CREATE TABLE` that ships views and procedures but
+ * omits an `EntityField` row, or that carries an FK column with no `EntityRelationship`, raises
+ * zero violations here. The risk is lower there than the #201 shape this function exists to catch:
+ * CodeGen's new-table output is appended whole (one block, one PARTIAL-coverage failure would be
+ * obvious), whereas #201 happened because V202609091600 hand-excluded specific field blocks from
+ * output it otherwise shipped in full — a targeted omission a whole-table diff would not produce.
+ */
+export function findAddedColumns(sql) {
+  const code = stripSqlComments(sql);
+  const names = [];
+  for (const parts of parseAddStatements(code)) {
+    for (const part of parts) {
+      const name = partColumnName(part);
+      if (name) names.push(name);
+    }
+  }
+  return names;
+}
+
+/** Split on commas that are not inside parentheses — `DECIMAL(18, 2)` must stay one part. */
+function splitTopLevel(text) {
+  const parts = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')') depth--;
+    else if (text[i] === ',' && depth === 0) { parts.push(text.slice(start, i)); start = i + 1; }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+/**
+ * String-literal values at the position of `columnName` in each
+ * `INSERT INTO <schema>.<tableName> (<columns>) VALUES (<tuple>)` this migration ships.
+ *
+ * Positional, not proximity: reads the value out of the VALUES tuple by the column's own index in
+ * the column list, because that is the shape CodeGen emits and the only one that distinguishes
+ * (say) a field's `Name` from its `DisplayName`, or a relationship's `RelatedEntityJoinField` from
+ * its `EntityID`/`RelatedEntityID` GUIDs — rather than assuming the value is merely "nearby".
+ * Shared by `findInsertedEntityFieldNames` and `findInsertedRelationshipJoinFields`.
+ */
+function findInsertedColumnValues(sql, tableName, columnName) {
+  const code = stripSqlComments(sql);
+  const re = new RegExp(String.raw`INSERT\s+INTO\s+\S*\[?${tableName}\]?\s*\(([^)]*)\)\s*VALUES\s*\(`, 'gi');
+  const targetCol = columnName.toLowerCase();
+  const values = [];
+  for (const m of code.matchAll(re)) {
+    const cols = m[1].split(',').map((c) => c.trim().replace(/[[\]]/g, '').toLowerCase());
+    const idx = cols.indexOf(targetCol);
+    if (idx === -1) continue;
+    const open = code.indexOf('(', m.index + m[0].length - 1);
+    const close = matchingParen(code, open);
+    if (close === -1) continue;
+    const tuple = splitTopLevel(code.slice(open + 1, close));
+    const raw = tuple[idx];
+    if (raw === undefined) continue;
+    const lit = raw.trim().match(/^N?'([^']*)'$/);
+    if (lit) values.push(lit[1]);
+  }
+  return values;
+}
+
+/**
+ * Column names this migration inserts an `__mj.EntityField` row for.
+ *
+ * Read from the VALUES list by position of `[Name]` in the column list, because that is the shape
+ * CodeGen emits and the only one that distinguishes the field's name from its DisplayName.
+ */
+export function findInsertedEntityFieldNames(sql) {
+  return findInsertedColumnValues(sql, 'EntityField', 'Name');
+}
+
+/**
+ * Column names this migration inserts an `__mj.EntityRelationship` row's `RelatedEntityJoinField`
+ * as — the FK column that row makes the related-records collection exist for.
+ */
+export function findInsertedRelationshipJoinFields(sql) {
+  return findInsertedColumnValues(sql, 'EntityRelationship', 'RelatedEntityJoinField');
+}
+
+/**
+ * Columns added in this migration that are foreign keys, in either spelling: the inline
+ * `… REFERENCES …` on the column's OWN comma-separated part, or a separate
+ * `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY (col)`.
+ *
+ * Only columns THIS migration adds count, and both spellings are read from `parseAddStatements` —
+ * never a whole-ADD-body or whole-file scan. Whole-body would credit REFERENCES to whichever
+ * column happens to come first after ADD, regardless of which comma-separated part actually
+ * carries it (CLAUDE.md's "single multi-ADD ALTERs" makes a multi-column ADD the normal shape, not
+ * an edge case). Whole-file would let an unrelated CREATE TABLE's own FOREIGN KEY constraint, on a
+ * same-named column, make an unrelated plain ADD read as a foreign key. A constraint added over a
+ * pre-existing column is a different change besides, and its relationship, if it needed one, was
+ * owed by the migration that added the column.
+ */
+export function findAddedForeignKeyColumns(sql) {
+  const code = stripSqlComments(sql);
+  const fks = new Set();
+
+  for (const parts of parseAddStatements(code)) {
+    for (const part of parts) {
+      const name = partColumnName(part);
+      if (name && /\bREFERENCES\b/i.test(part)) fks.add(name.toLowerCase());
+    }
+    for (const part of parts) {
+      const m = part.match(/\bFOREIGN\s+KEY\s*\(\s*\[?(\w+)\]?\s*\)/i);
+      if (m) fks.add(m[1].toLowerCase());
+    }
+  }
+
+  return findAddedColumns(code).filter((c) => fks.has(c.toLowerCase()));
+}
+
+/** Index of the `)` closing the `(` at `open`, or -1. */
+function matchingParen(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * Which of a flagged migration's obligations its recorded remedies do NOT supply.
+ *
+ * Returns the added columns with no `EntityField` INSERT anywhere (`fields`) and the added foreign
+ * keys with no `EntityRelationship` INSERT naming them (`relationships`), both lower-cased; two
+ * empty arrays means the remedies genuinely cover the file.
+ *
+ * The obligations are counted SEPARATELY because they fail separately and, as V202609091600 proved,
+ * can be remedied by different migrations. A per-file check -- "the named remedy exists and carries
+ * some CodeGen output" -- answers neither question: `carriesCodeGenOutput` is satisfied by any
+ * spCreate/vw/EntityField-INSERT anywhere in the file, so a remedy shipping four EntityField rows
+ * and no relationship reads as covering an unshipped relationship. That is the gate's own defect
+ * class reappearing in its escape hatch.
+ *
+ * The flagged file's own INSERTs count too: an obligation it satisfied itself was never owed to a
+ * remedy, and `@codegen-none` naming the column still excuses it, exactly as in `classifyMigration`.
+ */
+export function remedyCovers(flaggedSql, remedySqls) {
+  const lower = (xs) => xs.map((n) => n.toLowerCase());
+  const shippedFields = new Set([
+    ...lower(findInsertedEntityFieldNames(flaggedSql)),
+    ...remedySqls.flatMap((s) => lower(findInsertedEntityFieldNames(s))),
+  ]);
+  const shippedJoins = new Set([
+    ...lower(findInsertedRelationshipJoinFields(flaggedSql)),
+    ...remedySqls.flatMap((s) => lower(findInsertedRelationshipJoinFields(s))),
+  ]);
+  const reason = findCodeGenNoneReason(flaggedSql) ?? '';
+  const excused = (c) => new RegExp(`\\b${c}\\b`).test(reason);
+
+  return {
+    fields: [...new Set(findAddedColumns(flaggedSql))]
+      .filter((c) => !shippedFields.has(c.toLowerCase()) && !excused(c))
+      .map((c) => c.toLowerCase()),
+    relationships: [...new Set(findAddedForeignKeyColumns(flaggedSql))]
+      .filter((c) => !shippedJoins.has(c.toLowerCase()) && !excused(c))
+      .map((c) => c.toLowerCase()),
+  };
+}
+
+/**
+ * Why a recorded `OUTPUT_SHIPPED_LATER` entry does NOT excuse this migration — empty means suppress.
+ *
+ * Pure on purpose. `main()` owns the I/O (reading each named remedy at the head sha) and this owns
+ * the judgement, so the judgement is reachable from the spec. It was not, and that mattered: with
+ * the decision inlined in `main()`, deleting the coverage branch left the whole suite green, which
+ * is the same "a gate whose spec passes when the gate is broken is not a gate" failure this file
+ * exists to refuse -- and it was found by mutating this module, not by reading it.
+ *
+ * `remedySqls` is positional with `remedyNames`; a null entry means the file was unreadable there.
+ */
+export function suppressionRefusals(relPath, sql, remedyNames, remedySqls, headSha) {
+  const missing = remedyNames.filter((_, i) => remedySqls[i] === null);
+  if (missing.length) {
+    return [
+      `${relPath}: recorded as remedied by ${missing.join(', ')}, but that migration does not ` +
+        `exist at ${headSha}. The columns are unregistered on every host either way.`,
+    ];
+  }
+  if (!remedySqls.some(carriesCodeGenOutput)) {
+    return [
+      `${relPath}: recorded as remedied by ${remedyNames.join(', ')}, but no named migration ` +
+        `carries CodeGen output. The exemption no longer holds.`,
+    ];
+  }
+  // The half a per-file check cannot see: a remedy that carries output, but not the artifact THIS
+  // finding asks for. Suppressing on file identity alone is the gate's own defect class.
+  const uncovered = remedyCovers(sql, remedySqls);
+  const unmet = [
+    ...uncovered.fields.map((c) => `no __mj.EntityField row for ${c}`),
+    ...uncovered.relationships.map((c) => `no __mj.EntityRelationship row for ${c}`),
+  ];
+  if (unmet.length) {
+    return [
+      `${relPath}: recorded as remedied by ${remedyNames.join(', ')}, but those migrations ` +
+        `ship ${unmet.join('; ')}. A remedy must carry the artifact the finding names, not ` +
+        `merely some CodeGen output — record the migration that actually ships it.`,
+    ];
+  }
+  return [];
+}
+
+/** Does this migration touch a column description? */
+export function touchesExtendedProperty(sql) {
+  return /\bsp_(add|update)extendedproperty\b/i.test(stripSqlComments(sql));
+}
+
+/**
+ * Does it also write `__mj.EntityField.Description` -- an actual SET of the column, not just the
+ * word "Description" occurring somewhere nearby?
+ *
+ * The established Forms pattern (V202608302200) writes BOTH: CodeGen copies the description into the
+ * generated entity class, Explorer's field UI reads the EntityField row, and a migration that
+ * updates only one leaves the two surfaces publishing different sentences. Requiring an actual SET
+ * (not mere proximity) matters because a WHERE clause or an unrelated column can carry the word
+ * "Description" without the UPDATE ever assigning it -- `[^;]` bounds the search to the one UPDATE
+ * statement so a later, unrelated SET can't be credited to this one.
+ */
+export function writesEntityFieldDescription(sql) {
+  return /UPDATE\s+(?:\[?\$\{mjSchema\}\]?\s*\.\s*)?\[?EntityField\]?\b[^;]{0,300}?\bSET\b[^;]{0,300}?\[?Description\]?\s*=/i
+    .test(stripSqlComments(sql));
+}
+
+/** The banner, on its own. Kept separate because the banner rule applies only to NEW files. */
+export function hasBanner(sql) {
+  return BANNER_PATTERN.test(sql);
+}
+
+/**
+ * The structural CodeGen shapes: spCreate/spUpdate/spDelete procedures, `vw` views, an
+ * `EntityField`/`EntityFieldValue` INSERT, or an `EntityFieldValue` UPDATE.
+ *
+ * A bare `UPDATE ... EntityField` does NOT count. CodeGen's actual EntityField output is an INSERT
+ * (a new field row) -- an UPDATE of EntityField is a hand-patch to an existing row (a Sequence
+ * tweak, a description edit) and proves nothing about whether THIS migration's DDL got its
+ * metadata. Without this distinction, one unrelated EntityField UPDATE anywhere in the file excuses
+ * every DDL statement in it -- the exact V202608182100 failure this gate exists to catch.
+ * EntityFieldValue is different: CodeGen's value-list sync inserts new rows AND updates existing
+ * ones, so both verbs count there (V202608301200 depends on the UPDATE case).
+ */
+function hasGeneratedShape(sql) {
+  const code = stripSqlComments(sql);
+  return (
+    /CREATE\s+(?:OR\s+ALTER\s+)?PROCEDURE\s+\S*\[?sp(?:Create|Update|Delete)\w+/i.test(code) ||
+    /CREATE\s+(?:OR\s+ALTER\s+)?VIEW\s+\S*\[?vw\w+/i.test(code) ||
+    /INSERT\s+INTO\s+\S*\[?EntityField(?:Value)?\]?/i.test(code) ||
+    /(?:INSERT\s+INTO|UPDATE)\s+\S*\[?EntityFieldValue\]?/i.test(code)
+  );
+}
+
+/**
+ * Does the file carry CodeGen's SQL — under the banner, or structurally?
+ *
+ * The banner is a claim, not proof — it must be verified against what actually follows it, or a
+ * comment that merely MENTIONS the banner phrase (exactly the sentence an author would naturally
+ * write to say "no output needed here") reads as a satisfied obligation. So a banner's presence
+ * only narrows WHERE to look: the structural patterns run against the slice of the file after the
+ * banner's own line, and a banner followed by prose, nothing, or one unrelated statement does not
+ * count, same as if there were no banner and no generated content anywhere.
+ *
+ * With no banner, the structural patterns run against the whole file. That path exists because
+ * history predates the banner: six merged migrations carry generated CRUD without one, and they
+ * ship correct output. Hand-authored equivalents count too — V202608301200 writes the
+ * `__mj.EntityFieldValue` rows CodeGen derives from a CHECK constraint by hand, and documents
+ * exactly why (it had no database to regenerate from).
+ */
+export function carriesCodeGenOutput(sql) {
+  const m = sql.match(BANNER_PATTERN);
+  if (!m) return hasGeneratedShape(sql);
+  const restOfBannerLine = sql.indexOf('\n', m.index + m[0].length);
+  const after = restOfBannerLine === -1 ? '' : sql.slice(restOfBannerLine + 1);
+  return hasGeneratedShape(after);
+}
+
+/**
+ * The stated reason behind `@codegen-none:`, or null when absent.
+ *
+ * Horizontal whitespace only around the colon — `\s*` would swallow the newline and adopt the next
+ * SQL statement as the "reason", so a bare `-- @codegen-none:` would read as fully justified.
+ */
+export function findCodeGenNoneReason(sql) {
+  const m = sql.match(new RegExp(String.raw`${CODEGEN_NONE_MARKER}[ \t]*:[ \t]*([^\n]*)`));
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * Does this migration honour the DDL ↔ CodeGen-output contract?
+ *
+ * Returns violation strings (empty = clean). `isNew` is true for a file the diff ADDS: the banner is
+ * required of new migrations only, because history cannot be retrofitted (migrations/README.md,
+ * "Add a NEW seed migration; never edit an existing one"). Every message names the fix — a gate
+ * that only says "no" costs a round trip to find out why.
+ */
+export function classifyMigration(relPath, sql, { isNew = false } = {}) {
+  const violations = [];
+  const ddl = findAppSchemaDDL(sql);
+  const generated = carriesCodeGenOutput(sql);
+
+  // A banner that claims output but ships none is worse than no banner: it reads as satisfied.
+  // `generated` already checks the content AFTER the banner line (carriesCodeGenOutput), so this
+  // is just "banner present, and that verification came back empty" -- but only for a file that
+  // has an obligation to begin with. A migration with neither app-schema DDL nor an extended
+  // property change (a bare CREATE INDEX, say) has nothing for a banner to be lying about, and a
+  // comment that merely MENTIONS the banner phrase to say "not needed here" must not fail it --
+  // that is finding 1's bypass in reverse, and just as much the sentence an author naturally
+  // writes.
+  const hasObligation = ddl.length > 0 || touchesExtendedProperty(sql);
+  if (hasBanner(sql) && !generated && hasObligation) {
+    violations.push(
+      `${relPath}: carries the "-- CodeGen output (appended)" banner, but nothing generated ` +
+        `follows it -- an empty section satisfies no host. Append CodeGen's actual output below ` +
+        `the banner, or remove the banner if this migration truly ships none.`
+    );
+    return violations;
+  }
+
+  // The description obligation stands on its own, independent of whatever else the file contains.
+  // It used to be gated on `!generated` too, which meant an unrelated, incidentally CodeGen-shaped
+  // statement anywhere in a description-only file (no DDL of its own) silently satisfied a
+  // requirement it has nothing to do with. `!ddl.length` stays: a migration that DOES change
+  // schema gets its column's Description from CodeGen's own generated INSERT, not a hand-written
+  // UPDATE -- that obligation is `generated` itself, checked below.
+  //
+  // No `return` here, deliberately: this branch's job is ONLY the description obligation. A
+  // description-only file can still independently be a NEW migration shipping real generated SQL
+  // with no banner (a hand-authored CodeGen-shaped statement alongside the extended-property
+  // change) -- the `isNew && generated && !hasBanner` check below is a separate, independently
+  // applicable rule, and returning unconditionally from here swallowed it even when this branch
+  // found nothing wrong of its own.
+  if (!ddl.length && touchesExtendedProperty(sql) && !writesEntityFieldDescription(sql)) {
+    violations.push(
+      `${relPath}: changes a column description via sp_addextendedproperty but never writes ` +
+        `__mj.EntityField.Description. CodeGen copies the description into the generated entity ` +
+        `class and Explorer reads the EntityField row, so the two surfaces will publish different ` +
+        `sentences. Write both — see V202608302200 for the shape.`
+    );
+  }
+
+  if (ddl.length && !generated) {
+    const reason = findCodeGenNoneReason(sql);
+    if (reason === null) {
+      violations.push(
+        `${relPath}: changes schema CodeGen owns (${[...new Set(ddl)].join(', ')}) but ships no ` +
+          `CodeGen output. The host runs only migrations and never CodeGen for __mj_BizAppsForms, so ` +
+          `it gets the column and not the API — no EntityField row, a stale base view, stale CRUD. ` +
+          `Run \`npm run mj:migrate && npx mj codegen --skipfiles\`, then append ` +
+          `migrations/codegen/CodeGen_Run_*.sql below a "-- CodeGen output (appended)" banner and ` +
+          `DELETE the run file. If this DDL genuinely produces none, say so and why: ` +
+          `\`-- ${CODEGEN_NONE_MARKER}: <reason>\`.`
+      );
+    } else if (reason === '') {
+      violations.push(
+        `${relPath}: ${CODEGEN_NONE_MARKER} carries no reason. The marker exists to make the claim ` +
+          `reviewable — state what about this DDL yields no CodeGen output.`
+      );
+    } else if (ddl.some((d) => d.startsWith('CREATE TABLE'))) {
+      violations.push(
+        `${relPath}: ${CODEGEN_NONE_MARKER} on a migration that CREATEs a table is always false — a ` +
+          `new table always produces at least the __mj.Entity registration and its EntityField rows. ` +
+          `Append the output instead.`
+      );
+      // Deliberately NOT extended to DROP TABLE (reverted -- an earlier pass here got this wrong,
+      // and a review caught it before it shipped past the branch). CodeGen emits SQL for tables
+      // that EXIST; a dropped table has nothing left for CodeGen to (re)generate, so the metadata
+      // removal is necessarily hand-written -- @codegen-none naming the table is exactly the right
+      // escape hatch for a DROP, not an always-false claim.
+    } else {
+      // One `@codegen-none` must not excuse every DDL statement in the file — only the tables it
+      // actually names. Otherwise a second, genuinely-unexcused ALTER inherits an old reason it
+      // never earned.
+      const ddlTables = [...new Set(ddl.map((d) => d.split(' ').pop()))];
+      const unnamed = ddlTables.filter((t) => !new RegExp(`\\b${t}\\b`).test(reason));
+      if (unnamed.length) {
+        violations.push(
+          `${relPath}: ${CODEGEN_NONE_MARKER} does not name ${unnamed.join(', ')}, so it does not ` +
+            `excuse ${unnamed.length > 1 ? 'those tables' : 'that table'} — name every table this ` +
+            `migration's DDL touches in the reason, or a later ALTER on the same file silently ` +
+            `inherits an excuse it never earned.`
+        );
+      }
+    }
+  }
+
+  // The PARTIAL case the all-or-nothing check above cannot see: this file DID ship CodeGen output,
+  // so `generated` is true, but a column it added has no EntityField row in it. That is #201 --
+  // V202609091600 shipped views, procedures and indexes and no field rows, and every Form Response
+  // save failed on a host until V202609121200 repaired it three days later.
+  //
+  // Deliberately NOT consulting OUTPUT_SHIPPED_LATER here. This block only decides whether the
+  // finding EXISTS; whether a recorded remedy excuses it is main()'s job, and main() does it right
+  // -- it reads the remedy file at headSha and re-checks carriesCodeGenOutput before suppressing,
+  // so the map's own contract ("Verified, never trusted") holds. Checking the map in here would
+  // suppress the violation before that verification ever ran, on the map ENTRY alone -- trusted,
+  // not verified, exactly what the map's header warns against.
+  if (generated) {
+    const reason = findCodeGenNoneReason(sql) ?? '';
+    const inserted = new Set(findInsertedEntityFieldNames(sql).map((n) => n.toLowerCase()));
+    const uncovered = [...new Set(findAddedColumns(sql))].filter(
+      (c) => !inserted.has(c.toLowerCase()) && !new RegExp(`\\b${c}\\b`).test(reason),
+    );
+    if (uncovered.length) {
+      violations.push(
+        `${relPath}: adds ${uncovered.join(', ')} but ships no INSERT INTO __mj.EntityField naming ` +
+          `${uncovered.length > 1 ? 'those columns' : 'that column'}. The host runs only migrations, ` +
+          `so a column with no EntityField row is unwritable there — BaseEntity.Set on it is a silent ` +
+          `no-op and the save reports success having written nothing. Append CodeGen's EntityField ` +
+          `INSERT for ${uncovered.length > 1 ? 'each' : 'it'}, or state why none is needed: ` +
+          `\`-- ${CODEGEN_NONE_MARKER}: <reason naming the column>\`.`,
+      );
+    }
+
+    // The relationship is a SECOND obligation, not the same one. V202609121200 shipped every
+    // EntityField row and no EntityRelationship, so a host at `next` has the field and no
+    // related-records collection: EntityInfo.RelatedEntities has no entry, so nothing renders it (#201).
+    //
+    // Positional, not proximity: a column is "linked" only when its name is the actual
+    // RelatedEntityJoinField VALUE of some EntityRelationship INSERT, read by column position
+    // (findInsertedRelationshipJoinFields) -- not merely near the word EntityRelationship
+    // somewhere in the file. A proximity window passed a migration that added TWO FK columns and
+    // shipped a relationship for only the first, because the second column's own (separately
+    // mandatory) EntityField INSERT put its name inside the window regardless of which column the
+    // relationship actually named.
+    const linkedFields = new Set(findInsertedRelationshipJoinFields(sql).map((n) => n.toLowerCase()));
+    const unlinked = findAddedForeignKeyColumns(sql).filter(
+      (c) => !linkedFields.has(c.toLowerCase()) && !new RegExp(`\\b${c}\\b`).test(reason),
+    );
+    // No OUTPUT_SHIPPED_LATER check here, deliberately, and the same reason as the EntityField
+    // block above: `main()` owns suppression for a file with a recorded remedy, and it VERIFIES the
+    // remedy (reads it at headSha, confirms it carries output) before suppressing. It only does
+    // that when classifyMigration returns findings, so swallowing the violation here would skip the
+    // verification the map's own contract promises.
+    if (unlinked.length) {
+      violations.push(
+        `${relPath}: adds the foreign key ${unlinked.join(', ')} but ships no INSERT INTO ` +
+          `__mj.EntityRelationship for it. CodeGen mints that row locally and the host never runs ` +
+          `CodeGen, so the related-records collection does not exist there — EntityInfo.` +
+          `RelatedEntities has no entry for the pair and the form's section resolves to empty view ` +
+          `params, rendering nothing. Ship the relationship, guarded on ` +
+          `(EntityID, RelatedEntityID, RelatedEntityJoinField) and never on its own ID — the id is ` +
+          `minted per database (lint:distribution CHECK 4, #64). Or state why none is needed: ` +
+          `\`-- ${CODEGEN_NONE_MARKER}: <reason naming the column>\`.`,
+      );
+    }
+  }
+
+  // This branch depends on `isNew` for more than its own correctness: several merged migrations
+  // legitimately ship CodeGen output with no banner (some predate the banner convention and are
+  // caught only by carriesCodeGenOutput's structural detection; V202608191300/V202608191400 are
+  // OUTPUT_SHIPPED_LATER remedies written before the banner existed; V202608301200 hand-writes
+  // EntityFieldValue rows with no banner). History here is append-only (migrations/README.md,
+  // "Add a NEW seed migration; never edit an existing one"), so none of them can be retrofitted --
+  // `isNew` is what keeps this rule from re-flagging them.
+  // That only holds while the caller's BASE sits at or after those commits: true for a PR's
+  // merge-base and for a push range, since both start somewhere already on the branch, but NOT
+  // true for an arbitrary wide range (e.g. "everything since the banner convention began"), which
+  // would relight all of them as if newly added. Whoever changes what base/head this script is
+  // invoked with must preserve that invariant, or this fires on merged history it cannot fix.
+  if (isNew && generated && !hasBanner(sql)) {
+    violations.push(
+      `${relPath}: ships CodeGen output with no "-- CodeGen output (appended)" banner. In a file this ` +
+        `long the hand-DDL/generated boundary has to be unmissable, or a reviewer reads generated ` +
+        `plumbing as reviewable schema. Put the banner above the appended block, under ~50 blank lines.`
+    );
+  }
+
+  return violations;
+}
+
+// ── CHECK 1: no capture file is tracked, anywhere ───────────────────────────────────────────────
+
+/**
+ * Every tracked path matching `CodeGen_Run_*.sql`.
+ *
+ * `git ls-files`, not the filesystem, and that is load-bearing: 14 untracked run files sit in
+ * `migrations/codegen/` on a developer machine right now. A pure-fs check would fail every local run
+ * and teach people that this gate is noise.
+ */
+export function trackedCaptureFiles(cwd) {
+  return execFileSync('git', ['ls-files', '--', '*CodeGen_Run_*.sql'], {
+    cwd, encoding: 'utf8', maxBuffer: GIT_OUTPUT_LIMIT,
+  }).split('\n').filter(Boolean);
+}
+
+// ── CHECK 2: a changed migration ships its output ───────────────────────────────────────────────
+
+function diffPaths(baseSha, headSha, cwd, filter) {
+  const args = ['diff', '--name-only'];
+  if (filter) args.push(`--diff-filter=${filter}`);
+  args.push(baseSha, headSha, '--', 'migrations/');
+  return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: GIT_OUTPUT_LIMIT })
+    .split('\n').filter(Boolean);
+}
+
+/** Top-level `migrations/*.sql` added or modified between two commits. */
+export function changedMigrations(baseSha, headSha, cwd) {
+  return diffPaths(baseSha, headSha, cwd, 'AM').filter((p) => /^migrations\/[^/]+\.sql$/.test(p));
+}
+
+/** Of those, the ones the diff ADDS — the only files the banner rule applies to. */
+export function addedMigrations(baseSha, headSha, cwd) {
+  return diffPaths(baseSha, headSha, cwd, 'A').filter((p) => /^migrations\/[^/]+\.sql$/.test(p));
+}
+
+/** File contents at `sha`, or null when the path does not exist there. */
+export function readAt(sha, relPath, cwd) {
+  try {
+    return execFileSync('git', ['show', `${sha}:${relPath}`], {
+      cwd, encoding: 'utf8', maxBuffer: GIT_OUTPUT_LIMIT,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function main() {
+  const [, , rawBaseSha, headSha, targetBranch] = process.argv;
+  const cwd = process.cwd();
+  const violations = [];
+
+  // CHECK 1 — always, with or without a diff.
+  const captures = trackedCaptureFiles(cwd);
+  for (const f of captures) {
+    violations.push(
+      `${f}: a standalone CodeGen capture is tracked. Nothing applies it — skyway globs **/*.sql, ` +
+        `fails to parse a name that is not V…__/B…__/R__, and swallows the error into a warning, so ` +
+        `this reads as "the output shipped" while shipping nothing. Append it below a ` +
+        `"-- CodeGen output (appended)" banner in the migration that caused it, then delete it.`
+    );
+  }
+
+  // CHECK 2 — only when given a range.
+  if (rawBaseSha && headSha) {
+    // Which commit the range starts at is a decision, not an input — see resolveCheckBase. It is
+    // made here rather than in the workflow so the spec can pin it: a decision that only runs
+    // during a release cannot be proven by running a release.
+    let baseSha;
+    try {
+      baseSha = resolveCheckBase(rawBaseSha, targetBranch, cwd);
+    } catch (error) {
+      console.error(`::error::${error.message}`);
+      process.exit(1);
+    }
+    if (baseSha !== rawBaseSha) {
+      console.log(
+        `::notice::Base retargeted from ${rawBaseSha} to ${INTEGRATION_BRANCH}@${baseSha}: a change ` +
+          `into main introduces no migration next does not already carry.`
+      );
+    }
+
+    let changed, added;
+    try {
+      changed = changedMigrations(baseSha, headSha, cwd);
+      added = new Set(addedMigrations(baseSha, headSha, cwd));
+    } catch (error) {
+      // Named as itself. The unfetched-base case must never be mistaken for a clean run.
+      console.error(
+        `::error::Could not diff ${baseSha}..${headSha} from ${cwd}: ${error.message.trim()}\n` +
+          `This check ran nothing. Confirm the base commit is fetched (\`fetch-depth: 0\`) and that ` +
+          `both refs exist.`
+      );
+      process.exit(1);
+    }
+
+    for (const relPath of changed) {
+      const sql = readAt(headSha, relPath, cwd);
+      if (sql === null) {
+        violations.push(`${relPath}: listed as added/modified but unreadable at ${headSha}.`);
+        continue;
+      }
+      const findings = classifyMigration(relPath, sql, { isNew: added.has(relPath) });
+      if (findings.length === 0) continue;
+
+      // A merged migration's output may have shipped in a later one — verified, never assumed, and
+      // verified per OBLIGATION. A file can owe two independent things (an EntityField row and an
+      // EntityRelationship row) and they can be remedied by different migrations, so a value may be
+      // a list and every named file is read at headSha before anything is suppressed.
+      const recorded = OUTPUT_SHIPPED_LATER.get(path.basename(relPath));
+      if (recorded) {
+        const remedyNames = Array.isArray(recorded) ? recorded : [recorded];
+        const remedySqls = remedyNames.map((n) => readAt(headSha, `migrations/${n}`, cwd));
+        const refusals = suppressionRefusals(relPath, sql, remedyNames, remedySqls, headSha);
+        if (refusals.length) {
+          violations.push(...refusals);
+          continue;
+        }
+        console.log(
+          `::notice file=migrations/${remedyNames[0]}::${path.basename(relPath)} ships no output of ` +
+            `its own — it was already merged when that was found; its registration ships in ` +
+            `${remedyNames.join(', ')}.`
+        );
+        continue;
+      }
+      violations.push(...findings);
+    }
+
+    if (violations.length === 0) {
+      console.log(`::notice::${changed.length} changed migration(s) ship their CodeGen output.`);
+    }
+  } else if (violations.length === 0) {
+    console.log('::notice::No CodeGen capture files are tracked.');
+  }
+
+  if (violations.length > 0) {
+    console.error('::error::CodeGen output convention violated:');
+    for (const v of violations) console.error(`  - ${v}`);
+    console.error('See .claude/rules/migrations-codegen.md and migrations/README.md.');
+    process.exit(1);
+  }
+}
+
+// Only run as a CLI when executed directly, so the spec can import the pure parts.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}

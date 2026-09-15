@@ -26,7 +26,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   return { ...actual, Metadata, RunView };
 });
 
-const { MJBindingGateway, sqlLiteral } = await import('../mj-binding-gateway');
+const { MJBindingGateway } = await import('../mj-binding-gateway');
 
 const fakeUser = { Name: 'tester' } as never;
 
@@ -61,12 +61,7 @@ describe('MJBindingGateway.findMatch — identifier safety', () => {
   });
 });
 
-describe('sqlLiteral', () => {
-  it('doubles embedded quotes and marks the literal as unicode on SQL Server', () => {
-    expect(sqlLiteral("O'Brien")).toBe("N'O''Brien'");
-  });
-
-  it('omits the unicode prefix for PostgreSQL, which rejects it', () => {
-    expect(sqlLiteral("O'Brien", 'postgresql')).toBe("'O''Brien'");
-  });
-});
+// `sqlLiteral`'s own cases moved to packages/Entities/src/contracts/sql-literal.spec.ts along with
+// the function. What remains here is the gateway's USE of it, which is the part this file is about:
+// the criterion cases above assert the emitted `ExtraFilter` text, so a change to the escaping still
+// fails here as well as there.

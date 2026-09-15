@@ -1,0 +1,116 @@
+<!-- Your templates first once any exist: your own work outranks a built-in for recognition. -->
+@if (loading) {
+  <div class="mjf-state"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading templates…</div>
+} @else {
+  <section class="tg-section" aria-labelledby="tg-saved-title">
+    <div class="tg-section-head">
+      <span class="tg-section-title" id="tg-saved-title">Your templates</span>
+      @if (saved.length > 0) {
+        <span class="tg-section-note">{{ saved.length }} saved · newest first</span>
+      }
+    </div>
+
+    @if (saved.length === 0) {
+      <p class="tg-section-note">
+        Nothing saved yet. Open any form, then use <strong>Save as template</strong> in its
+        <i class="fa-solid fa-ellipsis" aria-hidden="true"></i> menu to reuse it here.
+      </p>
+    } @else {
+      <div class="tg-grid">
+        @for (row of saved; track row.id) {
+          <div
+            class="tg-card"
+            [class.is-busy]="Busy"
+            role="button"
+            tabindex="0"
+            [attr.aria-label]="'Create a form from ' + row.name"
+            (click)="chooseSaved(row)"
+            (keydown.enter)="chooseSaved(row)"
+            (keydown.space)="chooseSaved(row); $event.preventDefault()"
+          >
+            <div class="tg-card-top">
+              <i [class]="'tg-card-icon ' + markFor(row).colorClass + ' ' + markFor(row).icon" aria-hidden="true"></i>
+              <span class="tg-card-name">{{ row.name }}</span>
+              <button
+                type="button"
+                class="mjf-btn mjf-btn--quiet mjf-btn--icon mjf-btn--sm tg-delete"
+                [disabled]="Busy"
+                [attr.aria-label]="'Delete the template ' + row.name"
+                title="Delete this template"
+                (click)="askDelete(row); $event.stopPropagation()"
+                (keydown.enter)="$event.stopPropagation()"
+                (keydown.space)="$event.stopPropagation()"
+              >
+                <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+              </button>
+            </div>
+            @if (row.description) {
+              <span class="tg-card-desc">{{ row.description }}</span>
+            }
+            <span class="tg-card-meta">{{ summaryFor(row) }}</span>
+          </div>
+        }
+      </div>
+    }
+  </section>
+
+  <section class="tg-section" aria-labelledby="tg-starter-title">
+    <div class="tg-section-head">
+      <span class="tg-section-title" id="tg-starter-title">Starter templates</span>
+      <span class="tg-section-note">Built in</span>
+    </div>
+    <div class="tg-grid">
+      @for (starter of starters; track starter.key; let i = $index) {
+        <div
+          class="tg-card"
+          [class.is-busy]="Busy"
+          role="button"
+          tabindex="0"
+          [attr.aria-label]="'Create a form from ' + starter.name"
+          (click)="chooseStarter(starter)"
+          (keydown.enter)="chooseStarter(starter)"
+          (keydown.space)="chooseStarter(starter); $event.preventDefault()"
+        >
+          <div class="tg-card-top">
+            <i [class]="'tg-card-icon ' + colorFor(i) + ' ' + starter.icon" aria-hidden="true"></i>
+            <span class="tg-card-name">{{ starter.name }}</span>
+            <span class="tg-lock">Built-in</span>
+          </div>
+          <span class="tg-card-desc">{{ starter.description }}</span>
+        </div>
+      }
+    </div>
+  </section>
+}
+
+<!-- The confirm answers the fear people actually have about deleting a template: that it will
+     take the forms made from it too. It will not — each use was a deep copy. -->
+@if (pendingDelete; as target) {
+  <div
+    class="tg-confirm-backdrop"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="tg-confirm-title"
+    (keydown.escape)="cancelDelete()"
+  >
+    <div class="tg-confirm">
+      <span class="tg-confirm-title" id="tg-confirm-title">Delete “{{ target.name }}”?</span>
+      <p class="tg-confirm-body">
+        This removes the template permanently. Forms already created from it are not affected —
+        each one was a full copy, not a link back to this template.
+      </p>
+      <div class="tg-confirm-actions">
+        <button type="button" class="mjf-btn mjf-btn--danger" [disabled]="deleting" (click)="confirmDelete()">
+          @if (deleting) {
+            <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Deleting…
+          } @else {
+            <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete template
+          }
+        </button>
+        <button type="button" class="mjf-btn mjf-btn--quiet" [disabled]="deleting" (click)="cancelDelete()">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+}

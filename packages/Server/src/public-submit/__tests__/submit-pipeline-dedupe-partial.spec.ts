@@ -34,6 +34,7 @@ function validSubmission(overrides?: Partial<PipelineSubmission>): PipelineSubmi
 }
 
 interface BuildOptions {
+  definition?: ReturnType<typeof makeDefinition>;
   existingResponses?: ExistingResponseRow[];
   concurrentlyCreated?: ExistingResponseRow[];
   failRunViewFor?: string;
@@ -41,7 +42,7 @@ interface BuildOptions {
 }
 
 function build(options: BuildOptions = {}): { ctx: PipelineContext; fake: FakeProvider } {
-  const definition = makeDefinition();
+  const definition = options.definition ?? makeDefinition();
   const fake = makeFakeProvider({
     distribution: makeDistribution(),
     version: makeVersion(definition),
@@ -159,7 +160,9 @@ describe('partial semantics (Task 4)', () => {
   });
 });
 
-describe('client-supplied responseId ownership guard (autosave seam)', () => {
+// These cover which row the LOOKUPS propose for a client-supplied responseId. Whether the caller
+// may then write to it is a separate decision made at persistence — `session-ownership.spec.ts`.
+describe('client-supplied responseId lookup (autosave seam)', () => {
   it('adopts a client responseId that belongs to THIS session (threads the same partial)', async () => {
     // Row owned by the current session; client sends its id explicitly as the autosave target.
     const { ctx, fake } = build({ existingResponses: [partialRow()] });
@@ -178,8 +181,14 @@ describe('client-supplied responseId ownership guard (autosave seam)', () => {
 
   it("IGNORES a client responseId owned by ANOTHER session (cannot hijack a foreign partial)", async () => {
     // The only stored Partial belongs to a DIFFERENT anonymous session. The current session
-    // supplies that foreign id as its autosave hint — it must be rejected by the ownership guard,
-    // and NO existing row adopted (a fresh row is created instead).
+    // supplies that foreign id as its autosave hint — the lookup must not resolve it, and NO
+    // existing row is adopted (a fresh row is created instead).
+    //
+    // NOTE ON WHAT THIS DOES *NOT* COVER. `resp-foreign-1` is not a UUID, so persistence never
+    // adopts it as a primary key and the insert cannot collide with the foreign row. That is why
+    // this test passed throughout issue #78: with a real uuid the same request took over the row
+    // through the duplicate-key recovery. The takeover family is covered in
+    // `session-ownership.spec.ts`, which uses uuids for exactly that reason.
     const foreignRow: ExistingResponseRow = {
       ID: 'resp-foreign-1',
       Status: 'Partial',
@@ -331,8 +340,11 @@ describe('client-id upsert idempotency with a BLANK session (the core bug)', () 
       validSubmission({ partial: true, clientResponseId: CLIENT_ID }),
     );
 
-    // The proof lookup misses, so a fresh row is created (adopting the id as its own PK) rather
-    // than overwriting the unproven row.
+    // The proof lookup misses, so no candidate is proposed and persistence CREATEs — which
+    // collides on the primary key it just adopted and recovers onto the row already there. One
+    // save either way, which is what this asserts. (The earlier comment here claimed a "fresh
+    // row" was created instead; there is only ever one row at a given client id, and the
+    // unproven row is reachable precisely because it has no owner — see session-ownership.spec.)
     expect(result.success).toBe(true);
     const responseSaves = fake.saved.filter((r) => r.entityName === FORM_RESPONSE_ENTITY);
     expect(responseSaves).toHaveLength(1);
@@ -420,6 +432,30 @@ describe('submission shape validation (loud failure, not a throw)', () => {
     expect(result.errors?.[0].message).toMatch(/formVersionId/i);
   });
 
+  it('LOGS why a submit was refused, not just how long it took', async () => {
+    // OBSERVED IN PRODUCTION. A refused submit emitted only the timing line — the refusal
+    // reason was never written anywhere. Five refusals in one session could only be diagnosed
+    // by noticing which stage was LAST in the breakdown and reading the pipeline source to see
+    // which gate returns before its own mark. The respondent is told what happened; the
+    // operator, who is the one who can fix it, is told nothing.
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    });
+    try {
+      const { ctx } = build();
+      const result = await runSubmitPipeline(ctx, validSubmission({ formVersionId: '' }));
+      expect(result.success).toBe(false);
+
+      const line = logged.find((l) => l.includes('[Forms] submit'));
+      expect(line, 'the submit should still log a line').toBeDefined();
+      expect(line).toMatch(/refused/i);
+      expect(line).toMatch(/formVersionId/i);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('returns a clear error result when an answer is missing its question id', async () => {
     const { ctx } = build();
     const result = await runSubmitPipeline(
@@ -428,5 +464,71 @@ describe('submission shape validation (loud failure, not a throw)', () => {
     );
     expect(result.success).toBe(false);
     expect(result.errors?.[0].message).toMatch(/question id/i);
+  });
+});
+
+describe('an idempotent resubmit lands on the SAME ending the first submit did', () => {
+  /** A form whose thank-you page depends on how the respondent answered. */
+  const conditionalEndings = () =>
+    makeDefinition({
+      endScreens: [
+        {
+          id: 'end-vip',
+          screenType: 'Ending',
+          title: 'VIP',
+          displayOrder: 0,
+          body: 'A concierge will call you.',
+          conditionalRule: {
+            show: { all: [{ questionId: 'q-name', op: 'equals', value: 'Ada Lovelace' }] },
+          },
+        },
+        { id: 'end-default', screenType: 'Ending', title: 'Thanks', displayOrder: 1, isDefault: true },
+      ],
+    });
+
+  it('resolves the conditional ending on a retry of an already-Complete response', async () => {
+    // A retry is the case this matters in: the first submit SUCCEEDED and its network response was
+    // lost, so the respondent sees only what the retry returns. Resolving with no answers gave
+    // them the default ending — a different thank-you page, or no redirect at all, for a response
+    // the server had already accepted and routed correctly.
+    const { ctx } = build({
+      definition: conditionalEndings(),
+      existingResponses: [
+        {
+          ID: 'resp-1',
+          Status: 'Complete',
+          FormVersionID: 'ver-1',
+          AnonymousSessionID: SESSION,
+        },
+      ],
+    });
+
+    const result = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(result.success).toBe(true);
+    expect(result.responseId).toBe('resp-1');
+    expect(result.confirmationMessage).toBe('VIP\n\nA concierge will call you.');
+  });
+
+  it('still falls back to the default ending when the answers match no condition', async () => {
+    const { ctx } = build({
+      definition: conditionalEndings(),
+      existingResponses: [
+        {
+          ID: 'resp-1',
+          Status: 'Complete',
+          FormVersionID: 'ver-1',
+          AnonymousSessionID: SESSION,
+        },
+      ],
+    });
+
+    const result = await runSubmitPipeline(
+      ctx,
+      validSubmission({ answers: [{ questionId: 'q-name', textValue: 'Someone Else' }] }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.confirmationMessage).toBe('Thanks');
   });
 });

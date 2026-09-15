@@ -9,40 +9,37 @@ import {
   ViewChild,
 } from '@angular/core';
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
-// Import directly from the widget source modules (same package; no cross-package re-export).
-import { MjFormComponent } from '../widget/mj-form.component';
-import { FORMS_API_SERVICE } from '../widget/api/forms-api.interface';
-import { FormsMockApiService } from '../widget/api/forms-api.mock.service';
+import { FormPreviewStageComponent } from './form-preview-stage.component';
 
 /**
  * Full-screen WYSIWYG preview of the real respondent form, built from the unpublished
  * draft ({@link buildPublishedDefinition}) and themed with the current (possibly unsaved)
- * style. It hosts the actual `<mj-form>` widget so both render modes, progress, validation
- * and the confirmation screen behave exactly as they will for respondents — the author can
- * fill it end-to-end before publishing.
+ * style.
  *
- * A scoped {@link FormsMockApiService} makes a preview "submit" harmless (no server write);
- * the widget renders from the `definition` input and never calls `loadPublishedForm`.
+ * This component is now only the WINDOW: the backdrop, the title, ESC-to-close and focus. The
+ * form itself — the device stage, the measured frame, the mock transports that make a trial
+ * submission harmless — is {@link FormPreviewStageComponent}, shared with the Design tab so the
+ * two cannot show an author different things. The bar looks unchanged because the title and
+ * close button are projected into the stage's own toolbar.
  */
 @Component({
   selector: 'mjf-form-preview-modal',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MjFormComponent],
-  providers: [{ provide: FORMS_API_SERVICE, useClass: FormsMockApiService }],
+  imports: [FormPreviewStageComponent],
   host: { '(document:keydown.escape)': 'close()' },
   template: `
     <div class="pv-backdrop" (click)="close()"></div>
     <div class="pv-dialog" role="dialog" aria-modal="true" [attr.aria-label]="'Preview of ' + definition.name">
-      <header class="pv-bar">
-        <span class="pv-title"><i class="fa-solid fa-eye" aria-hidden="true"></i> Preview — {{ definition.name }}</span>
-        <button #closeBtn type="button" class="pv-close" (click)="close()" aria-label="Close preview">
+      <mjf-form-preview-stage [definition]="definition">
+        <span preview-bar-start class="pv-title">
+          <i class="fa-solid fa-eye" aria-hidden="true"></i> Preview — {{ definition.name }}
+        </span>
+
+        <button #closeBtn preview-bar-end type="button" class="pv-close" (click)="close()" aria-label="Close preview">
           <i class="fa-solid fa-xmark" aria-hidden="true"></i>
         </button>
-      </header>
-      <div class="pv-body">
-        <mj-form [definition]="definition"></mj-form>
-      </div>
+      </mjf-form-preview-stage>
     </div>
   `,
   styles: [
@@ -61,29 +58,24 @@ import { FormsMockApiService } from '../widget/api/forms-api.mock.service';
         background: color-mix(in srgb, var(--mj-text-primary) 60%, transparent);
         backdrop-filter: blur(2px);
       }
+      /* Full window, not a 720px column. The dialog is now the DESK the device sits on, so the
+         author gets the real desktop width at the desktop setting instead of a permanent
+         tablet-ish slice that matched no device anyone owns. */
       .pv-dialog {
         position: relative;
         display: flex;
         flex-direction: column;
-        width: min(720px, 100%);
+        width: 100%;
+        height: 100%;
         max-height: 100%;
         margin: 0 auto;
         background: var(--mj-bg-page, var(--mj-bg-surface));
         box-shadow: 0 24px 60px -20px color-mix(in srgb, var(--mj-text-primary) 45%, transparent);
       }
-      .pv-bar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.75rem;
-        padding: 0.75rem 1rem;
-        border-bottom: 1px solid var(--mj-border-default);
-        background: var(--mj-bg-surface);
-        font-family: var(--mj-font-family);
-      }
       .pv-title {
         font-weight: 600;
         color: var(--mj-text-primary);
+        font-family: var(--mj-font-family);
       }
       .pv-close {
         display: inline-flex;
@@ -101,16 +93,6 @@ import { FormsMockApiService } from '../widget/api/forms-api.mock.service';
       .pv-close:hover {
         background: var(--mj-bg-surface-hover);
         color: var(--mj-text-primary);
-      }
-      .pv-body {
-        flex: 1 1 auto;
-        overflow-y: auto;
-        overflow-x: hidden;
-      }
-      @media (max-width: 640px) {
-        .pv-dialog {
-          width: 100%;
-        }
       }
     `,
   ],

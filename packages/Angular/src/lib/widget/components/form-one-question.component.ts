@@ -19,7 +19,7 @@ import {
 import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 
 import { FormRuntime } from '../core/form-runtime';
-import { clampCursor } from '../core/one-question-stepper';
+import { clampCursor } from '../core/stepper';
 import { FormProgressComponent } from './form-progress.component';
 import { FormQuestionComponent } from './questions/form-question.component';
 
@@ -43,6 +43,12 @@ export class FormOneQuestionComponent {
   public readonly submit = output<void>();
   /** Fires when the respondent advances a step — a natural autosave checkpoint. */
   public readonly progressChange = output<void>();
+  /**
+   * Fires when the respondent has FINISHED with a question. In this mode that is unambiguous:
+   * they answered it and advanced. See the scroll renderer for why knockout rules need a signal
+   * distinct from {@link progressChange}.
+   */
+  public readonly commitChange = output<void>();
 
   private readonly hostRef: ElementRef<HTMLElement> = inject(ElementRef);
 
@@ -61,15 +67,39 @@ export class FormOneQuestionComponent {
   );
   protected readonly isFirst = computed(() => this.index() === 0);
   protected readonly isLast = computed(() => this.index() >= this.total() - 1);
-  protected readonly progress = computed(() => {
-    const t = this.total();
-    return t === 0 ? 1 : (this.index() + 1) / t;
-  });
+  /**
+   * Progress comes from the runtime, the same as Scroll mode.
+   *
+   * This used to be `(index + 1) / total` — the respondent's POSITION in the deck, which is a
+   * different quantity wearing the same name. It read 14% on arrival with nothing filled in,
+   * moved when someone skipped an optional question without answering it, and disagreed with
+   * the bar the other render mode showed for the identical form. One definition of "how far
+   * along am I", in the one place that can answer it.
+   */
+  protected readonly progress = computed(() => this.runtime().progress());
   protected readonly stepLabel = computed(() => `${this.index() + 1} of ${this.total()}`);
 
   /** Disable the primary control while submitting, or on the final (submit) step when blocked. */
   protected readonly primaryDisabled = computed(
     () => this.submitting() || (this.isLast() && this.submitDisabled()),
+  );
+
+  /**
+   * Whether "you can submit now" is true HERE — the last question, the control live, the whole
+   * visible form valid. Same three conditions as the scroll renderer, resolved against this
+   * renderer's own cursor, because "the last step" is the one thing the two do not share.
+   *
+   * This is the signal the progress bar used to carry by reading 100% early (#88).
+   */
+  protected readonly readyToSubmit = computed(
+    () =>
+      this.isLast() &&
+      !this.primaryDisabled() &&
+      this.runtime().isFormValid() &&
+      // ...and the submit would actually be ACCEPTED. `isFormValid` only asks whether any field is
+      // in error, which nothing is on a form of blank optional questions — so without this the bar
+      // said "You can submit now." beside the #124 banner refusing that exact submit.
+      !this.runtime().wouldSubmitNothing(),
   );
 
   constructor() {
@@ -137,8 +167,10 @@ export class FormOneQuestionComponent {
       this.submit.emit();
     } else {
       this.setIndex(this.index() + 1);
-      // Advancing a step is a natural, non-chatty autosave checkpoint.
+      // Advancing a step is a natural, non-chatty autosave checkpoint — and, since the answer
+      // behind us is now final, the moment to judge a knockout on it.
       this.progressChange.emit();
+      this.commitChange.emit();
     }
   }
 

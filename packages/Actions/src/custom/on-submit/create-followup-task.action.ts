@@ -20,6 +20,7 @@ import type { ActionResultSimple, RunActionParams } from '@memberjunction/action
 import { RegisterClass } from '@memberjunction/global';
 import { Metadata, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
+import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 // Task types come from the package that owns __mj_BizAppsTasks — Forms deliberately
 // does not generate them (rationale: `excludeSchemas` in mj.config.cjs).
 import type {
@@ -29,6 +30,7 @@ import type {
 } from '@mj-biz-apps/tasks-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
 import { saveOrExplain } from '../shared/save-entity';
+import { explainMissingEntityClasses } from '../shared/generated-entity';
 import { loadFormResponseContext, type FormResponseContext } from '../shared/form-response-context';
 
 const ENTITY = {
@@ -37,6 +39,14 @@ const ENTITY = {
   TaskType: 'MJ_BizApps_Tasks: Task Types',
   FormResponse: 'MJ_BizApps_Forms: Form Responses',
 } as const;
+
+/**
+ * The sibling-app entities this action reads and writes. Checked up front rather than trusted: an
+ * unregistered class does not fail the write, it silently drops every field set on it (#60). The
+ * TaskType read is in the list because the same fallback would leave `Results[0].ID` undefined and
+ * report "No TaskType available" on a host whose TaskTypes are all present.
+ */
+const SIBLING_ENTITIES = [ENTITY.Task, ENTITY.TaskLink, ENTITY.TaskType] as const;
 
 type TaskPriority = 'Critical' | 'High' | 'Medium' | 'Low';
 const VALID_PRIORITIES: readonly TaskPriority[] = ['Critical', 'High', 'Medium', 'Low'];
@@ -51,6 +61,10 @@ export class CreateFollowupTaskAction extends BaseAction {
     const responseId = getStringParam(params, 'FormResponseID');
     if (!responseId) {
       return fail('FormResponseID parameter is required', 'MISSING_PARAMETERS');
+    }
+    const missingClasses = explainMissingEntityClasses(SIBLING_ENTITIES);
+    if (missingClasses) {
+      return fail(missingClasses, 'ENTITY_CLASS_UNREGISTERED');
     }
 
     const ctx = await loadFormResponseContext(responseId, params.ContextUser);
@@ -141,7 +155,7 @@ async function createTaskLink(
 /** Resolve the required Task.TypeID — by name when supplied, else the first active type. */
 async function resolveTaskTypeId(typeName: string | undefined, contextUser: UserInfo): Promise<string | null> {
   const rv = new RunView();
-  const filter = typeName ? `Name='${typeName.replace(/'/g, "''")}'` : 'IsActive=1';
+  const filter = typeName ? `Name=${quoteSqlString(typeName)}` : 'IsActive=1';
   const result = await rv.RunView<mjBizAppsTasksTaskTypeEntity>(
     {
       EntityName: ENTITY.TaskType,

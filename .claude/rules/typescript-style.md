@@ -187,7 +187,7 @@ The guard lives at `.github/scripts/check-esm-imports.mjs`. Only `OWN_DIST_MISSI
 
 - Use TypeScript strict mode and explicit typing
 - Always use MemberJunction generated `BaseEntity` sub-classes for all data work for strong typing
-- Study the data model in `packages/Entities/src/generated/entity_subclasses.ts` (this app's entities) or `node_modules/@memberjunction/core-entities/dist/generated/entity_subclasses.d.ts` (MJ core entities) to understand the schema and use properties/fields defined there
+- Study the data model in `packages/Entities/src/generated/entities/` (this app's entities — one module per schema; `entity_subclasses.ts` is now only a barrel that re-exports them) or `node_modules/@memberjunction/core-entities/dist/generated/entity_subclasses.d.ts` (MJ core entities) to understand the schema and use properties/fields defined there
 - No explicit `any` types - see above
 - Prefer union types over enums for better package exports (e.g., `type Status = 'active' | 'inactive'` instead of `enum Status`)
 - Prefer object shorthand syntax

@@ -28,6 +28,18 @@ import './generated/generated.js';
 import { installConfirmationEmailSender } from './confirmation-email/install-sender.js';
 installConfirmationEmailSender();
 
+// Import the request-identity middleware so its @RegisterClass fires and MJ server bootstrap
+// mounts it PRE-AUTH. It establishes the server-derived caller identity (resolved peer IP, salted
+// and hashed) that the public routes key their abuse ceilings on — without it those ceilings fall
+// back to the client-settable `x-session-id`, which a caller can rotate to escape them.
+import './http/RequestIdentityMiddleware.js';
+
+// Import the stacktrace-redaction middleware so its @RegisterClass fires and MJ server bootstrap
+// merges its Apollo plugin. Apollo puts `extensions.stacktrace` — server paths, dependency versions
+// — on every error unless NODE_ENV is production, and the anonymous session a public link mints is
+// enough to request one; this keeps it off the wire whatever NODE_ENV says (#119).
+import './http/StacktraceRedactionMiddleware.js';
+
 // WP-B: import the custom public-submit resolver so its TypeGraphQL metadata is registered.
 import './public-submit/PublicFormResolver.js';
 
@@ -44,6 +56,24 @@ import './widget-bundle/WidgetBundleMiddleware.js';
 // via MJ's configured file-storage provider into MJ: Files). Registered as POST-AUTH middleware
 // so it reads the verified anonymous session; missing storage config yields a 5xx, never a crash.
 import './upload/UploadMiddleware.js';
+
+// Import the authoring-asset middleware so its @RegisterClass fires and MJ server bootstrap
+// discovers BOTH its routes: POST /forms/asset (authenticated authors uploading form artwork)
+// and GET /forms/asset/:id (anonymous, so a published form's images render for a respondent
+// with no session). The read route serves ONLY objects stored under the public asset prefix.
+import './asset/AssetMiddleware.js';
+
+// Import the response-file download middleware so its @RegisterClass fires and MJ server
+// bootstrap discovers GET /forms/files/:fileId — an AUTHENTICATED reader downloading one
+// respondent-uploaded answer. Mounted post-auth because identity is the guard here, unlike the
+// asset read route beside it, whose guard is the public storage prefix.
+import './download/DownloadMiddleware.js';
+
+// Registers the development-only local-disk storage driver. Importing it is enough — the
+// @RegisterClass decorator does the work — and the driver stays inert unless both
+// FORMS_LOCAL_STORAGE_ROOT is set AND a FileStorageAccount points at its driver key, so a
+// deployment that configures neither behaves exactly as it does without this import.
+import './storage/LocalDiskFileStorage.js';
 
 // Import generated class registrations manifest
 import { CLASS_REGISTRATIONS } from './generated/class-registrations-manifest.js';

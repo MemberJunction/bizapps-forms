@@ -11,47 +11,92 @@
  */
 import { Arg, Ctx, Mutation, Query, Resolver } from 'type-graphql';
 import { AppContext, GetReadOnlyProvider, GetReadWriteProvider, ResolverBase } from '@memberjunction/server';
-import type { UserInfo } from '@memberjunction/core';
+import { LogError, type UserInfo } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import type { FieldError, FormSubmissionResult } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition } from './definition-loader.service';
+import { loadResumeSnapshot } from './resume-snapshot.service';
+import { scopeNamesDistribution } from './scope-response.service';
 import {
   FieldErrorType,
   FormSubmissionInputType,
   FormSubmissionResultType,
   PublishedFormType,
 } from './graphql-types';
-import { runSubmitPipeline, type PipelineSubmission } from './submit-pipeline';
+import { runSubmitPipeline, SUBMIT_FAILED_MESSAGE, type PipelineSubmission } from './submit-pipeline';
 import { toAnswerInputs } from './input-mapping';
+import { respondentSafe } from './respondent-safe';
+import { currentRequestIdentity } from '../http/request-identity';
+import { checkEmbedOrigin } from '../http/embed-origin';
+import { publicFormPayload } from './public-form-payload';
 
 @Resolver()
 export class PublicFormResolver extends ResolverBase {
   /**
    * Load a published form by its public distribution slug. Read-only; runs under
    * the anonymous read scope.
+   *
+   * Wrapped in {@link respondentSafe}: this method has no other boundary, so a throw anywhere in it
+   * would reach Apollo and be rendered to the respondent as the exception's own words (#119). `null`
+   * is already this field's answer for "no form to show", so a failure is indistinguishable from a
+   * closed link to the caller and fully described in the log.
    */
   @Query(() => PublishedFormType, { nullable: true })
   async PublishedForm(
     @Arg('distributionSlug', () => String) distributionSlug: string,
     @Ctx() { providers, userPayload }: AppContext,
   ): Promise<PublishedFormType | null> {
-    const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-    const contextUser = this.requireUser(userPayload);
+    return respondentSafe(`PublishedForm(${distributionSlug})`, null, async () => {
+      const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+      const contextUser = this.requireUser(userPayload);
 
-    const loaded = await resolvePublishedDefinition(provider, distributionSlug, contextUser);
-    if (!loaded.ok || !loaded.value) {
-      return null;
-    }
-    const { definition } = loaded.value;
-    return Object.assign(new PublishedFormType(), {
-      formId: definition.formId,
-      formVersionId: definition.formVersionId,
-      name: definition.name,
-      description: definition.description,
-      renderMode: definition.renderMode,
-      settingsJSON: JSON.stringify(definition.settings),
-      styleTokensJSON: JSON.stringify(definition.styleTokens),
-      definitionJSON: JSON.stringify(definition),
+      const loaded = await resolvePublishedDefinition(provider, distributionSlug, contextUser);
+      if (!loaded.ok || !loaded.value) {
+        return null;
+      }
+      const { definition, distribution } = loaded.value;
+      // The same gate the submit runs, at the READ. A widget that will not be allowed to submit
+      // must not be allowed to render either: a foreign page would otherwise show a working-looking
+      // form that only fails at the very end, after the respondent has typed everything — a worse
+      // experience than a refusal — and it would hand that page the full published definition on
+      // the way, which is the thing the allowlist is meant to keep off it.
+      //
+      // `null` is already this field's answer for "no form to show", so a refusal here is
+      // indistinguishable from a closed link to the caller and fully described in the log. That is
+      // exactly the posture `respondentSafe` establishes for this query, reused rather than
+      // reinvented — there is no second failure vocabulary for an anonymous reader to learn from.
+      const embedOrigin = checkEmbedOrigin(distribution.AllowedOrigins, currentRequestIdentity()?.origin);
+      if (!embedOrigin.allowed) {
+        LogError(
+          `[Forms] PublishedForm refused for ${distributionSlug}: ${embedOrigin.reason ?? 'origin not allowed'}`,
+        );
+        return null;
+      }
+      // A resume session and a public-link session reach this resolver identically; the only
+      // difference is what their scope claim names. Only a claim that is NOT this distribution can
+      // name a response, so an ordinary public link pays for no read here at all.
+      const scope = contextUser.MagicLinkScope?.ResourceID;
+      const resume =
+        scope && !scopeNamesDistribution(scope, distribution.ID)
+          ? await loadResumeSnapshot(provider, scope, contextUser)
+          : undefined;
+      // What an anonymous caller may see — the `automations` narrowing, and the distribution's
+      // captcha flag folded into the definition — is decided by `publicFormPayload`, which is pure
+      // and asserted whole in `public-form-payload.spec.ts`. Inline here it was a contract
+      // narrowing nothing could test, and therefore one that could be deleted with the suite green.
+      //
+      // `CaptchaRequired` is passed because the SUBMIT gate reads it and this query did not, so a
+      // link with it on demanded a token from a widget that was never told to collect one (#151).
+      //
+      // `resumeJSON` is layered on top rather than moved inside it: it is a property of THIS
+      // SESSION's scope claim, not of the published definition, and `publicFormPayload` is pure in
+      // the definition and the link's captcha column alone. Folding a per-caller field into it
+      // would make the payload spec's whole-object assertion impossible to keep.
+      return Object.assign(
+        new PublishedFormType(),
+        publicFormPayload(definition, distribution.CaptchaRequired),
+        { resumeJSON: resume ? JSON.stringify(resume) : undefined },
+      );
     });
   }
 
@@ -59,11 +104,31 @@ export class PublicFormResolver extends ResolverBase {
    * Submit (or partial-save) a response through the hardening pipeline (Turnstile,
    * rate-limit, quota, dedupe, re-validation, Save, on-submit hooks). Runs under
    * the anonymous CanCreate-on-responses scope.
+   *
+   * Wrapped in {@link respondentSafe} even though `runSubmitPipeline` never throws: the pipeline's
+   * boundary starts where the pipeline does, and everything this method does before entering it —
+   * resolving the provider, the context user, the answer mapping, the system user, the request
+   * identity — and `toResultType` after it, sit outside that boundary. An exception there reaches
+   * Apollo and is rendered to the respondent verbatim (#119). The fallback is the pipeline's own
+   * authored sentence, mapped through the same `toResultType` as every other outcome, so the widget
+   * sees one shape whatever happened.
    */
   @Mutation(() => FormSubmissionResultType)
   async SubmitFormResponse(
     @Arg('input', () => FormSubmissionInputType) input: FormSubmissionInputType,
     @Ctx() { providers, userPayload }: AppContext,
+  ): Promise<FormSubmissionResultType> {
+    const failed = toResultType({ success: false, errors: [{ message: SUBMIT_FAILED_MESSAGE }] });
+    return respondentSafe(`SubmitFormResponse(${input.distributionSlug})`, failed, async () =>
+      this.submitResponse(input, providers, userPayload),
+    );
+  }
+
+  /** The submit body, with no boundary of its own — {@link SubmitFormResponse} owns that. */
+  private async submitResponse(
+    input: FormSubmissionInputType,
+    providers: AppContext['providers'],
+    userPayload: AppContext['userPayload'],
   ): Promise<FormSubmissionResultType> {
     const provider = GetReadWriteProvider(providers);
     const contextUser = this.requireUser(userPayload);
@@ -84,8 +149,27 @@ export class PublicFormResolver extends ResolverBase {
     // user: the anonymous respondent can CREATE but not READ Form Responses. The anon `contextUser`
     // still gates authorization via the pipeline's scope check (no privilege accretion).
     const elevatedUser = UserCache.Instance.GetSystemUser();
+    // `clientIpHash` is the one caller attribute here that the caller did not choose, so it is
+    // what the pipeline's abuse ceilings key on. It reaches us through the request-scoped store
+    // that `RequestIdentityMiddleware` establishes pre-auth, because `AppContext` carries no
+    // request object — see `http/request-identity.ts`.
     const result = await runSubmitPipeline(
-      { provider, contextUser, elevatedUser, sessionId: userPayload.sessionId },
+      {
+        provider,
+        contextUser,
+        elevatedUser,
+        sessionId: userPayload.sessionId,
+        // The VERIFIED half of the caller's identity. `MagicLinkScope` is populated by MJ core's
+        // `buildMagicLinkSessionUser` from the session's `mj_scopes` claim, so unlike the session
+        // header beside it, a browser cannot choose what it says.
+        scopeResourceId: contextUser.MagicLinkScope?.ResourceID,
+        clientIpHash: currentRequestIdentity()?.ipHash,
+        // Rides the same request-scoped store for the same reason: `AppContext` carries no request
+        // object, so the header is unreachable at the point the decision is made. Unlike the hash
+        // above it, the caller chose this — which is why the pipeline checks it against the
+        // AUTHOR's list rather than keying anything on it.
+        requestOrigin: currentRequestIdentity()?.origin,
+      },
       submission,
     );
     return toResultType(result);

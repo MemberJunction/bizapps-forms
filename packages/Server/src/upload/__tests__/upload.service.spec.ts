@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntityInfo, EntityUserPermissionInfo, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import { runUpload, type UploadContext, type UploadRequest, type UploadStorageEngine } from '../upload.service';
 import { resetUploadConfigForTests } from '../config';
+import { FOREIGN_ORIGIN_MESSAGE } from '../../http/embed-origin';
 import type { ParsedFile } from '../multipart';
 import { makeDefinition, makeDistribution, makeVersion } from '../../public-submit/__tests__/fakes';
 
@@ -42,16 +43,44 @@ function respondentPerms(): Record<string, boolean> {
   };
 }
 
+/**
+ * The published definition the fake distribution serves: the shared fake's ShortText question
+ * plus the two file-answer questions the requests here upload against — the endpoint verifies
+ * the question exists on the definition AND that its answer lands in the file column.
+ */
+function makeUploadDefinition() {
+  const definition = makeDefinition();
+  definition.pages[0].questions.push({
+    id: 'q-file',
+    type: 'FileUpload',
+    prompt: 'Upload your résumé',
+    isRequired: false,
+    displayOrder: 2,
+    options: [],
+  });
+  // A Doodle answer IS a file answer — the pad exports a PNG and sends it down this same
+  // route — so the definition carries one to upload against.
+  definition.pages[0].questions.push({
+    id: 'q-sign',
+    type: 'Doodle',
+    prompt: 'Sign here',
+    isRequired: false,
+    displayOrder: 3,
+    options: [],
+  });
+  return definition;
+}
+
 /** RunView provider that resolves an open published distribution for slug 'public-1'. */
-function runViewProvider(options: { openDistribution?: boolean } = {}) {
+function runViewProvider(options: { openDistribution?: boolean; allowedOrigins?: string | null } = {}) {
   const open = options.openDistribution ?? true;
   return {
     RunView: async <T>(params: RunViewParams): Promise<RunViewResult<T>> => {
       let rows: unknown[] = [];
       if (params.EntityName === FORM_DISTRIBUTION_ENTITY && open) {
-        rows = [makeDistribution()];
+        rows = [makeDistribution({ AllowedOrigins: options.allowedOrigins ?? null })];
       } else if (params.EntityName === FORM_VERSION_ENTITY && open) {
-        rows = [makeVersion(makeDefinition())];
+        rows = [makeVersion(makeUploadDefinition())];
       }
       return { Success: true, Results: rows as T[], RowCount: rows.length, TotalRowCount: rows.length, ExecutionTime: 0, ErrorMessage: '' } as RunViewResult<T>;
     },
@@ -79,18 +108,21 @@ function request(overrides?: Partial<UploadRequest>): UploadRequest {
 }
 
 /** Provenance rows recorded by the stub, so tests can assert what the endpoint wrote. */
-const recordedProvenance: { fileId: string; responseId?: string; distributionId: string }[] = [];
+const recordedProvenance: { fileId: string; responseId?: string; distributionId: string; questionId?: string }[] = [];
 
 function context(opts: {
   perms?: Record<string, boolean>;
   open?: boolean;
   storage?: UploadStorageEngine;
   provenanceFails?: boolean;
+  allowedOrigins?: string | null;
+  requestOrigin?: string;
 }): UploadContext {
   return {
     contextUser: USER,
+    requestOrigin: opts.requestOrigin,
     metadataProvider: metadataProvider(opts.perms ?? respondentPerms()),
-    runViewProvider: runViewProvider({ openDistribution: opts.open }),
+    runViewProvider: runViewProvider({ openDistribution: opts.open, allowedOrigins: opts.allowedOrigins }),
     storage: opts.storage ?? storageEngine().engine,
     // Stubbed rather than hitting the database. The endpoint fails closed when provenance cannot
     // be recorded, so without a substitute every upload test would fail for the wrong reason.
@@ -102,6 +134,7 @@ function context(opts: {
         fileId: input.fileId,
         responseId: input.responseId,
         distributionId: input.distributionId,
+        questionId: input.questionId,
       });
       return true;
     },
@@ -175,6 +208,115 @@ describe('runUpload', () => {
     expect(result.failure?.status).toBe(400);
   });
 
+  it('rejects (400) a questionId that is not on the published definition — before storing bytes', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ storage: engine }), request({ questionId: 'q-not-real' }));
+    expect(result.failure?.status).toBe(400);
+    expect(result.failure?.error).toMatch(/Unknown "questionId"/);
+    // The whole point: an unknown question must never reach storage (it used to travel all the
+    // way to the provenance insert and orphan the stored bytes + MJ: Files row on the way out).
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('says what a refused file type should have been instead', async () => {
+    // "Content type "text/markdown" is not allowed." names the problem and stops. The
+    // respondent is now holding a file they cannot use and no idea what would work, so
+    // the next thing they try is a guess.
+    const { engine } = storageEngine();
+    const file = { ...pngFile(), filename: 'notes.md', contentType: 'text/markdown' };
+    const result = await runUpload(context({ storage: engine }), request({ file }));
+    expect(result.failure?.status).toBe(415);
+    expect(result.failure?.error).toMatch(/text\/markdown/);
+    expect(result.failure?.error.toLowerCase()).toMatch(/pdf|image/);
+  });
+
+  it('states the size cap in units a person reads, not raw bytes', async () => {
+    // "10485760 bytes" is a number from a spec sheet. The respondent has to divide by
+    // 1048576 to learn their file is 3 MB over — and this exact rawness was already fixed
+    // once on the authoring asset route, so the fix belongs in one place, not two.
+    const { engine } = storageEngine();
+    const result = await runUpload(context({ storage: engine }), request({ file: pngFile(50 * 1024 * 1024) }));
+    expect(result.failure?.status).toBe(413);
+    expect(result.failure?.error).toMatch(/\bMB\b/);
+    expect(result.failure?.error).not.toMatch(/\d{7,}/);
+  });
+
+  it('gives every upload its own storage path, even for identical filenames', async () => {
+    // DATA LOSS. The prefix was `forms-uploads/<date>` with nothing unique in it, and the
+    // doodle pad names every file it exports `doodle.png` — so every drawing made
+    // on a given day, by every respondent, on every form, wrote to the SAME object path.
+    // Each upload silently overwrote the last, and the MJ: Files rows all pointed at one
+    // set of bytes, so a response ended up showing a stranger's drawing. Verified on a
+    // real host: five uploads, one file on disk. MJ's own default prefix carries a UUID
+    // for exactly this reason; this one dropped it.
+    const { engine, upload } = storageEngine();
+    await runUpload(context({ storage: engine }), request());
+    await runUpload(context({ storage: engine }), request());
+    const [first, second] = upload.mock.calls.map((c) => c[0].pathPrefix);
+    expect(first).toBeTruthy();
+    expect(second).not.toBe(first);
+  });
+
+  it('gives every upload its own path even when an operator configures the prefix', async () => {
+    // The fix above lived in the `?? defaultPathPrefix()` FALLBACK, so it only protected hosts
+    // that had not configured anything. `FORMS_UPLOAD_PATH_PREFIX` is a documented, supported
+    // setting, and setting it put back the exact data loss the fallback had just removed:
+    // `cfg.pathPrefix` is a constant string, so every `doodle.png` writes to one object and
+    // the new download route hands a reviewer whichever respondent's drawing landed last.
+    // Uniqueness has to be an invariant of the path builder, not of one branch of it.
+    process.env.FORMS_UPLOAD_PATH_PREFIX = 'forms-uploads';
+    resetUploadConfigForTests();
+    try {
+      const { engine, upload } = storageEngine();
+      await runUpload(context({ storage: engine }), request());
+      await runUpload(context({ storage: engine }), request());
+      const [first, second] = upload.mock.calls.map((c) => c[0].pathPrefix);
+      expect(first).toMatch(/^forms-uploads\//);
+      expect(second).not.toBe(first);
+    } finally {
+      delete process.env.FORMS_UPLOAD_PATH_PREFIX;
+      resetUploadConfigForTests();
+    }
+  });
+
+  it('accepts a Doodle question, whose answer is a file drawn on a canvas', async () => {
+    // The shipped bug: the guard hardcoded 'FileUpload', so every drawing came back 400
+    // and the respondent saw "Upload failed (HTTP 400)" under a drawing they had just
+    // made, with no way forward. Doodle and FileUpload both declare answerColumn:
+    // 'file' in the question-type contract, which is the thing this should be asking.
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ storage: engine }), request({ questionId: 'q-sign' }));
+    expect(result.failure).toBeUndefined();
+    expect(result.success?.fileId).toBeTruthy();
+    expect(upload).toHaveBeenCalled();
+  });
+
+  it('rejects (400) a questionId whose answer is not a file at all', async () => {
+    // Still fail-closed for a text question: a ledger row minted against one could never be
+    // matched to a file answer at submit. Only the reason changed — the guard now asks the
+    // contract which column the answer lands in instead of naming a single type.
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ storage: engine }), request({ questionId: 'q-name' }));
+    expect(result.failure?.status).toBe(400);
+    expect(result.failure?.error).toMatch(/does not take a file answer/);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('accepts a questionId differing only by GUID case, and records the definition spelling', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ storage: engine }), request({ questionId: 'Q-FILE' }));
+
+    expect(result.ok).toBe(true);
+    // Reached storage — an accepted upload must actually store, not merely avoid rejection.
+    expect(upload).toHaveBeenCalledOnce();
+    // The LEDGER carries the definition's spelling, not whatever case the client sent. The id is
+    // matched case-folded (client mints lowercase, SQL Server returns uppercase) but written
+    // canonically, so `FormUpload.QuestionID` cannot disagree with the published definition about
+    // which question an upload answered.
+    expect(recordedProvenance).toHaveLength(1);
+    expect(recordedProvenance[0].questionId).toBe('q-file');
+  });
+
   it('rejects (404) when the distribution does not resolve to an open form', async () => {
     const result = await runUpload(context({ open: false }), request());
     expect(result.failure?.status).toBe(404);
@@ -210,5 +352,82 @@ describe('runUpload — provenance', () => {
     // breaks their submission.
     expect(result.ok).toBe(false);
     expect(result.failure?.status).toBe(500);
+  });
+
+  /**
+   * #203 closed this door LAST. The embed-origin gate shipped on `PublishedForm` and
+   * `SubmitFormResponse` -- the "two doors" the change reasons about -- while `/forms/upload` is a
+   * third door on the same public path, reached by the same widget with the same anonymous session
+   * and resolved through the SAME `resolvePublishedDefinition`. Measured on a live branch host
+   * before this gate existed: with AllowedOrigins=["https://careers.acme.com"] a caller on
+   * https://evil.example was refused by the submit and still stored bytes plus an `MJ: Files` row
+   * here. A refusal that only covers some of a distribution's doors is not fail-closed.
+   */
+  describe('embed origin (#203)', () => {
+    it('refuses an upload whose Origin is not on the distribution allowlist', async () => {
+      const { engine, upload } = storageEngine();
+      const result = await runUpload(
+        context({
+          storage: engine,
+          allowedOrigins: '["https://careers.acme.com"]',
+          requestOrigin: 'https://evil.example',
+        }),
+        request(),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.failure?.status).toBe(403);
+      // The respondent-facing sentence is the SAME one the submit door uses, so a prober cannot
+      // tell the two apart and a respondent is not taught a second vocabulary.
+      expect(result.failure?.error).toBe(FOREIGN_ORIGIN_MESSAGE);
+      // The point of the gate: nothing was stored.
+      expect(upload).not.toHaveBeenCalled();
+      expect(recordedProvenance).toHaveLength(0);
+    });
+
+    it('refuses an upload that sends no Origin at all once a list is authored', async () => {
+      const { engine, upload } = storageEngine();
+      const result = await runUpload(
+        context({ storage: engine, allowedOrigins: '["https://careers.acme.com"]' }),
+        request(),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.failure?.status).toBe(403);
+      expect(upload).not.toHaveBeenCalled();
+    });
+
+    it('admits an upload from an origin the author listed', async () => {
+      const { engine, upload } = storageEngine();
+      const result = await runUpload(
+        context({
+          storage: engine,
+          allowedOrigins: '["https://careers.acme.com"]',
+          requestOrigin: 'https://careers.acme.com',
+        }),
+        request(),
+      );
+      expect(result.ok).toBe(true);
+      expect(upload).toHaveBeenCalledTimes(1);
+    });
+
+    it('admits an upload when the distribution authored nothing, whatever the Origin', async () => {
+      const { engine, upload } = storageEngine();
+      const result = await runUpload(
+        context({ storage: engine, allowedOrigins: null, requestOrigin: 'https://evil.example' }),
+        request(),
+      );
+      expect(result.ok).toBe(true);
+      expect(upload).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses everyone when the authored value parses to nothing usable', async () => {
+      const { engine, upload } = storageEngine();
+      const result = await runUpload(
+        context({ storage: engine, allowedOrigins: 'not json', requestOrigin: 'https://careers.acme.com' }),
+        request(),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.failure?.status).toBe(403);
+      expect(upload).not.toHaveBeenCalled();
+    });
   });
 });

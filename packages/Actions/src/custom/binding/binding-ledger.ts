@@ -13,9 +13,9 @@
  */
 import { LogError, Metadata, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
+import { sqlLiteral } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormEntityBindingRecordEntity } from '@mj-biz-apps/forms-entities';
 import type { BindingOutcome, BindingOutcomeKind, PriorBindingOutcome } from './binding-executor';
-import { sqlLiteral } from './mj-binding-gateway';
 
 const BINDING_RECORD_ENTITY = 'MJ_BizApps_Forms: Form Entity Binding Records';
 

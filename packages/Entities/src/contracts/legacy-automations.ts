@@ -7,6 +7,12 @@
  * form silently changes what else happens on submit — which is precisely the failure this
  * definition exists to prevent.
  *
+ * HOW A FORM DECLINES THEM. Dispatch is no longer inferred from whether this list is empty: a form
+ * whose settings say `onSubmitMode: 'Configured'` runs its own automations, INCLUDING when it has
+ * none. See {@link resolveOnSubmitDispatch} and `docs/on-submit-automations.md` — which also
+ * documents `Forms: Upsert Respondent Person` as the owner of respondent identity, so a consuming
+ * app reads `FormResponse.RespondentPersonID` instead of deriving a second Person of its own.
+ *
  * WHY THE BUILDER SEEDS THEM AT ALL. Dispatch is all-or-nothing: a form whose snapshot carries any
  * automations runs those and nothing else. Without seeding, an author who adds one binding would
  * lose their confirmation email, their follow-up task, their respondent-Person upsert and their

@@ -2,23 +2,44 @@
 /**
  * Distribution gate — can a stranger install this app and get a working one?
  *
- * The first two failures this catches were live in the repo when it was written, and both were
- * invisible from inside: everything built, every test passed, and the app worked perfectly on the
- * machine that had run `mj sync push` by hand. The third guards a regression that has not happened
- * yet and would look identical. See plans/DISTRIBUTION_SEED_PLAN.md.
+ * The first failures this catches were live in the repo when it was written, and all were invisible
+ * from inside: everything built, every test passed, and the app worked perfectly on the machine that
+ * had run `mj sync push` by hand. The later ones guard regressions that have not happened yet and
+ * would look identical. See plans/DISTRIBUTION_SEED_PLAN.md.
  *
- * CHECK 1 — THE METADATA SEED EXISTS AND IS CURRENT.
- *   `mj-app.json`'s `metadata.directory` is documentation: MJ's manifest schema says the install
- *   engine NEVER reads it, and seeding happens exclusively through `migrations/`. So metadata that
- *   has not been pushed into a `*Metadata_Sync*.sql` migration ships nowhere. MJ Forms went nine
- *   months and ~56 records without one.
+ * WHAT THIS FILE NO LONGER DOES, so nobody adds it back (#105). A CHECK 1 here used to compare
+ * `metadata/` against a checked-in hash manifest and infer "the seed ships this record" from the
+ * presence of a manifest key. That inference passes silently in one direction — regenerate the
+ * manifest without regenerating the seed and it goes green while the record ships nowhere — and the
+ * cadence it enforced (a `Metadata_Sync` per feature PR) is the one MJ/metadata/CLAUDE.md §1b and
+ * §10 rule out. PRs now contribute declarative JSON only and the build engineer generates ONE
+ * consolidated seed per release. What replaced the proxy is `scripts/check-release-seed-coverage.mjs`,
+ * which checks the property itself — every declared `primaryKey` UUID appears in shipped SQL — and
+ * runs at the release boundary rather than on every PR.
  *
- *   Currency is checked against a manifest of content hashes rather than by diffing git: a hash
- *   manifest answers the question that actually matters ("is the shipped seed current with the
- *   metadata?") rather than a proxy ("did both change in the same pull request?"), and it works on
- *   any checkout, including the shallow clones CI hands you.
+ * The checks below are unaffected by that and keep their numbers: each reads shipped SQL directly
+ * for a hazard whose failure mode is silence on a stranger's database.
  *
- *   Regenerate both together:  npm run seed:manifest   (after regenerating the seed migration)
+ * CHECK 5 — A SHIPPED SCHEMA SYNC NEVER REACHES A SCHEMA THIS APP DOES NOT OWN.
+ *   CodeGen writes `@ExcludedSchemaNames` from whatever schemas the DEV database happened to hold,
+ *   so the list is only ever as good as one developer's install. It must never be NARROWER than a
+ *   list the repo already shipped — which is checked against history rather than a constant,
+ *   because a hand-written deny-list cannot name an Open App nobody here has heard of.
+ *
+ * CHECK 4 — A CORE-METADATA INSERT IS NEVER GUARDED ON ITS OWN ID ALONE.
+ *   `IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityRelationship] WHERE [ID] = '<guid>')` asks
+ *   whether THIS ROW was inserted before. What makes an insert safe is whether the THING IT
+ *   DESCRIBES already exists, under whatever id the host minted for it — and on any machine that ran
+ *   `mj codegen` before the migration, that id is not ours. The guard misses, the insert lands a
+ *   second copy, and four of the seven tables involved have no unique constraint on their natural
+ *   key to stop it. That is #64. Its consequence is #66: CodeGen emits one `@FieldResolver` per
+ *   `EntityRelationship` row, so a duplicated row makes the NEXT regeneration emit a duplicate
+ *   identifier and `forms-server` stops compiling — on whichever branch happens to regenerate,
+ *   nowhere near the migration that caused it.
+ *
+ *   This is the third gate here whose failure mode is silence, and the third for the same reason:
+ *   everything builds, every test passes, and the checked-in generated files still compile, because
+ *   they predate the duplicate. Nothing in the repo reads the database this defect lives in.
  *
  * CHECK 2 — NO UNRESOLVABLE PLACEHOLDERS IN SHIPPED SQL.
  *   `mj migrate` builds Skyway's placeholder map from THIS repo's mj.config.cjs, but
@@ -69,10 +90,9 @@
  * without an install step.
  */
 
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
@@ -85,8 +105,17 @@ const REPO_ROOT = join(__dirname, '..');
 const INSTALL_SUPPLIED_PLACEHOLDERS = new Set(['flyway:defaultSchema', 'mjSchema']);
 
 /**
- * The one machine-generated file class: `mj sync push`'s output, moved into migrations/. CHECK 1
- * asks whether one exists and is current; CHECK 3 asks what the post-hardening ones grant.
+ * The directories whose SQL reaches a stranger's database, scanned by CHECK 3 and CHECK 4 alike.
+ *
+ * `migrations-pg/` is included so the first PostgreSQL seed is checked from birth rather than from
+ * whenever somebody remembers to widen a gate. It is not kept in lockstep today (it stops at 0.8.x),
+ * which is precisely why the gates must already know about it.
+ */
+const SHIPPED_MIGRATION_DIRS = ['migrations', 'migrations-pg'];
+
+/**
+ * The one machine-generated file class: `mj sync push`'s output, moved into migrations/. CHECK 3
+ * asks what the post-hardening ones grant.
  *
  * The separator is optional because CHECK 3 made this name security-load-bearing: `MetadataSync`
  * is a spelling someone types, and under an exact `Metadata_Sync` a generated seed walked past the
@@ -98,122 +127,6 @@ const INSTALL_SUPPLIED_PLACEHOLDERS = new Set(['flyway:defaultSchema', 'mjSchema
  * in `checkRespondentGrants` (loudly, as "I could not read this"), NOT by the grant rules.
  */
 const METADATA_SEED_FILE = /Metadata[_ -]?Sync.*\.sql$/i;
-
-/**
- * `metadata/sql_logging/` holds the raw generator output that BECOMES the seed migration. It is
- * gitignored, but a local run leaves it on disk and it must not be hashed as if it were source.
- */
-const METADATA_IGNORED_DIRS = new Set(['sql_logging']);
-
-/**
- * `README.md` under `metadata/` is documentation for humans, never record content, so editing one
- * cannot make the shipped seed stale. Record bodies that DO live in files are pulled in by
- * `@file:` references (`metadata/templates/templates/*.md`) and are still hashed — only the name
- * `README.md` is exempt. Without this the gate fires on a documentation edit and teaches people
- * that regenerating the manifest is how you make it quiet, which is precisely the habit that would
- * let a real drift through.
- */
-const METADATA_IGNORED_FILES = new Set(['README.md']);
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Every file under `metadata/`, repo-relative and sorted, excluding generator output. */
-function collectMetadataFiles(dir, acc = []) {
-    for (const name of readdirSync(dir).sort()) {
-        const full = join(dir, name);
-        if (statSync(full).isDirectory()) {
-            if (!METADATA_IGNORED_DIRS.has(name)) collectMetadataFiles(full, acc);
-        } else if (!METADATA_IGNORED_FILES.has(name)) {
-            acc.push(full);
-        }
-    }
-    return acc;
-}
-
-/**
- * Hash of a metadata file's MEANING, not its bytes.
- *
- * `mj sync push` writes a `sync` block (lastModified + checksum) back into each record after a
- * push. Those are bookkeeping about the push, not content — hashing them would make the gate fire
- * on the very push that regenerated the seed, which trains people to regenerate the manifest to
- * silence it. Stripped for JSON; other files (template .md bodies) hash whole.
- */
-function contentHash(file) {
-    const raw = readFileSync(file, 'utf-8');
-    if (!file.endsWith('.json')) return createHash('sha256').update(raw).digest('hex');
-    let parsed;
-    try {
-        parsed = JSON.parse(raw);
-    } catch {
-        // Unparseable JSON is a real problem, but not this gate's problem to diagnose — hash the
-        // bytes so it still registers as a change rather than being silently skipped.
-        return createHash('sha256').update(raw).digest('hex');
-    }
-    const strip = (node) => {
-        if (Array.isArray(node)) return node.map(strip);
-        if (node && typeof node === 'object') {
-            return Object.fromEntries(
-                Object.entries(node)
-                    .filter(([k]) => k !== 'sync')
-                    .map(([k, v]) => [k, strip(v)]),
-            );
-        }
-        return node;
-    };
-    return createHash('sha256').update(JSON.stringify(strip(parsed))).digest('hex');
-}
-
-export function buildManifest(repoRoot = REPO_ROOT) {
-    const files = {};
-    for (const file of collectMetadataFiles(join(repoRoot, 'metadata'))) {
-        files[relative(repoRoot, file)] = contentHash(file);
-    }
-    return { generatedFrom: 'metadata/', files };
-}
-
-// ---------------------------------------------------------------------------
-// CHECK 1 — the seed migration exists and matches the metadata it was generated from
-// ---------------------------------------------------------------------------
-
-function checkSeedMigration(repoRoot, violations) {
-    const MIGRATIONS_DIR = join(repoRoot, 'migrations');
-    const MANIFEST_PATH = join(MIGRATIONS_DIR, 'metadata-seed.manifest.json');
-    const seeds = readdirSync(MIGRATIONS_DIR).filter((f) => METADATA_SEED_FILE.test(f));
-    if (seeds.length === 0) {
-        violations.push(
-            'No `*Metadata_Sync*.sql` migration in migrations/. Everything under metadata/ ships ' +
-                'NOWHERE: MJ never reads mj-app.json\'s metadata.directory at install. Generate one with ' +
-                '`mj sync push --dir metadata` against a database whose Forms metadata is empty.',
-        );
-        return;
-    }
-
-    if (!existsSync(MANIFEST_PATH)) {
-        violations.push(
-            `Seed migration(s) present (${seeds.join(', ')}) but ${relative(repoRoot, MANIFEST_PATH)} is ` +
-                'missing, so nothing can tell whether they are current. Run `npm run seed:manifest`.',
-        );
-        return;
-    }
-
-    const recorded = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8')).files ?? {};
-    const current = buildManifest(repoRoot).files;
-
-    for (const [file, hash] of Object.entries(current)) {
-        if (!(file in recorded)) {
-            violations.push(`${file} is new metadata that no seed migration ships. Regenerate the seed, then \`npm run seed:manifest\`.`);
-        } else if (recorded[file] !== hash) {
-            violations.push(`${file} changed since the seed migration was generated, so the change ships nowhere. Regenerate the seed, then \`npm run seed:manifest\`.`);
-        }
-    }
-    for (const file of Object.keys(recorded)) {
-        if (!(file in current)) {
-            violations.push(`${file} was deleted but the seed migration still creates its records. Regenerate the seed, then \`npm run seed:manifest\`.`);
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // CHECK 2 — shipped SQL uses only placeholders the install engine supplies
@@ -227,7 +140,12 @@ function checkPlaceholders(repoRoot, violations) {
         // literal string split, no Skyway involved.
         const allowed = dir.endsWith('migrations-teardown') ? new Set(['mjSchema']) : INSTALL_SUPPLIED_PLACEHOLDERS;
         for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
-            const sql = readFileSync(join(dir, file), 'utf-8');
+            // The `values` mask, for the same reason CHECK 7 reads it: comments are blanked, so a
+            // header that DISCUSSES a placeholder — PR #168's said it had removed
+            // `${flyway:timestamp}` — is not read as using one, while string bodies survive because
+            // a placeholder inside a literal really would ship unresolved. A gate that fires on the
+            // sentence explaining a fix is a gate the next author stops believing.
+            const sql = maskSql(readFileSync(join(dir, file), 'utf-8')).values;
             const seen = new Set();
             for (const match of sql.matchAll(/\$\{([^}]+)\}/g)) {
                 const name = match[1];
@@ -240,6 +158,378 @@ function checkPlaceholders(repoRoot, violations) {
                     );
                 }
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CHECK 5 — CodeGen's schema-sync calls never reach a schema this app does not own
+// ---------------------------------------------------------------------------
+
+/**
+ * The FLOOR of schemas `spUpdateExistingEntitiesFromSchema` must always be told to leave alone.
+ *
+ * A floor, not the answer. The `__mj_BizApps*` schemas belong to SIBLING Open Apps —
+ * `bizapps-tasks` is a hard dependency of this one and `mj app install` installs it FIRST, so a
+ * sync that includes it rewrites another app's entity metadata on every host that installs Forms.
+ * `dbo` and `staging` belong to the HOST: sweeping them registers the customer's own tables as MJ
+ * entities. Both case variants, because the collation a host uses is not ours to assume.
+ *
+ * What a hand-written list CANNOT do is name an Open App nobody here has heard of — `mj.config.cjs`
+ * makes exactly this point about `__mj_BizAppsCaliber`, "which no deny-list maintained here could
+ * ever have named in advance". So this floor is only half the check; {@link previouslyExcluded}
+ * supplies the other half by reading what the repo has already shipped.
+ */
+const SCHEMAS_NEVER_SYNCED = [
+    'sys',
+    'staging',
+    'dbo',
+    '${mjSchema}',
+    '${mjSchema}_BizAppsCommon',
+    '${mjSchema}_BizAppsTasks',
+    '${mjSchema}_bizappscommon',
+    '${mjSchema}_bizappstasks',
+    // Named explicitly even though history also supplies them: the history half derives from the
+    // WORKING TREE, and exactly one tracked file names these two, so renaming or squashing
+    // `V202608191400` would have silently relaxed the floor back to the six above. History is for
+    // the apps nobody here has heard of; this list is for the ones we have.
+    '${mjSchema}_BizAppsATS',
+    '${mjSchema}_BizAppsCaliber',
+];
+
+/**
+ * The first migration this check governs, as its version stamp.
+ *
+ * Deliberately forward-looking. Four migrations that predate this carry lists missing some of the
+ * baseline, and they are already applied on every host that installed those versions — editing
+ * them now would change nothing for those hosts while making the shipped history disagree with
+ * what ran. Remediating them means a NEW corrective migration, which is its own change with its
+ * own verification; it is logged in plans/FORMS_BUILD_PLAN.md rather than smuggled in here.
+ *
+ * What this gate does is stop the next one, which is the failure mode that matters: the list is
+ * regenerated by CodeGen from the dev machine's schema inventory on every run.
+ */
+const SCHEMA_SYNC_GATE_FROM = '202608252340';
+
+/**
+ * The same watershed, as a number, for the checks that compare with {@link landsAfter}.
+ *
+ * Both of this repo's newest checks — the schema-sync scope above and the unguarded-core-insert
+ * scan below — are deliberately forward-looking for the same reason: older migrations carry known
+ * instances of both gaps and are already applied on hosts, where editing them changes nothing
+ * while making the shipped history disagree with what ran. Remediating those means a corrective
+ * migration, which is its own change with its own verification, and it is logged in
+ * plans/FORMS_BUILD_PLAN.md rather than smuggled into an unrelated one.
+ */
+const NEWER_GATES_WATERSHED = Number(SCHEMA_SYNC_GATE_FROM) - 1;
+
+
+/**
+ * CHECK 5 — every `@ExcludedSchemaNames` in shipped SQL excludes at least the baseline above.
+ *
+ * This exists because a CodeGen run bakes the DEV MACHINE's schema inventory into the SQL it
+ * emits, and that inventory is whatever happened to be installed that day. A developer whose
+ * database lacks `bizapps-tasks` gets a list without it, appends the output to a migration, and
+ * ships a sync that quietly rewrites tasks' metadata for everyone else. It happened: the
+ * Rules & Branching migration shipped a list missing `__mj_BizAppsTasks`, `dbo` and `staging`
+ * while the migration immediately before it named all three, and nothing caught the difference —
+ * `check-generated-schema-scope.mjs` reads `mj.config.cjs` and generated TypeScript, not SQL.
+ */
+/**
+ * A schema name reduced to its IDENTITY, so two spellings of one schema compare equal.
+ *
+ * Only the PLACEHOLDER is normalized, deliberately, and case is NOT. Shipped lists disagree on the
+ * placeholder — most write `${mjSchema}_BizAppsTasks`, one older CodeGen run baked the literal
+ * `__mj_BizAppsTasks` — and treating those as different schemas would report a drop that is purely
+ * a spelling difference, which is how a real check turns into noise somebody switches off.
+ *
+ * Case is a different thing entirely. CodeGen emits BOTH `_BizAppsTasks` and `_bizappstasks`
+ * because the host's collation is not knowable from here, so the two spellings are two separate
+ * protections and losing one is a real narrowing on a case-sensitive host. Folding case here made
+ * the check accept dropping either — the first version of this function did exactly that, and
+ * removing `${mjSchema}_BizAppsTasks` outright passed clean.
+ */
+function schemaIdentity(name) {
+    return name.replace(/\$\{mjSchema\}/g, '__mj');
+}
+
+/**
+ * The procs that this repo's shipped SQL is known to pass `@ExcludedSchemaNames` to.
+ *
+ * DISCOVERED, not enumerated. A hand-written list of proc names goes stale exactly the way a
+ * hand-written list of schema names does, and it did: the first version named four procs and
+ * missed `spDeleteUnneededEntityFields`, which is the one CodeGen emits LAST — so deleting that
+ * call's argument passed the accounting backstop clean, the very hole the backstop was added to
+ * close. Reading the names out of the corpus means a proc is covered from the first call that
+ * passes the argument, with nothing to keep up to date.
+ */
+function schemaSyncProcNames(repoRoot) {
+    // The floor: every such proc CodeGen is known to emit today. Discovery alone is not enough —
+    // in a corpus where no call happens to pass the argument (a single-migration fixture, or a
+    // future paste that omits it everywhere) there would be nothing to discover, and the check
+    // would go quiet exactly when it is needed. The floor is what we know; discovery is for what
+    // we do not.
+    const names = new Set([
+        'spupdateexistingentitiesfromschema',
+        'spupdateexistingentityfieldsfromschema',
+        'spdeleteunneededentityfields',
+        'spsetdefaultcolumnwidthwhereneeded',
+        'spupdateschemainfofromdatabase',
+    ]);
+    for (const dir of SHIPPED_MIGRATION_DIRS.map((d) => join(repoRoot, d))) {
+        if (!existsSync(dir)) continue;
+        for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
+            const sql = maskSql(readFileSync(join(dir, file), 'utf-8')).values;
+            // Both spellings, or discovery is only half true. T-SQL names the argument; PostgreSQL
+            // passes it positionally, so matching `@ExcludedSchemaNames` alone meant a proc used
+            // ONLY in `migrations-pg/` was never discovered — and once the positional matcher was
+            // filtered to discovered names, that made CHECK 5 silent on exactly the dialect it had
+            // just been taught to read. Coverage should not depend on a proc happening to appear
+            // in T-SQL too.
+            for (const call of sql.matchAll(/\[?(sp\w+)\]?\s*@ExcludedSchemaNames/gi)) {
+                names.add(call[1].toLowerCase());
+            }
+            // Deliberately NOT the positional form. That regex is character-identical to the one
+            // this set gates, so discovering through it would populate the filter with the very
+            // pattern the filter exists to restrict: `migrations-pg/` is full of generated
+            // `"spCreateFormQuestion"('<guid>', …)` calls, and one of those would be discovered as
+            // a sync proc and its GUID read as an exclusion list — poisoning the history floor so
+            // that every later correct migration failed. The named form is unambiguous, and the
+            // floor above already covers every sync proc that exists in either dialect.
+        }
+    }
+    return names;
+}
+
+/**
+ * How many times `sql` invokes one of `procNames` — with or without an argument.
+ *
+ * Counting the CALLS rather than the arguments is the whole point: {@link checkSchemaSyncScope}
+ * can only inspect lists it manages to parse, so every way of making one unparseable is a way of
+ * passing it silently. Comparing this count against the number parsed turns "not seen" into a
+ * violation instead of a pass.
+ */
+function countSchemaSyncCalls(sql, procNames) {
+    // Anchored on the NAME alone, indifferent to what follows it. Requiring a specific next
+    // character (`@`, `;`, whitespace) missed a call whose argument list had been left malformed —
+    // `[spDeleteUnneededEntityFields], @EntityIDs=…` — which is precisely the shape a careless
+    // deletion produces, so the one mutation that mattered slipped through. Being name-anchored
+    // also covers the PostgreSQL call form (`SELECT schema."spX"(…)`), which has no EXEC to anchor
+    // What counts as a CALL. Every real invocation in either dialect is introduced by a keyword —
+    // `EXEC`/`EXECUTE` in T-SQL, a `SELECT` of a quoted function in PostgreSQL — and that keyword
+    // is what separates a call from a MENTION. Anchoring on the punctuation before the name was
+    // not enough: an `sp_addextendedproperty` description reading "See dbo.spUpdate… for how this
+    // is populated" has a dot before the name and is not a call, and the comment here used to
+    // claim the anchor prevented exactly that shape. It did not.
+    //
+    // Counted on the `values` mask (see the call site), so a call written inside a dynamic-SQL
+    // literal still counts — which is the point of not sharing the parser's mask.
+    let calls = 0;
+    for (const call of sql.matchAll(/\bEXEC(?:UTE)?\s+(?:\[[^\]]*\]|[\w$.{}]+)?\s*\.?\s*\[?"?(sp\w+)/gi)) {
+        if (procNames.has(call[1].toLowerCase())) {
+            calls++;
+        }
+    }
+    // PostgreSQL: `SELECT schema."spX"(…)`. The parenthesis is what makes it a call rather than a
+    // name in prose; `exclusionListsIn` reads the argument itself.
+    for (const call of sql.matchAll(/"(sp\w+)"\s*\(/gi)) {
+        if (procNames.has(call[1].toLowerCase())) {
+            calls++;
+        }
+    }
+    return calls;
+}
+
+/**
+ * The version a shipped SQL file sorts under, or `null` if it is not shipped SQL at all.
+ *
+ * Fails SAFE on anything it cannot order, which is the convention the other two watershed helpers
+ * in this file already document — "an unorderable file is the one most likely to land last". This
+ * previously demanded a 12-digit stamp and skipped everything else, so `V1__Foo.sql`, `V1_0__Foo.sql`
+ * and `V2026_08__Foo.sql` — all legal Flyway versions, and `V1__Metadata_Sync.sql` is this repo's
+ * own spec fixture — were exempt from CHECK 5 entirely. `R__` repeatables sort last because that is
+ * when Flyway runs them; every other unparseable name sorts last too, so it is gated rather than
+ * ignored.
+ */
+function gatedVersionOf(file) {
+    if (!file.endsWith('.sql')) {
+        return null;
+    }
+    const stamp = /^[A-Z](\d{12})__/.exec(file);
+    return stamp === null ? '999999999999' : stamp[1];
+}
+
+/**
+ * Every exclusion list `sql` passes to a schema-sync proc, in either dialect.
+ *
+ * T-SQL names the argument (`@ExcludedSchemaNames='…'`); PostgreSQL passes it POSITIONALLY
+ * (`SELECT schema."spUpdateExistingEntitiesFromSchema"('…')`). Reading only the named form meant
+ * CHECK 5 could not see the PG path at all — and the lists there are narrower than the T-SQL ones,
+ * naming no sibling Open App, which is precisely the drift the check exists to catch. The
+ * accounting backstop was reporting those files as calls-it-could-not-parse; that was the check
+ * working, and taking it for an over-count would have been the wrong lesson entirely.
+ */
+/**
+ * The schema this app owns, as shipped SQL is required to spell it. Anything else in an
+ * `@IncludedSchemaNames` list is a schema this app does not own, which is the thing CHECK 5 exists
+ * to refuse — so the positive filter only exempts a call when it names this and nothing else.
+ */
+const OWNED_SCHEMA = '${flyway:defaultSchema}';
+
+/**
+ * True when the sync call containing `from` limits itself to this app's own schema.
+ *
+ * `@IncludedSchemaNames` is MJ 6.1.0-edge.4's positive filter (`MJ/migrations/v6/V202608260829`):
+ * when non-empty the heal is limited to those schemas AND still minus the exclusions. A call that
+ * names only our own schema therefore cannot reach `__mj` or a sibling Open App whatever its
+ * exclusion list says — it is strictly SAFER than the long negative list this check was written
+ * around, and refusing it pushed authors back toward the shape that caused the problem.
+ *
+ * Bounded to the statement, not the line: `V202609050300` writes the proc name on one line and its
+ * arguments on the next, so a line-scoped read would miss the pairing. `GO` bounds it too, because
+ * the inlined `R__RefreshMetadata` block runs its calls with no terminating semicolon at all —
+ * those must keep failing, and do.
+ */
+function scopedToOwnSchema(sql, from) {
+    const rest = sql.slice(from);
+    const end = Math.min(
+        ...[/;/, /\bEXEC(?:UTE)?\b/i, /^[ \t]*GO[ \t]*$/im]
+            .map((re) => { const m = re.exec(rest); return m === null ? Infinity : m.index; })
+            .filter((i) => i > 0),
+    );
+    const statement = rest.slice(0, end === Infinity ? rest.length : end);
+    const included = /@IncludedSchemaNames\s*=\s*N?'([^']*)'/i.exec(statement);
+    if (included === null) return false;
+    const names = included[1].split(',').map((n) => n.trim()).filter((n) => n.length > 0);
+    return names.length > 0 && names.every((n) => n === OWNED_SCHEMA);
+}
+
+function exclusionListsIn(sql, procNames) {
+    const found = [];
+    for (const named of sql.matchAll(/@ExcludedSchemaNames\s*=\s*'([^']*)'/g)) {
+        found.push({ raw: named[1], positivelyScoped: scopedToOwnSchema(sql, named.index) });
+    }
+    // Positional form, and ONLY for a proc known to take an exclusion list. Unfiltered, this would
+    // read the first string argument of any `"spSomething"('…')` as a schema list — there is no
+    // such call today, but `migrations-pg/` is full of generated `"spDeleteForm"(…)` functions and
+    // one of them growing a string parameter would silently become an "exclusion list".
+    for (const positional of sql.matchAll(/"(sp\w+)"\s*\(\s*'([^']*)'/gi)) {
+        if (procNames.has(positional[1].toLowerCase())) {
+            found.push({ raw: positional[2], positivelyScoped: false });
+        }
+    }
+    return found;
+}
+
+/**
+ * Every `@ExcludedSchemaNames` a migration ships, keyed by its version stamp.
+ *
+ * Read from the repo rather than maintained, because that is the only way the check can know
+ * about a schema nobody thought to add to a constant.
+ */
+function shippedExclusionLists(repoRoot) {
+    const procNames = schemaSyncProcNames(repoRoot);
+    const lists = [];
+    for (const dir of SHIPPED_MIGRATION_DIRS.map((d) => join(repoRoot, d))) {
+        if (!existsSync(dir)) continue;
+        for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
+            const version = gatedVersionOf(file);
+            if (version === null) continue;
+            // The STRUCTURE mask, so `--` comments do not count. `migrations-pg/` documents the
+            // statements its conversion skipped in comments, wrapped mid-literal — scanning raw
+            // text captured `'s` from a line break as if it were a whole exclusion list, and the
+            // check then reported every real migration as "dropping" a schema called `s`. A
+            // commented-out call also excludes nothing, so reading one is wrong twice over.
+            const sql = maskSql(readFileSync(join(dir, file), 'utf-8')).values;
+            for (const { raw, positivelyScoped } of exclusionListsIn(sql, procNames)) {
+                const names = raw.split(',').map((n) => n.trim()).filter((n) => n.length > 0);
+                lists.push({ stamp: version, file: join(dir, file), names, raw, positivelyScoped });
+            }
+        }
+    }
+    return lists;
+}
+
+/**
+ * Everything the repo has ALREADY shipped an exclusion for, before `stamp`.
+ *
+ * This is what makes the check self-maintaining. Once any migration excludes a schema, no later
+ * migration may drop it — so an Open App this repo has never heard of is still protected the
+ * moment one CodeGen run happens to name it. That is the failure this gate exists for: the list
+ * is regenerated from whatever schemas the DEV BOX held, so a developer without Caliber installed
+ * silently emits a narrower list than the one before it. That has already happened twice
+ * (`V202608211000` and `V202608211600` both dropped ATS and Caliber, which `V202608191400` had).
+ */
+function previouslyExcluded(lists, stamp) {
+    const seen = new Set();
+    for (const list of lists) {
+        if (list.stamp < stamp) {
+            for (const name of list.names) seen.add(schemaIdentity(name));
+        }
+    }
+    return seen;
+}
+
+/**
+ * Every schema-sync call in a gated migration must have yielded a parseable exclusion list.
+ *
+ * Without this the check is only as strong as its regex: an argument that is absent, renamed or
+ * bound to a variable simply is not seen, and "not seen" reads identically to "correct".
+ */
+function checkEverySyncCallWasParsed(repoRoot, lists, violations) {
+    const procNames = schemaSyncProcNames(repoRoot);
+    for (const dir of SHIPPED_MIGRATION_DIRS.map((d) => join(repoRoot, d))) {
+        if (!existsSync(dir)) continue;
+        for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
+            const version = gatedVersionOf(file);
+            if (version === null || version < SCHEMA_SYNC_GATE_FROM) continue;
+            const path = join(dir, file);
+            // The `values` mask, deliberately — the same choice, for the same reason, that
+            // `countPermissionProcedureMentions` documents above: a backstop that read `structure`
+            // shares the string-scanning layer with the parser it is checking, so a mask desync
+            // that blanked real code would erase the calls and the count together and the gate
+            // would go quiet. This briefly read `structure` to dodge a false positive on a
+            // procedure name appearing in prose; that traded a loud wrong answer for a silent one,
+            // and it also went blind to a real call inside a dynamic-SQL literal. The prose
+            // problem is solved in {@link countSchemaSyncCalls} instead, by requiring the name to
+            // be QUOTED the way both dialects quote a callee.
+            const calls = countSchemaSyncCalls(maskSql(readFileSync(path, 'utf-8')).values, procNames);
+            const parsed = lists.filter((l) => l.file === path).length;
+            if (calls > parsed) {
+                violations.push(
+                    `${relative(repoRoot, path)} invokes a schema-sync procedure ${calls} time(s) but only ` +
+                        `${parsed} carry an @ExcludedSchemaNames this gate can read. An unreadable list is not a safe ` +
+                        'one: a sync with no exclusions sweeps dbo, staging and every sibling Open App on the host. ' +
+                        "Write the list as a literal on the call, the way the rest of the file's calls do.",
+                );
+            }
+        }
+    }
+}
+
+function checkSchemaSyncScope(repoRoot, violations) {
+    const lists = shippedExclusionLists(repoRoot);
+    checkEverySyncCallWasParsed(repoRoot, lists, violations);
+    for (const list of lists) {
+        if (list.stamp < SCHEMA_SYNC_GATE_FROM) continue;
+        // Still counted by checkEverySyncCallWasParsed — it IS a readable list — but its breadth is
+        // moot: the positive filter already confines the call to our own schema.
+        if (list.positivelyScoped) continue;
+        const required = new Set([
+            ...SCHEMAS_NEVER_SYNCED.map(schemaIdentity),
+            ...previouslyExcluded(lists, list.stamp),
+        ]);
+        const listed = new Set(list.names.map(schemaIdentity));
+        const missing = [...required].filter((n) => !listed.has(n));
+        if (missing.length > 0) {
+            violations.push(
+                `${relative(repoRoot, list.file)} ships an @ExcludedSchemaNames that drops ` +
+                    `${missing.join(', ')}. CodeGen writes this list from whatever schemas the DEV database ` +
+                    'happened to hold, so it must be normalized before the output is shipped — and it may never ' +
+                    'be NARROWER than one the repo already shipped: a sync reaching a sibling Open App\'s schema ' +
+                    "rewrites its entity metadata on every host, and one reaching dbo/staging registers the host's " +
+                    'own tables as entities. Copy the list from the previous migration and add anything new.',
+            );
         }
     }
 }
@@ -296,7 +586,16 @@ const WRITER_CAPABILITIES = ['Update', 'Delete'];
 const MAX_VARIABLE_CHASE = 8;
 
 const PERMISSION_CALL = /\bEXEC(?:UTE)?\s+(?:(?:\[[^\]]*\]|[\w${}]+)\s*\.\s*)?\[?(sp(?:Create|Update)EntityPermission)\]?/gi;
-const UUID_LITERAL = /^N?'([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})'$/;
+
+/**
+ * A UUID, as regex SOURCE, so the several shapes that need one all spell it the same way.
+ *
+ * CHECK 7 embeds it mid-pattern (`EntityID = '<uuid>'`) where an anchored regex is no use, and a
+ * second spelling of the character class is the kind of duplication that drifts silently — one
+ * copy gaining a `{8}` the other lacks would leave one check reading ids the other cannot see.
+ */
+const UUID_PATTERN = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}';
+const UUID_LITERAL = new RegExp(`^N?'(${UUID_PATTERN})'$`);
 
 /**
  * Two offset-preserving copies of `sql`, both with comment bodies blanked to spaces:
@@ -322,6 +621,11 @@ function maskSql(sql) {
     // mask out of alignment with the source and three blanked the record outright — a silent pass.
     const structure = sql.split('');
     const values = sql.split('');
+    // Newlines survive blanking, so a mask is LINE-preserving as well as offset-preserving: printing
+    // one beside the source lines up, which is how the three silent-pass bugs in this layer were
+    // eventually seen. No reader below depends on it — a mutation pass over 600k inputs and every
+    // shipped .sql file cannot distinguish keeping it from dropping it — so it is a debuggability
+    // invariant, not behaviour. Do not "test" it; there is nothing to observe.
     const blankBoth = (from, to) => {
         for (let k = from; k < to; k++) {
             if (structure[k] === '\n') continue;
@@ -363,11 +667,21 @@ function maskSql(sql) {
     return { structure: structure.join(''), values: values.join('') };
 }
 
-/** `[start, end)` ranges between `GO` batch separators — the boundary the generator writes on. */
+/**
+ * `[start, end)` ranges between `GO` batch separators — the boundary the generator writes on.
+ *
+ * CRLF needs no handling here and must not grow any: ECMAScript counts CR as a LineTerminator, so
+ * under `/m` the `$` already matches BEFORE the `\r` of a Windows line ending. The `\r?` this
+ * pattern used to carry made it look like CRLF support a test could pin, and it is not: dropping it
+ * shortens `match[0]` by one character and therefore moves the next range's start back onto the
+ * `\r` — `"a\r\nGO\r\nb"` gives `[[0,3],[5,8]]` where it used to give `[[0,3],[6,8]]`. Every reader
+ * of a range trims or tokenises, so a leading CR changes nothing, and no input distinguishes the two
+ * spellings. `equivalent/crlf-in-go` in the mutation gate holds that claim to account.
+ */
 function splitBatches(masked) {
     const ranges = [];
     let start = 0;
-    for (const match of masked.matchAll(/^[ \t]*GO[ \t]*\r?$/gim)) {
+    for (const match of masked.matchAll(/^[ \t]*GO[ \t]*$/gim)) {
         ranges.push([start, match.index]);
         start = match.index + match[0].length;
     }
@@ -375,7 +689,16 @@ function splitBatches(masked) {
     return ranges;
 }
 
-/** Scans from `from` to the first character at paren depth 0 for which `stop` holds, else `to`. */
+/**
+ * Scans from `from` to the first character at paren depth 0 for which `stop` holds, else `to`.
+ *
+ * The depth tracking is defence, not a modelled shape, and is deliberately unpinned by any test: the
+ * only inputs that distinguish it from a flat scan put a terminator keyword inside parentheses in
+ * CODE — a column literally named `[SET]`, say — because the mask has already blanked anything
+ * inside a string or a comment. No generator emits that. Three lines that fail safe are worth
+ * keeping; a test asserting `[SET]` works would advertise support for SQL we do not model. See the
+ * DELIBERATELY NOT LISTED note in check-distribution-seed.mutants.mjs.
+ */
 function scanToDepthZero(masked, from, to, stop) {
     let depth = 0;
     for (let i = from; i < to; i++) {
@@ -424,7 +747,14 @@ function resolveArgumentValue(raw, assignments) {
     return null;
 }
 
-/** `@Name = value` pairs of one call, resolved through the batch's assignments. */
+/**
+ * `@Name = value` pairs of one call, resolved through the batch's assignments.
+ *
+ * The paren-depth guard on the comma split is the same unexercised defence as `scanToDepthZero`'s,
+ * and unpinned for the same reason: it only shows through on a value carrying a top-level comma
+ * inside parentheses BEFORE the text that identifies the grant — `WHERE Name IN (N'a', N'b')` — and
+ * nothing emits that either.
+ */
 function parseCallArguments(structure, values, from, to, assignments) {
     const args = new Map();
     let start = from;
@@ -512,16 +842,17 @@ function readEntityIdentity(value) {
 }
 
 /**
- * Every `spCreate/spUpdateEntityPermission` call in `sql` that binds the anonymous respondent role,
- * with its arguments already resolved through the per-record variables the generator emits. Pure
- * read; exported because the spec pins the guarded table against the shipped seed through it, using
- * the same parser the gate uses rather than a second one that could agree by coincidence.
- */
-/**
- * How many times the SQL names a permission procedure in CODE (comments excluded). Compared against
- * what the parser actually read, this is the gate's own postcondition: zero parsed calls is
- * otherwise indistinguishable from a clean file, and every parser blind spot — a new dialect, a
- * shape MetadataSync starts emitting, a mask that desynced — lands as exactly that.
+ * How many times the SQL names a permission procedure outside a comment. Compared against what the
+ * parser actually read, this is the gate's own postcondition: zero parsed calls is otherwise
+ * indistinguishable from a clean file, and every parser blind spot — a new dialect, a shape
+ * MetadataSync starts emitting, a mask that desynced — lands as exactly that.
+ *
+ * Counted on the `values` mask, which keeps string bodies, rather than the `structure` mask the
+ * parser itself matches on. That is the whole point: a backstop that read `structure` would share
+ * the string-scanning layer with the thing it is checking, so a desync that blanked real code would
+ * erase the calls and the count together and the gate would go quiet — the exact failure it exists
+ * to catch. The cost is that a procedure name inside a string literal reads as a call the parser
+ * missed. That is a false positive in the loud direction, and this file prefers loud.
  */
 export function countPermissionProcedureMentions(sql) {
     return [...maskSql(sql).values.matchAll(/sp(?:Create|Update)EntityPermission/gi)].length;
@@ -574,7 +905,12 @@ export function findPermissionCalls(sql) {
 
 /**
  * The permission calls that concern the anonymous role — everything `findPermissionCalls` read
- * except the calls that provably bind some other role.
+ * except the calls that provably bind some other role, with arguments already resolved through the
+ * per-record variables the generator emits.
+ *
+ * Pure read, and exported for the spec rather than for the gate: case 20 pins the guarded table
+ * against the shipped seed through this function, so the ids are re-derived by the SAME parser the
+ * gate uses rather than by a second one that could agree with it by coincidence.
  */
 export function findRespondentGrants(sql) {
     return findPermissionCalls(sql).filter((call) => call.role !== 'other');
@@ -679,7 +1015,7 @@ function landsAfterHardening(file) {
 }
 
 function checkRespondentGrants(repoRoot, violations) {
-    for (const dirName of ['migrations', 'migrations-pg']) {
+    for (const dirName of SHIPPED_MIGRATION_DIRS) {
         const dir = join(repoRoot, dirName);
         if (!existsSync(dir)) continue;
         for (const file of readdirSync(dir).filter((f) => METADATA_SEED_FILE.test(f) && landsAfterHardening(f)).sort()) {
@@ -705,15 +1041,773 @@ function checkRespondentGrants(repoRoot, violations) {
 }
 
 // ---------------------------------------------------------------------------
-// Entry point. Skipped when imported (by seed:manifest, which reuses buildManifest).
+// CHECK 4 — a core-metadata INSERT is never guarded on its own ID alone
+// ---------------------------------------------------------------------------
+
+/**
+ * The `__mj` tables a migration may write metadata rows into, and where the guard shape matters.
+ *
+ * The failure differs across them, and BOTH halves belong on this list. `EntityFieldValue`,
+ * `EntityRelationship`, `EntitySetting` and `EntityPermission` carry no unique constraint on their
+ * natural key, so an ID-only guard duplicates SILENTLY — that is #64, and the duplicated
+ * relationship row is what broke CodeGen in #66. `Entity`, `EntityField` and `ApplicationEntity` DO
+ * carry one (`UQ_EntityField_EntityID_Name`, `UQ_ApplicationEntity_ApplicationID_EntityID`), so the
+ * same mistake there fails LOUDLY on a constraint violation and takes the install down instead.
+ *
+ * Do not "optimise" the constrained three off this list on the grounds that the database catches
+ * them. A migration that cannot apply is not a lesser defect than one that applies wrongly — it is
+ * the same authoring error, and the fix is identical: guard on the natural key.
+ */
+const CORE_METADATA_TABLES = new Set(
+    ['entity', 'entityfield', 'entityfieldvalue', 'entityrelationship', 'entitypermission', 'applicationentity', 'entitysetting'],
+);
+
+/**
+ * The point after which an ID-only guard is a NEW defect rather than shipped history.
+ *
+ * WATERSHED, NOT WHOLE HISTORY — the same reasoning CHECK 3 records at line 42, and the same
+ * constraint: `migrations/` is append-only, so a gate that fails on a file nobody may edit is a gate
+ * someone disables. FIVE shipped migrations carry this shape, 51 statements in total, and none can
+ * be corrected in place:
+ *
+ *   B202606281200  Schema_and_Tables                 — 16 EntityRelationship
+ *   V202608072330  Automation_And_Entity_Binding     — 12 EntityRelationship
+ *   V202608081200  Form_Upload_Provenance            —  5 EntityRelationship
+ *   V202608191300  Element_Parity_Metadata_Backfill  — 17 mixed (#64: 14 value, 1 rel, 2 setting)
+ *   V202608211600  Form_Template_Source              —  1 EntityRelationship
+ *
+ * That distribution is the real lesson, and it is why this check is worth its lines: only the fourth
+ * file was hand-authored. The other four are PASTED CODEGEN OUTPUT, and this is the guard CodeGen
+ * itself emits for a relationship row — so the defect arrives by the routine act of running
+ * `mj codegen` and pasting the result, not by anybody choosing a weak predicate. Upstream MJ is
+ * where that ends (see the PR's follow-ups); until then this gate is what stops the next paste.
+ *
+ * The stamp therefore sits after the LATEST offender, not the first. Their damage on existing hosts
+ * is repaired by `V202608252300__Converge_Element_Parity_Metadata_Duplicates.sql` for the rows it
+ * could identify, and `smoke/metadata-integrity-path.mjs` rules on the END STATE in the database for
+ * everything else — it reports a duplicate whatever wrote it, which is the coverage that matters for
+ * the 33 rows above whose twins nobody has observed. This check rules on the SQL instead, so that the
+ * next one is never written. Moving this stamp forward again to quiet a NEW violation would be
+ * exactly the wrong repair: add the natural key to the guard instead.
+ */
+const ID_ONLY_GUARD_WATERSHED = 202608211600;
+
+/** The `[` … `]`-optional core-table INSERT, on either spelling of the core schema. */
+const CORE_INSERT = /\bINSERT\s+INTO\s+(?:\[\$\{mjSchema\}\]|\[?__mj\]?)\s*\.\s*\[?(\w+)\]?/gi;
+
+/** A predicate that tests the row's own id and nothing else — the defect this check names. */
+const ID_ONLY_PREDICATE = /^\s*\[?ID\]?\s*=\s*(?:N?'[^']*'|@\w+)\s*$/i;
+
+/** Index of the `)` closing the `(` at `open`, or -1. */
+function matchingParen(text, open) {
+    let depth = 0;
+    for (let i = open; i < text.length; i++) {
+        if (text[i] === '(') depth++;
+        else if (text[i] === ')' && --depth === 0) return i;
+    }
+    return -1;
+}
+
+/** Index of the `END` closing the `BEGIN` at `begin`, or the end of the text. */
+function matchingEnd(text, begin) {
+    const keyword = /\b(BEGIN|END)\b/gi;
+    keyword.lastIndex = begin;
+    let depth = 0;
+    for (let match = keyword.exec(text); match !== null; match = keyword.exec(text)) {
+        if (match[1].toUpperCase() === 'BEGIN') depth++;
+        else if (--depth === 0) return match.index;
+    }
+    return text.length;
+}
+
+/** Everything after the subquery's top-level `WHERE`, or null when it has none. */
+function whereClauseOf(subquery) {
+    const where = /\bWHERE\b/iy;
+    let depth = 0;
+    for (let i = 0; i < subquery.length; i++) {
+        const char = subquery[i];
+        if (char === '(') depth++;
+        else if (char === ')') depth--;
+        else if (depth === 0) {
+            where.lastIndex = i;
+            if (where.test(subquery)) return subquery.slice(where.lastIndex);
+        }
+    }
+    return null;
+}
+
+/**
+ * The statement an `IF` guard governs: `[from, to)` of its `BEGIN … END` block, or of the single
+ * statement that follows.
+ *
+ * Scanning starts AFTER the `NOT EXISTS (…)` closes and steps over whatever else the condition
+ * carries, at paren depth zero. That is what makes a companion `AND EXISTS (…)` unable to rescue an
+ * ID-only guard: the extra clause is skipped as condition text, never read as a second predicate.
+ * It is the shape `V202608191300`'s QuestionType inserts use, and it does not help — the `AND
+ * EXISTS` tests that a DIFFERENT row exists, so on a host where the NOT EXISTS is wrong it fires
+ * anyway.
+ *
+ * ⚠️ THE SCAN STOPS AT THE FIRST STATEMENT OF ANY KIND, not at the first statement we care about.
+ * `STATEMENT_START` therefore lists `PRINT`, `SET`, `SELECT` and friends alongside the DML: a guard
+ * whose body is `PRINT 'x'` governs that PRINT and nothing else, and returning an EMPTY region for
+ * it is the correct answer. An earlier draft matched only DML and so scanned straight past the
+ * PRINT to whatever `INSERT` came next — attributing an unrelated, possibly well-guarded insert to
+ * this guard and reporting a violation against the wrong line. Over-reporting is the safe direction
+ * for this gate, but naming the wrong statement is not: it sends someone to fix code that is fine.
+ */
+const STATEMENT_START = /\b(BEGIN|INSERT|UPDATE|DELETE|EXEC|EXECUTE|SELECT|SET|PRINT|THROW|DECLARE|RAISERROR|WAITFOR|MERGE|TRUNCATE|IF|WHILE|RETURN|GOTO)\b/iy;
+const GOVERNED_DML = new Set(['INSERT', 'UPDATE', 'DELETE', 'EXEC', 'EXECUTE']);
+
+function governedStatement(text, from) {
+    let depth = 0;
+    for (let i = from; i < text.length; i++) {
+        const char = text[i];
+        if (char === '(') depth++;
+        else if (char === ')') depth--;
+        else if (depth === 0) {
+            STATEMENT_START.lastIndex = i;
+            const match = STATEMENT_START.exec(text);
+            if (match === null || match.index !== i) continue;
+            const keyword = match[1].toUpperCase();
+            if (keyword === 'BEGIN') return [i, matchingEnd(text, i)];
+            if (!GOVERNED_DML.has(keyword)) return [i, i];
+            const semicolon = text.indexOf(';', i);
+            return [i, semicolon === -1 ? text.length : semicolon];
+        }
+    }
+    return [from, from];
+}
+
+/**
+ * The `[start, end)` ranges an `IF NOT EXISTS (…)` governs, on an already-masked text.
+ *
+ * One definition of "guarded", used by CHECK 4 (which asks whether anything was asked at all) and by
+ * {@link findSeededEntityIds} (which asks whether a seed is CONDITIONAL). Those two questions have
+ * to share an answer: a range CHECK 4 calls guarded is exactly a range whose INSERT may not run, and
+ * an INSERT that may not run cannot license a literal reference elsewhere.
+ */
+function guardedRanges(masked) {
+    const ranges = [];
+    for (const guard of masked.matchAll(/\bIF\s+NOT\s+EXISTS\s*\(/gi)) {
+        const open = guard.index + guard[0].length - 1;
+        const close = matchingParen(masked, open);
+        if (close === -1) continue;
+        ranges.push(governedStatement(masked, close + 1));
+    }
+    return ranges;
+}
+
+/**
+ * Core-metadata tables inserted under an `IF NOT EXISTS` whose predicate tests only `[ID]`.
+ *
+ * Read off the STRUCTURE mask, like CHECK 3's parser: string bodies are blanked, so a guid inside a
+ * literal still reads as `'        '` and matches the shape without the value mattering, while a
+ * `--` comment describing a guard can never be mistaken for one. Pure read; exported for the spec.
+ */
+export function findIdOnlyGuardedInserts(sql) {
+    const { structure } = maskSql(sql);
+    const found = [];
+    for (const guard of structure.matchAll(/\bIF\s+NOT\s+EXISTS\s*\(/gi)) {
+        const open = guard.index + guard[0].length - 1;
+        const close = matchingParen(structure, open);
+        if (close === -1) continue;
+        const predicate = whereClauseOf(structure.slice(open + 1, close));
+        if (predicate === null || !ID_ONLY_PREDICATE.test(predicate)) continue;
+        const [from, to] = governedStatement(structure, close + 1);
+        for (const insert of structure.slice(from, to).matchAll(CORE_INSERT)) {
+            if (CORE_METADATA_TABLES.has(insert[1].toLowerCase())) {
+                found.push({ table: insert[1], line: structure.slice(0, guard.index).split('\n').length });
+            }
+        }
+    }
+    return found;
+}
+
+/**
+ * Core-metadata INSERTs that carry no `IF NOT EXISTS` guard at all.
+ *
+ * {@link findIdOnlyGuardedInserts} walks outward from each guard, which means an insert with NO
+ * guard is not merely allowed — it is invisible. That is the wrong way round: an unguarded insert
+ * is strictly weaker than the ID-only guard CHECK 4 rejects, since it cannot even claim to have
+ * asked. It shipped: the Rules & Branching migration carried a bare
+ * `INSERT INTO [__mj].[EntityFieldValue]` naming an `EntityFieldID` that only exists on the
+ * database CodeGen ran against, so a host that had run `mj codegen` first would have hit a foreign
+ * key and stopped mid-migration.
+ *
+ * "Guarded" is read structurally rather than semantically: an insert counts as guarded when an
+ * `IF`/`IF NOT EXISTS` governs it, or when it is inside a `BEGIN…END` that one does. Judging the
+ * predicate is CHECK 4's job; this only asks whether anything was asked at all.
+ */
+export function findUnguardedCoreInserts(sql) {
+    const masked = maskSql(sql).structure;
+    // The ranges an `IF NOT EXISTS (…)` actually governs, computed with the same
+    // `governedStatement` walk CHECK 4 uses — so a single fence around a `BEGIN…END` covers every
+    // insert inside it. A first attempt looked backwards from each insert for a nearby `IF`, which
+    // reported the SECOND insert under one fence as unguarded: the gate's own spec caught it,
+    // which is the whole reason that spec exists.
+    const guarded = guardedRanges(masked);
+    const found = [];
+    for (const insert of masked.matchAll(CORE_INSERT)) {
+        if (!CORE_METADATA_TABLES.has(insert[1].toLowerCase())) continue;
+        if (guarded.some(([from, to]) => insert.index >= from && insert.index < to)) continue;
+        found.push({ table: insert[1], line: masked.slice(0, insert.index).split('\n').length });
+    }
+    return found;
+}
+
+/** A migration's position relative to `watershed`, read from the `V<YYYYMMDDHHMM>` in its name. */
+function landsAfter(file, watershed) {
+    const stamp = file.match(/^[VB](\d{12})__/);
+    return stamp === null || Number(stamp[1]) > watershed;
+}
+
+function checkIdOnlyGuards(repoRoot, violations) {
+    for (const dirName of SHIPPED_MIGRATION_DIRS) {
+        const dir = join(repoRoot, dirName);
+        if (!existsSync(dir)) continue;
+        const files = readdirSync(dir)
+            .filter((f) => f.endsWith('.sql') && landsAfter(f, ID_ONLY_GUARD_WATERSHED))
+            .sort();
+        for (const file of files) {
+            const rel = relative(repoRoot, join(dir, file));
+            const sql = readFileSync(join(dir, file), 'utf-8');
+            for (const { table, line } of landsAfter(file, NEWER_GATES_WATERSHED) ? findUnguardedCoreInserts(sql) : []) {
+                violations.push(
+                    `${rel}:${line} INSERTs into \`${table}\` with no \`IF NOT EXISTS\` guard at all. That is ` +
+                        'weaker than the ID-only guard this check rejects below — it cannot even claim to have asked ' +
+                        'whether the thing already exists. CodeGen emits these bare, naming ids that exist only on the ' +
+                        'database it ran against, so on a host that ran `mj codegen` first the foreign key fails and ' +
+                        '`mj app install` stops mid-migration. Guard on the natural key: resolve the parent through its ' +
+                        'own name and test what the row IS.',
+                );
+            }
+            for (const { table, line } of findIdOnlyGuardedInserts(sql)) {
+                violations.push(
+                    `${rel}:${line} guards an INSERT into \`${table}\` on \`[ID] = '<guid>'\` alone. That asks whether ` +
+                        'THIS ROW was inserted before; what makes an insert safe is whether the THING IT DESCRIBES already ' +
+                        'exists, under whatever id the host minted for it. Any developer who ran `mj codegen` before this ' +
+                        'migration has that row under a different id, so the guard misses and the insert lands a second ' +
+                        'copy — silently, because these tables have no unique constraint on their natural key. A duplicated ' +
+                        'EntityRelationship makes CodeGen emit one @FieldResolver per row and forms-server stops compiling ' +
+                        '(#66); a duplicated EntityFieldValue duplicates a generated union member. Guard on the natural key ' +
+                        `instead — \`WHERE ID = '<guid>' OR (EntityID = … AND Name = …)\` is the shape the EntityField ` +
+                        'inserts in the same file already use. A companion `AND EXISTS (…)` outside the NOT EXISTS does ' +
+                        'not count: it tests a different row.',
+                );
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CHECK 6 — an extended-property value is never a MAX-typed variable
+// ---------------------------------------------------------------------------
+
+/**
+ * CHECK 6 — A MIGRATION THAT CANNOT EXECUTE NEVER SHIPS.
+ *
+ * `sp_addextendedproperty` and `sp_updateextendedproperty` declare `@value` as `sql_variant`, and
+ * `sql_variant` cannot hold ANY of the MAX types. Hand one an `NVARCHAR(MAX)` variable and the
+ * batch dies with `Operand type clash: nvarchar(max) is incompatible with sql_variant` — which
+ * fails the migration, and with it the whole run, on someone else's database.
+ *
+ * Every earlier migration here escaped this by accident: they pass string LITERALS, which SQL
+ * Server types as `nvarchar(n)`. The moment one routes the text through a variable — a good idea,
+ * since a description written once cannot drift between its three writes — the declared type
+ * starts mattering, and `NVARCHAR(MAX)` is the reflex.
+ *
+ * This is the first check here that asks whether shipped SQL can RUN rather than what it means,
+ * and it exists because a migration shipped that could not. The gates are all static, so nothing
+ * else could have noticed: the defect is invisible until the file is executed, and a migration
+ * authored in a branch that never applied it is executed for the first time by whoever installs
+ * the release.
+ *
+ * `4000` is the ceiling `sql_variant` allows for `nvarchar` (an extended property is capped at
+ * 7500 bytes regardless), so a bounded declaration is both correct and sufficient.
+ */
+/** The extended-property procedures, whose `@value` parameter is `sql_variant`. */
+const EXTENDED_PROPERTY_PROCS = /\b(?:sp_addextendedproperty|sp_updateextendedproperty)\b/gi;
+
+/**
+ * Every type `sql_variant` cannot hold, as a variable declaration.
+ *
+ * `NVARCHAR`/`VARCHAR`/`VARBINARY` only when declared `(MAX)`; `XML` always, since it has no
+ * length to qualify and is rejected outright. `AS` is optional in T-SQL's `DECLARE`, so it is
+ * optional here — leaving it out was one of the ways a broken migration stayed invisible.
+ */
+// The `\b` sits INSIDE the XML alternative on purpose. Trailing it after the whole group put it
+// straight after a literal `)`, and `)` followed by a space is two non-word characters — never a
+// word boundary — so every parenthesised type silently failed to match while `XML` still did.
+const MAX_TYPED_DECLARATION = /(@[A-Za-z0-9_]+)\s+(?:AS\s+)?((?:N?VARCHAR|VARBINARY)\s*\(\s*MAX\s*\)|XML\b)/gi;
+
+/**
+ * A DECLARE statement's body — the only place a MAX-typed VARIABLE can be introduced. Scoping the
+ * per-variable scan to these is what stops a stored-procedure PARAMETER (`CREATE PROCEDURE … @Value
+ * NVARCHAR(MAX)`) being collected and then matched against a call's `@value` argument, which would
+ * flag every extended-property write in that file. A body ends at `;`, a blank line, or `GO`, and a
+ * single DECLARE may introduce several variables (`DECLARE @a NVARCHAR(100), @d NVARCHAR(MAX)`).
+ */
+const DECLARE_STATEMENT = /\bDECLARE\b([\s\S]*?)(?=;|\n\s*\n|^\s*GO\s*$|$(?![\s\S]))/gim;
+
+/**
+ * The MAX-typed variables handed to an extended-property procedure in `sql`.
+ *
+ * Two passes: collect every MAX-typed declaration, then read each extended-property CALL'S OWN
+ * ARGUMENT LIST and report any of those variables appearing in it.
+ *
+ * Reading the call's arguments — rather than finding `@value = @x` and walking back to the
+ * nearest preceding `EXEC` — is what makes this sound, and the walk-back is why the first cut
+ * leaked. It searched for the substring `EXEC`, so a named argument whose VALUE contains those
+ * four letters (`@level1name = N'ActionExecutionLog'`, a table these migrations already write
+ * to) captured the walk-back and hid the call completely. Reading forwards also gates a
+ * POSITIONAL `@value`, which the named-parameter pattern could never see, and T-SQL allows
+ * named arguments in any order, so there was no ordering assumption left to rescue it.
+ *
+ * The argument list ends at the statement terminator. `;` is required by every call in this
+ * tree; a bare newline-then-blank-line or a batch separator closes an unterminated one so a
+ * missing semicolon cannot swallow the rest of the file.
+ */
+export function findMaxTypedExtendedPropertyValues(sql) {
+    const maxTyped = new Map();
+    for (const decl of sql.matchAll(DECLARE_STATEMENT)) {
+        for (const m of decl[1].matchAll(MAX_TYPED_DECLARATION)) {
+            maxTyped.set(m[1].toLowerCase(), m[2].toUpperCase().replace(/\s+/g, ''));
+        }
+    }
+    if (maxTyped.size === 0) {
+        return [];
+    }
+    const hits = [];
+    for (const call of sql.matchAll(EXTENDED_PROPERTY_PROCS)) {
+        const from = call.index + call[0].length;
+        const terminator = sql.slice(from).search(/;|\n\s*\n|^\s*GO\s*$/m);
+        const args = sql.slice(from, terminator < 0 ? sql.length : from + terminator);
+        for (const ref of args.matchAll(/@[A-Za-z0-9_]+/g)) {
+            const declaredType = maxTyped.get(ref[0].toLowerCase());
+            // A parameter NAME is also an `@identifier`. Only a variable inside a DECLARE statement
+            // is collected above, so a stored-procedure parameter that happens to be named `@Value`
+            // in the same file is not mistaken for the call's `@value` argument.
+            if (!declaredType) continue;
+            hits.push({
+                variable: ref[0],
+                declaredType,
+                line: sql.slice(0, from + ref.index).split('\n').length,
+            });
+        }
+    }
+    return hits;
+}
+
+function checkExtendedPropertyValueTypes(repoRoot, violations) {
+    for (const dirName of [...SHIPPED_MIGRATION_DIRS, 'migrations-teardown']) {
+        const dir = join(repoRoot, dirName);
+        if (!existsSync(dir)) continue;
+        for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
+            const rel = relative(repoRoot, join(dir, file));
+            const sql = readFileSync(join(dir, file), 'utf-8');
+            for (const { variable, declaredType, line } of findMaxTypedExtendedPropertyValues(sql)) {
+                violations.push(
+                    `${rel}:${line} passes \`${variable}\`, declared \`${declaredType}\`, as \`@value\` to an ` +
+                        'extended-property procedure. That parameter is `sql_variant`, which cannot hold a MAX type or XML: ' +
+                        'SQL Server rejects the batch with `Operand type clash: nvarchar(max) is incompatible with ' +
+                        'sql_variant`, so this migration does not merely misbehave — it does not run, and it fails the ' +
+                        'whole migration run on whichever database applies it first. Declare it `NVARCHAR(4000)` ' +
+                        '(the ceiling `sql_variant` allows, and more than an extended property can hold anyway).',
+                );
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CHECK 7 — an entity id shipped SQL REFERENCES is one shipped SQL SEEDS
+// ---------------------------------------------------------------------------
+
+/**
+ * CHECK 7 — NO SHIPPED SQL POINTS AT AN `__mj.Entity` ROW NOTHING SHIPPED CREATES.
+ *
+ * CodeGen introspects the developer's database and writes the ids it finds there into the SQL it
+ * emits. Hardcoding is correct MJ practice — a fixed id is what makes a fresh install deterministic
+ * — but only for an entity whose id THIS REPO SEEDS. Where it does not, the literal is a fact about
+ * one laptop.
+ *
+ * That is #155. `V202608252340__Rules_And_Branching.sql` was generated on a host where the
+ * `MJ_BizApps_Forms: Form Screens` entity carried `A1F8CC58-B040-429C-B695-70DB0E9E7327` — an id
+ * no shipped migration creates, because `V202608182100` added the FormScreen table with no metadata
+ * behind it and `V202608191300` later repaired that under a NATURAL-KEY guard, which means the id a
+ * host ends up with is whatever it minted or `V202608191300`'s own literal. Neither is A1F8CC58. On
+ * every database but the one it was generated on, the chain died at that file:
+ *
+ *   FAILED: V202608252340 — batch 5/16: The INSERT statement conflicted with the FOREIGN KEY
+ *   constraint "FK_EntityField_Entity" ... table "__mj.Entity", column 'ID'.
+ *
+ * The same family as CHECK 4 and CHECK 5, and invisible for the same reason: everything built, every
+ * test passed, and the app worked perfectly on the machine that produced the file. Nothing in the
+ * repo reads shipped SQL for what it ASSUMES about the database it lands on — and this failure is
+ * not even silent, it is total: nothing after the file it stops at can run.
+ *
+ * WHAT THE CORRECT SHAPE LOOKS LIKE, so the message can name it. Resolve the entity by natural key
+ * into a variable and THROW when the lookup comes back NULL — `V202608191400` and the fixed
+ * `V202608252340` both do it. A lookup is not merely safer than a literal here, it is more correct:
+ * whichever id a host minted, the lookup finds it, and so does the next CodeGen run against any of
+ * them.
+ *
+ * THE ASYMMETRY THAT SETS THIS CHECK'S SHAPE. A seed this parser fails to read makes every reference
+ * to that id fire — loud, and easy to trace. A reference it fails to read is invisible, which is the
+ * failure mode this whole file exists to refuse. So the seed side is written narrowly and the
+ * reference side is written from the corpus: four shapes, each discovered in shipped SQL and each
+ * pinned by its own spec case and its own mutant.
+ *
+ * THREE HOLES, NAMED RATHER THAN PAPERED OVER. What this check enforces is narrower than "a literal
+ * entity id can never ship again", and the difference is worth stating precisely so nobody reads the
+ * release note as a stronger guarantee than the code makes.
+ *
+ * HOLE 2 — A CONDITIONALLY GUARDED SEED IS READ AS AN UNCONDITIONAL ONE. `findSeededEntityIds` has no
+ * notion of enclosing control flow, so `V202608191300`'s Form Screens INSERT — which sits inside
+ * `IF NOT EXISTS (… WHERE [BaseTable] = 'FormScreen' …) BEGIN … END` — puts 6313B0B1 in the seeded
+ * set unconditionally. But that id exists ONLY on hosts that had no FormScreen entity when they ran
+ * it; a host that had already run CodeGen kept its own. So a future CodeGen paste hardcoding
+ * 6313B0B1 would pass this gate and still die with FK_EntityField_Entity on the other population —
+ * the same shape as #155, which `plans/ISSUE_155_PLAN.md` explicitly rejected as a fix for exactly
+ * that reason. Not live today: of the 16 seeded ids, one is guarded and nothing references it by
+ * literal. Closing it means teaching the seed reader the guard analysis CHECK 4 already does, plus
+ * its own case and mutant — see the issue filed from the #163 review.
+ *
+ * HOLE 3 — ONLY `EntityID` COLUMNS ARE IN SCOPE. `ENTITY_ID_COLUMNS` is `(?:Related)?EntityID`, so a
+ * host-local `EntityFieldID` literal is invisible, and 28 of them ship today
+ * (`grep -c "@EntityFieldID='" migrations/*.sql`). `EntityFieldValue.EntityFieldID` is a real foreign
+ * key and fails the same way; this file's scope note at ENTITY_ID_COLUMNS says why the column list is
+ * deliberately short, and the answer is not "because the other columns are safe".
+ *
+ * HOLE 1 — A positional `[EntityID]` in a column-list INSERT with no
+ * `-- Entity:` annotation is NOT read. That is not an oversight: `V202608081200` ships
+ * `INSERT INTO [__mj].[EntityRelationship] ([ID], [EntityID], [RelatedEntityID], …) VALUES (…,
+ * 'E1238F34-2837-EF11-86D4-6045BDEE16E6', …)` — `MJ: Users`, an MJ CORE entity whose id this repo
+ * legitimately does not seed, and `MJ: Files` beside it. Reading that shape would fire on correct,
+ * shipped SQL, and the only way to quiet it would be a hand-maintained allow-list of foreign ids —
+ * the same instrument CHECK 5's comments already explain cannot work, because it can never name the
+ * app nobody here has heard of. CHECK 4 covers those same inserts from the other side (guard on the
+ * natural key), and the annotated shape below covers the EntityField inserts — which is where #155
+ * actually landed, and the shape CodeGen emits far more of.
+ */
+
+/** The core schema, in every spelling shipped SQL uses for it — both dialects, both quotings. */
+const CORE_SCHEMA_PATTERN = '(?:\\[\\$\\{mjSchema\\}\\]|"\\$\\{mjSchema\\}"|\\[__mj\\]|"__mj"|__mj)';
+
+/**
+ * `INSERT INTO <core>.[Entity] (` — the only statement that can make an entity id exist.
+ *
+ * The table name is spelled out in each dialect's quoting and nothing else, so `[EntityField]` and
+ * `[EntityRelationship]` — which carry an `[ID]` column of their own, in the same first position —
+ * cannot be read as seeds. That direction matters more than the other: a seed this check invents is
+ * an id it then stops asking about, and stopping asking is how the defect ships.
+ */
+const ENTITY_SEED_INSERT = new RegExp(
+    `\\bINSERT\\s+INTO\\s+${CORE_SCHEMA_PATTERN}\\s*\\.\\s*(?:\\[Entity\\]|"Entity"|Entity)\\s*\\(`,
+    'gi',
+);
+
+/** `[start, end)` of each comma-separated item at paren depth zero inside `masked[from, to)`. */
+function topLevelItemRanges(masked, from, to) {
+    const ranges = [];
+    let depth = 0;
+    let start = from;
+    for (let i = from; i < to; i++) {
+        const char = masked[i];
+        if (char === '(') depth++;
+        else if (char === ')') depth--;
+        else if (char === ',' && depth === 0) {
+            ranges.push([start, i]);
+            start = i + 1;
+        }
+    }
+    ranges.push([start, to]);
+    return ranges;
+}
+
+/** A column name with whatever quoting its dialect uses stripped off. */
+function bareColumnName(text) {
+    return text.trim().replace(/^\[|\]$|^"|"$/g, '').toLowerCase();
+}
+
+/**
+ * Every entity id an `INSERT INTO <core>.[Entity]` in `sql` creates. Pure read; exported for the spec.
+ *
+ * Read across BOTH masks, which is the same division of labour `collectAssignments` uses: the
+ * statement's SHAPE — the INSERT, its parentheses, its top-level commas — comes off `structure`,
+ * where string bodies are blanked, so a description that happens to contain the text of an INSERT
+ * cannot invent a seed; the id itself is sliced from `values` at the same offsets, where string
+ * bodies survive, because the whole point is to read what the literal says.
+ *
+ * The column position of `[ID]` is looked up rather than assumed to be first. CodeGen puts it first
+ * today; a check that reads position 0 blindly would silently start seeding whatever column moved
+ * into that slot, and a wrong id in the seeded set is the direction that goes quiet.
+ */
+export function findSeededEntityIds(sql) {
+    const { structure, values } = maskSql(sql);
+    const seeded = new Set();
+    // A seed inside an `IF NOT EXISTS` licenses NOTHING, because it does not run everywhere. This is
+    // #155 wearing the other face: `V202608191300` seeds Form Screens under a natural-key guard, so
+    // its literal exists only on hosts that had no such entity when they ran it — a host that ran
+    // CodeGen first kept its own id and skipped the block. Crediting that literal unconditionally is
+    // what let PR #168 ship six references to it that FK-violate on exactly that population, proven
+    // by running its own file there. Same `guardedRanges` CHECK 4 uses, so the two checks cannot
+    // drift into disagreeing about what "guarded" means.
+    const conditional = guardedRanges(structure);
+    for (const insert of structure.matchAll(ENTITY_SEED_INSERT)) {
+        if (conditional.some(([from, to]) => insert.index >= from && insert.index < to)) continue;
+        const columnsOpen = insert.index + insert[0].length - 1;
+        const columnsClose = matchingParen(structure, columnsOpen);
+        if (columnsClose === -1) continue;
+        const idColumn = topLevelItemRanges(structure, columnsOpen + 1, columnsClose)
+            .findIndex(([from, to]) => bareColumnName(structure.slice(from, to)) === 'id');
+        if (idColumn === -1) continue;
+        const row = valuesRowOf(structure, columnsClose + 1);
+        if (row === null) continue;
+        const items = topLevelItemRanges(structure, row[0], row[1]);
+        if (idColumn >= items.length) continue;
+        const id = literalUuid(values.slice(items[idColumn][0], items[idColumn][1]).trim());
+        if (id !== null) seeded.add(id);
+    }
+    return seeded;
+}
+
+/**
+ * `[start, end)` of the first `VALUES ( … )` row, when it follows the column list IMMEDIATELY.
+ *
+ * "Immediately" is the whole guard. Searching forward for the next `VALUES` would, on an
+ * `INSERT … SELECT`, walk past the end of its own statement and read the NEXT insert's row against
+ * THIS insert's column list — pairing an id column with someone else's value. Returning null for a
+ * shape this parser does not model costs a seed, and a missing seed fails loud (see the asymmetry
+ * note above); a mispaired one would quietly add a bogus id to the allowed set.
+ */
+function valuesRowOf(structure, after) {
+    const keyword = /\bVALUES\s*\(/gi;
+    keyword.lastIndex = after;
+    const match = keyword.exec(structure);
+    if (match === null || structure.slice(after, match.index).trim() !== '') return null;
+    const open = match.index + match[0].length - 1;
+    const close = matchingParen(structure, open);
+    return close === -1 ? null : [open + 1, close];
+}
+
+/**
+ * CodeGen's annotation on a positional entity id: `'<guid>', -- Entity: MJ_BizApps_Forms: Form Screens`.
+ *
+ * Matched on the RAW source and anchored to the end of a literal the `values` mask already proved is
+ * CODE, which is the only way to read this shape at all: the guid lives in the statement and the
+ * label that identifies it as an entity reference lives in a COMMENT, and no single mask holds both
+ * (`structure` blanks the guid, `values` blanks the comment). Two constraints keep that from
+ * becoming the comment-scanning gate this file warns against everywhere else —
+ *
+ *   1. the literal must survive on `values`, so a guid discussed in prose is invisible. The fixed
+ *      `V202608252340` header records A1F8CC58 in prose on purpose, as provenance; a gate that
+ *      fired on that is a gate the next author switches off. Deliberately no count here — this
+ *      line said "half a dozen" while the header named it once, which is what a number in prose
+ *      does. Case 107 holds the pairing to account instead: the header still mentions the id, and
+ *      the gate still reads no reference to it.
+ *   2. the annotation must be on the SAME LINE. CodeGen's file banners open with
+ *      `-- Entity: MJ_BizApps_Forms: Form Uploads` on a line of their own, several lines below
+ *      whatever code precedes them, and `migrations-pg/` is full of them.
+ */
+const ENTITY_VALUE_ANNOTATION = /^[ \t]*,?[ \t]*--[ \t]*(?:Related)?Entity:/i;
+
+/** A bare UUID, for the tokens of a comma-separated `@EntityIDs` list. */
+const BARE_UUID = new RegExp(`^${UUID_PATTERN}$`, 'i');
+
+/**
+ * The two core-metadata columns CODEGEN writes an `__mj.Entity` id into. Both point at that table.
+ *
+ * NOT every column that does. This app's own `FormEntityBinding.TargetEntityID` is a declared
+ * foreign key to `__mj.Entity(ID)`, and `__mj.GeneratedCode.LinkedEntityID` is another. Neither is
+ * in scope, deliberately: no generator writes either as a literal — they carry runtime data, and
+ * shipped SQL contains no `TargetEntityID = '<guid>'` anywhere today. This list is the shapes a
+ * CodeGen paste produces, which is where #155 came from and where the next one will. If a migration
+ * ever seeds a `FormEntityBinding` row by literal id, add the column here and give it a case; that
+ * literal would be as wrong on a stranger's host as A1F8CC58 was.
+ */
+const ENTITY_ID_COLUMNS = '(?:Related)?EntityID';
+
+/**
+ * "Not the tail of a longer identifier, and not a variable."
+ *
+ * Without the first half, `TargetEntityID = '<guid>'` reads as one of the two columns above, which
+ * would quietly widen the check past the scope its comment claims — and a scope nobody wrote down
+ * is one the next reader has to reverse-engineer from a regex. Without the second,
+ * `@EntityID = '<guid>'` is read twice: once here as a column and once by
+ * {@link GENERATED_ENTITY_ID_VARIABLE}, which is what it actually is.
+ */
+const NOT_PART_OF_A_LONGER_NAME = '(?<![\\w@])';
+
+/** `EntityID = '<guid>'`, bracketed, double-quoted or bare, as both dialects spell it. */
+const ENTITY_ID_COLUMN_REFERENCE = new RegExp(
+    `${NOT_PART_OF_A_LONGER_NAME}(?:\\[|")?${ENTITY_ID_COLUMNS}(?:\\]|")?\\s*=\\s*N?'(${UUID_PATTERN})'`,
+    'gi',
+);
+
+/** Any quoted UUID. {@link ENTITY_VALUE_ANNOTATION} decides which of them is an entity reference. */
+const QUOTED_UUID = new RegExp(`N?'(${UUID_PATTERN})'`, 'gi');
+
+/**
+ * `@EntityIDs='<guid>[,<guid>…]'` — how CodeGen scopes the two heal procedures.
+ *
+ * Comma-separated, and the argument where a wrong id does the MOST damage rather than the least:
+ * `spDeleteUnneededEntityFields` reads a NULL or empty `@EntityIDs` as "unscoped" and sweeps every
+ * entity its exclusion list does not name.
+ */
+const ENTITY_IDS_ARGUMENT = /@EntityIDs\s*=\s*N?'([^']*)'/gi;
+
+/**
+ * `SET @EntityID_<hash> = '<guid>'` — how a generated metadata seed carries one.
+ *
+ * `mj sync push` suffixes every variable with a per-record hash, so the suffix is optional rather
+ * than absent. This is #155 arriving by the other route: a seed REGENERATED on a developer's box
+ * carries whatever ids that box minted.
+ */
+const GENERATED_ENTITY_ID_VARIABLE = new RegExp(
+    `(?<!\\w)@${ENTITY_ID_COLUMNS}(?:_\\w+)?\\s*=\\s*N?'(${UUID_PATTERN})'`,
+    'gi',
+);
+
+/**
+ * How shipped SQL names an `__mj.Entity` row by literal id. Every entry was found in this repo's own
+ * migrations; none is invented, and none may be dropped without a spec case going red.
+ *
+ * `read` returns the ids one match states — a list, because `@EntityIDs` may carry several.
+ * `confirm` is the escape hatch for a shape no single mask can express; only the annotated
+ * positional value needs it.
+ *
+ * What is deliberately NOT here: `EntityID = @Variable` and
+ * `EntityID = (SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity] WHERE …)`. Those are the CORRECT shape —
+ * they resolve on the host — so they must not match, and they cannot: neither is a quoted UUID.
+ */
+const ENTITY_REFERENCE_SHAPES = [
+    {
+        shape: 'an [EntityID] / [RelatedEntityID] column compared to a literal',
+        pattern: ENTITY_ID_COLUMN_REFERENCE,
+        read: (match) => [match[1]],
+    },
+    {
+        shape: "CodeGen's `-- Entity:` annotation on a positional value",
+        pattern: QUOTED_UUID,
+        read: (match) => [match[1]],
+        confirm: (raw, match) => ENTITY_VALUE_ANNOTATION.test(raw.slice(match.index + match[0].length)),
+    },
+    {
+        shape: 'the @EntityIDs argument that scopes a schema-sync call',
+        pattern: ENTITY_IDS_ARGUMENT,
+        read: (match) => match[1].split(',').map((token) => token.trim()).filter((token) => BARE_UUID.test(token)),
+    },
+    {
+        shape: 'a generated @EntityID variable in a metadata seed',
+        pattern: GENERATED_ENTITY_ID_VARIABLE,
+        read: (match) => [match[1]],
+    },
+];
+
+/**
+ * Every entity id `sql` references by literal, with the line and the shape it was written in.
+ *
+ * Read off the `values` mask: comments are blanked there, so prose about an id — the provenance note
+ * the fixed migration carries, or this file's own examples if they ever moved into SQL — cannot be
+ * mistaken for a reference. String BODIES survive, which is the deliberate cost: an id quoted inside
+ * a description would read as a reference. That is a false positive in the loud direction, and this
+ * file prefers loud. Pure read; exported for the spec.
+ */
+export function findEntityIdReferences(sql) {
+    const { values } = maskSql(sql);
+    const found = [];
+    for (const { shape, pattern, read, confirm } of ENTITY_REFERENCE_SHAPES) {
+        for (const match of values.matchAll(pattern)) {
+            if (confirm !== undefined && !confirm(sql, match)) continue;
+            const line = values.slice(0, match.index).split('\n').length;
+            for (const id of read(match)) found.push({ id: id.toUpperCase(), line, shape });
+        }
+    }
+    return found;
+}
+
+/**
+ * The `.sql` files of `dirNames`, read once each.
+ *
+ * `readdirSync` is not recursive, and that is load-bearing rather than incidental:
+ * `migrations/codegen/` is gitignored CodeGen staging, full of raw un-normalised output that ships
+ * nowhere, and every check in this file relies on the same non-recursion to exclude it.
+ */
+function shippedSqlFiles(repoRoot, dirNames) {
+    const files = [];
+    for (const dirName of dirNames) {
+        const dir = join(repoRoot, dirName);
+        if (!existsSync(dir)) continue;
+        for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
+            files.push({ path: join(dir, file), sql: readFileSync(join(dir, file), 'utf-8') });
+        }
+    }
+    return files;
+}
+
+/**
+ * Where the seeds come from, and where the references are read — deliberately not the same list.
+ *
+ * A teardown script only ever DELETEs an `[Entity]` row, so it can never be what makes an id exist
+ * and must not contribute to the seeded set. It is read for references all the same: a hardcoded
+ * entity id in a teardown deletes nothing on a host that minted its own, which is the same defect
+ * wearing different clothes.
+ *
+ * The seeded set is ONE UNION across both dialects rather than one set per dialect, and that rests
+ * on a fact worth stating: `migrations-pg/` is a converted mirror that stops at 0.8.x, and every id
+ * it seeds is one `migrations/` seeds too (the reverse does not hold — `V202608191300`'s Form
+ * Screens row has no PG twin). Splitting them today would draw a distinction with no difference.
+ * If the two chains ever diverge, this is the assumption to revisit: a PostgreSQL host runs only
+ * `migrations-pg/`, so a PG file referencing an id only the T-SQL chain seeds would install broken.
+ */
+const ENTITY_SEED_DIRS = SHIPPED_MIGRATION_DIRS;
+const ENTITY_REFERENCE_DIRS = [...SHIPPED_MIGRATION_DIRS, 'migrations-teardown'];
+
+function checkEntityIdReferences(repoRoot, violations) {
+    const seeded = new Set();
+    for (const { sql } of shippedSqlFiles(repoRoot, ENTITY_SEED_DIRS)) {
+        for (const id of findSeededEntityIds(sql)) seeded.add(id);
+    }
+    for (const { path, sql } of shippedSqlFiles(repoRoot, ENTITY_REFERENCE_DIRS)) {
+        // One violation per id per file, listing every line: the same wrong literal is written five
+        // times in one generated file, and five identical messages train people to skim.
+        const unseeded = new Map();
+        for (const { id, line } of findEntityIdReferences(sql)) {
+            if (seeded.has(id)) continue;
+            if (!unseeded.has(id)) unseeded.set(id, new Set());
+            unseeded.get(id).add(line);
+        }
+        for (const [id, lines] of unseeded) {
+            violations.push(
+                `${relative(repoRoot, path)}:${[...lines].sort((a, b) => a - b).join(',')} references \`__mj.Entity\` ` +
+                    `id ${id}, which no shipped migration seeds. CodeGen bakes in the id the DEVELOPER'S database ` +
+                    'happened to hold; on every other host there is no such row, the foreign key to [__mj].[Entity] ' +
+                    'fails, and `mj app install` stops at this file — taking every migration after it down with it ' +
+                    '(#155). Resolve the entity by natural key instead: `DECLARE @X UNIQUEIDENTIFIER = (SELECT TOP 1 ' +
+                    "[ID] FROM [${mjSchema}].[Entity] WHERE [BaseTable] = '<Table>' AND [SchemaName] = " +
+                    "'${flyway:defaultSchema}');` with a THROW when it comes back NULL — the shape V202608191400 and " +
+                    'V202608252340 already use, and the one that stays correct whichever id the host minted. If the ' +
+                    'id genuinely belongs to an entity this repo does not own — MJ core, or a sibling Open App — it ' +
+                    'still may not be a literal, because that host minted its own too: look it up by name the same way.',
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Entry point. Skipped when imported (by the spec and the mutation harness).
 // ---------------------------------------------------------------------------
 
 /** Runs every check against a repo root and returns the violations found. */
 export function runChecks(repoRoot = REPO_ROOT) {
     const violations = [];
-    checkSeedMigration(repoRoot, violations);
     checkPlaceholders(repoRoot, violations);
     checkRespondentGrants(repoRoot, violations);
+    checkIdOnlyGuards(repoRoot, violations);
+    checkSchemaSyncScope(repoRoot, violations);
+    checkExtendedPropertyValueTypes(repoRoot, violations);
+    checkEntityIdReferences(repoRoot, violations);
     return violations;
 }
 
@@ -727,7 +1821,10 @@ if (process.argv[1] && process.argv[1].endsWith('check-distribution-seed.mjs')) 
         process.exit(1);
     }
     console.log(
-        '✅ Distribution gate passed — metadata seed is present and current; shipped SQL uses only install-supplied ' +
-            'placeholders; no post-hardening seed re-grants the Form Respondent role unfiltered access.',
+        '✅ Distribution gate passed — shipped SQL uses only install-supplied placeholders; no post-hardening ' +
+            'seed re-grants the Form Respondent role unfiltered access; no new core-metadata insert is guarded ' +
+            'on its own ID alone; no shipped schema sync reaches a schema this app does not own; no extended-property ' +
+            'write hands `sql_variant` a MAX-typed value; and every `__mj.Entity` id shipped SQL references is one ' +
+            'shipped SQL also seeds.',
     );
 }
