@@ -73,7 +73,7 @@
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {
     "@changesets/cli": "^2.29.8",
-    "@memberjunction/cli": "6.1.0",
+    "@memberjunction/cli": "6.1.1",
     "beasties": "0.3.5",
     "mrmime": "2.0.1",
     "pg": "^8.22.0",
@@ -101,8 +101,8 @@
       "@angular/platform-browser-dynamic": "21.2.22",
       "@angular/router": "21.2.22",
       "@angular-devkit/build-angular": "21.2.23",
-      "@memberjunction/core": "6.1.0",
-      "@memberjunction/global": "6.1.0"
+      "@memberjunction/core": "6.1.1",
+      "@memberjunction/global": "6.1.1"
     }
   },
   "engines": {
