@@ -4,10 +4,10 @@ Ask each respondent to prove they are a person before their answers are accepted
 thing with whoever looks after your system before you switch it on.
 
 *Turning this on when the server has no Cloudflare Turnstile keys takes your form offline.* Every
-submission through the link is refused, the respondent is told the form cannot be submitted, and
-nothing on the **Distribute** tab warns you beforehand. There is no way to tell from the builder
-whether the keys exist. So ask first, and if the answer is no, leave the switch alone until it is
-yes.
+submission through the link is refused — in one of two ways, depending on which of the two keys is
+missing, and neither of them is the respondent's fault. Nothing on the **Distribute** tab warns you
+beforehand and there is no way to tell from the builder whether the keys exist. So ask first, and if
+the answer is no, leave the switch alone until it is yes.
 
 ## Before you start
 
@@ -26,8 +26,10 @@ yes.
    Turnstile keys configured on the server — without them, every submission through this link is
    refused.**
 3. Turn the switch on.
-4. Open the link yourself and submit a test answer. This is not optional. It is the only check that
-   distinguishes a working captcha from a form nobody can submit, and it takes a minute.
+4. Open the link yourself and answer it through to the confirmation. This is not optional, and
+   passing the challenge is not the part that counts — a challenge can appear, be passed, and the
+   submission be refused a moment later. Only a test that reaches the confirmation distinguishes a
+   working captcha from a form nobody can submit, and it takes a minute.
 
 ## What the respondent sees
 
@@ -41,12 +43,20 @@ Two things can go wrong for them, and both say so plainly:
 - A challenge that cannot load gives **The security challenge could not be loaded. Please refresh and
   try again.** — a network or blocking problem at their end, and refreshing usually settles it.
 
-Without keys configured, there is no challenge to pass. In its place the respondent reads
-**This form requires a security challenge, but it has not been configured yet. It can't be submitted
-until the site owner adds a Turnstile site key.**
+Without the keys it goes wrong in one of two ways, because the check has two halves — one the
+respondent's browser needs and one the server needs — and they are configured separately. Which half
+is missing decides what the respondent meets:
 
-The form cannot be submitted at all. Everything they typed is on the screen and there is no way to
-send it, and the *site owner* in that sentence is you.
+- *No challenge appears.* In its place they read **This form requires a security challenge, but it
+  has not been configured yet. It can't be submitted until the site owner adds a Turnstile site
+  key.** The form cannot be submitted at all. Everything they typed is on the screen and there is no
+  way to send it, and the *site owner* in that sentence is you.
+- *A challenge appears, they pass it, and the submission is refused anyway.* Nothing looks wrong
+  until they press **Submit** — and then they read **This form requires a security check that has
+  not been set up on this server. Please contact the form owner.** This is the worse of the two,
+  because it takes the respondent's whole form off them at the last moment, and because a challenge
+  that renders and passes looks exactly like one that works. It does not. That is why the test in
+  step 4 has to reach the confirmation.
 
 ## If you have already done it
 

@@ -4,6 +4,16 @@ Each submission becomes something your organisation already keeps track of — a
 organisation, an application — so that the rest of your system can find it, report on it and act on
 it without anybody retyping a thing.
 
+## Before you start
+
+- The questions written and worded the way you will keep them:
+  [Add and arrange questions](../build/add-and-arrange-questions.md). Your wording is what MJ Forms
+  matches against, so a question called *Email* pairs itself up and one called *Q4* does not.
+- At least one finished response, if you want to check your work before committing it. The check is
+  the last step below, and it is worth having.
+- A rough idea of what a submission *is*, in your organisation's words. One application? One person?
+  One registration? That answer decides everything else on this page.
+
 ## What this is for
 
 A response is a response. It sits in MJ Forms, it is yours to read and to export, and that is the
@@ -22,16 +32,6 @@ this option: **Turn each submission into a real record — a person, an organisa
 The practical difference shows up six weeks later, when somebody who has never opened MJ Forms asks
 how many enquiries came in last month. If your form only collects responses, the answer lives in a
 place they do not go.
-
-## Before you start
-
-- The questions written and worded the way you will keep them:
-  [Add and arrange questions](../build/add-and-arrange-questions.md). Your wording is what MJ Forms
-  matches against, so a question called *Email* pairs itself up and one called *Q4* does not.
-- At least one finished response, if you want to check your work before committing it. The check is
-  the last step below, and it is worth having.
-- A rough idea of what a submission *is*, in your organisation's words. One application? One person?
-  One registration? That answer decides everything else on this page.
 
 ## Set the step up
 

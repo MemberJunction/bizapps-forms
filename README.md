@@ -33,10 +33,10 @@ operational data the moment they land.
 - ⚙️ &nbsp;**On-submit automation, free.** Send an email, create a Task, upsert a Person,
   route to an agent, run an LLM judge over a free-text answer. What incumbents charge the
   most for, MemberJunction already has.
-- 🧬 &nbsp;**Promote responses to first-class entities.** A recurring instrument can be
-  projected — via a live SQL view or an opt-in materialized table — into something the whole
-  toolchain (dashboards, query builder, **Skip**) treats natively. _No form tool on the
-  market does this._
+- 🧬 &nbsp;**The rest of the toolchain sees it the moment it lands.** The **Automate** tab writes
+  each submission into a real MemberJunction record in the same database, so dashboards, the query
+  builder and **Skip** read it natively — no export, no sync job, no second copy to keep in step.
+  _No form tool on the market does this._
 
 > **Philosophy: _beat the meter._** Free and unlimited at the core; differentiate on native
 > data integration, not on out-feature-ing the long tail.

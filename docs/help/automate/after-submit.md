@@ -86,10 +86,15 @@ so they can only be moved among themselves.** **Earlier** and **Later** move the
 
 A step may carry one more fact, which appears beside the others rather than as a setting:
 **Also runs on part-way saves, not just on the finished submission.**, or
-**Only runs on part-way saves, never on the finished submission.** A step reading either of those
-fires on somebody who started your form and stopped, as well as — or instead of — somebody who
-submitted. Nothing on this tab sets that; a step without one of those lines runs on finished
-submissions only, which is every step you can add here.
+**Only runs on part-way saves, never on the finished submission.** Nothing on this tab sets that —
+**Add a step** does not offer the choice — so a step reading either line came in with the form,
+which in practice means [Let AI draft a form](../build/author-with-ai.md) wrote it.
+
+It means less than it sounds like. MJ Forms runs your steps when somebody finishes the form: a
+part-way save writes the answers down and sets nothing off. So a step reading the first line runs
+once, on the finished submission, exactly as every other step does — and a step reading the second
+one, which asks to run only on part-way saves, does not run at all. If a drafted form has left you
+one of those, switch it off or remove it rather than waiting for it.
 
 ## Removing a step
 

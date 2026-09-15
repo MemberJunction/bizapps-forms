@@ -1,21 +1,15 @@
 # Export responses
 
-Every finished response to one form as a spreadsheet, from the one place in MJ Forms that offers
-one.
-
-## Read this first: it is not on the Responses tab
-
-This is where the afternoon goes, so it goes at the top.
-
-The **Responses** tab inside the builder shows this form's responses one at a time. It has no export
-button, it never had one, and looking harder will not produce one.
-
-The export is on **Responses & Analytics**, which is the second link on the **Forms** card on your
-MemberJunction home page. The two places, and which job belongs to which, are in
-[Where everything lives](../get-started/where-everything-lives.md).
+Every finished response to one form as a spreadsheet — from **Responses & Analytics**, which is not
+the **Responses** tab in the builder, and that difference is where the afternoon goes.
 
 ## Before you start
 
+- The export is not on the **Responses** tab. That tab, inside the builder, shows this form's
+  responses one at a time. It has no export button, it never had one, and looking harder will not
+  produce one. The export is on **Responses & Analytics**, the second link on the **Forms** card on
+  your MemberJunction home page; the two places, and which job belongs to which, are in
+  [Where everything lives](../get-started/where-everything-lives.md).
 - A form that has been published at least once and has collected at least one finished response.
   Nothing else appears on the dashboard: [Publish a form](../share/publish.md).
 

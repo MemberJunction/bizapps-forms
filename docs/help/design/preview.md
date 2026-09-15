@@ -5,8 +5,9 @@ anyone a link.
 
 ## Before you start
 
-- A form with at least one question in it. Until then there is nothing to preview and the button is
-  not available: [Add and arrange questions](../build/add-and-arrange-questions.md).
+- A form open in the builder. **Preview** is live from the moment the form loads, with no questions
+  in it or with fifty, so you can open it at any point while you are building:
+  [Add and arrange questions](../build/add-and-arrange-questions.md).
 
 ## Open the preview
 

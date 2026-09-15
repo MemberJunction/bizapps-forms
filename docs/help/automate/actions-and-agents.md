@@ -3,6 +3,13 @@
 Hand each submission to something your organisation has already built — a job that runs, or an AI
 agent that reads.
 
+## Before you start
+
+- Someone must have set up the action or the agent already. This is the part that most often stops
+  the job, and there is a whole section on it below.
+- A form worth wiring up: [Publish a form](../share/publish.md), since nothing here runs until the
+  form is published.
+
 ## Which of the two you want
 
 They are the other two answers to **What should happen when someone submits?**, and the difference
@@ -20,13 +27,6 @@ flagging the applications worth reading first.
 
 If what you want is for the submission to become a record your colleagues can find, neither of these
 is it: that is [Save answers into a record](save-into-a-record.md).
-
-## Before you start
-
-- Someone must have set up the action or the agent already. This is the part that most often stops
-  the job, and there is a whole section on it below.
-- A form worth wiring up: [Publish a form](../share/publish.md), since nothing here runs until the
-  form is published.
 
 ## Add one
 
