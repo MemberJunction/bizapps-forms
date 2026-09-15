@@ -17,7 +17,7 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import type { ConditionalRule } from '@mj-biz-apps/forms-entities';
-import { FORMS_UI_CSS } from '../shared';
+import { FORMS_UI_CSS, HELP_LINKS } from '../shared';
 import { RuleEditorDialogComponent } from './rule-editor-dialog.component';
 import { LogicEditorComponent } from './logic-editor.component';
 import type { ConditionalSourceQuestion } from './condition-sources';
@@ -42,6 +42,9 @@ const RULES_PANEL_CSS = /* css */ `
    and muted rendered it visibly lighter than every other line beside it. */
 .rp-bar-title { flex: 1 1 auto; margin: 0; font-size: var(--mjf-label); font-weight: 700; letter-spacing: 0.06em; color: var(--mj-text-secondary); }
 .rp-empty { margin: 0; font-size: var(--mjf-label); color: var(--mj-text-muted); }
+/* The help link rides inside that one muted line rather than under a heading, so it takes the
+   line's own size instead of the primitive's slightly larger one. */
+.rp-empty .mjf-help-link { font-size: inherit; }
 
 .rp-add {
   flex: none;
@@ -172,6 +175,9 @@ export class RulesPanelComponent {
   @Input() defaultEndingLabel: string | null = null;
 
   @Output() ruleChange = new EventEmitter<ConditionalRule | undefined>();
+
+  /** Help-centre articles, for the empty state's way out. */
+  protected readonly help = HELP_LINKS;
 
   protected dialogOpen = false;
   /** Whether the footer is asking about unsaved work rather than offering Save. */

@@ -85,3 +85,21 @@ jobs:
             exit 1
           fi
           echo "Valid changeset with minor or major bump found"
+
+      # THIS STEP BELONGS HERE, NOT IN build.yml's `build-and-test`. Do not move it.
+      #
+      # `build-and-test` is gated by the `scope` job, whose prefix list (pinned by
+      # scripts/check-paths-touched.spec.mjs) does not include `docs/` — deliberately, because an
+      # article does not need a 30-minute build. So a pull request that edits only a help article
+      # makes that decider answer `false`, the job reports `skipped`, and a required status check
+      # treats `skipped` as PASSING. Wiring this gate there would mean the only pull requests it
+      # exists to check are precisely the ones it never runs on: a green required check over a gate
+      # that did not execute, which is the failure this repository keeps re-fixing.
+      #
+      # `changes_and_migrations` is required, runs unconditionally on every pull request to `next`
+      # and `main`, and is already checked out with Node 24. check-help-docs.mjs is Node stdlib
+      # only, so it needs no `pnpm install` and adds a second or two to a job that already exists.
+      # Its unit tests run in `build-and-test` instead, and correctly: `scripts/` IS in the path
+      # decider's list.
+      - name: Help docs stay true to the product
+        run: npm run lint:help

@@ -535,10 +535,46 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
 .mjf-empty-title { font-size: var(--mjf-section); font-weight: 600; color: var(--mj-text-primary); }
 .mjf-empty-body { margin: 0; max-width: 42ch; font-size: var(--mjf-meta); color: var(--mj-text-secondary); }
 
+/* A link out to the help centre, for the dead ends (empty states) where a reader is stuck by
+   definition. Quiet on purpose: it sits under whatever button actually moves the person forward,
+   and must not compete with it.
+
+   Every one of these opens a new tab. The arrow icon is the sighted cue and is aria-hidden, so the
+   markup must also carry a .mjf-visually-hidden "(opens in a new tab)" span — otherwise the one
+   reader who cannot see the arrow is the one who loses their place without warning. */
+.mjf-help-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--mjf-meta);
+  color: var(--mj-brand-primary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+.mjf-help-link:hover { color: var(--mj-brand-primary-hover); border-bottom-color: currentColor; }
+.mjf-help-link:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; border-radius: 2px; }
+
 /* -------------------------------------------------------------------- utilities */
 
 .mjf-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mjf-muted { color: var(--mj-text-muted); }
+
+/* Text for a screen reader and nobody else. Same name and same rule as the widget already uses
+   (form-question.component.css), so "hidden text" has one spelling in this package rather than two
+   — the builder surfaces simply had no copy of it until an empty-state link needed one.
+   Absolute positioning also keeps it out of the flex layout of whatever contains it, so it adds no
+   gap to an inline-flex row such as .mjf-help-link. */
+.mjf-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 `;
 
 /**

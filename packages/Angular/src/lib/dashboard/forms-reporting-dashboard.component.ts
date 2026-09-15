@@ -7,7 +7,7 @@ import { RegisterClass } from '@memberjunction/global';
 import type { ExportFormat } from '@memberjunction/export-engine';
 import type { mjBizAppsFormsFormResponseAnswerEntityType } from '@mj-biz-apps/forms-entities';
 
-import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
+import { FORMS_UI_CSS, FORMS_VIZ_CSS, HELP_LINKS } from '../shared';
 import { FORMS_REPORTING_CSS } from './forms-reporting-dashboard.styles';
 import { FormsReportingService } from './services/forms-reporting.service';
 import { FormsReportingExportService } from './services/forms-reporting-export.service';
@@ -91,6 +91,9 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   private readonly responses = inject(ResponsesDataService);
   private readonly exporter = inject(FormsReportingExportService);
   private readonly cdr = inject(ChangeDetectorRef);
+
+  /** Help-centre articles, for the empty state's way out. */
+  public readonly help = HELP_LINKS;
 
   /**
    * Live RunView/RunQuery data path is the default. Set to `true` only as an explicit

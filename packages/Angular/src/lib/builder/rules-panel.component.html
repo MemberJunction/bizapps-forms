@@ -20,7 +20,14 @@
   </div>
 
   @if (!hasRules) {
-    <p class="rp-empty">No rules yet. This item always shows.</p>
+    <p class="rp-empty">
+      No rules yet. This item always shows.
+      <a class="mjf-help-link" [href]="help.logic" target="_blank" rel="noopener">
+        How logic works
+        <span class="mjf-visually-hidden">(opens in a new tab)</span>
+        <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+      </a>
+    </p>
   }
 
   @for (row of summaryRows; track $index) {

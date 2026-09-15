@@ -1,0 +1,74 @@
+# Add and arrange questions
+
+A form whose questions are the ones you meant to ask, in the order you meant to ask them.
+
+![The Build tab, in three columns: the question types you can add down the left, the form's own
+questions in the order a respondent meets them in the middle, and the settings for whichever
+question is selected on the right.](../images/build-tab.png)
+
+## Before you start
+
+- A form open on the **Build** tab. If you have never made one,
+  [Create your first form](../get-started/first-form.md) gets you there in about ten minutes.
+- Some idea of which type each question should be. [The 25 question types](question-types.md) is the
+  list, with a sentence on each saying when to use it.
+
+## Add and arrange
+
+1. Find the palette down the left of the **Build** tab. The 25 types are grouped under seven
+   headings — **Contact**, **Text**, **Choice**, **Scale**, **Date**, **Upload** and **Structure** —
+   and hovering one shows what it collects. The box above them, **Search form elements**, matches
+   the description as well as the name.
+2. Click a type. The question appears at the end of the current section and MJ Forms selects it, so
+   the panel on the right is already about the question you just made.
+3. Type your wording into **Question**, in **Question settings** on the right. Until you do, the
+   question is called *Untitled* followed by its type — an unnamed **Short text** question reads
+   `Untitled Short text question` on the canvas, which is how you spot the one you forgot.
+4. Add **Description** if the question needs a sentence of explanation. It sits under the question
+   in grey, and the respondent reads it before they answer rather than after they have got it wrong.
+5. To put a question *between* two others rather than at the end, click the question it should
+   follow. **Add content** appears under that card while it is selected, and opening it opens
+   **Insert a question**, which
+   offers a shortlist under **Common** on the left — **Short text**, **Multiple choice**, **Email**
+   and **Long text** — and all 25 in the same seven groups on the right.
+6. Move a question with **Move up** and **Move down**, on the right-hand end of its card, or drag it
+   by the handle on the left. Both work between sections as well as inside one.
+7. Remove a question with **Delete question**, at the end of the same row. There is no confirmation
+   and no undo for a deletion, so read the card before you press it.
+
+## What happens next
+
+Nothing needs saving. MJ Forms writes each edit as you make it, and respondents see none of it until
+you publish.
+
+Each card on the canvas carries everything you need to check your work at a glance: a two-digit
+position number, your wording, the description under it, and the type. A question you have made
+compulsory also wears a **Required** badge, and one carrying logic wears **Conditional**,
+**Branches**, or **Rule is broken** if something it depends on has gone.
+
+Moving a question can break a rule, because a rule may only read a question that comes *before* it.
+When a move does that, a banner appears above the canvas saying what you moved, how many rules it
+cost, and where to go and look. Which of those three it can tell you depends on where the damage
+landed:
+
+- On another question — `Moved "Your email". This broke 2 rules on "Your postcode".` This is the
+  usual one. You moved a question later, and a rule that was reading it is now in front of it.
+- On the question you moved — `Moved "Your email". This broke 1 rule on it.` It does not repeat the
+  name, which would read as a mistake.
+- On more than one — `Moved "Your email". This broke 3 rules — the affected questions are badged.`
+  Past one, a list in a banner is a list nobody reads, so it sends you to the badges on the canvas
+  instead.
+
+**Undo** sits beside the banner and puts the question back where it was. The banner does not time
+out. If you dismiss it with **Dismiss** and the rules stay broken, the form will refuse to publish:
+see [Show, skip and branch](logic.md).
+
+## Related
+
+- [The 25 question types](question-types.md) — what each type collects, and when to use it.
+- [Require and check answers](required-and-validation.md) — making an answer compulsory, and
+  rejecting one in the wrong shape.
+- [Add sections and screens](sections-and-screens.md) — splitting a long form into pages, and what
+  the respondent sees before the first question and after the last.
+- [Preview on phone and tablet](../design/preview.md) — reading your order and your wording at the
+  width most respondents will actually meet them at.

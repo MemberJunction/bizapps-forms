@@ -1,0 +1,32 @@
+# Bold spans that scripts/check-help-docs.mjs must accept even though they are not found
+# in packages/Angular/src, packages/Server/src or packages/Entities/src.
+#
+# WHAT THIS FILE IS FOR
+# Bold in docs/help means "this text is on the screen in the product" (see STYLE.md §6), and the
+# gate proves it by looking every bold span up in the source. A few on-screen strings cannot be
+# found that way: text the product composes while it runs (a page heading numbered from a count, a
+# sentence assembled from parts), and text that comes from MemberJunction core rather than from
+# this repository. Those go here.
+#
+# WHAT THIS FILE IS NOT FOR
+# A label that used to exist. If the gate says a span is missing, assume the label was renamed and
+# fix the article. Silencing a real failure here is how the whole rule quietly stops working, and
+# nobody will notice for a year.
+#
+# FORMAT
+#   - A line whose first non-blank character is "#" is a comment. Blank lines are ignored.
+#   - Every other line is one entry: the bold span exactly as it is written in the article, with
+#     leading and trailing whitespace trimmed. A "#" inside an entry is fine; an entry that starts
+#     with one cannot be expressed, which has not come up.
+#   - Put the reason in a comment immediately above the entry. An entry without a reason is a bug.
+#   - Keep entries grouped and alphabetical within a group.
+#
+# Keep the list short. Every entry here is a label nobody will ever verify against the product
+# again, so the outcome to aim for is a file with nothing in it.
+
+# The heading over the branching half of the Edit logic dialog. The template writes
+# `Then, after this {{ itemNoun }}`, and itemNoun is "question", "section" or "screen" depending
+# on what is selected — so the sentence a reader sees exists only once the dialog has been
+# rendered, and no spelling of it appears in the source. Logic is authored on a question far more
+# often than on the other two, so the question wording is the one the help centre quotes.
+Then, after this question

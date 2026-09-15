@@ -11,6 +11,7 @@ export {
   renderAnswer,
   respondentLabel,
 } from './answer-values';
+export { HELP_BASE_URL, HELP_LINKS } from './help-links';
 export { toDate } from './runview-dates';
 export { flattenQuestions } from './published-questions';
 export { FORMS_UI_CSS, FORMS_UI_TOKENS, FORMS_UI_PRIMITIVES } from './forms-ui';

@@ -16,7 +16,7 @@ import { parseAllowedOrigins } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
 import { LogError } from '@memberjunction/core';
 
-import { FORMS_UI_CSS } from '../shared';
+import { FORMS_UI_CSS, HELP_LINKS } from '../shared';
 import { DISTRIBUTION_STYLES } from './distribution-manager.styles';
 import { DistributionService, type MutationOutcome } from './distribution.service';
 import { fromLocalInputValue, toLocalInputValue } from './local-datetime';
@@ -83,6 +83,9 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
   private readonly service = inject(DistributionService);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly cdr = inject(ChangeDetectorRef);
+
+  /** Help-centre articles, for the empty state's way out. */
+  protected readonly help = HELP_LINKS;
 
   protected links: mjBizAppsFormsFormDistributionEntity[] = [];
   protected loading = true;

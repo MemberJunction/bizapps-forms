@@ -21,7 +21,7 @@ import type {
   mjBizAppsFormsFormEntityBindingEntity,
 } from '@mj-biz-apps/forms-entities';
 
-import { FORMS_UI_CSS } from '../shared';
+import { FORMS_UI_CSS, HELP_LINKS } from '../shared';
 import { AUTOMATION_STYLES } from './automation-tab.styles';
 import {
   LEGACY_STEP_DESCRIPTIONS,
@@ -124,6 +124,9 @@ export class AutomationTabComponent implements OnInit {
   private readonly md = new Metadata();
 
   protected readonly choices = STEP_CHOICES;
+
+  /** Help-centre articles, for the empty state's way out. */
+  protected readonly help = HELP_LINKS;
 
   protected readonly loading = signal(true);
   protected readonly loadError = signal('');

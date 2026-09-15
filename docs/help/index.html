@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark light" />
+<title>MJ Forms help</title>
+<meta name="description" content="How to build a form in MJ Forms, publish it, share a link to it and read the answers — written for the person using the builder, not the person installing it." />
+
+<!-- Sora, the typeface the design gallery at ../index.html uses. The two sites are one property. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+<!--
+  Docsify 5.0.0, pinned to an exact version rather than a floating major.
+  A floating major would let a CDN push a breaking change into a published help site with no
+  commit, no review and no way to tell from the repository what the reader is actually running.
+  Upgrading is a deliberate edit to these four lines — including the integrity hashes, which pin
+  the bytes as well as the version number. Regenerate one with:
+    curl -sL <url> | openssl dgst -sha384 -binary | openssl base64 -A
+  The dark add-on is loaded unconditionally: dark is the house look, matching the gallery. A reader
+  whose system asks for light gets a light palette from theme.css instead.
+-->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@5.0.0/dist/themes/core.min.css"
+      integrity="sha384-u1ltA0BWEetQbGokjUjglT9sN702RQwy8JESh3Ha4GNlyzMU57usk6duY0/BOTMj"
+      crossorigin="anonymous" referrerpolicy="no-referrer" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@5.0.0/dist/themes/addons/core-dark.min.css"
+      integrity="sha384-g9crfHW8IcGuSHfca3iTqOPPx2uRbodq5uKkC9CiXVqnNVszeNEYKIs5nYc8wUXY"
+      crossorigin="anonymous" referrerpolicy="no-referrer" />
+<!-- Ours last, so it wins over both Docsify themes. -->
+<link rel="stylesheet" href="theme.css" />
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%237c5cff'/%3E%3Cpath d='M9 10h14M9 16h14M9 22h8' stroke='%23ffffff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <div id="app">Loading the MJ Forms help centre…</div>
+
+  <script>
+    window.$docsify = {
+      name: 'MJ Forms help',
+      // No `repo` setting on purpose. It would draw Docsify's corner ribbon, which duplicates the
+      // GitHub link already in _navbar.md and sits on top of the first heading at phone width.
+      loadSidebar: true,
+      loadNavbar: true,
+      subMaxLevel: 2,
+      auto2top: true,
+      mergeNavbar: true,
+
+      // Links inside articles are written the way they sit on disk ("../reference/glossary.md"),
+      // so the same link works on the rendered site, in a plain checkout, and on github.com if
+      // this site is ever unavailable. It is also the form scripts/check-help-docs.mjs resolves.
+      // The cost of this setting is that _sidebar.md and _navbar.md links must start with "/",
+      // or they would be resolved against whichever folder the reader happens to be in.
+      relativePath: true,
+
+      // With loadSidebar/loadNavbar, Docsify looks for _sidebar.md and _navbar.md next to the
+      // current page first. There is one of each, at the root, so point every folder at them.
+      alias: {
+        '/.*/_sidebar.md': '/_sidebar.md',
+        '/.*/_navbar.md': '/_navbar.md'
+      },
+
+      search: {
+        depth: 3,
+        placeholder: 'Search the help',
+        noData: 'No help article matches that.',
+        paths: 'auto',
+        // github.io serves every MemberJunction Pages site from one origin, which means one shared
+        // localStorage. Without a namespace this index would collide with a sibling site's.
+        namespace: 'mj-forms-help'
+      }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify@5.0.0/dist/docsify.min.js"
+          integrity="sha384-w6yZXzkazsxmservgGooUY9zjEHzIFHubRNZMLJ3enj/JD+Z8BvAGBqdrjfnLNhu"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify@5.0.0/dist/plugins/search.min.js"
+          integrity="sha384-wZGyhbW44GtFpUJG1z6siOX84RFRDAht5UTeOlV/LlRP6T2GXj3LrLwcUHTyzfby"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</body>
+</html>
