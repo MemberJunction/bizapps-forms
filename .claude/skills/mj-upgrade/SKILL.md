@@ -82,7 +82,11 @@ Keep install/build/test output in background log files under the scratchpad and 
     **Read the first line of the output before anything else.** A real core run opens with `Detected installed migration version: <N> — fetching only migrations newer than it.` `<N>` must equal the frontier from step 12 (higher ⇒ poisoned history, kill the run), and the line must be **present at all** — bare `migrate` prints no watermark line, so no line ⇒ you are not migrating core.
 
 15. **Verify — all four checks, before moving on.**
-    - **The `N applied` count proves nothing.** `R__RefreshMetadata.sql` is repeatable and re-runs every time, so an already-current run and a fully-skipped run both report `1 applied` and exit 0. Judge by the **frontier moving** (or by it already being at the target band).
+    - **The `N applied` count proves nothing.** `R__RefreshMetadata.sql` is repeatable and re-runs every time, so an already-current run and a fully-skipped run both report `1 applied` and exit 0. Judge by the frontier **matching the target tag's own top migration version** — which is not the same as the frontier moving. A patch release on a line may ship no new versioned migration at all: 6.1.1 amended `V202608061704` (the Report/Workflow retirement, MJ#4483) **in place** and added nothing, so a database already at 6.1.0 came out of `migrate -t v6.1.1` with the frontier unchanged at `202609132006`, which is correct and complete. Ask the tag what the top is rather than inferring it from movement:
+      ```bash
+      cd ../MJ && git ls-tree -r --name-only v<version> -- migrations/ | grep -oE '/V[0-9]+' | tr -d '/V' | sort -n | tail -1
+      ```
+      **An amended migration below the watermark is never re-fetched** — the CLI's slice is versions strictly newer than the installed one — so it raises no checksum conflict, *and* its fix never reaches a database that is already past it. If the amendment matters to you (it did not here: ours crossed that migration on 2026-08-12 and it succeeded), it has to be applied deliberately, not by the tagged run.
     - Frontier advanced//is at the target band, and the entity count did not shrink:
       ```sql
       SELECT MAX(version) FROM __mj.flyway_schema_history WHERE version IS NOT NULL AND success = 1;
@@ -120,6 +124,15 @@ Step 12 already excluded that schema; the summary is step 14. The operator is to
 **The siblings do not carry this, so do not look there for confirmation.** `bizapps-common`, `bizapps-tasks` and `bizapps-accounting` mention `excludeSchemas` in **zero** files, and only `bizapps-caliber` has an `mj-upgrade` skill at all — whose step 6b still asserts the opposite ("every host names Caliber's 22 entities via CodeGen"), stale since Caliber's own `V202608062200__v1.0.x__CodeGen_Baseline.sql` (2026-08-06) fixed it and wrote the contract down: *"the BizApps contract is that an app ships its own CodeGen output and the host never runs CodeGen for the app's schema. `bizapps-forms` already does this."* This repo is the reference implementation; check MJ source, not a sibling runbook.
 
 16a. **Run CodeGen against a CLEAN ROOM and decide what the upgrade obliges you to SHIP.** This step is mandatory and is the only way to answer the question — a new MJ can change what CodeGen emits, and what it emits for our schema reaches a host only if a migration carries it.
+
+    **This is now a script — `pnpm run check:host-truth` (#220, merged 2026-09-15).** It builds exactly the room described below, runs CodeGen twice, and reports the verdict; prefer it to the hand chain, which is kept here because it is what the script does and what you fall back to when a step needs picking apart:
+
+    ```bash
+    # the database must already exist, be EMPTY, and be owned by [sa]
+    node scripts/check-host-truth-codegen.mjs --database MJ_HostTruth_<ver> \
+      --common-migrations ../bizapps-common/migrations --tasks-migrations ../bizapps-tasks/migrations
+    ```
+    It derives the core tag from `mj-app.json`'s `mjVersionRange` floor, so **bump the pins before running it** or it builds the previous version's room. Two things it cannot know: pass a sibling's migrations **at their shipped state** (a local checkout can be behind — bizapps-common was 89 commits behind `origin/next` and missing four migrations on the 6.1.1 run; `git archive origin/next migrations | tar -x -C <tmp>` gives a faithful one without touching anyone's tree), and it runs `node_modules/.bin/mj`, which in this workspace is a symlink into the **MJ source checkout**, not the pinned CLI. For a certification run, repeat the chain with the real thing — `npm i @memberjunction/cli@<version>` in a temp dir, then drive it with `DB_DATABASE=<room>` from the repo root. On 6.1.1 both CLIs returned the same verdict; that agreement is the point of doing it twice.
 
     **Never answer this by running CodeGen against the shared dev database.** It regenerates from whatever metadata that database happens to hold, including other branches' records, and can revert already-merged fixes with nothing in the repo able to detect it. Build the room from only what the repos ship (~2 min, verified 2026-09-14 on the 6.1.0 upgrade):
 
