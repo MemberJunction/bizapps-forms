@@ -37,6 +37,19 @@
   - [Reuse a form as a template](/build/templates.md)
   - [Let AI draft a form](/build/author-with-ai.md)
 
+- Design
+  - [Brand a form](/design/brand-a-form.md)
+  - [Preview on phone and tablet](/design/preview.md)
+
+- Share
+  - [Publish a form](/share/publish.md)
+  - [Create a share link](/share/share-link.md)
+  - [Embed in your own site](/share/embed.md)
+  - [Share a QR code](/share/qr-code.md)
+  - [Set limits and dates](/share/limits-and-dates.md)
+  - [Require a captcha](/share/captcha.md)
+  - [Why a link is not working](/share/why-a-link-is-not-working.md)
+
 - Reference
   - [Glossary](/reference/glossary.md)
 
@@ -44,19 +57,6 @@
   THE PLANNED RUNNING ORDER — fixed once, here, rather than renegotiated seven times by seven
   contributors appending to the end of a file. Each line moves up into the list above in the commit
   that adds its article. When this comment is empty, delete it.
-
-  - Design
-    - [Brand a form](/design/brand-a-form.md)
-    - [Preview on phone and tablet](/design/preview.md)
-
-  - Share
-    - [Publish a form](/share/publish.md)
-    - [Create a share link](/share/share-link.md)
-    - [Embed in your own site](/share/embed.md)
-    - [Share a QR code](/share/qr-code.md)
-    - [Set limits and dates](/share/limits-and-dates.md)
-    - [Require a captcha](/share/captcha.md)
-    - [Why a link is not working](/share/why-a-link-is-not-working.md)
 
   - Responses
     - [Read responses](/responses/read-responses.md)
