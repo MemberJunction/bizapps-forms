@@ -74,7 +74,9 @@ diff") that this not happen.
 > `Record<FormQuestionType, …>` grouped by palette heading, and no Forms UI code reads
 > `EntityFieldValue` at all. `Sequence` orders a field's `EntityFieldValues` in MJ metadata, so the
 > affected surface is Explorer's generated Form Question record form and any other metadata-driven
-> consumer. Task 1's code block below still carries the original wording; the shipped spec does not.
+> consumer. The surface wording was corrected everywhere it appears, this plan's three prescribed
+> code blocks included; each of those blocks is still the ORIGINAL DRAFT in every other respect and
+> is marked as such where it appears. The shipped files are the authority.
 
 ---
 
@@ -109,6 +111,13 @@ went unnoticed is that nothing in the repo read this artifact at all.
 
 Append to `packages/Entities/src/contracts/question-types.spec.ts`:
 
+> **Superseded during execution — the shipped spec is the authority.** The block below is the
+> original draft. `question-types.spec.ts` as shipped differs substantially: the constraint helper was
+> hoisted to module scope and the migration reads memoized, the replay was scoped to this field's own
+> `QuestionType` variable in both the INSERT and the natural-key UPDATE shapes (so a different
+> picklist containing `'Date'` or `'Email'` cannot corrupt it), and a second `describe` was added for
+> the four structural mutants a numeric replay cannot see. Read the shipped file, not this block.
+
 ```ts
 describe('the picklist order a host actually receives', () => {
   /**
@@ -116,7 +125,8 @@ describe('the picklist order a host actually receives', () => {
    * (MJ install-orchestrator.ts:1987), and CodeGen's constraint-sync query filters on exactly that
    * list (`WHERE SchemaName NOT IN (…)`, SQLServerCodeGenProvider.ts:2000). So CodeGen NEVER runs
    * against `FormQuestion.QuestionType` on a host: whatever `migrations/` leaves in
-   * `EntityFieldValue.Sequence` is what the designer dropdown renders, forever.
+   * `EntityFieldValue.Sequence` is the order every metadata-driven value list renders, forever --
+   * most visibly Explorer's generated Form Question record form, NOT the builder's palette.
    *
    * `V202608301200` renamed Signature→Doodle and skipped `Sequence` on the stated premise that
    * "CodeGen re-derives the whole field's sequences … on its next run". There is no next run. The
@@ -259,6 +269,14 @@ that drifted some other way. The nine no-op writes cost nothing.
 
 - [ ] **Step 1: Create the migration**
 
+> **Superseded during execution — the shipped migration is the authority.** The block below is the
+> original draft. `migrations/V202609142000__v0.12.x__Question_Type_Picklist_Sequence.sql` as shipped
+> differs in one way that matters behaviourally: it gained the **`THROW 51220` postcondition**,
+> asserting 25 rows / 25 distinct sequences / spanning exactly 1..25, because the opening `THROW`
+> guards the prerequisite this file can *see* and not the one it *depends on* — all 25 `UPDATE`s can
+> match zero rows and the migration still exit 0. Its header also names the affected surface
+> correctly (see the note above). Read the shipped file, not this block.
+
 ```sql
 -- =============================================================================================
 -- MJ Forms v0.12.x — the QuestionType picklist order a host actually receives (#219)
@@ -279,9 +297,11 @@ that drifted some other way. The nine no-op writes cost nothing.
 -- `scripts/check-codegen-append.mjs` is built on.
 --
 -- The damage: renaming Signature (alphabetical slot 20) to Doodle (slot 5) shifted every value
--- between, so 16 of 25 rows carry the pre-rename ordering. The designer's QuestionType dropdown
--- renders Doodle where Signature used to be and 15 other values off by one. Cosmetic, permanent,
--- and contrary to that migration's own stated contract ("A real run must produce NO diff").
+-- between, so 16 of 25 rows carry the pre-rename ordering. Every metadata-driven QuestionType value
+-- list -- most visibly Explorer's generated Form Question record form -- renders Doodle where
+-- Signature used to be, with 15 other values off by one. NOT the builder's palette, which is
+-- hand-authored. Cosmetic, permanent, and contrary to that migration's own stated contract
+-- ("A real run must produce NO diff").
 --
 -- THE NUMBERS BELOW ARE CODEGEN'S, NOT A PREFERENCE. `syncEntityFieldValues`
 -- (CodeGenLib/src/Database/manage-metadata.ts:5656) sorts the parsed CHECK values with a bare
@@ -392,7 +412,7 @@ git commit -m "fix(migrations): ship the QuestionType sequences the rename defer
 ### Task 3: Changeset, plan, and whole-repo verification
 
 **Files:**
-- Create: `.changeset/question-type-picklist-sequence.md`
+- Create: `.changeset/the-question-type-picklist-order-a-host-receives.md`
 - Create: `docs/superpowers/plans/2026-09-14-219-question-type-picklist-sequence.md` (this file)
 
 **Interfaces:** none.
@@ -401,6 +421,12 @@ git commit -m "fix(migrations): ship the QuestionType sequences the rename defer
 
 `minor`, because the PR ships a migration. Verify no sibling changeset on this branch already
 carries a *higher* level before settling on it.
+
+> **Superseded during execution — the shipped changeset is the authority.** The block below is the
+> original draft. The shipped changeset names the surface correctly and calls out the `THROW` on
+> the natural-key lookup. (It was drafted as `question-type-picklist-sequence.md`; changeset
+> filenames are arbitrary here, and the paths above name the file that actually shipped.) Read the
+> shipped file, not this block.
 
 ```markdown
 ---
@@ -411,11 +437,12 @@ Ship the `QuestionType` picklist sequences the Signature→Doodle rename deferre
 never happens on a host (#219).
 
 `mj app install` puts this app's schema in the host's `excludeSchemas`, and CodeGen's
-constraint-sync query filters on that list — so the designer's question-type dropdown rendered
-`Doodle` in the slot `Signature` used to occupy, with 15 other values off by one, on every host.
-A new migration writes all 25 rows to the order CodeGen derives, keyed on the field's natural key,
-and `question-types.spec.ts` now replays the shipped migrations and fails if that order ever drifts
-again.
+constraint-sync query filters on that list — so every metadata-driven `QuestionType` value list, most
+visibly Explorer's generated Form Question record form, rendered `Doodle` in the slot `Signature`
+used to occupy, with 15 other values off by one, on every host. (The Forms builder's own palette is
+hand-authored and was unaffected.) A new migration writes all 25 rows to the order CodeGen derives,
+keyed on the field's natural key, and `question-types.spec.ts` now replays the shipped migrations and
+fails if that order ever drifts again.
 ```
 
 - [ ] **Step 2: Verify the whole repo is green**
@@ -432,7 +459,7 @@ and is not).
 - [ ] **Step 3: Commit**
 
 ```bash
-git add .changeset/question-type-picklist-sequence.md docs/superpowers/plans/2026-09-14-219-question-type-picklist-sequence.md
+git add .changeset/the-question-type-picklist-order-a-host-receives.md docs/superpowers/plans/2026-09-14-219-question-type-picklist-sequence.md
 git commit -m "chore(changeset): minor — this ships a migration (#219)"
 ```
 
