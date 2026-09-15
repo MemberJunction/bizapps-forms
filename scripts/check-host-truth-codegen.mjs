@@ -50,9 +50,23 @@
  * ── WHY THIS SCRIPT HOLDS NO DATABASE CONNECTION ────────────────────────────────────────────────
  * It takes an EXISTING, EMPTY database and never creates or drops one. `.env` on a dev machine points
  * at the shared database MJ's host serves; a check that could DROP DATABASE is one bug away from
- * taking it. Emptiness is verified rather than trusted, from `mj migrate`'s own first stdout line —
- * the same signal the root CLAUDE.md teaches — and a run against the database named in .env is
- * refused outright.
+ * taking it.
+ *
+ * Two guards follow from that, and they are NOT equivalent — the difference matters enough to spell
+ * out, because reading them as one pair is how you would come to trust the weaker one:
+ *
+ *   1. The .env refusal is PRE-FLIGHT and absolute. `checkPreconditions` throws before a single `mj`
+ *      process is spawned, so the shared dev database is never touched at all.
+ *   2. The emptiness check is POST-HOC, and cannot be anything else. The only signal for it is
+ *      `mj migrate`'s own first stdout line, and that same invocation applies every migration newer
+ *      than the watermark it reports — there is no read-only way to ask. So pointing this at a
+ *      non-empty database that is NOT the one in .env runs the core chain into it and refuses
+ *      afterwards. What that guard protects is the VALIDITY OF THE VERDICT — a run that did not
+ *      start from nothing proves nothing, and is aborted rather than reported — not the database.
+ *
+ * Name a throwaway database, and drop it between runs: the fixed `MJ_HostTruth` in the runbook is
+ * left behind deliberately (see the success message), so a second run against it is exactly the case
+ * guard 2 catches late.
  *
  * Node stdlib only, like every other gate here: a dependency problem must never be the reason nobody
  * finds out.
