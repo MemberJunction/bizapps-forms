@@ -147,8 +147,11 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
     *GitHub Actions* integration specifically, and is irrelevant here because this design asks for no
     bypass at all. Dispatch **Verify the release App token** to confirm the credential is live; it is
     read-only.
-  - Between #177 and #218 the release was a hand-run runbook that **was never once executed** —
-    `v0.10.0` (2026-08-14) was cut by the automation #177 removed, and nothing shipped after it.
+  - Between #177 and #218 the release was a hand-run runbook that was never once executed, so
+    `v0.10.0` (2026-08-14) stood as the last release for a month. **The automation was first run on
+    2026-09-15 and shipped `v0.11.0`** — 77 changesets, all five packages, tag and back-merge. Its
+    first run found two defects in the release machinery (#225, #226), neither reachable by the seven
+    required checks, because neither fires on a PR into `next`. See [`docs/release.md`](docs/release.md).
 
 ## Build & dev commands
 - `pnpm install` (repo root only — never inside a package dir)

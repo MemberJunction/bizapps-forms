@@ -1,8 +1,10 @@
 # Cuts the release pull request: `next` -> `release/vX.Y.Z` -> a PR into `main`.
 #
-# This is step 1 of docs/release.md, which has never been run by hand since #177 wrote it. The steps
-# are the same ones; what changes is who types them, and therefore whether the version that reaches
-# npm was computed by the script or by a tired human at the end of a Friday.
+# This is step 1 of docs/release.md. The steps are the same ones a human would type; what changes is
+# who types them, and therefore whether the version that reaches npm was computed by the script or by
+# a tired human at the end of a Friday. First executed 2026-09-15 for v0.11.0 — and its first run
+# failed on the push, because checkout's persisted credential outranked the App token in the remote
+# URL (#226, and the persist-credentials note on the checkout below).
 #
 # NOT A PUSH TO A PROTECTED BRANCH, and this is the distinction the whole design turns on.
 # `release/*` is covered by no ruleset — `protect-main` (18239666) and `next-protect` (20589383) are
