@@ -73,6 +73,26 @@ jobs:
           # tags to know what has already shipped. Neither survives a shallow clone.
           fetch-depth: 0
           fetch-tags: true
+          # Without this the release cannot be pushed, and the error names neither credentials nor
+          # this line. `persist-credentials: true` (the default) writes
+          # `http.https://github.com/.extraheader: AUTHORIZATION: basic <GITHUB_TOKEN>` into the
+          # LOCAL git config. That header matches every remote whose URL is github.com -- including
+          # the `app-push` remote below, whose URL carries the App token -- and a config header
+          # OUTRANKS credentials embedded in a remote's URL. So the push authenticates as
+          # github-actions[bot], not as the App; this job deliberately holds `contents: read`, so it
+          # is refused with:
+          #
+          #   remote: Permission to MemberJunction/bizapps-forms.git denied to github-actions[bot].
+          #   fatal: ... The requested URL returned error: 403
+          #
+          # Measured on run 35006316189, which cut v0.11.0 correctly and died on the push. The
+          # identity in that message is the tell: the App itself is fine.
+          #
+          # Safe because nothing in this job reaches the remote except that one App-token push --
+          # checkout still authenticates its OWN fetch, it simply leaves no credential behind, and
+          # this repository is public. Do NOT copy this to publish.yml: that workflow pushes the
+          # release tag through `origin` and needs the persisted credential.
+          persist-credentials: false
 
       # Must precede setup-node: `cache: 'pnpm'` needs pnpm already on PATH.
       # Pinned to an immutable SHA, unlike the copy in build.yml, and the difference is deliberate:
