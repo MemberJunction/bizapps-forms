@@ -33,6 +33,8 @@ import {
   findInsertedEntityFieldNames,
   findAddedForeignKeyColumns,
   findInsertedRelationshipJoinFields,
+  INTEGRATION_BRANCH,
+  resolveCheckBase,
 } from './check-codegen-append.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -864,4 +866,120 @@ test('suppressionRefusals refuses a remedy set that carries no CodeGen output at
   const r = suppressionRefusals('migrations/V1__x.sql', FLAGGED_FK, ['V2__prose.sql'], ['-- just a comment'], 'HEAD');
   assert.equal(r.length, 1);
   assert.match(r[0], /carries CodeGen output/);
+});
+
+// ── The base a main-bound ref must be checked against ────────────────────────────────────────
+// A pull request into `main` is a release or a back-merge, and its base IS `main` -- 690 commits
+// back at the time of writing. CHECK 2's banner rule applies only to ADDED files, so against that
+// base every migration merged since the last release reads as newly added and the four that
+// predate the gate relight. The `isNew` branch states the invariant it depends on; what it could
+// not anticipate is that a pull request's base can BE main. These pin both directions.
+
+test('resolveCheckBase is identity for anything aimed at the integration branch', () => {
+  assert.equal(INTEGRATION_BRANCH, 'next');
+  assert.equal(resolveCheckBase('deadbeef', 'next', REPO_ROOT), 'deadbeef');
+  assert.equal(resolveCheckBase('deadbeef', undefined, REPO_ROOT), 'deadbeef');
+  assert.equal(resolveCheckBase('deadbeef', '', REPO_ROOT), 'deadbeef');
+});
+
+let mainBound;
+
+before(() => {
+  const dir = mkdtempSync(join(tmpdir(), 'codegen-gate-mainbound-'));
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
+  git('init', '--quiet');
+  git('config', 'user.email', 'fixture@test.local');
+  git('config', 'user.name', 'Fixture');
+  git('config', 'commit.gpgsign', 'false');
+  mkdirSync(join(dir, 'migrations'), { recursive: true });
+
+  // Real content, so the classifier sees exactly what it sees in this repository.
+  // V202608301200 is one of the four the release range relights: it carries hand-written
+  // EntityFieldValue rows and no banner, which fires only when the file reads as ADDED.
+  const bannerless = read('migrations/V202608301200__v0.12.x__Rename_Signature_Question_To_Doodle.sql');
+
+  writeFileSync(join(dir, 'migrations/V202601010000__v0.1.x__Already_Released.sql'),
+    '-- Nothing CodeGen owns.\nSELECT 1;\n');
+  git('add', '.');
+  git('commit', '-m', 'the last release');
+  git('branch', '-M', 'main');
+  const mainSha = git('rev-parse', 'HEAD').trim();
+
+  git('checkout', '--quiet', '-b', 'next');
+  writeFileSync(join(dir, 'migrations/V202602020000__v0.2.x__Merged_Before_The_Gate.sql'), bannerless);
+  git('add', '.');
+  git('commit', '-m', 'merged into next before the gate existed');
+  const nextSha = git('rev-parse', 'HEAD').trim();
+
+  // A hotfix branched from main, not from next: its migration is absent from next, so it must
+  // still read as added even though the ref is aimed at main.
+  // A DIFFERENT bannerless migration, not a copy of the one above. `next` drops V202602020000 on
+  // this branch, and two similar blobs make git score the deletion and the addition as a RENAME --
+  // which --diff-filter=A excludes, so the file this test is about would not appear in the diff at
+  // all. Real branches never hit that: the migrations they add and drop are unrelated files.
+  const otherBannerless = read('migrations/V202608191400__v0.11.x__Form_Screen_Social_Links_Metadata.sql');
+  git('checkout', '--quiet', '-b', 'hotfix', mainSha);
+  writeFileSync(join(dir, 'migrations/V202603030000__v0.2.x__Hotfix.sql'), otherBannerless);
+  git('add', '.');
+  git('commit', '-m', 'a hotfix aimed straight at main');
+  const hotfixSha = git('rev-parse', 'HEAD').trim();
+
+  git('checkout', '--quiet', 'next');
+  mainBound = { dir, mainSha, nextSha, hotfixSha };
+});
+
+after(() => {
+  if (mainBound) rmSync(mainBound.dir, { recursive: true, force: true });
+});
+
+test('resolveCheckBase answers with the tip of next for anything aimed at main', () => {
+  assert.equal(resolveCheckBase(mainBound.mainSha, 'main', mainBound.dir), mainBound.nextSha);
+});
+
+test('resolveCheckBase names both ref spellings when next cannot be resolved', () => {
+  const bare = mkdtempSync(join(tmpdir(), 'codegen-gate-no-next-'));
+  try {
+    execFileSync('git', ['init', '--quiet'], { cwd: bare, encoding: 'utf8' });
+    assert.throws(
+      () => resolveCheckBase('deadbeef', 'main', bare),
+      /refs\/remotes\/origin\/next.*refs\/heads\/next/s,
+    );
+  } finally {
+    rmSync(bare, { recursive: true, force: true });
+  }
+});
+
+test('FIRES: the release range relights merged history when the target is not named', () => {
+  assert.throws(
+    () => execFileSync('node',
+      [join(REPO_ROOT, 'scripts/check-codegen-append.mjs'), mainBound.mainSha, mainBound.nextSha],
+      { cwd: mainBound.dir, encoding: 'utf8', stdio: 'pipe' }),
+    (err) => {
+      assert.equal(err.status, 1);
+      assert.match(String(err.stderr), /V202602020000__v0\.2\.x__Merged_Before_The_Gate\.sql/);
+      assert.match(String(err.stderr), /no "-- CodeGen output \(appended\)" banner/);
+      return true;
+    }
+  );
+});
+
+test('a main-bound ref is checked against next, so merged history does not relight', () => {
+  const out = execFileSync('node',
+    [join(REPO_ROOT, 'scripts/check-codegen-append.mjs'), mainBound.mainSha, mainBound.nextSha, 'main'],
+    { cwd: mainBound.dir, encoding: 'utf8', stdio: 'pipe' });
+  assert.match(out, /Base retargeted/);
+  assert.match(out, /0 changed migration\(s\)/);
+});
+
+test('FIRES: a hotfix aimed at main still owes its CodeGen output', () => {
+  assert.throws(
+    () => execFileSync('node',
+      [join(REPO_ROOT, 'scripts/check-codegen-append.mjs'), mainBound.mainSha, mainBound.hotfixSha, 'main'],
+      { cwd: mainBound.dir, encoding: 'utf8', stdio: 'pipe' }),
+    (err) => {
+      assert.equal(err.status, 1);
+      assert.match(String(err.stderr), /V202603030000__v0\.2\.x__Hotfix\.sql/);
+      return true;
+    }
+  );
 });
