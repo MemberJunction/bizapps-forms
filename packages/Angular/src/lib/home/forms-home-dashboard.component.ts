@@ -12,7 +12,7 @@ import { BaseEntity, CompositeKey, LogError } from '@memberjunction/core';
 import { MJGlobal, MJEventType, RegisterClass } from '@memberjunction/global';
 import type { ActionParam } from '@memberjunction/actions-base';
 
-import { FORMS_UI_CSS } from '../shared';
+import { FORMS_UI_CSS, HELP_LINKS } from '../shared';
 import { FormsHomeService } from './forms-home.service';
 import { FORMS_HOME_CSS } from './forms-home-dashboard.styles';
 import {
@@ -95,6 +95,9 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   private readonly data = inject(FormsHomeService);
   private readonly clone = inject(FormCloneService);
   private readonly cdr = inject(ChangeDetectorRef);
+
+  /** Help-centre articles, for the empty state's way out. */
+  public readonly help = HELP_LINKS;
 
   public loading = false;
   public busy = false;

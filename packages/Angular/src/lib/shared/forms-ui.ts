@@ -535,6 +535,21 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
 .mjf-empty-title { font-size: var(--mjf-section); font-weight: 600; color: var(--mj-text-primary); }
 .mjf-empty-body { margin: 0; max-width: 42ch; font-size: var(--mjf-meta); color: var(--mj-text-secondary); }
 
+/* A link out to the help centre, for the dead ends (empty states) where a reader is stuck by
+   definition. Quiet on purpose: it sits under whatever button actually moves the person forward,
+   and must not compete with it. */
+.mjf-help-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--mjf-meta);
+  color: var(--mj-brand-primary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+.mjf-help-link:hover { color: var(--mj-brand-primary-hover); border-bottom-color: currentColor; }
+.mjf-help-link:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; border-radius: 2px; }
+
 /* -------------------------------------------------------------------- utilities */
 
 .mjf-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

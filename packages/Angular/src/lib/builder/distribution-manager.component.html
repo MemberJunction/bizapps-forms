@@ -30,6 +30,10 @@
         <i class="fa-solid fa-plus" aria-hidden="true"></i>
         {{ busy ? 'Creating…' : 'Create a share link' }}
       </button>
+      <a class="mjf-help-link" [href]="help.shareLink" target="_blank" rel="noopener">
+        How share links work
+        <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+      </a>
       @if (actionError) {
         <p class="mjf-alert" role="alert">{{ actionError }}</p>
       }
