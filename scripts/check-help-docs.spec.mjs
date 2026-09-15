@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import {
     buildHaystack,
+    describeProductLinks,
     extractBoldSpans,
     extractHelpLinkPaths,
     extractLinks,
@@ -11,6 +12,8 @@ import {
     isExcludedSourcePath,
     normaliseWhitespace,
     parseAllowlist,
+    readHelpLinkEntries,
+    repoPathFromGitHubUrl,
 } from './check-help-docs.mjs';
 
 const NUL = String.fromCharCode(0);
@@ -186,6 +189,64 @@ test('extractLinks handles a link with a title', () => {
     assert.deepEqual(extractLinks('[x](STYLE.md "House style")'), [{ target: 'STYLE.md', line: 1 }]);
 });
 
+// ── Absolute links into this repository's own files ─────────────────────────────────────────────
+// "Starts with http, so skip it" was true of every link in the help centre except the two that
+// matter most: the installation guide, which lives outside docs/help/ and so cannot be linked
+// relatively without Docsify trying to route it. Those two were the only unchecked links on the
+// site — and they name a file a release can rename.
+
+const BLOB = 'https://github.com/MemberJunction/bizapps-forms/blob/main/docs/install.md';
+
+test('extractLinks resolves a GitHub URL into this repository from the repo root', () => {
+    assert.deepEqual(extractLinks(`see [the installation guide](${BLOB}).`), [
+        { target: 'docs/install.md', line: 1, fromRepoRoot: true },
+    ]);
+});
+
+test('repoPathFromGitHubUrl reads the path out of any ref', () => {
+    assert.equal(repoPathFromGitHubUrl(BLOB), 'docs/install.md');
+    assert.equal(
+        repoPathFromGitHubUrl('https://github.com/MemberJunction/bizapps-forms/blob/v0.11.0/README.md'),
+        'README.md',
+    );
+});
+
+test('repoPathFromGitHubUrl drops a fragment and a query', () => {
+    assert.equal(repoPathFromGitHubUrl(`${BLOB}#turnstile-keys`), 'docs/install.md');
+    assert.equal(repoPathFromGitHubUrl(`${BLOB}?plain=1`), 'docs/install.md');
+});
+
+test('another repository and another site stay skipped', () => {
+    // Nothing in this checkout can say whether either exists, and a gate that guesses cries wolf.
+    assert.equal(repoPathFromGitHubUrl('https://github.com/MemberJunction/MJ/blob/main/README.md'), null);
+    assert.equal(repoPathFromGitHubUrl('https://example.com/bizapps-forms/blob/main/a.md'), null);
+    assert.deepEqual(extractLinks('[MJ](https://github.com/MemberJunction/MJ/blob/main/README.md)'), []);
+});
+
+test('a directory (tree) URL and the repository home stay skipped', () => {
+    // A /tree/ URL names a directory, which is a different claim from "this file exists"; the
+    // repository home names no path at all. _navbar.md links the latter.
+    assert.equal(repoPathFromGitHubUrl('https://github.com/MemberJunction/bizapps-forms/tree/main/docs'), null);
+    assert.equal(repoPathFromGitHubUrl('https://github.com/MemberJunction/bizapps-forms'), null);
+});
+
+test('the two articles that link the installation guide name a file that exists', () => {
+    // The whole point: these are the links the gate used to skip. Resolved from the repo root,
+    // not from the article, because that is what a GitHub URL means.
+    const repoRoot = new URL('../', import.meta.url);
+    for (const article of ['docs/help/share/captcha.md', 'docs/help/README.md']) {
+        const links = extractLinks(readFileSync(new URL(article, repoRoot), 'utf8'))
+            .filter((link) => link.fromRepoRoot);
+        assert.ok(links.length > 0, `${article} no longer links this repository by absolute URL`);
+        for (const link of links) {
+            assert.ok(
+                existsSync(new URL(link.target, repoRoot)),
+                `${article}:${link.line} points at ${link.target}, which is not in the repository`,
+            );
+        }
+    }
+});
+
 // ── parseAllowlist ──────────────────────────────────────────────────────────────────────────────
 
 test('parseAllowlist treats a comment-only file as an empty allowlist', () => {
@@ -330,6 +391,108 @@ test('the real help-links.ts yields the five in-product routes', () => {
     ]) {
         assert.ok(paths.has(expected), `help-links.ts no longer links #/${expected}`);
     }
+});
+
+// ── Counting both sides of help-links.ts ────────────────────────────────────────────────────────
+// The route regex matches a LITERAL "#/path". A URL assembled any other way matches nothing, and
+// the only guard was "zero routes in the whole file" — which four good entries and one assembled
+// one walk straight past. Counting the exported keys is the independent second opinion.
+
+test('readHelpLinkEntries counts the keys and the routes separately', () => {
+    assert.deepEqual(readHelpLinkEntries(HELP_LINKS_SAMPLE), {
+        entryCount: 2,
+        routes: [{ path: 'get-started/first-form', line: 4 }, { path: 'build/logic', line: 5 }],
+    });
+});
+
+test('readHelpLinkEntries ignores a route written in a comment', () => {
+    // The opposite decision from extractHelpLinkPaths, and deliberately: a comment is checked for
+    // rot, but it is not a link the product shows anyone, so counting it would hide a real gap.
+    const source = [
+        '/** The shape is …/help/#/build/logic. */',
+        'export const HELP_LINKS = {',
+        '  // also …/help/#/share/publish one day',
+        '  logic: `${HELP_BASE_URL}#/build/logic`,',
+        '};',
+    ].join('\n');
+    assert.deepEqual(readHelpLinkEntries(source), {
+        entryCount: 1, routes: [{ path: 'build/logic', line: 4 }],
+    });
+});
+
+test('readHelpLinkEntries catches a route assembled instead of written out', () => {
+    // The blind spot itself: this entry renders a real URL and matches no literal route.
+    const source = 'export const HELP_LINKS = {\n  a: `${B}#/build/logic`,\n  b: B + HASH + slug,\n};';
+    const entries = readHelpLinkEntries(source);
+    assert.equal(entries.entryCount, 2);
+    assert.equal(entries.routes.length, 1);
+});
+
+test('readHelpLinkEntries counts a quoted key, and does not count a nested one', () => {
+    const source = "export const HELP_LINKS = {\n  'a': `${B}#/x/y`,\n  b: { nested: `${B}#/p/q` },\n};";
+    assert.equal(readHelpLinkEntries(source).entryCount, 2);
+});
+
+test('readHelpLinkEntries returns null when the export is not there to read', () => {
+    assert.equal(readHelpLinkEntries('export const SOMETHING_ELSE = { a: 1 };'), null);
+    assert.equal(readHelpLinkEntries('export const HELP_LINKS = {\n  a: 1,\n'), null);
+});
+
+test('readHelpLinkEntries on the real file agrees with itself', () => {
+    const source = readFileSync(new URL(
+        '../packages/Angular/src/lib/shared/help-links.ts', import.meta.url,
+    ), 'utf8');
+    const entries = readHelpLinkEntries(source);
+    assert.equal(entries.entryCount, entries.routes.length);
+    assert.ok(entries.entryCount >= 5, 'the five in-product empty-state links are still exported');
+});
+
+// ── Reporting rather than throwing ──────────────────────────────────────────────────────────────
+// This check runs last. Throwing out of it took the whole run with it, so a renamed help-links.ts
+// hid every bold-span, link and reachability failure in the same commit — found one at a time, one
+// run each. It must still fail; it must not silence anything else.
+
+test('describeProductLinks reports a missing file instead of throwing', () => {
+    const result = describeProductLinks({ source: null, articleExists: () => true });
+    assert.equal(result.structural.length, 1);
+    assert.match(result.structural[0], /help-links\.ts not found/);
+    assert.deepEqual(result.links, []);
+});
+
+test('describeProductLinks reports an export it cannot find', () => {
+    const result = describeProductLinks({
+        source: 'export const LINKS = { a: `${B}#/build/logic` };', articleExists: () => true,
+    });
+    assert.equal(result.structural.length, 1);
+    assert.match(result.structural[0], /HELP_LINKS/);
+    // The route is still verified: the structural problem is about counting, not about seeing.
+    assert.deepEqual(result.broken, []);
+});
+
+test('describeProductLinks reports a count mismatch and still resolves what it can see', () => {
+    const result = describeProductLinks({
+        source: 'export const HELP_LINKS = {\n  a: `${B}#/build/logic`,\n  b: B + slug,\n};',
+        articleExists: (file) => file === 'build/logic.md',
+    });
+    assert.equal(result.structural.length, 1);
+    assert.match(result.structural[0], /exports 2 help link\(s\) but its values hold 1/);
+    assert.deepEqual(result.broken, []);
+});
+
+test('describeProductLinks reports a broken route and a structural problem together', () => {
+    const result = describeProductLinks({
+        source: 'export const HELP_LINKS = {\n  a: `${B}#/build/gone`,\n  b: B + slug,\n};',
+        articleExists: () => false,
+    });
+    assert.equal(result.structural.length, 1);
+    assert.deepEqual(result.broken, [{ path: 'build/gone', line: 2 }]);
+});
+
+test('describeProductLinks is quiet when the file is sound', () => {
+    assert.deepEqual(
+        describeProductLinks({ source: HELP_LINKS_SAMPLE, articleExists: () => true }).structural,
+        [],
+    );
 });
 
 // ── What is in the haystack, and what is not ────────────────────────────────────────────────────

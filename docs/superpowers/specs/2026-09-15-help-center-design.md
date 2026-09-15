@@ -76,9 +76,15 @@ The allowlist exists because some on-screen text is composed at runtime (`Page <
 MJ core rather than this repository. Every entry carries a reason.
 
 The same script checks that internal links and images resolve, and that every article is reachable
-from the sidebar. It also checks the return direction: the five help-centre URLs in
+from the sidebar. An absolute GitHub URL into this repository's own files counts as internal and
+resolves from the repository root: `docs/install.md` sits outside the site, so that is the only way
+to link it, and skipping it would leave the site's one link to a release-renameable file unchecked.
+
+It also checks the return direction: the five help-centre URLs in
 `packages/Angular/src/lib/shared/help-links.ts`, which the in-product empty states send a stuck
-reader to, must each name an article that exists on disk.
+reader to, must each name an article that exists on disk. Both sides of that file are counted — one
+literal `#/article` route per exported link — so a URL assembled from pieces, which the route
+pattern cannot see, fails rather than going out unverified.
 
 **It is wired into an existing required job, not a new workflow.** The seven required checks are
 fixed in a repository ruleset that nobody, including administrators, can bypass. A new workflow

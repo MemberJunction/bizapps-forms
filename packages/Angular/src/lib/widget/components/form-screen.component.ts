@@ -244,7 +244,7 @@ const FORM_SCREEN_CSS = /* css */ `
               [href]="link.url"
               target="_blank"
               rel="noopener noreferrer external"
-              [attr.aria-label]="link.label"
+              [attr.aria-label]="link.ariaLabel"
               [attr.title]="link.label"
             ><svg class="mjf-screen__social-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path [attr.d]="link.svgPath" /></svg></a>
           }
@@ -267,6 +267,10 @@ export class FormScreenComponent {
    *
    * Resolved here rather than in the template so an unknown platform simply does not render —
    * the alternative is an empty circle on a published form, which is worse than an absent one.
+   *
+   * `ariaLabel` carries the new-tab warning that the `title` deliberately does not: every one of
+   * these leaves the form, the glyph is aria-hidden, and a respondent using a screen reader is
+   * mid-submission — the one person who must not lose their place without being told.
    */
   protected readonly socialLinks = computed(() =>
     (this.screen().socialLinks ?? []).flatMap((link) => {
@@ -274,7 +278,12 @@ export class FormScreenComponent {
       // svgPath, not the icon class: the respondent host page loads no stylesheet, so an icon
       // font renders as an empty square there while looking perfect in the builder.
       return platform
-        ? [{ ...link, svgPath: platform.svgPath, label: platform.label }]
+        ? [{
+            ...link,
+            svgPath: platform.svgPath,
+            label: platform.label,
+            ariaLabel: `${platform.label} (opens in a new tab)`,
+          }]
         : [];
     }),
   );

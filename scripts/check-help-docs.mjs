@@ -217,7 +217,39 @@ export function extractBoldSpans(markdown) {
 const MARKDOWN_LINK = /!?\[[^\]]*\]\(\s*<?([^)\s>]+)>?[^)]*\)/g;
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 
-/** Pure. Every link or image target that has to resolve on disk. External targets are dropped. */
+/**
+ * A link to a file of THIS repository, written the way GitHub writes one:
+ * `github.com/MemberJunction/bizapps-forms/blob/<ref>/<path from the repo root>`.
+ *
+ * Two articles link `docs/install.md` this way, and they have to: the target sits outside
+ * `docs/help/`, so a relative link would be a path Docsify tries to route as an article. Being
+ * absolute, it read as "external" and was skipped — which meant the one link in the help centre
+ * pointing at a file that a release could rename was the one link nobody checked.
+ *
+ * Only `/blob/` and only this repository. Another repository or another site is a claim about
+ * something this checkout cannot see, and guessing about it is how a gate starts crying wolf. A
+ * `/tree/` URL names a directory rather than a file and stays skipped for the same reason the
+ * existence check below insists on a file: a directory link is a different kind of claim.
+ */
+const OWN_REPO_BLOB =
+    /^https?:\/\/(?:www\.)?github\.com\/MemberJunction\/bizapps-forms\/blob\/[^/]+\/(.+)$/i;
+
+/**
+ * Pure. The repo-root-relative path an absolute GitHub URL names, or null if it names anything
+ * else. The fragment and query are dropped first, so a deep link to a heading still resolves to
+ * the file that has to exist.
+ */
+export function repoPathFromGitHubUrl(url) {
+    const match = OWN_REPO_BLOB.exec(url.split('#')[0].split('?')[0]);
+    return match === null ? null : match[1];
+}
+
+/**
+ * Pure. Every link or image target that has to resolve on disk, each with the base it resolves
+ * against: `fromRepoRoot` links are the GitHub URLs above, everything else is relative to the
+ * article (or, with a leading "/", to the site root — see {@link resolveTarget}). Targets pointing
+ * at another site are dropped, because nothing here can check them.
+ */
 export function extractLinks(markdown) {
     const visible = stripUnrendered(markdown);
     const links = [];
@@ -225,10 +257,13 @@ export function extractLinks(markdown) {
     let match = MARKDOWN_LINK.exec(visible);
     while (match !== null) {
         const raw = match[1];
-        const isExternal = HAS_SCHEME.test(raw) || raw.startsWith('//');
-        const target = raw.split('#')[0];
-        if (!isExternal && target !== '') {
-            links.push({ target, line: lineNumberAt(visible, match.index) });
+        const line = lineNumberAt(visible, match.index);
+        if (HAS_SCHEME.test(raw) || raw.startsWith('//')) {
+            const repoPath = repoPathFromGitHubUrl(raw);
+            if (repoPath !== null) links.push({ target: repoPath, line, fromRepoRoot: true });
+        } else {
+            const target = raw.split('#')[0];
+            if (target !== '') links.push({ target, line });
         }
         match = MARKDOWN_LINK.exec(visible);
     }
@@ -274,6 +309,82 @@ export function extractHelpLinkPaths(source) {
         match = HELP_ROUTE_FRAGMENT.exec(source);
     }
     return found;
+}
+
+// ── readHelpLinkEntries ─────────────────────────────────────────────────────────────────────────
+//
+// The regex above matches a LITERAL `#/path`. A URL assembled some other way — a slug interpolated
+// in, a base joined by `+`, a route built from a variable — matches nothing and is checked by
+// nothing, and the only guard against that was "zero routes in the whole file", which a file with
+// four good entries and one assembled one sails straight past.
+//
+// So count both sides. Every key of HELP_LINKS is a link the product shows somebody; every literal
+// route is one this gate can verify; and if those two numbers differ, at least one link is going
+// out unverified. Counting keys has to be independent of the route regex or it proves nothing,
+// which is what the projection below is for: comments blanked, everything outside the object
+// literal blanked, everything nested inside a value blanked, all in place so line numbers survive.
+
+const TS_BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
+/** `//` preceded by start-of-line or whitespace. A URL's `//` follows a colon, so it survives. */
+const TS_LINE_COMMENT = /(?:^|\s)\/\/[^\n]*/g;
+const HELP_LINKS_DECL = /export\s+const\s+HELP_LINKS\b[^={]*=\s*/;
+/** A key at the top level of the object: `name:`, `'name':` or `"name":`, after `{` or a comma. */
+const ENTRY_KEY = /(?:^|[,{])\s*(?:[A-Za-z_$][\w$]*|'[^']*'|"[^"]*")\s*:/g;
+
+/** Index just past the `}` matching the `{` at `openIndex`, or -1 if it is never closed. */
+function indexAfterMatchingBrace(text, openIndex) {
+    let depth = 0;
+    for (let i = openIndex; i < text.length; i += 1) {
+        if (text[i] === '{') depth += 1;
+        else if (text[i] === '}' && (depth -= 1) === 0) return i + 1;
+    }
+    return -1;
+}
+
+/** Keeps only what sits directly inside the outermost `{}`; anything nested is blanked in place. */
+function blankNested(text) {
+    let depth = 0;
+    let out = '';
+    for (const ch of text) {
+        if ('{[('.includes(ch)) depth += 1;
+        const keep = depth <= 1;
+        if (')]}'.includes(ch)) depth -= 1;
+        out += keep || ch === '\n' ? ch : ' ';
+    }
+    return out;
+}
+
+/**
+ * Pure. `help-links.ts` reduced to the body of its `HELP_LINKS` object literal, with everything
+ * else — comments included — blanked to spaces in place, so line numbers are still the file's own.
+ * Null when the object literal is not there to be read: a rename or a restructure, which the
+ * caller must report rather than quietly compare against nothing.
+ */
+function helpLinkEntriesBody(source) {
+    const withoutComments = source
+        .replace(TS_BLOCK_COMMENT, blankOut)
+        .replace(TS_LINE_COMMENT, blankOut);
+    const declaration = HELP_LINKS_DECL.exec(withoutComments);
+    if (declaration === null) return null;
+    const open = declaration.index + declaration[0].length;
+    if (withoutComments[open] !== '{') return null;
+    const close = indexAfterMatchingBrace(withoutComments, open);
+    if (close === -1) return null;
+    return blankNested(
+        blankOut(withoutComments.slice(0, open)) +
+        withoutComments.slice(open, close) +
+        blankOut(withoutComments.slice(close)),
+    );
+}
+
+/**
+ * Pure. How many links `HELP_LINKS` exports, and which of them carry a route this gate can read.
+ * Null when {@link helpLinkEntriesBody} cannot find the object at all.
+ */
+export function readHelpLinkEntries(source) {
+    const body = helpLinkEntriesBody(source);
+    if (body === null) return null;
+    return { entryCount: (body.match(ENTRY_KEY) ?? []).length, routes: extractHelpLinkPaths(body) };
 }
 
 // ── findUnverifiedStrings ───────────────────────────────────────────────────────────────────────
@@ -371,8 +482,13 @@ export function buildHaystack() {
     return { haystack, files };
 }
 
-/** Where a link target written in `fromFile` points. A leading "/" is the site root, per STYLE §8. */
-function resolveTarget(fromFile, target) {
+/**
+ * Where a link written in `fromFile` points on disk. Three bases, one function: a GitHub URL into
+ * this repository is rooted at the repository, a leading "/" is the site root (STYLE §8), and
+ * everything else is relative to the file that wrote it.
+ */
+function resolveTarget(fromFile, { target, fromRepoRoot = false }) {
+    if (fromRepoRoot) return path.resolve(REPO_ROOT, target);
     const base = target.startsWith('/') ? HELP_DIR : path.dirname(fromFile);
     const relative = target.startsWith('/') ? target.slice(1) : target;
     return path.resolve(base, relative);
@@ -390,30 +506,66 @@ const rel = (file) => path.relative(REPO_ROOT, file);
  * skip here would mean that moving or renaming the file silently retires the only thing standing
  * between a renamed article and five dead links in the product, and nothing would ever say so. The
  * cost of failing loudly is one line to update in this file, on the pull request that moved it.
+ *
+ * It fails by RECORDING, though, not by throwing. This check runs last, so throwing out of it took
+ * the whole run with it and the report never printed — a renamed `help-links.ts` hid every bold
+ * span, link and reachability failure in the same commit, and the author fixed one thing, ran it
+ * again, and found the rest one at a time. One run should say everything that is wrong.
+ *
+ * Pure: `source` is the file's text, or null when the file is not there, and `articleExists` is
+ * injected — the same shape as {@link findBrokenHelpLinks}, and the only way the "the file is
+ * missing" and "the export was restructured" paths can be tested at all.
+ *
+ * Returns `{ links, broken, structural }`: the routes to verify, the ones naming no article, and
+ * the reasons this check cannot see the links at all.
  */
-function checkProductLinks() {
-    if (!existsSync(HELP_LINKS_FILE)) {
-        throw new Error(
+export function describeProductLinks({ source, articleExists }) {
+    if (source === null) {
+        return { links: [], broken: [], structural: [
             `${rel(HELP_LINKS_FILE)} not found. It holds the help-centre URLs the in-product empty ` +
             'states link to, and this gate is the only thing checking that those articles exist. ' +
             'If the file moved, point HELP_LINKS_FILE at its new home — do not delete this check.',
-        );
+        ] };
     }
-    const source = readFileSync(HELP_LINKS_FILE, 'utf8');
     const links = extractHelpLinkPaths(source);
+    const structural = [];
     if (links.length === 0) {
-        throw new Error(
+        structural.push(
             `No "#/<article>" help-centre routes found in ${rel(HELP_LINKS_FILE)}. Either the URL ` +
             'shape changed, in which case update HELP_ROUTE_FRAGMENT, or the links are gone.',
         );
     }
-    const articleExists = (relativeToSiteRoot) => {
-        // A route is site-absolute by construction, which is exactly what resolveTarget's leading
-        // "/" branch means — so the product's links and the sidebar's resolve through one function.
-        const resolved = resolveTarget(HELP_LINKS_FILE, `/${relativeToSiteRoot}`);
-        return existsSync(resolved) && statSync(resolved).isFile();
-    };
-    return { links, broken: findBrokenHelpLinks({ links, articleExists }) };
+    const entries = readHelpLinkEntries(source);
+    if (entries === null) {
+        structural.push(
+            `Could not find "export const HELP_LINKS = { … }" in ${rel(HELP_LINKS_FILE)}, so there ` +
+            'is no way to tell how many links the product shows. If the export was renamed or ' +
+            'restructured, update HELP_LINKS_DECL to match it.',
+        );
+    } else if (entries.entryCount !== entries.routes.length) {
+        structural.push(
+            `${rel(HELP_LINKS_FILE)} exports ${entries.entryCount} help link(s) but its values hold ` +
+            `${entries.routes.length} literal "#/<article>" route(s). Each exported link must carry ` +
+            'exactly one route written out in full, because a route assembled from pieces matches ' +
+            'nothing here and goes to the reader unchecked. Routes read: ' +
+            `${entries.routes.map((r) => `#/${r.path}`).join(', ') || '(none)'}.`,
+        );
+    }
+    return { links, broken: findBrokenHelpLinks({ links, articleExists }), structural };
+}
+
+/** Reads the world for {@link describeProductLinks}: a missing file is `null` source, not a throw. */
+function checkProductLinks() {
+    return describeProductLinks({
+        source: existsSync(HELP_LINKS_FILE) ? readFileSync(HELP_LINKS_FILE, 'utf8') : null,
+        articleExists: (relativeToSiteRoot) => {
+            // A route is site-absolute by construction, which is exactly what resolveTarget's
+            // leading "/" branch means — so the product's links and the sidebar's resolve through
+            // one function.
+            const resolved = resolveTarget(HELP_LINKS_FILE, { target: `/${relativeToSiteRoot}` });
+            return existsSync(resolved) && statSync(resolved).isFile();
+        },
+    });
 }
 
 function run() {
@@ -426,9 +578,10 @@ function run() {
         existsSync(ALLOWLIST_FILE) ? readFileSync(ALLOWLIST_FILE, 'utf8') : null,
     );
 
-    const failures = { strings: [], links: [], unreachable: [], productLinks: [] };
+    const failures = { strings: [], links: [], unreachable: [], productLinks: [], structure: [] };
     let spanCount = 0;
     let linkCount = 0;
+    let repoLinkCount = 0;
 
     for (const file of articles) {
         const markdown = readFileSync(file, 'utf8');
@@ -441,7 +594,8 @@ function run() {
 
         for (const link of extractLinks(markdown)) {
             linkCount += 1;
-            const resolved = resolveTarget(file, link.target);
+            if (link.fromRepoRoot) repoLinkCount += 1;
+            const resolved = resolveTarget(file, link);
             if (!existsSync(resolved) || !statSync(resolved).isFile()) {
                 failures.links.push({ file, ...link });
             }
@@ -453,7 +607,7 @@ function run() {
     if (!existsSync(sidebarFile)) throw new Error(`${rel(sidebarFile)} is missing.`);
     const listed = new Set(
         extractLinks(readFileSync(sidebarFile, 'utf8')).map((link) =>
-            path.relative(HELP_DIR, resolveTarget(sidebarFile, link.target)),
+            path.relative(HELP_DIR, resolveTarget(sidebarFile, link)),
         ),
     );
     for (const file of articles) {
@@ -465,25 +619,30 @@ function run() {
 
     const productLinks = checkProductLinks();
     failures.productLinks = productLinks.broken;
+    failures.structure = productLinks.structural;
 
     return {
         failures,
         articles,
         spanCount,
         linkCount,
+        repoLinkCount,
         productLinkCount: productLinks.links.length,
         sourceFileCount: sourceFiles.length,
     };
 }
 
-function report({ failures, articles, spanCount, linkCount, productLinkCount, sourceFileCount }) {
+function report({
+    failures, articles, spanCount, linkCount, repoLinkCount, productLinkCount, sourceFileCount,
+}) {
     const total =
         failures.strings.length + failures.links.length + failures.unreachable.length +
-        failures.productLinks.length;
+        failures.productLinks.length + failures.structure.length;
     if (total === 0) {
         console.log(
             `check-help-docs: ${articles.length} articles, ${spanCount} bold spans verified against ` +
-            `${sourceFileCount} product source files, ${linkCount} links resolved, all reachable, ` +
+            `${sourceFileCount} product source files, ${linkCount} links resolved ` +
+            `(${repoLinkCount} of them GitHub URLs into this repository), all reachable, ` +
             `${productLinkCount} help links from the product resolved.`,
         );
         return 0;
@@ -505,11 +664,14 @@ function report({ failures, articles, spanCount, linkCount, productLinkCount, so
     if (failures.links.length > 0) {
         console.error('\nLinks and images whose target does not exist on disk:\n');
         for (const f of failures.links) {
-            console.error(`  ${rel(f.file)}:${f.line}  ${JSON.stringify(f.target)}`);
+            const where = f.fromRepoRoot ? '  (from the repository root)' : '';
+            console.error(`  ${rel(f.file)}:${f.line}  ${JSON.stringify(f.target)}${where}`);
         }
         console.error(
             '\n  Write internal links the way they sit on disk, including the ".md" (STYLE.md §8).\n' +
             '  In _sidebar.md and _navbar.md only, a path starts at the site root with "/".\n' +
+            '  A GitHub URL into this repository resolves from the repository root, so it fails\n' +
+            '  here when the file it names is renamed or moved.\n' +
             '  Link an article in the same commit that adds the article.',
         );
     }
@@ -529,6 +691,15 @@ function report({ failures, articles, spanCount, linkCount, productLinkCount, so
             '\n  A route "#/x/y" is the article docs/help/x/y.md. These five URLs are what the\n' +
             '  in-product empty states send a stuck reader to, so a rename here is a 404 delivered\n' +
             '  at the worst possible moment. Rename the link, or restore the article.',
+        );
+    }
+
+    if (failures.structure.length > 0) {
+        console.error("\nThe product's help links cannot be checked at all:\n");
+        for (const message of failures.structure) console.error(`  ${message}`);
+        console.error(
+            '\n  This is the check itself losing sight of the links, which is worse than a broken\n' +
+            '  link: a link nobody checks is a 404 nobody hears about.',
         );
     }
 

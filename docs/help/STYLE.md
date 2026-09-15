@@ -246,7 +246,14 @@ unavailable, and it is the form the gate resolves. Always include the `.md`.
 rendered on every page, from every folder. Leave them that way.
 
 The gate fails on a link whose target does not exist on disk, and on an image that does not resolve.
-It skips anything starting with `http`, and — as in §6 — anything inside code or an HTML comment.
+It skips a link to another site, which nothing here can check, and — as in §6 — anything inside code
+or an HTML comment.
+
+One kind of absolute link is *not* skipped: a GitHub URL into this repository's own files
+(`https://github.com/MemberJunction/bizapps-forms/blob/main/docs/install.md`) is resolved from the
+repository root and checked like any other. That is how to link a file that lives outside
+`docs/help/` — a relative path out of the site is one the site would try to open as an article —
+and it means a file renamed by a release fails the gate here rather than 404ing for a reader.
 
 Every new article must be added to `_sidebar.md`. The gate checks this; an article nobody can
 navigate to is an article nobody reads.
