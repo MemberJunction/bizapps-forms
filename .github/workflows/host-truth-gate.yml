@@ -148,6 +148,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Load-bearing, not tidiness. The pinned CLI has no --skip-commands, so every `mj codegen` run
+      # executes mj.config.cjs's AFTER commands — `pnpm run build` in Entities, Actions, Server and
+      # Angular — and a failure there fails this gate. Those four do NOT include CoreEntitiesServer,
+      # which Server imports, so on a fresh checkout Server's build dies with five
+      # `TS2307: Cannot find module '@mj-biz-apps/forms-core-entities-server'` before CodeGen's
+      # verdict is ever reached. Building the whole `@mj-biz-apps/forms-*` set first puts the missing
+      # dist/ in place and leaves the AFTER commands a cheap no-op. Verified on this workflow's
+      # second run, which failed exactly this way.
+      - name: Build the packages CodeGen's AFTER commands rebuild
+        run: pnpm run build:packages
+
       # The CLI reads its database settings through dotenv, so give it the file shape every local run
       # uses. The encryption key is generated per run: nothing in this job encrypts anything, and a
       # literal would be a credential in a public file for no reason.
