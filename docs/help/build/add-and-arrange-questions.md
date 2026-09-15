@@ -2,6 +2,10 @@
 
 A form whose questions are the ones you meant to ask, in the order you meant to ask them.
 
+![The Build tab, in three columns: the question types you can add down the left, the form's own
+questions in the order a respondent meets them in the middle, and the settings for whichever
+question is selected on the right.](../images/build-tab.png)
+
 ## Before you start
 
 - A form open on the **Build** tab. If you have never made one,

@@ -3,6 +3,9 @@
 A square you can put on a poster, a table card or a slide, which opens your form when somebody points
 a phone camera at it.
 
+![The QR code view of a share link: the code itself, the button that downloads it for print, and a
+note about where the code will and will not work.](../images/distribute-qr.png)
+
 ## Before you start
 
 - A share link: [Create a share link](share-link.md). The code is a picture of that link's address,

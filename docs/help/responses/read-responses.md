@@ -3,6 +3,9 @@
 Everything one person sent you — their answers, when they submitted, and what their submission set
 off — read one at a time, on the tab beside the questions you wrote.
 
+![The Responses tab, listing one row per submission with who sent it, how far they got, how many
+questions they answered and when — and a search box above them.](../images/responses-tab.png)
+
 ## Before you start
 
 - A published form with a share link, so that there is something to read:

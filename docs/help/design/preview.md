@@ -3,6 +3,9 @@
 The form exactly as a respondent gets it, at three widths, without publishing anything or sending
 anyone a link.
 
+![The preview taking over the screen, with the three widths to choose from along the top and the
+form drawn at the narrowest of them, the size a phone would give it.](../images/preview-dialog.png)
+
 ## Before you start
 
 - A form open in the builder. **Preview** is live from the moment the form loads, with no questions

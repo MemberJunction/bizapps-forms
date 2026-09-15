@@ -3,6 +3,10 @@
 A web address you can send to anyone, which opens your form without a sign-in, an account or a
 password.
 
+![The Distribute tab showing a link: its web address ready to copy, and beneath it the settings that
+govern the link — whether it is open, whether it asks for a captcha, how many responses it takes and
+when it stops.](../images/distribute-link.png)
+
 ## Before you start
 
 - A published form. A link to a form that has never been published opens to a message telling the

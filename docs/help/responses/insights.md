@@ -3,6 +3,10 @@
 What a form's answers add up to — how many people finished, where the rest gave up, what they chose
 and what they wrote — without opening a single response.
 
+![Responses and Analytics, with a form picked from the list on the left: how many answered and how
+many finished across the top, then who they were, then each question with its answers counted
+up.](../images/insights.png)
+
 ## Before you start
 
 - A published form that has collected some responses. A form with none still appears, and says so:

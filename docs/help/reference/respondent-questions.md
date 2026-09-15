@@ -3,6 +3,9 @@
 The messages people send you while they are part-way through one of your forms, each one answered in
 their language rather than yours.
 
+![A form open on a phone: one question under another down a single column, each answer box wide
+enough to tap, with the form's name at the top.](../images/respondent-phone.png)
+
 Everything below the line is addressed to the respondent. Forward one section of it, or the whole
 page, as it stands.
 

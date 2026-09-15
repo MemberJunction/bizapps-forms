@@ -3,6 +3,9 @@
 Your form inside a page of your own website, so people answer it without leaving your site — and the
 one setting on this screen that can take it back off that page again.
 
+![The embed view of a share link: the snippet to paste into your own page, and under it the box that
+lists which websites are allowed to show the form.](../images/distribute-embed.png)
+
 ## Before you start
 
 - A share link: [Create a share link](share-link.md). An embed is a view of a link, not a separate

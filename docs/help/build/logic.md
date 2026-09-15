@@ -3,6 +3,10 @@
 A form that asks each person only the questions that apply to them, and sends them where their
 answers say they should go.
 
+![The dialog where one question's logic is written: whether the question is shown at all, then a
+numbered rule reading an earlier answer and naming where the respondent goes
+next.](../images/edit-logic.png)
+
 ## Before you start
 
 - A form with several questions already in it, in the order you want them. Logic is written against

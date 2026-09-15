@@ -3,6 +3,9 @@
 What MJ Forms already does every time somebody submits your form, what you can add to it, and the
 one guarantee that makes adding anything safe.
 
+![The Automate tab: a list of the things MJ Forms already does with every submission, and below it
+an empty space with one button, where steps of your own go.](../images/automate-tab.png)
+
 ## The guarantee, first
 
 Open the **Automate** tab on any form and this is the heading:

@@ -2,6 +2,10 @@
 
 A question nobody can skip, and an answer that arrives in the shape you can use.
 
+![The settings panel for a selected question, holding its wording and description, the switches that
+decide whether an answer is required and whether it is checked, and the list of options a respondent
+picks from.](../images/question-settings.png)
+
 ## Before you start
 
 - A question on the canvas, selected, so that **Question settings** is showing it. See

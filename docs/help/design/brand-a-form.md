@@ -3,6 +3,10 @@
 A form that looks like it came from you — your logo, your typeface, your colours — with the real
 form beside the controls showing each change as you make it.
 
+![The Design tab: the styling controls down the left, grouped under a logo, font, button and
+background heading, and the form itself filling the rest of the screen, restyled as you
+go.](../images/design-tab.png)
+
 ## Before you start
 
 - A form with at least one question in it. With none, the panel beside the controls says

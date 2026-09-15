@@ -3,6 +3,10 @@
 MJ Forms sits in two places in MemberJunction, and a form itself has five tabs. This page says which
 one does what, so you spend your time in the right one.
 
+![The Forms home, listing every form you have with whether it is published and how many responses it
+has, above a search box and beside the three buttons that start a new
+one.](../images/forms-home.png)
+
 ## The two places
 
 The **Forms** card on your MemberJunction home page carries two links, and they are separate on

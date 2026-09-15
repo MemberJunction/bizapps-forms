@@ -3,6 +3,9 @@
 A form of your own, published, with a link anyone can open — and your own answer to it, read back
 from inside MJ Forms. About ten minutes.
 
+![A published form open at its own web address on a computer, the way anyone you send the link to
+sees it: the questions, and a button to send the answers. No sign-in, no account.](../images/respondent-desktop.png)
+
 ## Before you start
 
 - You can sign in to MemberJunction and there is a **Forms** card on the home page. If there is no

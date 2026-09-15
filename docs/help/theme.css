@@ -117,6 +117,19 @@ body {
   letter-spacing: .1em;
 }
 
+/* --- Screenshots -----------------------------------------------------------
+   The orientation images (STYLE.md §9) are captured 1440px wide so they stay
+   sharp on a laptop, which is wider than the article column on every screen
+   there is. Docsify 5's core theme constrains tables and code but not images,
+   so without this an article scrolls sideways — on a phone the picture is
+   nearly four times the width of the page it sits in. Scale to the column and
+   keep the aspect ratio instead. */
+.markdown-section img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+}
+
 /* --- Light mode ------------------------------------------------------------
    Dark is the base, because that is what the gallery looks like: it is what
    the rules above give anyone whose browser expresses no preference. In
