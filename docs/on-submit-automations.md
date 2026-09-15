@@ -66,7 +66,7 @@ Per-step options, with their defaults — chosen to reproduce what the legacy ru
 
 | field | default | notes |
 |---|---|---|
-| `trigger` | `OnComplete` | `OnPartial` fires on autosave; think hard before using it for anything a respondent can see |
+| `trigger` | `OnComplete` | the only value with an effect today: `submit-pipeline.ts` plans automations on a terminal completion and nowhere else, passing `complete: true`, so `OnCompleteOrPartial` behaves exactly as `OnComplete` and `OnPartial` never fires |
 | `executionMode` | `Sync` | sequential and awaited, so a later step can rely on an earlier one |
 | `continueOnError` | `true` | best-effort, matching the legacy loop |
 | `isActive` | `true` | an inactive step is carried into the snapshot and skipped at run time |

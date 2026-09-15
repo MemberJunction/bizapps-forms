@@ -76,6 +76,20 @@
   .theme b { font-size: 15px; }
   .theme p { color: var(--ink-mute); font-size: 13px; margin: 5px 0 0; }
 
+  /* help centre band — same card vocabulary as .card, one row wide instead of a third of one */
+  .help { display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: start;
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 24px;
+    background-image: radial-gradient(520px 220px at 0% 0%, rgba(124,92,255,.18), transparent 70%);
+    transition: border-color .18s, box-shadow .18s; }
+  .help:hover { border-color: var(--accent); box-shadow: var(--shadow); }
+  .help .ico { width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center;
+    background: rgba(124,92,255,.16); border: 1px solid var(--line); color: var(--accent); font-size: 19px; }
+  .help .help-title { font-size: 17px; font-weight: 600; display: inline-flex; align-items: center; gap: 9px; }
+  .help .help-title i { font-size: 13px; color: var(--ink-mute); transition: transform .18s, color .18s; }
+  .help .help-title:hover i { color: var(--accent); transform: translateX(3px); }
+  .help p { color: var(--ink-mute); font-size: 13px; margin: 6px 0 14px; max-width: 620px; }
+  @media (max-width: 700px) { .help { grid-template-columns: 1fr; } }
+
   footer { border-top: 1px solid var(--line); margin-top: 52px; padding: 30px 0 70px; color: var(--ink-mute); font-size: 14px; }
   footer a { color: var(--ink-soft); border-bottom: 1px solid var(--line); }
   footer a:hover { color: var(--ink); }
@@ -170,10 +184,30 @@
       </div>
     </section>
 
+    <!-- Help centre. Its own navbar links back here, so the two halves of the site reach each other. -->
+    <section class="section">
+      <h2>The help centre</h2>
+      <p class="sub">The same product in words, for the person who has been asked to get a survey out by Friday — not the person installing it.</p>
+      <div class="help">
+        <div class="ico"><i class="fa-solid fa-book-open"></i></div>
+        <div>
+          <a class="help-title" href="help/">Read the help centre <i class="fa-solid fa-arrow-right"></i></a>
+          <p>Build a form, publish it, share a link anyone can open without signing in, and read what comes back. No package, no schema, no API.</p>
+          <div class="chips">
+            <a href="help/#/get-started/first-form">Your first form</a>
+            <a href="help/#/build/logic">Show, skip and branch</a>
+            <a href="help/#/share/share-link">Share a link</a>
+            <a href="help/#/responses/read-responses">Read the answers</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <footer>
       <div class="foot-row">
         <div>MJ Forms — design prototypes (no backend). Built on <a href="https://github.com/MemberJunction/MJ">MemberJunction</a> · themed with <code style="font-size:12px">--mj-*</code> design tokens.</div>
         <div>
+          <a href="help/">Help centre</a> &nbsp;·&nbsp;
           <a href="https://github.com/MemberJunction/bizapps-forms">Repo</a> &nbsp;·&nbsp;
           <a href="https://github.com/MemberJunction/bizapps-forms/blob/main/plans/FORMS_BUILD_PLAN.md">Build plan</a> &nbsp;·&nbsp;
           <a href="aurora/respondent.html">v1 explorations</a>
