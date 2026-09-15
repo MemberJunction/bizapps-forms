@@ -1,0 +1,202 @@
+# Build a database from ONLY what this repository ships, run CodeGen against it, and fail if CodeGen
+# wants to change anything. See scripts/check-host-truth-codegen.mjs for why this is the only check
+# that reads the artefact rather than the repository, and issue #220 for the two defects that reached
+# every host because nothing did.
+#
+# NOT a required status check, deliberately. It needs a SQL Server, two sibling checkouts and ~15
+# minutes, which is the wrong shape for every pull request. It runs nightly on the default branch, on
+# demand, and on the pull requests that touch what it reads. Promote it into publish.yml alongside
+# check:release-seed once it has a track record; that is the other half of #220's own suggestion.
+name: Host-truth CodeGen convergence
+
+on:
+  schedule:
+    # 09:00 UTC daily. Nightly is the point: a migration that merges without its CodeGen output
+    # becomes invisible to the diff-scoped gate the moment it lands, so the next run after the merge
+    # is the last chance to catch it before a release.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+  # No `paths:` filter. Path decisions live in the job-level `if:` below, fed by
+  # scripts/check-paths-touched.mjs — a workflow skipped by `on: paths:` creates no check run at all.
+  pull_request:
+
+concurrency:
+  group: host-truth-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  host-truth-scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.decide.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The decision is a diff against the base, which shallow history does not contain.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check the path decider still fires
+        run: npm run lint:paths-touched:test
+
+      - name: Does this change touch anything the host-truth build reads?
+        id: decide
+        env:
+          # A pull_request diffs against its base. A schedule or a dispatch has neither SHA, which
+          # check-paths-touched.mjs treats as fail-open — so those always run, which is what we want.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          RELEVANT=$(node scripts/check-paths-touched.mjs "$BASE_SHA" "$HEAD_SHA" \
+            migrations/ \
+            metadata/ \
+            mj.config.cjs \
+            mj-app.json \
+            package.json \
+            pnpm-lock.yaml \
+            scripts/ \
+            .github/workflows/)
+          echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
+          echo "host-truth relevant: $RELEVANT"
+
+  host-truth:
+    needs: host-truth-scope
+    # Same fail-open rule the decider applies to itself, one level up: if the decider could not
+    # decide, build. `!cancelled()` rather than `always()`, matching build.yml — this workflow sets
+    # cancel-in-progress, and `always()` would keep a 20-minute build running after cancellation.
+    if: ${{ !cancelled() && (needs.host-truth-scope.result != 'success' || needs.host-truth-scope.outputs.relevant == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: bizapps-forms
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: 'Y'
+          # Not a secret. This container exists for the length of one job, is reachable only from it,
+          # and is thrown away with the runner. A repository secret here would buy nothing and would
+          # make the workflow unrunnable from a fork or a fresh clone.
+          MSSQL_SA_PASSWORD: 'HostTruth!2026#ci'
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'HostTruth!2026#ci' -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
+          --health-start-period 30s
+
+    steps:
+      # A token for the two PRIVATE sibling repositories. GITHUB_TOKEN is scoped to this repository
+      # only, so it cannot read them; the org App already used by publish.yml can. Least privilege,
+      # named here rather than inherited: read, and only these two repositories.
+      - name: Mint a token for the sibling repositories
+        id: sibling-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: MemberJunction
+          repositories: bizapps-common,bizapps-tasks
+          permission-contents: read
+
+      # The three checkouts sit side by side, exactly as a developer's machine has them, so the
+      # script's own ../bizapps-*/migrations defaults are what runs here too.
+      - uses: actions/checkout@v4
+        with:
+          path: bizapps-forms
+
+      - uses: actions/checkout@v4
+        with:
+          repository: MemberJunction/bizapps-common
+          token: ${{ steps.sibling-token.outputs.token }}
+          path: bizapps-common
+
+      - uses: actions/checkout@v4
+        with:
+          repository: MemberJunction/bizapps-tasks
+          token: ${{ steps.sibling-token.outputs.token }}
+          path: bizapps-tasks
+
+      # Must precede setup-node: `cache: 'pnpm'` needs pnpm already on PATH.
+      # `package_json_file` is not optional here: the three checkouts live in subdirectories, so
+      # there is no package.json at the workspace root for the action to read `packageManager` from,
+      # and it fails with "No pnpm version is specified" rather than defaulting to anything.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: bizapps-forms/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+          cache-dependency-path: 'bizapps-forms/pnpm-lock.yaml'
+
+      - name: Check the convergence gate's own logic still fires
+        run: npm run check:host-truth:test
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The CLI reads its database settings through dotenv, so give it the file shape every local run
+      # uses. The encryption key is generated per run: nothing in this job encrypts anything, and a
+      # literal would be a credential in a public file for no reason.
+      - name: Write the .env this run uses
+        run: |
+          {
+            echo "DB_HOST='localhost'"
+            echo "DB_PORT='1433'"
+            echo "DB_DATABASE='MJ_HostTruth_Placeholder'"
+            echo "DB_TRUST_SERVER_CERTIFICATE=1"
+            echo "DB_USERNAME='sa'"
+            echo "DB_PASSWORD='HostTruth!2026#ci'"
+            echo "CODEGEN_DB_USERNAME='sa'"
+            echo "CODEGEN_DB_PASSWORD='HostTruth!2026#ci'"
+            echo "MJ_CORE_SCHEMA='__mj'"
+            echo "OUTPUT_CODE='Forms'"
+            echo "CONFIG_FILE='config.json'"
+            echo "MJ_BASE_ENCRYPTION_KEY='$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")'"
+          } > .env
+
+      # Provisioning is the caller's job — the check itself holds no database connection and cannot
+      # drop anything, which is what keeps it from ever being pointed at a real database by mistake.
+      # Owned by [sa]: MJ's core baseline dies ~12 batches in otherwise, with an error that says
+      # nothing about ownership.
+      - name: Create the empty clean-room database
+        run: |
+          SQL_CONTAINER=$(docker ps --filter "ancestor=mcr.microsoft.com/mssql/server:2022-latest" --format '{{.ID}}' | head -n1)
+          if [ -z "$SQL_CONTAINER" ]; then
+            echo "::error::No SQL Server service container found; nothing to build the clean room in."
+            exit 1
+          fi
+          docker exec "$SQL_CONTAINER" /opt/mssql-tools18/bin/sqlcmd \
+            -S localhost -U sa -P 'HostTruth!2026#ci' -C -Q \
+            "CREATE DATABASE [MJ_HostTruth_${{ github.run_id }}];
+             ALTER AUTHORIZATION ON DATABASE::[MJ_HostTruth_${{ github.run_id }}] TO [sa];"
+
+      - name: Build from only what we ship, and ask CodeGen whether it is complete
+        run: |
+          npm run check:host-truth -- \
+            --database "MJ_HostTruth_${{ github.run_id }}" \
+            --common-migrations ../bizapps-common/migrations \
+            --tasks-migrations ../bizapps-tasks/migrations
+
+      # The capture IS the finding: it is the SQL a host would need and will never run. Keep it when
+      # the check goes red, so the fix can be written from the artefact rather than from a log.
+      - name: Keep what CodeGen wanted to change
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codegen-capture-${{ github.run_id }}
+          path: bizapps-forms/migrations/codegen/
+          if-no-files-found: ignore
