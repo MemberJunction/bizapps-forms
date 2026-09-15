@@ -9,25 +9,39 @@ needs a developer.
 
 ## Start here
 
-New to MJ Forms? [Your first form](get-started/first-form.md) takes about ten minutes and ends with
-a real answer from a real link, which is the fastest way to understand the rest of this.
+- [Glossary](reference/glossary.md) — every word this help uses that you might not already have a
+  meaning for, in the sense MJ Forms means it.
 
-## The sections
+<!--
+  This list grows one line at a time, and so does _sidebar.md: the commit that adds an article adds
+  its link in both places. scripts/check-help-docs.mjs resolves every link on this page against
+  disk, with no exemption for this file and no reason to add one — a landing page that sends the
+  reader to a page that does not exist is the worst first impression the help centre could make.
 
-- [Get started](get-started/first-form.md) — one form, start to finish, and a tour of where
-  everything lives.
-- [Build](build/add-and-arrange-questions.md) — questions, question types, required answers,
-  sections, logic, scoring, templates and AI drafting.
-- [Design](design/brand-a-form.md) — make the form look like it came from you, and see it on a
-  phone before anyone else does.
-- [Share](share/publish.md) — publish, create a link, embed it, print a QR code, set limits, and
-  work out why a link is not opening.
-- [Responses](responses/read-responses.md) — read what came back, export it, see the patterns, and
-  find the files people attached.
-- [Automate](automate/after-submit.md) — what happens after someone submits, and how to make more
-  happen.
-- [Reference](reference/glossary.md) — the words this help uses, the questions respondents send you,
-  and what MJ Forms cannot do yet.
+  THE SECTION SUMMARIES, parked here until the articles they point at land. Restore each bullet in
+  the commit that adds the first article it links to. When this comment is empty, delete it, and
+  put the "The sections" heading back above the list.
+
+  - [Get started](get-started/first-form.md) — one form, start to finish, and a tour of where
+    everything lives.
+  - [Build](build/add-and-arrange-questions.md) — questions, question types, required answers,
+    sections, logic, scoring, templates and AI drafting.
+  - [Design](design/brand-a-form.md) — make the form look like it came from you, and see it on a
+    phone before anyone else does.
+  - [Share](share/publish.md) — publish, create a link, embed it, print a QR code, set limits, and
+    work out why a link is not opening.
+  - [Responses](responses/read-responses.md) — read what came back, export it, see the patterns, and
+    find the files people attached.
+  - [Automate](automate/after-submit.md) — what happens after someone submits, and how to make more
+    happen.
+  - [Reference](reference/glossary.md) — the words this help uses, the questions respondents send
+    you, and what MJ Forms cannot do yet.
+
+  And the opening line that goes back above them, once get-started/first-form.md exists:
+
+  New to MJ Forms? [Your first form](get-started/first-form.md) takes about ten minutes and ends
+  with a real answer from a real link, which is the fastest way to understand the rest of this.
+-->
 
 ## Not what you were looking for?
 

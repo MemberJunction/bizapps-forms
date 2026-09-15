@@ -153,10 +153,18 @@ name, at the moment they can still fix it cheaply, instead of leaving it for a r
   wrong.
 - The match is a case-sensitive substring, so capitals, punctuation and spacing are all exact.
   Watch for curly apostrophes — the product uses them. Prefer a label without one.
+- A one-word label is only weakly checked, and it is worth knowing why. The haystack is raw source,
+  so **Next** matches a variable named `nextQuestion` as happily as it matches the button: the word
+  occurs 64 times in the source and renaming the button would leave the gate green. Multi-word
+  labels occur once or twice — **Save progress here** and **Require a captcha** occur exactly once
+  each — so those are checked properly. Quote the whole label wherever the product gives you one.
 - Do not bold inside a heading. Write the label in plain words there.
 - Bad examples belong in fenced or inline code. The gate skips both, which is why the wrong example
   two bullets above could be written at all. Use that escape hatch for anything you are quoting *as*
   broken.
+- The gate skips HTML comments for the same reason it skips code: nothing inside one is rendered, so
+  nothing inside one is a claim about the product. That is not a loophole to bold through — it is
+  how `_sidebar.md` and `README.md` park the articles that have not been written yet.
 - This page and `reference/glossary.md` obey the rule too. The gate reads them like any other file.
 
 ### The allowlist, and how to not ruin this
@@ -216,10 +224,16 @@ unavailable, and it is the form the gate resolves. Always include the `.md`.
 rendered on every page, from every folder. Leave them that way.
 
 The gate fails on a link whose target does not exist on disk, and on an image that does not resolve.
-It skips anything starting with `http`.
+It skips anything starting with `http`, and — as in §6 — anything inside code or an HTML comment.
 
 Every new article must be added to `_sidebar.md`. The gate checks this; an article nobody can
 navigate to is an article nobody reads.
+
+There is no exemption from either half, for any file. So the commit that adds an article is also the
+commit that links it: from `_sidebar.md` always, and from `README.md` and any `## Related` list that
+should point at it. Until then its line waits in the comment at the foot of `_sidebar.md`. A
+navigation entry leading nowhere is the worst dead link a help centre can have, which is exactly why
+the file holding the navigation does not get to skip the check.
 
 ---
 

@@ -264,6 +264,16 @@ jobs:
       - name: Path decider spec (required-job copy)
         run: npm run lint:paths-touched:test
 
+      # Stdlib-only, like the gate specs above. Only the TESTS run here; the gate itself runs in
+      # changes.yml's `changes_and_migrations`, because this job is skipped for a docs-only pull
+      # request and `skipped` passes a required check — the reasoning is written out beside that
+      # step. The half that belongs here is this one: `scripts/` IS in the path decider's list, so
+      # a change to the extractor always runs its own suite. And the extractor is where the damage
+      # would be silent — a bold span it stops SEEING is a quoted button label nobody ever verifies
+      # again, with the gate still reporting green.
+      - name: Help docs gate tests
+        run: npm run lint:help:test
+
       # Stdlib-only and databaseless. Pins the ONE metadata record that the v0.12 consolidation
       # silently dropped (#111): the retired V202608182130 corrected the Designer Template's
       # Description as well as its prompt body, and a push cannot re-emit a correction when BOTH

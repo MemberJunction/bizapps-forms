@@ -10,55 +10,66 @@
      screen in the product", and scripts/check-help-docs.mjs enforces that against the source.
      "Get started" and "Reference" are our words, not the product's, so they must not be bold.
 
-  3. Every article listed here arrives in its own commit on this branch, in plan order. Between the
-     first of those commits and the last, some of these targets do not exist on disk yet. That is
-     deliberate: the shape of the help centre is fixed once, here, rather than being negotiated
-     seven times by seven contributors appending to the end of a file.
-     -> If you are writing scripts/check-help-docs.mjs: its reachability check runs
-        article -> sidebar and is unaffected. Its link-resolution check runs the other way and will
-        report these until the last article lands. Exempt this file from link resolution, or accept
-        a red gate mid-branch; the merged state has no dangling link either way.
+  3. This file lists the articles that EXIST, and adding an article and listing it here are the
+     same commit. The gate checks both directions: an article no group lists is unreachable, and a
+     group entry pointing at a file that is not there is a dead link. The second half is the one
+     worth defending. A navigation entry that goes nowhere is the worst dead link a help centre can
+     have, so exempting this file from link resolution — to keep a running order of unwritten
+     articles visible — would hide precisely the failure the check exists to catch, and a gate that
+     is knowingly red mid-branch teaches everyone to ignore a red gate.
+
+     The running order is not lost for it. It is parked in the comment at the foot of this file,
+     where it is not rendered, not linked and therefore not a claim about anything. When you add an
+     article, move its line out of that comment and into the list below, in the same commit.
 -->
-
-- Get started
-  - [Your first form](/get-started/first-form.md)
-  - [Where everything lives](/get-started/where-everything-lives.md)
-
-- Build
-  - [Add and arrange questions](/build/add-and-arrange-questions.md)
-  - [The 25 question types](/build/question-types.md)
-  - [Require and check answers](/build/required-and-validation.md)
-  - [Add sections and screens](/build/sections-and-screens.md)
-  - [Show, skip and branch](/build/logic.md)
-  - [Score answers](/build/scoring.md)
-  - [Reuse a form as a template](/build/templates.md)
-  - [Let AI draft a form](/build/author-with-ai.md)
-
-- Design
-  - [Brand a form](/design/brand-a-form.md)
-  - [Preview on phone and tablet](/design/preview.md)
-
-- Share
-  - [Publish a form](/share/publish.md)
-  - [Create a share link](/share/share-link.md)
-  - [Embed in your own site](/share/embed.md)
-  - [Share a QR code](/share/qr-code.md)
-  - [Set limits and dates](/share/limits-and-dates.md)
-  - [Require a captcha](/share/captcha.md)
-  - [Why a link is not working](/share/why-a-link-is-not-working.md)
-
-- Responses
-  - [Read responses](/responses/read-responses.md)
-  - [Export responses](/responses/export.md)
-  - [Read the insights](/responses/insights.md)
-  - [Find uploaded files](/responses/files.md)
-
-- Automate
-  - [What happens after submit](/automate/after-submit.md)
-  - [Save answers into a record](/automate/save-into-a-record.md)
-  - [Run an action or an agent](/automate/actions-and-agents.md)
 
 - Reference
   - [Glossary](/reference/glossary.md)
-  - [Questions respondents ask](/reference/respondent-questions.md)
-  - [What MJ Forms cannot do yet](/reference/not-yet.md)
+
+<!--
+  THE PLANNED RUNNING ORDER — fixed once, here, rather than renegotiated seven times by seven
+  contributors appending to the end of a file. Each line moves up into the list above in the commit
+  that adds its article. When this comment is empty, delete it.
+
+  - Get started
+    - [Your first form](/get-started/first-form.md)
+    - [Where everything lives](/get-started/where-everything-lives.md)
+
+  - Build
+    - [Add and arrange questions](/build/add-and-arrange-questions.md)
+    - [The 25 question types](/build/question-types.md)
+    - [Require and check answers](/build/required-and-validation.md)
+    - [Add sections and screens](/build/sections-and-screens.md)
+    - [Show, skip and branch](/build/logic.md)
+    - [Score answers](/build/scoring.md)
+    - [Reuse a form as a template](/build/templates.md)
+    - [Let AI draft a form](/build/author-with-ai.md)
+
+  - Design
+    - [Brand a form](/design/brand-a-form.md)
+    - [Preview on phone and tablet](/design/preview.md)
+
+  - Share
+    - [Publish a form](/share/publish.md)
+    - [Create a share link](/share/share-link.md)
+    - [Embed in your own site](/share/embed.md)
+    - [Share a QR code](/share/qr-code.md)
+    - [Set limits and dates](/share/limits-and-dates.md)
+    - [Require a captcha](/share/captcha.md)
+    - [Why a link is not working](/share/why-a-link-is-not-working.md)
+
+  - Responses
+    - [Read responses](/responses/read-responses.md)
+    - [Export responses](/responses/export.md)
+    - [Read the insights](/responses/insights.md)
+    - [Find uploaded files](/responses/files.md)
+
+  - Automate
+    - [What happens after submit](/automate/after-submit.md)
+    - [Save answers into a record](/automate/save-into-a-record.md)
+    - [Run an action or an agent](/automate/actions-and-agents.md)
+
+  - Reference
+    - [Questions respondents ask](/reference/respondent-questions.md)
+    - [What MJ Forms cannot do yet](/reference/not-yet.md)
+-->
