@@ -1,5 +1,5 @@
 # Bold spans that scripts/check-help-docs.mjs must accept even though they are not found
-# verbatim in packages/Angular/src or packages/Server/src.
+# in packages/Angular/src, packages/Server/src or packages/Entities/src.
 #
 # WHAT THIS FILE IS FOR
 # Bold in docs/help means "this text is on the screen in the product" (see STYLE.md §6), and the
@@ -21,6 +21,6 @@
 #   - Put the reason in a comment immediately above the entry. An entry without a reason is a bug.
 #   - Keep entries grouped and alphabetical within a group.
 #
-# There are no entries yet. Task 1's own files (README.md, STYLE.md, reference/glossary.md,
-# _sidebar.md) use 16 bold spans and every one of them is a verbatim string in the product source,
-# which is the outcome to aim for: needing an entry here should feel like a small defeat.
+# There are no entries yet. The help centre currently uses 74 bold spans across 7 files, and every
+# one of them is found in the product source, which is the outcome to aim for: needing an entry
+# here should feel like a small defeat.

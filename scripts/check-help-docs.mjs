@@ -12,7 +12,8 @@
  * are quoted labels. So `docs/help/STYLE.md` §6 reserves **bold** for exactly one meaning — "this
  * text is painted on the reader's screen" — emphasis uses italics, and nothing else may be bold.
  * That convention is what turns a style rule into an assertion, and this script is what makes the
- * assertion cost something: every bold span must be a verbatim substring of the product source.
+ * assertion cost something: every bold span must appear in the product's own source, give or take
+ * where two unrelated editors happened to wrap a line.
  *
  * The payoff is the direction people do not expect. Renaming a button turns the build red on the
  * pull request that renames it, handing that author the list of articles to fix while it is still
@@ -46,11 +47,53 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(HERE, '..');
 const HELP_DIR = path.join(REPO_ROOT, 'docs', 'help');
 const ALLOWLIST_FILE = path.join(HELP_DIR, '.ui-strings-allow.txt');
+/**
+ * Where on-screen text lives. Entities is not an afterthought: `contracts/form-screens.ts` holds the
+ * default confirmation a respondent reads after submitting, `contracts/answer-format.ts` holds every
+ * built-in validation message, and `contracts/starter-templates.ts` holds the template names in the
+ * gallery. Leaving it out did not fail loudly — it just meant none of that copy could be bolded
+ * anywhere in the help centre, which is most of what the respondent-facing articles are made of.
+ */
 const SOURCE_DIRS = [
     path.join(REPO_ROOT, 'packages', 'Angular', 'src'),
     path.join(REPO_ROOT, 'packages', 'Server', 'src'),
+    path.join(REPO_ROOT, 'packages', 'Entities', 'src'),
 ];
 const SOURCE_EXTENSIONS = ['.ts', '.html'];
+
+/**
+ * Files that are NOT the product, excluded from the haystack.
+ *
+ * Extension alone is not enough, and the gap was the silent kind. A `.spec.ts` is still TypeScript,
+ * so a bold span matching nothing but a leftover string in an old assertion or a mock verified
+ * clean — a help article quoting a button that no longer exists anywhere a reader can see, with the
+ * gate reporting green. There are 208 spec files under these roots; they were 40% of the haystack.
+ *
+ * Deliberately the same list as `EXCLUDE_PATH_FRAGMENTS` in scripts/check-ui-tokens.mjs, so that
+ * "which files are real UI source" has ONE answer in this repository rather than two that drift.
+ * Two documented divergences, both load-bearing:
+ *
+ *   - `/generated/` is EXCLUDED there and KEPT here. That gate refuses to judge CodeGen output it
+ *     cannot ask anyone to fix; this one is asking a different question, and generated Angular form
+ *     code is real shipped UI whose labels a reader genuinely sees.
+ *   - `/__tests__/` is here and not there, because a test helper need not be named `.spec.ts`:
+ *     packages/Server/src/public-submit/__tests__/fakes.ts is a mock and nothing else. The sibling
+ *     gate scans only packages/Angular/src, which has no such directory, so it never met the case.
+ *
+ * `/node_modules/` and `/dist/` match nothing under these roots today. They are kept for parity
+ * with the sibling list: an inert pattern costs nothing and a build artefact appearing under `src/`
+ * later would otherwise be read as product source.
+ */
+const EXCLUDE_PATH_FRAGMENTS = ['/node_modules/', '/dist/', '/__tests__/', '.spec.ts', '.test.ts'];
+
+/**
+ * Joins source files. Not `\n`: the haystack is whitespace-normalised before matching, which would
+ * turn a newline into a space and let the tail of one file plus the head of the next read as one
+ * continuous label. NUL is not matched by `\s`, so it survives normalisation, and no label can
+ * contain it.
+ */
+const FILE_SEPARATOR = `\n${String.fromCharCode(0)}\n`;
+
 const SIDEBAR = '_sidebar.md';
 
 /** Articles that are not navigation targets: the landing page, the style guide, and the partials. */
@@ -181,11 +224,40 @@ export function extractLinks(markdown) {
 // ── findUnverifiedStrings ───────────────────────────────────────────────────────────────────────
 
 /**
+ * Pure. Collapses every run of whitespace to one space and trims.
+ *
+ * A label is one continuous sentence ON SCREEN, but neither side of the comparison keeps it on one
+ * line: a long string wraps inside a template literal or an HTML attribute in the source, and a long
+ * bold span wraps inside a paragraph in the article. Either wrap defeats a literal substring match,
+ * and the failure looks exactly like a renamed button — which is the one signal this gate must not
+ * counterfeit. Normalising both sides makes the comparison about the label rather than about where
+ * two unrelated editors happened to break a line.
+ *
+ * Punctuation is deliberately NOT touched. `**Publish.**` extracting `Publish.` is a known false
+ * failure, and it stays one: labels ending in a full stop genuinely exist — every validation message
+ * in `contracts/answer-format.ts` is one — so trimming punctuation would weaken a real match to
+ * silence a loud, visible, one-line fix.
+ */
+export const normaliseWhitespace = (text) => text.replace(/\s+/g, ' ').trim();
+
+/**
  * Pure. The spans that are neither in the product source nor allowlisted. Case-sensitive on
- * purpose: the capitals, punctuation and spacing on screen are part of the label.
+ * purpose: the capitals and punctuation on screen are part of the label. Spacing is the one thing
+ * normalised, for the reason above.
  */
 export function findUnverifiedStrings({ spans, sourceText, allowlist }) {
-    return spans.filter((span) => !sourceText.includes(span.text) && !allowlist.has(span.text));
+    const haystack = normaliseWhitespace(sourceText);
+    const allowed = new Set([...allowlist].map(normaliseWhitespace));
+    return spans.filter((span) => {
+        const label = normaliseWhitespace(span.text);
+        return !haystack.includes(label) && !allowed.has(label);
+    });
+}
+
+/** Pure. Is this source path a test file rather than the product? Tolerates Windows separators. */
+export function isExcludedSourcePath(filePath) {
+    const normalised = filePath.split('\\').join('/');
+    return EXCLUDE_PATH_FRAGMENTS.some((fragment) => normalised.includes(fragment));
 }
 
 // ── parseAllowlist ──────────────────────────────────────────────────────────────────────────────
@@ -218,8 +290,12 @@ function listFilesRecursively(dir, extensions) {
     return out.sort();
 }
 
-/** Every `.ts` and `.html` file under the product packages, concatenated once. */
-function readProductSource() {
+/**
+ * Every `.ts` and `.html` file under the product packages that is not a test, concatenated once and
+ * whitespace-normalised once. Exported so its spec can assert what is in the haystack and what is
+ * not — the two things that decide what this gate can see at all.
+ */
+export function buildHaystack() {
     const files = [];
     for (const dir of SOURCE_DIRS) {
         if (!existsSync(dir)) {
@@ -228,12 +304,16 @@ function readProductSource() {
                 'span is checked against it, so an empty haystack would fail every article at once.',
             );
         }
-        files.push(...listFilesRecursively(dir, SOURCE_EXTENSIONS));
+        files.push(
+            ...listFilesRecursively(dir, SOURCE_EXTENSIONS).filter((f) => !isExcludedSourcePath(f)),
+        );
     }
-    if (files.length === 0) throw new Error('No .ts or .html files found under the product packages.');
-    const haystack = files.map((file) => readFileSync(file, 'utf8')).join('\n');
+    if (files.length === 0) throw new Error('No product .ts or .html files found under the source roots.');
+    const haystack = normaliseWhitespace(
+        files.map((file) => readFileSync(file, 'utf8')).join(FILE_SEPARATOR),
+    );
     if (haystack.length === 0) throw new Error('The product source haystack is empty.');
-    return { haystack, fileCount: files.length };
+    return { haystack, files };
 }
 
 /** Where a link target written in `fromFile` points. A leading "/" is the site root, per STYLE §8. */
@@ -252,7 +332,7 @@ function run() {
     const articles = listFilesRecursively(HELP_DIR, ['.md']);
     if (articles.length === 0) throw new Error(`No markdown files under ${rel(HELP_DIR)}.`);
 
-    const { haystack, fileCount } = readProductSource();
+    const { haystack, files: sourceFiles } = buildHaystack();
     const allowlist = parseAllowlist(
         existsSync(ALLOWLIST_FILE) ? readFileSync(ALLOWLIST_FILE, 'utf8') : null,
     );
@@ -294,7 +374,7 @@ function run() {
         }
     }
 
-    return { failures, articles, spanCount, linkCount, sourceFileCount: fileCount };
+    return { failures, articles, spanCount, linkCount, sourceFileCount: sourceFiles.length };
 }
 
 function report({ failures, articles, spanCount, linkCount, sourceFileCount }) {

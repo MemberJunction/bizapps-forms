@@ -1,11 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    buildHaystack,
     extractBoldSpans,
     extractLinks,
     findUnverifiedStrings,
+    isExcludedSourcePath,
+    normaliseWhitespace,
     parseAllowlist,
 } from './check-help-docs.mjs';
+
+const NUL = String.fromCharCode(0);
 
 // ── extractBoldSpans ────────────────────────────────────────────────────────────────────────────
 // This is the half of the gate that decides what gets checked at all. Everything it fails to see is
@@ -194,4 +199,137 @@ test('parseAllowlist reads one entry per line and trims it', () => {
 
 test('parseAllowlist keeps a hash that is not the first character', () => {
     assert.deepEqual([...parseAllowlist('Issue #4 reported')], ['Issue #4 reported']);
+});
+
+// ── Whitespace normalisation ────────────────────────────────────────────────────────────────────
+// A label is one continuous sentence on screen, but neither side of the comparison keeps it on one
+// line: source wraps it inside a template literal or an HTML attribute, articles wrap it inside a
+// paragraph. Without this, either wrap reads as a renamed button — the one signal the gate must
+// never counterfeit.
+
+test('normaliseWhitespace collapses runs and trims', () => {
+    assert.equal(normaliseWhitespace('  Save   progress\n\there  '), 'Save progress here');
+});
+
+test('normaliseWhitespace leaves the file separator intact', () => {
+    // NUL is not matched by \s, which is the whole reason it separates files in the haystack: a
+    // newline would collapse to a space and let the tail of one file and the head of the next read
+    // as one continuous label.
+    assert.equal(normaliseWhitespace(`a\n${NUL}\nb`), `a ${NUL} b`);
+});
+
+test('findUnverifiedStrings matches a label the SOURCE wrapped across two lines', () => {
+    assert.deepEqual(findUnverifiedStrings({
+        spans: [{ text: 'Thanks — your response has been recorded.', line: 1 }],
+        sourceText: "return settings.confirmationMessage?.trim() ||\n  'Thanks — your response\n   has been recorded.';",
+        allowlist: new Set(),
+    }), []);
+});
+
+test('findUnverifiedStrings matches a span the ARTICLE wrapped across two lines', () => {
+    assert.deepEqual(findUnverifiedStrings({
+        spans: [{ text: 'Thanks — your response\nhas been recorded.', line: 7 }],
+        sourceText: "const DEFAULT = 'Thanks — your response has been recorded.';",
+        allowlist: new Set(),
+    }), []);
+});
+
+test('a soft-wrapped bold span in an article survives extraction and verification', () => {
+    const spans = extractBoldSpans('Respondents see **Thanks — your response\nhas been recorded.** at the end.');
+    assert.equal(spans.length, 1);
+    assert.equal(spans[0].line, 1);
+    assert.deepEqual(findUnverifiedStrings({
+        spans,
+        sourceText: "'Thanks — your response has been recorded.'",
+        allowlist: new Set(),
+    }), []);
+});
+
+test('normalising does not paper over a real difference', () => {
+    // Collapsing runs of whitespace is not the same as ignoring whitespace. A space that is not in
+    // the label is still a different label.
+    assert.deepEqual(findUnverifiedStrings({
+        spans: [{ text: 'Publish Form', line: 1 }], sourceText: 'PublishForm', allowlist: new Set(),
+    }), [{ text: 'Publish Form', line: 1 }]);
+});
+
+test('an allowlist entry is normalised the same way', () => {
+    assert.deepEqual(findUnverifiedStrings({
+        spans: [{ text: 'Page 2\nof 3', line: 1 }], sourceText: '', allowlist: new Set(['Page 2 of 3']),
+    }), []);
+});
+
+test('trailing punctuation is NOT normalised away, deliberately', () => {
+    // Deferred, and it stays deferred: every validation message in contracts/answer-format.ts ends
+    // in a full stop, so trimming punctuation would weaken a real match to silence a loud one.
+    // `**Publish.**` failing is a visible one-line fix; a silently weakened match is not.
+    assert.deepEqual(findUnverifiedStrings({
+        spans: [{ text: 'Publish.', line: 1 }], sourceText: 'Publish', allowlist: new Set(),
+    }), [{ text: 'Publish.', line: 1 }]);
+});
+
+// ── What is in the haystack, and what is not ────────────────────────────────────────────────────
+// This is the half that decides what the gate can SEE. Extension alone let 230 test files in, and a
+// bold span matching only an old assertion or a mock verified clean — an article quoting a button
+// no reader can find, with the gate green. That failure is silent and permanent, so it is pinned.
+
+test('isExcludedSourcePath drops spec and test files', () => {
+    assert.equal(isExcludedSourcePath('packages/Angular/src/lib/builder/form-builder.spec.ts'), true);
+    assert.equal(isExcludedSourcePath('packages/Entities/src/contracts/answer-format.spec.ts'), true);
+    assert.equal(isExcludedSourcePath('packages/Server/src/http/router.test.ts'), true);
+});
+
+test('isExcludedSourcePath drops a mock that is not named .spec.ts', () => {
+    // The case the sibling gate's list would have missed: a helper inside __tests__ with an
+    // ordinary name. packages/Angular/src has no such directory, which is why it never met it.
+    assert.equal(isExcludedSourcePath('packages/Server/src/public-submit/__tests__/fakes.ts'), true);
+});
+
+test('isExcludedSourcePath KEEPS generated code, which is real shipped UI', () => {
+    assert.equal(isExcludedSourcePath('packages/Angular/src/lib/generated/forms.component.ts'), false);
+});
+
+test('isExcludedSourcePath keeps ordinary product source', () => {
+    assert.equal(isExcludedSourcePath('packages/Entities/src/contracts/form-screens.ts'), false);
+    assert.equal(isExcludedSourcePath('packages/Angular/src/lib/widget/mj-form.component.html'), false);
+});
+
+test('isExcludedSourcePath tolerates Windows separators', () => {
+    assert.equal(isExcludedSourcePath('packages\\Angular\\src\\lib\\a.spec.ts'), true);
+    assert.equal(isExcludedSourcePath('packages\\Server\\src\\public-submit\\__tests__\\fakes.ts'), true);
+});
+
+test('the real haystack contains no test file', () => {
+    const { files } = buildHaystack();
+    const tests = files.filter(isExcludedSourcePath);
+    assert.deepEqual(tests, [], `${tests.length} test files reached the haystack`);
+});
+
+test('the real haystack contains respondent-facing copy from packages/Entities/src', () => {
+    // These four are the whole reason Entities is a source root: none of them exists in Angular or
+    // Server, so without it the respondent FAQ could not bold a single message it quotes.
+    const { haystack } = buildHaystack();
+    for (const label of [
+        'Thanks — your response has been recorded.',
+        'Thanks for your time.',
+        'Enter a valid email address.',
+        'Enter a number.',
+    ]) {
+        assert.ok(haystack.includes(label), `the haystack cannot see ${JSON.stringify(label)}`);
+    }
+});
+
+test('the real haystack still contains generated Angular code', () => {
+    const { files } = buildHaystack();
+    assert.ok(
+        files.some((file) => file.includes('/generated/')),
+        'generated code is real shipped UI and must stay in the haystack',
+    );
+});
+
+test('the real haystack draws on all three source roots', () => {
+    const { files } = buildHaystack();
+    for (const root of ['/packages/Angular/src/', '/packages/Server/src/', '/packages/Entities/src/']) {
+        assert.ok(files.some((file) => file.includes(root)), `no files from ${root}`);
+    }
 });

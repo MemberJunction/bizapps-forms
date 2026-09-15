@@ -136,9 +136,17 @@ quoted labels. Bold is that marker, and this rule is what makes it reliable.
 ### What the gate actually does
 
 `scripts/check-help-docs.mjs` takes every bold span in `docs/help/**/*.md`, concatenates every `.ts`
-and `.html` file under `packages/Angular/src` and `packages/Server/src` into one haystack, and fails
-if a span is neither a verbatim substring of that haystack nor listed in `.ui-strings-allow.txt`.
-It prints `file:line` for every failure.
+and `.html` file under `packages/Angular/src`, `packages/Server/src` and `packages/Entities/src` into
+one haystack, and fails if a span is neither a substring of that haystack nor listed in
+`.ui-strings-allow.txt`. It prints `file:line` for every failure.
+
+Entities is in the list because a lot of what a *respondent* reads lives there rather than in a
+template: the confirmation after submitting, every validation message, the starter template names.
+
+Both sides are whitespace-normalised before the comparison — every run of spaces, tabs and newlines
+collapses to one space. A long label wraps across two lines in the source, and a long bold span
+wraps across two lines in your paragraph; neither wrap should read as a renamed button. Everything
+else is exact, including punctuation and capitals.
 
 *Renaming a button therefore turns the build red on the pull request that renames it.* That is the
 feature, not a bug. The person doing the rename gets a list of every article that quotes the old
@@ -148,14 +156,17 @@ name, at the moment they can still fix it cheaply, instead of leaving it for a r
 
 - Never bold for emphasis. Not once. Italics exist.
 - Never bold a paraphrase. `**the publish button**` fails the gate; **Publish** passes it.
-- Copy labels; do not recall them. Read them out of `packages/Angular/src` or out of the extracted
-  copy your task brief points you at. A label you are confident about is exactly the kind that is
-  wrong.
-- The match is a case-sensitive substring, so capitals, punctuation and spacing are all exact.
+- Copy labels; do not recall them. Read them out of the three source roots above — respondent-facing
+  wording usually lives in `packages/Entities/src/contracts/` — or out of the extracted copy your
+  task brief points you at. A label you are confident about is exactly the kind that is wrong.
+- The match is case-sensitive, so capitals and punctuation are exact; only spacing is forgiving.
   Watch for curly apostrophes — the product uses them. Prefer a label without one.
-- A one-word label is only weakly checked, and it is worth knowing why. The haystack is raw source,
-  so **Next** matches a variable named `nextQuestion` as happily as it matches the button: the word
-  occurs 64 times in the source and renaming the button would leave the gate green. Multi-word
+- A one-word label is only weakly checked, and it is worth knowing why. *The haystack is the
+  product's source code, not a list of its labels* — 338 files, every one of them shipped, with the
+  230 test files excluded so that a leftover string in an old assertion can never stand in for a
+  button. What it still cannot tell apart is a label from an identifier or a code comment in the
+  same file. So **Next** matches a variable named `nextQuestion` as happily as it matches the
+  button: the word occurs 43 times, and renaming the button would leave the gate green. Multi-word
   labels occur once or twice — **Save progress here** and **Require a captcha** occur exactly once
   each — so those are checked properly. Quote the whole label wherever the product gives you one.
 - Do not bold inside a heading. Write the label in plain words there.
