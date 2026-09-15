@@ -54,13 +54,13 @@ checked in order and the first one that matches wins.
 
 ## Partial response
 
-What you have from someone who started your form and did not finish. MJ Forms saves one on its own
-as a respondent answers, whether or not you asked for it; **Save progress here** banks a page the
-moment they leave it rather than waiting for that to come round.
+What you have from someone who started your form and did not finish. MJ Forms saves one on its own,
+whether or not you asked for it; **Save progress here** banks a page the moment they leave it rather
+than waiting for that to come round.
 
-A partial response is not a row on the **Responses** tab and is not in the export. Where you see
-these people is the count of how many started and did not finish, and the chart of where they
-stopped: [Read the insights](../responses/insights.md).
+You never open one: it is not on the **Responses** tab and not in the export, and what you see
+instead is the count of how many started and did not finish and the chart of where they stopped —
+[Read the insights](../responses/insights.md).
 
 ## Preview
 
@@ -74,9 +74,9 @@ change afterwards stays private until you publish again.
 
 ## QR code
 
-A square pattern that opens your share link when somebody points a phone camera at it. You download
-it from the **QR code** view on the **Distribute** tab. It downloads as a vector file, so it stays
-sharp at any print size.
+A square pattern that opens your share link when somebody points a phone camera at it. The **QR
+code** view on the **Distribute** tab gives you one as a vector file, so it stays sharp at any print
+size.
 
 ## Question
 
@@ -111,7 +111,7 @@ there is no limit. It is set per link, so two links to the same form can have di
 ## Score
 
 Points you attach to particular answers. The running total can decide which ending screen someone
-lands on, and automations can act on it. Respondents never see their score.
+lands on and an automation can act on it, but respondents never see it.
 
 ## Section
 

@@ -36,9 +36,10 @@ This is the first thing every author asks, and usually about a form that plainly
 
 **Respondent** is the person a response belongs to, and a share link deliberately knows nobody:
 your respondents do not sign in and have no account of any kind. So MJ Forms falls back to reading a
-name out of the answers — but it only recognises a name when the question is *about* a name, one
-whose wording says *full name*, *first name* or *last name*, or when the question is of the
-**Email** type.
+name out of the answers — but only when the question is *about* a name: one worded *Name* on its
+own, *Your name*, *Full name* or *Display name*, or one asking for part of a name (*First name*,
+*Last name*, and the usual variants such as *given name* and *surname*). A question of the **Email**
+type counts too.
 
 A **Contact info** question is neither. It is one question drawing five boxes, and its wording is a
 heading for the block rather than a name question, so there is nothing for MJ Forms to recognise.

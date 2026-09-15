@@ -40,7 +40,7 @@ sees it: the questions, and a button to send the answers. No sign-in, no account
 12. Answer both questions, then press **Submit**. A short thank-you replaces the form once the
     answer is in.
 13. Go back to the builder tab and open the **Responses** tab.
-14. Press **Refresh** if the table is still empty, then click your row to read the answer back.
+14. Press **Refresh** if nothing is listed yet, then click your response to read the answer back.
 
 ## What happens next
 

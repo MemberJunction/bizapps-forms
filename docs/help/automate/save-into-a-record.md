@@ -40,9 +40,10 @@ place they do not go.
 3. Read **Which record should a submission create?** and the line under it:
    **Pick the thing a submission is really about — the person applying, the organisation
    registering. Each submission will create one, or update it if it already exists.**
-4. Pick the kind of record. **Most forms use one of these** offers the handful almost every form
-   wants. If yours is not there, type into **Search** — its placeholder is the hint:
-   **Start typing — people, organisation, application…** — because
+4. Pick the kind of record. The short list under **Most forms use one of these** covers what almost
+   every form wants. If yours is not on it, type into **Search** instead. The placeholder suggests
+   the sort of thing to try — **Start typing — people, organisation, application…** — and the line
+   beside the box says how far that reaches:
    **Anything else in your system works too — search for it above.**
 5. The page changes to **What goes into** and the name of what you picked. If you picked wrongly,
    **Change** takes you back; nothing is saved until the last step.
