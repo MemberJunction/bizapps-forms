@@ -260,14 +260,22 @@ bizapps-forms/
 
 ## 🗺️ &nbsp;What's next
 
-- **Author with AI** — draft a whole form from a one-sentence brief
 - **AI answer scores in the UI** — the LLM judge already writes them; nothing displays them yet
-- **Per-form captcha toggle** — Turnstile verifies server-side, but nothing switches it on
 - **Payment** question type
 - `FormGroup` + view projection and opt-in RSU materialization
 - Review/approve-before-publish routing via bizapps-tasks
-- **Cross-session** resume — in-session autosave already ships
 - Advanced quotas and richer conditional logic
+
+The same list in an author's words, with what to do instead of each one, is
+**[`docs/help/reference/not-yet.md`](docs/help/reference/not-yet.md)**.
+
+---
+
+## 📚 &nbsp;Help for the people using it
+
+Building forms, publishing them, reading what comes back — written for the member of staff who has
+been asked to put a survey out by Friday, with no mention of a package, a schema or an API:
+**[`docs/help/`](docs/help/README.md)**.
 
 ---
 

@@ -12,6 +12,8 @@ needs a developer.
 New to MJ Forms? Start with [Create your first form](get-started/first-form.md): about ten minutes,
 ending with a real answer from a real link, which is the fastest way to understand the rest of this.
 
+## The sections
+
 - [Get started](get-started/first-form.md) — one form, start to finish, and a tour of where
   everything lives.
 - [Build](build/add-and-arrange-questions.md) — questions, question types, required answers,
@@ -24,8 +26,8 @@ ending with a real answer from a real link, which is the fastest way to understa
   find the files people attached.
 - [Automate](automate/after-submit.md) — what happens after someone submits, and how to make more
   happen.
-- [Glossary](reference/glossary.md) — every word this help uses that you might not already have a
-  meaning for, in the sense MJ Forms means it.
+- [Reference](reference/glossary.md) — the words this help uses, the questions respondents send
+  you, and what MJ Forms cannot do yet.
 
 <!--
   This list grows one line at a time, and so does _sidebar.md: the commit that adds an article adds
@@ -33,13 +35,9 @@ ending with a real answer from a real link, which is the fastest way to understa
   disk, with no exemption for this file and no reason to add one — a landing page that sends the
   reader to a page that does not exist is the worst first impression the help centre could make.
 
-  THE SECTION SUMMARIES, parked here until the articles they point at land. Restore each bullet in
-  the commit that adds the first article it links to. When this comment is empty, delete it, and
-  put the "The sections" heading back above the list.
-
-  - [Reference](reference/glossary.md) — the words this help uses, the questions respondents send
-    you, and what MJ Forms cannot do yet.
-
+  While the sections were still being written, the bullets above were parked in this comment and
+  restored one at a time, in the commit that added the first article each one links to. They are all
+  restored now. Park a future section the same way rather than linking a file that is not there.
 -->
 
 ## Not what you were looking for?

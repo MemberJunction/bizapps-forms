@@ -18,9 +18,11 @@
      articles visible — would hide precisely the failure the check exists to catch, and a gate that
      is knowingly red mid-branch teaches everyone to ignore a red gate.
 
-     The running order is not lost for it. It is parked in the comment at the foot of this file,
-     where it is not rendered, not linked and therefore not a claim about anything. When you add an
-     article, move its line out of that comment and into the list below, in the same commit.
+     While the running order was still being written, the unwritten articles were parked in a
+     comment at the foot of this file — not rendered, not linked, therefore not a claim about
+     anything — and each line moved up into the list below in the commit that added its article.
+     That comment is now empty and gone: every planned article exists. If you plan a run of new
+     articles, park them the same way rather than listing a file that is not there yet.
 -->
 
 - Get started
@@ -63,13 +65,5 @@
 
 - Reference
   - [Glossary](/reference/glossary.md)
-
-<!--
-  THE PLANNED RUNNING ORDER — fixed once, here, rather than renegotiated seven times by seven
-  contributors appending to the end of a file. Each line moves up into the list above in the commit
-  that adds its article. When this comment is empty, delete it.
-
-  - Reference
-    - [Questions respondents ask](/reference/respondent-questions.md)
-    - [What MJ Forms cannot do yet](/reference/not-yet.md)
--->
+  - [Questions respondents ask](/reference/respondent-questions.md)
+  - [What MJ Forms cannot do yet](/reference/not-yet.md)
