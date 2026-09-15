@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Keeps `docs/help/**` true to the product it describes.
+ * Keeps `docs/help/**` true to the product it describes — and, in one place, the product true to
+ * `docs/help/**`. See {@link HELP_LINKS_FILE} for that fourth check and why it is not optional.
  *
  * ── WHY A BOLD SPAN IS A CHECKABLE CLAIM ────────────────────────────────────────────────────────
  * Help documentation does not fail on the day it ships. It fails eighteen months later, when
@@ -60,6 +61,19 @@ const SOURCE_DIRS = [
     path.join(REPO_ROOT, 'packages', 'Entities', 'src'),
 ];
 const SOURCE_EXTENSIONS = ['.ts', '.html'];
+
+/**
+ * The one file in the product that quotes the DOCUMENTATION, rather than the other way round.
+ *
+ * Everything else here checks documentation against the product. This is the return direction, and
+ * it was the open half: `help-links.ts` holds the five URLs the in-product empty states send a stuck
+ * reader to, and nothing verified that the article each one names still exists. Rename an article
+ * and you get five silent 404s, delivered at exactly the moment somebody is stuck — the worst moment
+ * this repository has to offer, and the one place nobody would think to look.
+ */
+const HELP_LINKS_FILE = path.join(
+    REPO_ROOT, 'packages', 'Angular', 'src', 'lib', 'shared', 'help-links.ts',
+);
 
 /**
  * Files that are NOT the product, excluded from the haystack.
@@ -221,6 +235,47 @@ export function extractLinks(markdown) {
     return links;
 }
 
+// ── extractHelpLinkPaths ────────────────────────────────────────────────────────────────────────
+
+/**
+ * A help-centre route fragment: `#/`, then the article's path on disk with its `.md` dropped.
+ *
+ * Deliberately narrow about what a path may contain — letters, digits, `-`, `_`, `.` and `/` — so
+ * the closing backtick, quote or space of whatever literal the URL sits in ends the match. Nothing
+ * else about the surrounding TypeScript is parsed, which is why this stays a pure function over a
+ * string rather than something that has to know about template literals.
+ */
+const HELP_ROUTE_FRAGMENT = /#\/([A-Za-z0-9._/-]+)/g;
+
+/**
+ * Pure. The links whose article does not exist. `articleExists` is injected so the whole decision is
+ * testable without a filesystem — the one thing that would otherwise make this half untestable.
+ */
+export function findBrokenHelpLinks({ links, articleExists }) {
+    return links.filter((link) => !articleExists(`${link.path}.md`));
+}
+
+/**
+ * Pure. Every help-centre article path the product links to, with the line it sits on.
+ *
+ * Comments are NOT stripped, on purpose and unlike the markdown side. A route written in a comment
+ * — `help-links.ts` explains its URL shape using `…/help/#/build/logic` — is a claim about an
+ * article that can rot exactly like a rendered one, and a stale comment is the failure this whole
+ * gate exists to prevent. Checking it costs nothing and misleads nobody.
+ *
+ * Duplicates are kept: two links to the same renamed article are two edits to make.
+ */
+export function extractHelpLinkPaths(source) {
+    const found = [];
+    HELP_ROUTE_FRAGMENT.lastIndex = 0;
+    let match = HELP_ROUTE_FRAGMENT.exec(source);
+    while (match !== null) {
+        found.push({ path: match[1], line: lineNumberAt(source, match.index) });
+        match = HELP_ROUTE_FRAGMENT.exec(source);
+    }
+    return found;
+}
+
 // ── findUnverifiedStrings ───────────────────────────────────────────────────────────────────────
 
 /**
@@ -325,7 +380,41 @@ function resolveTarget(fromFile, target) {
 
 const rel = (file) => path.relative(REPO_ROOT, file);
 
-// ── The three checks ────────────────────────────────────────────────────────────────────────────
+// ── The four checks ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The product's own links into the help centre.
+ *
+ * A MISSING `help-links.ts` is a hard failure, not a skip. This repository's gates resolve every
+ * uncertainty towards running the check (`scripts/check-paths-touched.mjs` says why at length): a
+ * skip here would mean that moving or renaming the file silently retires the only thing standing
+ * between a renamed article and five dead links in the product, and nothing would ever say so. The
+ * cost of failing loudly is one line to update in this file, on the pull request that moved it.
+ */
+function checkProductLinks() {
+    if (!existsSync(HELP_LINKS_FILE)) {
+        throw new Error(
+            `${rel(HELP_LINKS_FILE)} not found. It holds the help-centre URLs the in-product empty ` +
+            'states link to, and this gate is the only thing checking that those articles exist. ' +
+            'If the file moved, point HELP_LINKS_FILE at its new home — do not delete this check.',
+        );
+    }
+    const source = readFileSync(HELP_LINKS_FILE, 'utf8');
+    const links = extractHelpLinkPaths(source);
+    if (links.length === 0) {
+        throw new Error(
+            `No "#/<article>" help-centre routes found in ${rel(HELP_LINKS_FILE)}. Either the URL ` +
+            'shape changed, in which case update HELP_ROUTE_FRAGMENT, or the links are gone.',
+        );
+    }
+    const articleExists = (relativeToSiteRoot) => {
+        // A route is site-absolute by construction, which is exactly what resolveTarget's leading
+        // "/" branch means — so the product's links and the sidebar's resolve through one function.
+        const resolved = resolveTarget(HELP_LINKS_FILE, `/${relativeToSiteRoot}`);
+        return existsSync(resolved) && statSync(resolved).isFile();
+    };
+    return { links, broken: findBrokenHelpLinks({ links, articleExists }) };
+}
 
 function run() {
     if (!existsSync(HELP_DIR)) throw new Error(`Help centre directory not found: ${rel(HELP_DIR)}`);
@@ -337,7 +426,7 @@ function run() {
         existsSync(ALLOWLIST_FILE) ? readFileSync(ALLOWLIST_FILE, 'utf8') : null,
     );
 
-    const failures = { strings: [], links: [], unreachable: [] };
+    const failures = { strings: [], links: [], unreachable: [], productLinks: [] };
     let spanCount = 0;
     let linkCount = 0;
 
@@ -374,16 +463,28 @@ function run() {
         }
     }
 
-    return { failures, articles, spanCount, linkCount, sourceFileCount: sourceFiles.length };
+    const productLinks = checkProductLinks();
+    failures.productLinks = productLinks.broken;
+
+    return {
+        failures,
+        articles,
+        spanCount,
+        linkCount,
+        productLinkCount: productLinks.links.length,
+        sourceFileCount: sourceFiles.length,
+    };
 }
 
-function report({ failures, articles, spanCount, linkCount, sourceFileCount }) {
+function report({ failures, articles, spanCount, linkCount, productLinkCount, sourceFileCount }) {
     const total =
-        failures.strings.length + failures.links.length + failures.unreachable.length;
+        failures.strings.length + failures.links.length + failures.unreachable.length +
+        failures.productLinks.length;
     if (total === 0) {
         console.log(
             `check-help-docs: ${articles.length} articles, ${spanCount} bold spans verified against ` +
-            `${sourceFileCount} product source files, ${linkCount} links resolved, all reachable.`,
+            `${sourceFileCount} product source files, ${linkCount} links resolved, all reachable, ` +
+            `${productLinkCount} help links from the product resolved.`,
         );
         return 0;
     }
@@ -417,6 +518,18 @@ function report({ failures, articles, spanCount, linkCount, sourceFileCount }) {
         console.error('\nArticles that _sidebar.md does not link to:\n');
         for (const f of failures.unreachable) console.error(`  ${f}`);
         console.error('\n  An article nobody can navigate to is an article nobody reads.');
+    }
+
+    if (failures.productLinks.length > 0) {
+        console.error('\nHelp-centre links in the product that name no article:\n');
+        for (const f of failures.productLinks) {
+            console.error(`  ${rel(HELP_LINKS_FILE)}:${f.line}  ${JSON.stringify(`#/${f.path}`)}`);
+        }
+        console.error(
+            '\n  A route "#/x/y" is the article docs/help/x/y.md. These five URLs are what the\n' +
+            '  in-product empty states send a stuck reader to, so a rename here is a 404 delivered\n' +
+            '  at the worst possible moment. Rename the link, or restore the article.',
+        );
     }
 
     console.error(`\ncheck-help-docs: ${total} problem(s).\n`);

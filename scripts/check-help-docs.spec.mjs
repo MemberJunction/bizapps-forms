@@ -1,9 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
     buildHaystack,
     extractBoldSpans,
+    extractHelpLinkPaths,
     extractLinks,
+    findBrokenHelpLinks,
     findUnverifiedStrings,
     isExcludedSourcePath,
     normaliseWhitespace,
@@ -266,6 +269,67 @@ test('trailing punctuation is NOT normalised away, deliberately', () => {
     assert.deepEqual(findUnverifiedStrings({
         spans: [{ text: 'Publish.', line: 1 }], sourceText: 'Publish', allowlist: new Set(),
     }), [{ text: 'Publish.', line: 1 }]);
+});
+
+// ── The product's links into the help centre ────────────────────────────────────────────────────
+// The return direction. These URLs are shown to somebody who is already stuck, so a 404 here is the
+// worst 404 the product can serve — and the only one no reader will report, because they are stuck.
+
+const HELP_LINKS_SAMPLE = `
+export const HELP_BASE_URL = 'https://memberjunction.github.io/bizapps-forms/help/';
+export const HELP_LINKS = {
+  firstForm: \`\${HELP_BASE_URL}#/get-started/first-form\`,
+  logic: \`\${HELP_BASE_URL}#/build/logic\`,
+} as const;
+`;
+
+test('extractHelpLinkPaths pulls the article path out of each route', () => {
+    assert.deepEqual(extractHelpLinkPaths(HELP_LINKS_SAMPLE), [
+        { path: 'get-started/first-form', line: 4 },
+        { path: 'build/logic', line: 5 },
+    ]);
+});
+
+test('extractHelpLinkPaths stops at the closing backtick and ignores the base URL', () => {
+    // The base URL contains "/help/" but no "#/", so it must contribute nothing; and the path must
+    // not swallow the literal's terminator, or every article name gains a stray backtick.
+    assert.deepEqual(extractHelpLinkPaths("x = `${BASE}#/share/publish`;"), [
+        { path: 'share/publish', line: 1 },
+    ]);
+});
+
+test('extractHelpLinkPaths sees a route written in a comment', () => {
+    // Not stripped, unlike the markdown side: a comment citing an article rots exactly like a link
+    // does, and a stale comment is the failure this whole gate exists to prevent.
+    assert.deepEqual(extractHelpLinkPaths('/** …/help/#/build/logic is build/logic.md */'), [
+        { path: 'build/logic', line: 1 },
+    ]);
+});
+
+test('findBrokenHelpLinks flags a route that names no article', () => {
+    const links = [{ path: 'build/logic', line: 2 }, { path: 'build/gone', line: 3 }];
+    const articleExists = (file) => file === 'build/logic.md';
+    assert.deepEqual(findBrokenHelpLinks({ links, articleExists }), [{ path: 'build/gone', line: 3 }]);
+});
+
+test('findBrokenHelpLinks passes when every route resolves', () => {
+    const links = [{ path: 'get-started/first-form', line: 1 }, { path: 'share/publish', line: 2 }];
+    assert.deepEqual(findBrokenHelpLinks({ links, articleExists: () => true }), []);
+});
+
+test('the real help-links.ts yields the five in-product routes', () => {
+    // Guards the regex against the file it actually has to read: a shape change that silently
+    // matched nothing would retire this check without failing anything.
+    const source = readFileSync(new URL(
+        '../packages/Angular/src/lib/shared/help-links.ts', import.meta.url,
+    ), 'utf8');
+    const paths = new Set(extractHelpLinkPaths(source).map((link) => link.path));
+    for (const expected of [
+        'get-started/first-form', 'share/share-link', 'automate/after-submit',
+        'build/logic', 'share/publish',
+    ]) {
+        assert.ok(paths.has(expected), `help-links.ts no longer links #/${expected}`);
+    }
 });
 
 // ── What is in the haystack, and what is not ────────────────────────────────────────────────────
