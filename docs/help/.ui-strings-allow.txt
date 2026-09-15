@@ -1,0 +1,26 @@
+# Bold spans that scripts/check-help-docs.mjs must accept even though they are not found
+# verbatim in packages/Angular/src or packages/Server/src.
+#
+# WHAT THIS FILE IS FOR
+# Bold in docs/help means "this text is on the screen in the product" (see STYLE.md §6), and the
+# gate proves it by looking every bold span up in the source. A few on-screen strings cannot be
+# found that way: text the product composes while it runs (a page heading numbered from a count, a
+# sentence assembled from parts), and text that comes from MemberJunction core rather than from
+# this repository. Those go here.
+#
+# WHAT THIS FILE IS NOT FOR
+# A label that used to exist. If the gate says a span is missing, assume the label was renamed and
+# fix the article. Silencing a real failure here is how the whole rule quietly stops working, and
+# nobody will notice for a year.
+#
+# FORMAT
+#   - A line whose first non-blank character is "#" is a comment. Blank lines are ignored.
+#   - Every other line is one entry: the bold span exactly as it is written in the article, with
+#     leading and trailing whitespace trimmed. A "#" inside an entry is fine; an entry that starts
+#     with one cannot be expressed, which has not come up.
+#   - Put the reason in a comment immediately above the entry. An entry without a reason is a bug.
+#   - Keep entries grouped and alphabetical within a group.
+#
+# There are no entries yet. Task 1's own files (README.md, STYLE.md, reference/glossary.md,
+# _sidebar.md) use 16 bold spans and every one of them is a verbatim string in the product source,
+# which is the outcome to aim for: needing an entry here should feel like a small defeat.

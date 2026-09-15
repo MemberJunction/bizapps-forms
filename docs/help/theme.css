@@ -1,0 +1,184 @@
+/* ===========================================================================
+   MJ Forms help centre — theme
+
+   WHY LITERAL COLOURS ARE CORRECT IN THIS FILE
+   The repository rule is that component CSS uses semantic --mj-* / --mjf-*
+   design tokens and never hardcodes a colour, because a hardcoded colour
+   breaks MemberJunction's dark mode. That rule is enforced by
+   scripts/check-ui-tokens.mjs, which scans packages/Angular/src only.
+   This file is not in the product. It is a static documentation page that
+   never runs inside Explorer, has no MemberJunction token stylesheet loaded
+   behind it, and is themed to match docs/index.html — the design gallery,
+   which hardcodes exactly these values. Reaching for --mj-* here would
+   resolve to nothing. The palette below is copied from that gallery on
+   purpose, so the two pages read as one property; if the gallery's palette
+   changes, change it here too.
+
+   Everything else here is a Docsify custom property rather than a selector.
+   Docsify 5 is token-driven, so overriding tokens survives a Docsify upgrade
+   in a way that overriding its class names would not.
+   =========================================================================== */
+
+:root {
+  /* --- The gallery palette (docs/index.html) ------------------------------ */
+  --mjf-bg:        #0b0f1a;
+  --mjf-bg-soft:   #121829;
+  --mjf-card:      #161d31;
+  --mjf-line:      #28324f;
+  --mjf-ink:       #eef2ff;
+  --mjf-ink-soft:  #aeb8d4;
+  --mjf-ink-mute:  #7a85a6;
+  --mjf-accent:    #7c5cff;
+  --mjf-accent-2:  #29d0c4;
+  --mjf-glow-1:    rgba(124, 92, 255, .20);
+  --mjf-glow-2:    rgba(41, 208, 196, .14);
+
+  /* --- Docsify's tokens, pointed at that palette -------------------------- */
+  --color-bg:    var(--mjf-bg);
+  --color-text:  var(--mjf-ink);
+  --theme-color: var(--mjf-accent);
+  --border-color: var(--mjf-line);
+
+  --font-family: 'Sora', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-weight: 400;
+  --heading-font-weight: 700;
+  --line-height: 1.65;
+  --content-max-width: 70ch;
+  --border-radius: 10px;
+
+  /* Bold is reserved for text that appears on a screen in the product (see
+     STYLE.md). It is styled crisp white rather than tinted, so a label reads
+     as a label and is never mistaken for a link. */
+  --strong-color: #ffffff;
+  --strong-font-weight: 600;
+
+  --link-underline-color: var(--mjf-accent);
+  --link-underline-thickness: 1px;
+  --link-underline-thickness-hover: 2px;
+  --link-color-hover: var(--mjf-ink);
+
+  /* Inline code borrows the gallery's `.lede code` treatment. Code blocks stay
+     on the card surface: a purple wash is charming for one word and unreadable
+     for twenty lines. */
+  --code-bg:    rgba(124, 92, 255, .12);
+  --code-color: #cbbcff;
+  --codeblock-bg:    var(--mjf-card);
+  --codeblock-color: var(--mjf-ink);
+
+  --blockquote-border-color: var(--mjf-accent-2);
+  --blockquote-color: var(--mjf-ink-soft);
+  --table-row-alt-bg: rgba(255, 255, 255, .03);
+  --button-bg: var(--mjf-accent);
+
+  --sidebar-bg: var(--mjf-bg-soft);
+  --sidebar-border-color: var(--mjf-line);
+  --sidebar-link-color: var(--mjf-ink-soft);
+  --sidebar-name-font-weight: 700;
+  --sidebar-group-title-color: var(--mjf-ink-mute);
+  --sidebar-group-title-font-size: 12px;
+  --sidebar-group-title-font-weight: 700;
+  --sidebar-group-spacing: 1.4rem;
+
+  --navbar-link-color: var(--mjf-ink-soft);
+}
+
+/* The gallery's two coloured glows, repositioned over the content column
+   rather than the sidebar. Fixed, so a long article does not drag them. */
+body {
+  background-color: var(--mjf-bg);
+  background-image:
+    radial-gradient(1200px 640px at 70% -10%, var(--mjf-glow-1), transparent 60%),
+    radial-gradient(900px 520px at 100% 2%, var(--mjf-glow-2), transparent 55%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+/* The gallery's signature: one gradient headline per page. Article titles only —
+   sub-headings stay plain so the page still has a hierarchy. */
+.markdown-section > h1 {
+  background: linear-gradient(120deg, #fff 20%, #b9a8ff 55%, #6ee7df 95%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: -.02em;
+  font-weight: 800;
+}
+
+/* Docsify wraps every heading in a self-link and hides that link's underline by painting it
+   transparent rather than removing it. A transparent underline is still part of the clip region
+   for background-clip:text, so the gradient above would paint straight through it and put a
+   coloured rule under the title. Remove the decoration instead of recolouring it. */
+.markdown-section > h1 .anchor {
+  text-decoration: none;
+}
+
+.sidebar-nav .group-title {
+  text-transform: uppercase;
+  letter-spacing: .1em;
+}
+
+/* --- Light mode ------------------------------------------------------------
+   Dark is the base, because that is what the gallery looks like: it is what
+   the rules above give anyone whose browser expresses no preference. In
+   practice browsers report "light" when the operating system is in light
+   mode, and those readers get the palette below instead. Only the palette
+   moves. Code blocks deliberately stay dark in both schemes, which is also
+   why the dark add-on's syntax colours — tuned for a dark background — never
+   need restoring here. */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --mjf-bg:       #ffffff;
+    --mjf-bg-soft:  #f7f8fc;
+    --mjf-card:     #f2f4fa;
+    --mjf-line:     #e1e6f2;
+    --mjf-ink:      #171c2b;
+    --mjf-ink-soft: #4a5468;
+    --mjf-ink-mute: #6b7488;
+    --mjf-glow-1:   rgba(124, 92, 255, .10);
+    --mjf-glow-2:   rgba(41, 208, 196, .08);
+
+    /* #7c5cff reaches only 4.35:1 on white, so interactive text uses a darker
+       mix of the same hue (6.7:1). The brand purple stays on the glows. */
+    --theme-color: #5b3fd6;
+    --strong-color: #0b0f1a;
+    --link-underline-color: var(--theme-color);
+    --link-color-hover: var(--theme-color);
+    --code-color: #5b3fd6;
+    --codeblock-bg: #0b0f1a;
+    --codeblock-color: #eef2ff;
+    --mark-bg: #fef08a;
+    --mark-color: #171c2b;
+    --table-row-alt-bg: rgba(11, 15, 26, .03);
+  }
+
+  .markdown-section > h1 {
+    background: none;
+    color: var(--strong-color);
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+/* --- Phone ----------------------------------------------------------------
+   The help centre is read on the same phones the forms are answered on.
+   Docsify's 45px desktop gutter is most of the screen at 360px; 16px is the
+   gutter the rest of this product uses. */
+@media (max-width: 640px) {
+  :root {
+    --content-margin-inline: 16px;
+    --sidebar-width: min(280px, 86vw);
+  }
+  /* Deliberately not touched: --sidebar-link-spacing. It is the gap between navigation rows, not
+     the height of one, so raising it separates the targets without enlarging them. Docsify's own
+     26px row already clears WCAG 2.2 AA target size (24x24), and padding the links instead would
+     mean overriding the vendor theme's layout for no accessibility gain. */
+
+  /* A wide table or a long code line must scroll inside its own box rather
+     than making the whole page scroll sideways. */
+  .markdown-section table,
+  .markdown-section pre {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
