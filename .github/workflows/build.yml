@@ -222,7 +222,8 @@ jobs:
       # #211. The defect class here is invisible to everything else in this repo: an exact version in
       # a `peerDependencies` block is a string only the CONSUMING host's npm resolver ever evaluates.
       # pnpm reads peer ranges here (`auto-install-peers=true`) but never has to CHOOSE on this one:
-      # packages/Angular anchors @angular/cdk at exactly 21.1.3 in devDependencies, which satisfies
+      # packages/Angular anchors @angular/cdk at exactly one patch in devDependencies (21.2.14 today,
+      # 21.1.3 when #211 shipped), which satisfies
       # the exact peer and the caret alike, so no resolver in this repo can tell them apart and no
       # unit test can reach the difference. `@angular/cdk` shipped
       # pinned to one patch in six consecutive releases behind that blind spot, and every host not on
