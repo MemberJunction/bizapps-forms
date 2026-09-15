@@ -71,6 +71,17 @@ All seven required checks run on it, because the App-authored push started them.
 that matters: it is the only point where a human looks at the consolidated seed, the computed
 version, and the CHANGELOGs before any of it is permanent.
 
+**Give it ten minutes, and do not read the wait as a hang.** This pull request is slower than any
+feature PR, for a reason: several gates filter their expensive work on what the diff touches, and a
+diff against `main` spans everything since the last release. On `v0.11.0` `distribution-gate` took
+9m41s against 20s on a feature PR (its mutant suite actually ran), and `host-truth` 8m9s.
+`build-and-test` is unaffected at ~3m.
+
+The diff is also too large for `gh pr diff` (over 300 files). Review the bump instead, which is the
+part a human can actually judge — `git diff --name-only origin/next origin/release/vX.Y.Z` should be
+the consumed changesets, five `package.json`, five `CHANGELOG.md`, the lockfile and `mj-app.json`,
+and **nothing** under `migrations/`, `metadata/` or any `src/`.
+
 Merge it with a **merge commit**.
 
 ## 3. Publishing happens by itself
@@ -137,9 +148,27 @@ never satisfy a required status check: checks are evaluated against the check ru
 being *introduced*, and a push introduces a SHA the remote has never seen. That finding still stands
 and this design never pushes to a protected branch. What `#177` also concluded — that routing the
 work through workflow-opened pull requests needed a credential this repo does not have — was true when
-written and is not true now: the App credential is visible to this repository today. The release ran
-by hand in the interim and was never actually executed; `v0.10.0` was the last release, cut by the
-automation `#177` removed.
+written and is not true now: the App credential is visible to this repository today.
+
+**First executed on 2026-09-15, for `v0.11.0`.** Between `#177` and `#218` the release was a hand-run
+runbook that was never once carried out, so `v0.10.0` (2026-08-14) stood as the last release for a
+month. Everything above has now run end to end. Two defects surfaced on that first run, both in the
+release machinery rather than in the product, and both invisible to the seven required checks because
+neither fires on a pull request into `next`:
+
+- **`#225`** — `codegen-append-gate` is required on `main` and diffs from the pull request's base.
+  For a release that base is `main`, hundreds of commits back, and its banner rule applies only to
+  files the diff *adds* — so every migration merged since the last release read as newly added and
+  the four predating the gate failed a check nobody can bypass. The base is now resolved from the
+  branch the ref is aimed at.
+- **`#226`** — `actions/checkout` defaults to `persist-credentials: true`, which writes an
+  `extraheader` carrying `GITHUB_TOKEN` into the local git config. It outranks credentials embedded
+  in a remote's URL, so the release branch was pushed as `github-actions[bot]` rather than as the App
+  and refused with a 403. `release-prep.yml` no longer persists a credential; `publish.yml` still
+  must, because it pushes the tag through `origin` (`#229`).
+
+Expect the first run after a long gap to find something similar. Nothing in either failure reached
+npm: both stopped before `Publish to npm`, which is what every gate sitting ahead of it is for.
 
 ## When something goes wrong
 
@@ -147,6 +176,8 @@ automation `#177` removed.
 |---|---|
 | A step fails to mint the App token | Dispatch **Verify the release App token** — read-only, and it names which half is broken. |
 | Publish run is red with an open `chore/backmerge-v*` PR | Should not happen — red means the PR could **not** be opened. Read the failed step. |
-| Some packages published, others did not | `changeset publish` works concurrently and expects a retry. Re-run the workflow; it publishes the rest and tags. |
+| Some packages appear published and others do not, right after a green run | **Wait three minutes and look again before doing anything.** npm's packument is eventually consistent: after `v0.11.0` the registry served `0.11.0` for one package and `0.10.0` for four, and converged over ~3 minutes. Read the `Publish to npm` step's own output — `changeset publish` names every package it published — and trust that over the registry. |
+| Some packages genuinely did not publish (the step's output says so, or they are still absent well after the run) | `changeset publish` works concurrently and expects a retry. Re-run the workflow; `release-plan.mjs` asks *publish* and *tag* separately, so it finishes the job rather than reporting a green no-op. |
+| A push in the release path is refused with a 403 naming `github-actions[bot]` | The push used the ambient token, not the App, whatever its remote URL says — `actions/checkout`'s persisted `extraheader` outranks URL credentials. See `#226` and `#229`. |
 | The back-merge branch exists at an unexpected SHA | The workflow refuses to force-push over it, because someone may have resolved conflicts there. Delete the branch or open the PR by hand. |
 | `release:plan` says the seed is owed | Step 0. `migrations/README.md`. |
