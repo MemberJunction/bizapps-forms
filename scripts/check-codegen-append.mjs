@@ -90,6 +90,50 @@ export const OUTPUT_SHIPPED_LATER = new Map([
     'V202609141900__v0.12.x__Form_Response_Distribution_Metadata.sql']],
 ]);
 
+/**
+ * The branch every migration is introduced on.
+ *
+ * A change into `main` is a release or a back-merge: by construction it carries nothing `next` does
+ * not already have. So `main` is the wrong commit to ask "what does this introduce?" from -- see
+ * resolveCheckBase.
+ */
+export const INTEGRATION_BRANCH = 'next';
+
+/**
+ * The commit CHECK 2 diffs FROM.
+ *
+ * Identity for anything aimed at `next`: a feature pull request's base and a push range both start
+ * somewhere already on the branch, which is the invariant the `isNew` rule needs.
+ *
+ * For anything aimed at `main` it is the tip of `next` instead. `main` is hundreds of commits
+ * behind, and `--diff-filter=A` against it reports every migration merged since the last release as
+ * newly ADDED -- relighting the four that predate this gate and cannot be repaired in place, because
+ * migrations/README.md forbids editing a merged migration. Diffing from
+ * `next` asks the question that is actually under review: what does this ref introduce that the
+ * integration branch does not already carry? For a release or a back-merge that is nothing. For a
+ * hotfix committed straight onto `main` it is the hotfix's own migration, which still fires.
+ */
+export function resolveCheckBase(baseSha, targetBranch, cwd) {
+  if (targetBranch !== 'main') return baseSha;
+  for (const ref of [`refs/remotes/origin/${INTEGRATION_BRANCH}`, `refs/heads/${INTEGRATION_BRANCH}`]) {
+    try {
+      return execFileSync('git', ['rev-parse', '--verify', ref], {
+        cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    } catch {
+      // Deliberate: an absent spelling is not an error, it is the reason to try the next one. The
+      // exhausted case throws below, with both spellings and the remedy named.
+    }
+  }
+  throw new Error(
+    `This ref is aimed at main, so CHECK 2's base must be the tip of '${INTEGRATION_BRANCH}' -- and ` +
+      `neither refs/remotes/origin/${INTEGRATION_BRANCH} nor refs/heads/${INTEGRATION_BRANCH} ` +
+      `resolves in ${cwd}. Fetch it first (\`git fetch --no-tags origin ${INTEGRATION_BRANCH}\`). ` +
+      `Diffing against main instead would report every migration merged since the last release as ` +
+      `newly added and relight the ones that predate this gate.`
+  );
+}
+
 /** Strip line and block comments so prose naming a table never trips a check. */
 export function stripSqlComments(sql) {
   return sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '');
@@ -682,7 +726,7 @@ export function readAt(sha, relPath, cwd) {
 }
 
 function main() {
-  const [, , baseSha, headSha] = process.argv;
+  const [, , rawBaseSha, headSha, targetBranch] = process.argv;
   const cwd = process.cwd();
   const violations = [];
 
@@ -698,7 +742,24 @@ function main() {
   }
 
   // CHECK 2 — only when given a range.
-  if (baseSha && headSha) {
+  if (rawBaseSha && headSha) {
+    // Which commit the range starts at is a decision, not an input — see resolveCheckBase. It is
+    // made here rather than in the workflow so the spec can pin it: a decision that only runs
+    // during a release cannot be proven by running a release.
+    let baseSha;
+    try {
+      baseSha = resolveCheckBase(rawBaseSha, targetBranch, cwd);
+    } catch (error) {
+      console.error(`::error::${error.message}`);
+      process.exit(1);
+    }
+    if (baseSha !== rawBaseSha) {
+      console.log(
+        `::notice::Base retargeted from ${rawBaseSha} to ${INTEGRATION_BRANCH}@${baseSha}: a change ` +
+          `into main introduces no migration next does not already carry.`
+      );
+    }
+
     let changed, added;
     try {
       changed = changedMigrations(baseSha, headSha, cwd);
