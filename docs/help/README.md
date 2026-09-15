@@ -9,6 +9,11 @@ needs a developer.
 
 ## Start here
 
+New to MJ Forms? Start with [Create your first form](get-started/first-form.md): about ten minutes,
+ending with a real answer from a real link, which is the fastest way to understand the rest of this.
+
+- [Get started](get-started/first-form.md) — one form, start to finish, and a tour of where
+  everything lives.
 - [Glossary](reference/glossary.md) — every word this help uses that you might not already have a
   meaning for, in the sense MJ Forms means it.
 
@@ -22,8 +27,6 @@ needs a developer.
   the commit that adds the first article it links to. When this comment is empty, delete it, and
   put the "The sections" heading back above the list.
 
-  - [Get started](get-started/first-form.md) — one form, start to finish, and a tour of where
-    everything lives.
   - [Build](build/add-and-arrange-questions.md) — questions, question types, required answers,
     sections, logic, scoring, templates and AI drafting.
   - [Design](design/brand-a-form.md) — make the form look like it came from you, and see it on a
@@ -37,10 +40,6 @@ needs a developer.
   - [Reference](reference/glossary.md) — the words this help uses, the questions respondents send
     you, and what MJ Forms cannot do yet.
 
-  And the opening line that goes back above them, once get-started/first-form.md exists:
-
-  New to MJ Forms? [Your first form](get-started/first-form.md) takes about ten minutes and ends
-  with a real answer from a real link, which is the fastest way to understand the rest of this.
 -->
 
 ## Not what you were looking for?

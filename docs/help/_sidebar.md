@@ -23,6 +23,10 @@
      article, move its line out of that comment and into the list below, in the same commit.
 -->
 
+- Get started
+  - [Create your first form](/get-started/first-form.md)
+  - [Where everything lives](/get-started/where-everything-lives.md)
+
 - Reference
   - [Glossary](/reference/glossary.md)
 
@@ -30,10 +34,6 @@
   THE PLANNED RUNNING ORDER — fixed once, here, rather than renegotiated seven times by seven
   contributors appending to the end of a file. Each line moves up into the list above in the commit
   that adds its article. When this comment is empty, delete it.
-
-  - Get started
-    - [Your first form](/get-started/first-form.md)
-    - [Where everything lives](/get-started/where-everything-lives.md)
 
   - Build
     - [Add and arrange questions](/build/add-and-arrange-questions.md)
