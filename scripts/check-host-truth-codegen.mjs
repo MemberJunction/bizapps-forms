@@ -128,3 +128,190 @@ export function workingDatabaseName({ envFileText, processEnv }) {
   const assignment = /^[ \t]*DB_DATABASE[ \t]*=[ \t]*(['"]?)([^'"\n#]+?)\1[ \t]*$/m.exec(envFileText ?? '');
   return assignment ? assignment[2] : null;
 }
+
+const require = createRequire(import.meta.url);
+
+/**
+ * Per-step ceilings. The core chain is 85 migrations and took 4m11s on a developer laptop; a cold CI
+ * runner is slower. Capped rather than open-ended so a hung child is reported as a hung child.
+ */
+const STEP_TIMEOUT_MS = { migrateCore: 45 * 60_000, migrateApp: 15 * 60_000, codegen: 30 * 60_000 };
+
+/** Where CodeGen writes its capture — read from mj.config.cjs so this decision lives in one place. */
+function captureDirectory() {
+  const folder = require(path.join(REPO_ROOT, 'mj.config.cjs'))?.SQLOutput?.folderPath;
+  if (!folder) {
+    throw new Error('mj.config.cjs has no SQLOutput.folderPath, so there is no capture folder to read.');
+  }
+  return path.resolve(REPO_ROOT, folder);
+}
+
+function listCaptures(directory) {
+  if (!existsSync(directory)) return [];
+  return readdirSync(directory).filter((name) => name.endsWith('.sql'));
+}
+
+/**
+ * The MJ CLI, never bare. `/opt/homebrew/bin/mj` is two majors behind the pinned one and would run a
+ * 5.x CLI against a 6.1 database without saying so.
+ */
+function mjCommand() {
+  const local = path.join(REPO_ROOT, 'node_modules', '.bin', 'mj');
+  if (existsSync(local)) return { command: local, prefix: [] };
+  return { command: 'npx', prefix: ['--no-install', 'mj'] };
+}
+
+/**
+ * Run one `mj` step. Progress goes straight to our stderr so a long chain is watchable; stdout is
+ * captured because that is where the CLI puts its findings.
+ */
+function runMj({ label, args, database, timeout }) {
+  const { command, prefix } = mjCommand();
+  process.stderr.write(`\n── ${label}\n`);
+  const child = spawnSync(command, [...prefix, ...args], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    timeout,
+    // dotenv does not overwrite a variable already in the environment, so this — not an edit to
+    // .env — is what points the CLI at the clean room.
+    env: { ...process.env, DB_DATABASE: database },
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  if (child.error?.code === 'ETIMEDOUT') {
+    throw new Error(`${label}: no answer within ${Math.round(timeout / 60_000)} minutes — giving up rather than waiting forever.`);
+  }
+  if (child.error) throw new Error(`${label}: could not run ${command} — ${child.error.message}`);
+  const stdout = child.stdout ?? '';
+  process.stdout.write(stdout);
+  if (child.status !== 0) {
+    throw new Error(
+      `${label}: mj exited ${child.status}.\n` +
+        (stdout.trim() ? `Its last words on stdout:\n${stdout.trim().split('\n').slice(-15).join('\n')}\n` : '') +
+        'If the failure mentions "The login already has an account under a different user name", the ' +
+        'database was not created owned by [sa] — see docs/database-operations.md §4.',
+    );
+  }
+  return stdout;
+}
+
+function parseArgs(argv) {
+  const options = { database: null, commonMigrations: '../bizapps-common/migrations', tasksMigrations: '../bizapps-tasks/migrations', coreTag: null };
+  const byFlag = { '--database': 'database', '--common-migrations': 'commonMigrations', '--tasks-migrations': 'tasksMigrations', '--core-tag': 'coreTag' };
+  for (let i = 0; i < argv.length; i += 2) {
+    const key = byFlag[argv[i]];
+    if (!key) throw new Error(`Unknown option ${argv[i]}. Known: ${Object.keys(byFlag).join(', ')}.`);
+    if (argv[i + 1] === undefined) throw new Error(`${argv[i]} needs a value.`);
+    options[key] = argv[i + 1];
+  }
+  return options;
+}
+
+/** Everything that must be true before a single migration runs. */
+function checkPreconditions(options) {
+  if (!options.database) {
+    throw new Error(
+      'A clean-room database name is required: --database <name>.\n' +
+        'It must already exist, be EMPTY, and be owned by [sa]. Create one with:\n' +
+        "  docker exec sql-mj-it /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$DB_PASSWORD\" -C -Q \\\n" +
+        '    "CREATE DATABASE [MJ_HostTruth]; ALTER AUTHORIZATION ON DATABASE::[MJ_HostTruth] TO [sa];"',
+    );
+  }
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(options.database)) {
+    throw new Error(`--database ${JSON.stringify(options.database)} is not a plain identifier; refusing to pass it on.`);
+  }
+  const envPath = path.join(REPO_ROOT, '.env');
+  const working = workingDatabaseName({
+    envFileText: existsSync(envPath) ? readFileSync(envPath, 'utf8') : null,
+    processEnv: process.env,
+  });
+  if (working && working === options.database) {
+    throw new Error(
+      `--database ${options.database} is the database this checkout already works against. A clean-room ` +
+        'build would run every migration into it; refusing. Name a throwaway database instead.',
+    );
+  }
+  for (const [what, dir] of [
+    ['this repo', path.join(REPO_ROOT, 'migrations')],
+    ['bizapps-common (--common-migrations)', path.resolve(REPO_ROOT, options.commonMigrations)],
+    ['bizapps-tasks (--tasks-migrations)', path.resolve(REPO_ROOT, options.tasksMigrations)],
+  ]) {
+    if (!existsSync(dir)) {
+      throw new Error(
+        `No migrations directory for ${what} at ${dir}. Forms' baseline cannot apply without common ` +
+          'and tasks — FormResponse.RespondentPersonID has a hard FK to MJ_BizApps_Common: People.',
+      );
+    }
+  }
+}
+
+function main() {
+  const options = parseArgs(process.argv.slice(2));
+  checkPreconditions(options);
+
+  const coreTag = options.coreTag ?? coreMigrationTag(require(path.join(REPO_ROOT, 'mj-app.json')).mjVersionRange);
+  const capture = captureDirectory();
+  const before = listCaptures(capture);
+
+  console.log(`Host-truth build of ${options.database}: core ${coreTag}, then common, tasks, forms, then CodeGen.`);
+
+  const coreOut = runMj({ label: `core migrations (${coreTag})`, args: ['migrate', '-t', coreTag], database: options.database, timeout: STEP_TIMEOUT_MS.migrateCore });
+  const start = readMigrateStart(coreOut);
+  if (!start.fresh) {
+    throw new Error(
+      `${options.database} is not empty — mj reported ${start.installedVersion ? `installed migration version ${start.installedVersion}` : 'no fresh-install line at all'}. ` +
+        'A clean room must start from nothing, or it proves nothing. Drop and recreate it.',
+    );
+  }
+
+  runMj({ label: 'bizapps-common migrations', args: ['migrate', '--schema', '__mj_BizAppsCommon', '--dir', options.commonMigrations], database: options.database, timeout: STEP_TIMEOUT_MS.migrateApp });
+  runMj({ label: 'bizapps-tasks migrations', args: ['migrate', '--schema', '__mj_BizAppsTasks', '--dir', options.tasksMigrations], database: options.database, timeout: STEP_TIMEOUT_MS.migrateApp });
+  runMj({ label: 'this repo\'s migrations', args: ['migrate', '--schema', '__mj_BizAppsForms', '--dir', './migrations'], database: options.database, timeout: STEP_TIMEOUT_MS.migrateApp });
+
+  const codegenOut = runMj({
+    label: 'CodeGen, database pass only',
+    // --skip-commands: the AFTER commands build four packages, which makes the exit code report
+    // unrelated build failures. --no-ai: advanced generation is LLM-driven and an assertion cannot
+    // rest on non-reproducible output.
+    args: ['codegen', '--skipfiles', '--skip-commands', '--no-ai', '--no-banner', '--format', 'json'],
+    database: options.database,
+    timeout: STEP_TIMEOUT_MS.codegen,
+  });
+  const result = readCliResult(codegenOut);
+  if (!result || result.command !== 'codegen' || result.success !== true || result.data?.skippedDb !== false) {
+    throw new Error(
+      'Could not confirm CodeGen ran its database pass, so its silence proves nothing. Its result ' +
+        `document was ${result ? JSON.stringify(result) : 'absent from stdout'}.`,
+    );
+  }
+
+  const appeared = newCaptureFiles({ before, after: listCaptures(capture) });
+  if (appeared.length === 0) {
+    console.log(`\n✅ Converged. What this repo ships builds a database CodeGen wants to change nothing about.`);
+    console.log(`   ${options.database} is still there; drop it when you are done with it.`);
+    return;
+  }
+
+  console.error(`\n❌ NOT converged. CodeGen wants ${appeared.length} change set(s) that no migration ships:`);
+  for (const name of appeared) {
+    const file = path.join(capture, name);
+    console.error(`\n   ${path.relative(REPO_ROOT, file)}`);
+    for (const { label, count } of summarizeCapture(readFileSync(file, 'utf8'))) {
+      console.error(`     ${String(count).padStart(4)} × ${label}`);
+    }
+  }
+  console.error(
+    '\nEvery line of that is SQL a host would need and will never run — `mj app install` excludes ' +
+      '__mj_BizAppsForms from the host\'s CodeGen, so migrations/ is the only channel. Append the ' +
+      'output to the migration that caused it (docs/database-operations.md §2), or ship a new one.',
+  );
+  process.exitCode = 1;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    main();
+  } catch (err) {
+    console.error(`\n❌ ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+  }
+}

@@ -43,6 +43,7 @@
     "lint:paths-touched:test": "node --test scripts/check-paths-touched.spec.mjs",
     "check:release-seed": "node scripts/check-release-seed-coverage.mjs",
     "check:seed-cadence": "node scripts/check-release-seed-cadence.mjs",
+    "check:host-truth": "node scripts/check-host-truth-codegen.mjs",
     "check:host-truth:test": "node --test scripts/check-host-truth-codegen.spec.mjs",
     "smoke:respondent": "node smoke/respondent-path.mjs",
     "smoke:ownership": "node smoke/session-ownership-path.mjs",
