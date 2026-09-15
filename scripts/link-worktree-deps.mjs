@@ -150,7 +150,14 @@ function isBrokenLink(path) {
 }
 
 mirror(join(MAIN, 'node_modules'), join(WORKTREE, 'node_modules'));
-for (const dir of ['Entities', 'Actions', 'Server', 'Angular']) {
+// CoreEntitiesServer belongs here even though nothing imports it directly: it publishes
+// `@mj-biz-apps/forms-core-entities-server`, which matches the `@mj-biz-apps/forms-*` filter, and
+// turbo gives `typecheck` `dependsOn: ["^build"]` — so every worktree typecheck builds it. Leaving it
+// out is invisible until someone runs `turbo typecheck --force`: with the cache warm turbo replays a
+// result produced in a DIFFERENT worktree and reports FULL TURBO, and forced it fails with
+// `WARN Local package.json exists, but node_modules missing` on a package the reader never named.
+// Green-only-because-cached is the failure mode this repo keeps re-fixing.
+for (const dir of ['Entities', 'Actions', 'Server', 'Angular', 'CoreEntitiesServer']) {
   mirror(join(MAIN, 'packages', dir, 'node_modules'), join(WORKTREE, 'packages', dir, 'node_modules'));
 }
 mirror(join(MAIN, 'apps', 'MJAPI', 'node_modules'), join(WORKTREE, 'apps', 'MJAPI', 'node_modules'));

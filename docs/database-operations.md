@@ -211,10 +211,46 @@ mj codegen --skipfiles                                            # the detector
 Common and tasks are **not optional**: `FormResponse.RespondentPersonID` has a hard FK to
 `MJ_BizApps_Common: People`, so Forms' baseline cannot apply without them.
 
-Read the resulting diff rather than reverting it — it is the repo telling you what your working
+Read the resulting capture rather than reverting it — it is the repo telling you what your working
 database had been hiding.
 
-> A clean-room run currently stops at `V202608252340`. See issue #155.
+### The same thing, as a check
+
+`npm run check:host-truth` runs exactly the chain above and turns the last step into an assertion:
+CodeGen must write **no capture file at all**. That is the only question that reads the same truth a
+host does — every other gate here reads the repository — and it is the question nothing was asking
+when #201 and #219 shipped.
+
+```bash
+# One empty database, owned by [sa], and a DIFFERENT one each time. The check never creates or drops
+# a database, and it refuses the one named in .env before it spawns anything — but its "must be
+# empty" check can only run AFTER `mj migrate` has reported the watermark, and that same command
+# applies everything newer than it. So a non-empty database that is not the .env one gets the core
+# chain applied and is refused afterwards. Drop MJ_HostTruth between runs.
+docker exec sql-mj-it /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$DB_PASSWORD" -C -Q \
+  "CREATE DATABASE [MJ_HostTruth]; ALTER AUTHORIZATION ON DATABASE::[MJ_HostTruth] TO [sa];"
+
+npm run check:host-truth -- --database MJ_HostTruth \
+  --common-migrations ../bizapps-common/migrations \
+  --tasks-migrations ../bizapps-tasks/migrations
+```
+
+It takes ~7 minutes, exits 0 on `✅ Converged`, and on failure names every statement CodeGen wanted —
+which is the SQL a host would need and will never run, because `mj app install` excludes
+`__mj_BizAppsForms` from the host's CodeGen. `.github/workflows/host-truth-gate.yml` runs it nightly,
+on manual dispatch, and on pull requests touching any of the eight paths it reads: `migrations/`,
+`metadata/`, `mj.config.cjs`, `mj-app.json`, `package.json`, `pnpm-lock.yaml`, `scripts/` and
+`.github/workflows/`.
+
+**It runs CodeGen twice, and only the second run is the verdict.** A clean room is not ours alone —
+Forms' baseline needs common and tasks for its foreign keys, and at the pinned CLI those schemas'
+own unshipped metadata lands in the capture too (measured: 7 `EntityField` writes for
+`MJ_BizApps_Common: Organizations` and `Activity Sync Run Details`). It cannot be filtered out after
+the fact, because the capture writes `${mjSchema}.EntityField` keyed by an opaque `EntityID` and
+names no schema anywhere; filtering on our own `${flyway:defaultSchema}` placeholder instead would
+let a metadata-only defect — #219's exact shape — through. So the first pass runs *before* our
+migrations and settles everything we do not own, and the second pass can only report what applying
+our migrations left unsaid.
 
 ---
 
