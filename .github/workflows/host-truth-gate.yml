@@ -99,21 +99,15 @@ jobs:
           --health-start-period 30s
 
     steps:
-      # A token for the two PRIVATE sibling repositories. GITHUB_TOKEN is scoped to this repository
-      # only, so it cannot read them; the org App already used by publish.yml can. Least privilege,
-      # named here rather than inherited: read, and only these two repositories.
-      - name: Mint a token for the sibling repositories
-        id: sibling-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ vars.APP_CLIENT_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: MemberJunction
-          repositories: bizapps-common,bizapps-tasks
-          permission-contents: read
-
       # The three checkouts sit side by side, exactly as a developer's machine has them, so the
       # script's own ../bizapps-*/migrations defaults are what runs here too.
+      #
+      # The siblings need NO token. All three repositories are public — CLAUDE.md already says so of
+      # the siblings ("free OSS and part of our stack") — and `actions/checkout` defaults its `token`
+      # to `github.token`, which reads any public repository. An earlier revision minted an org
+      # GitHub App token here on the premise that they were private; they are not, and that step was
+      # the one thing in this job that a pull request from a fork could never run, because forks are
+      # given no secrets. Nothing else in the job needs one.
       - uses: actions/checkout@v4
         with:
           path: bizapps-forms
@@ -121,13 +115,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: MemberJunction/bizapps-common
-          token: ${{ steps.sibling-token.outputs.token }}
           path: bizapps-common
 
       - uses: actions/checkout@v4
         with:
           repository: MemberJunction/bizapps-tasks
-          token: ${{ steps.sibling-token.outputs.token }}
           path: bizapps-tasks
 
       # Must precede setup-node: `cache: 'pnpm'` needs pnpm already on PATH.
