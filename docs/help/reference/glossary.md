@@ -54,9 +54,13 @@ checked in order and the first one that matches wins.
 
 ## Partial response
 
-What you have from someone who started your form and did not finish. Partial responses sit alongside
-finished ones, marked **Partial**. You only collect them from a page where you have turned on
-**Save progress here**.
+What you have from someone who started your form and did not finish. MJ Forms saves one on its own
+as a respondent answers, whether or not you asked for it; **Save progress here** banks a page the
+moment they leave it rather than waiting for that to come round.
+
+A partial response is not a row on the **Responses** tab and is not in the export. Where you see
+these people is the count of how many started and did not finish, and the chart of where they
+stopped: [Read the insights](../responses/insights.md).
 
 ## Preview
 
@@ -140,3 +144,12 @@ was actually asked.
 
 An optional screen shown before the first question, with a title, a description and a button to
 begin. Use it to say who is asking and how long the form takes.
+
+## Related
+
+- [Questions respondents ask](respondent-questions.md) — several of these words as a respondent
+  meets them, in a page you can forward.
+- [What MJ Forms cannot do yet](not-yet.md) — the terms that are not defined here because the thing
+  itself is not there.
+- [Where everything lives](../get-started/where-everything-lives.md) — the surfaces these words
+  describe, and which one does what.

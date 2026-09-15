@@ -66,3 +66,5 @@ the same place, for as long as it is stored.
 - [Export responses](export.md) — why the file itself is not in the spreadsheet.
 - [The 25 question types](../build/question-types.md) — **File upload**, **Doodle**, and what each
   one asks a respondent to do.
+- [Questions respondents ask](../reference/respondent-questions.md) — the refusal messages in the
+  respondent's own words, for when one writes to you about a file that would not go.

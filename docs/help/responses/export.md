@@ -93,3 +93,5 @@ as they stand at that moment.
   spreadsheet at all.
 - [Where everything lives](../get-started/where-everything-lives.md) — why the export is on the
   dashboard and not on the tab.
+- [What MJ Forms cannot do yet](../reference/not-yet.md) — the AI scores and the half-finished
+  responses this file leaves out, and what to do instead of waiting for them.

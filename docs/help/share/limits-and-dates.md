@@ -71,3 +71,5 @@ printed starts working again.
   different limits.
 - [Require a captcha](captcha.md) — the other setting in this list, and the one worth reading before
   you touch it.
+- [Questions respondents ask](../reference/respondent-questions.md) — the same refusals from the
+  respondent's side, ready to forward to somebody who was turned away.

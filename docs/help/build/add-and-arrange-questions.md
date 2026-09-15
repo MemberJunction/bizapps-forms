@@ -66,3 +66,5 @@ see [Show, skip and branch](logic.md).
   rejecting one in the wrong shape.
 - [Add sections and screens](sections-and-screens.md) — splitting a long form into pages, and what
   the respondent sees before the first question and after the last.
+- [Preview on phone and tablet](../design/preview.md) — reading your order and your wording at the
+  width most respondents will actually meet them at.

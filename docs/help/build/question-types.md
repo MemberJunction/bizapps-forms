@@ -109,3 +109,6 @@ reason to change your mind about which one to use.
 - [Require and check answers](required-and-validation.md) — making an answer compulsory, and
   rejecting one that is the wrong shape.
 - [Score answers](scoring.md) — points per option, and routing by the total.
+- [What MJ Forms cannot do yet](../reference/not-yet.md) — for the type that is not on this list, a
+  payment question among them, and for a question whose answer you wanted worked out from the
+  others.

@@ -80,3 +80,5 @@ button that fixes it.
 - [Set limits and dates](limits-and-dates.md) — stopping a link at a number of responses or on a
   date, and what a respondent sees when it stops.
 - [Embed in your own site](embed.md) — the same link shown inside a page of your own.
+- [Questions respondents ask](../reference/respondent-questions.md) — what somebody opening this
+  address actually sees when it misbehaves, written so you can forward it.

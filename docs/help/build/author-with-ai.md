@@ -67,3 +67,5 @@ Delete the form, write a longer brief naming the questions you know you want, an
 - [Reuse a form as a template](templates.md) — the other way to skip the empty page, and where a
   good draft should end up.
 - [The 25 question types](question-types.md) — checking that each question is the type you wanted.
+- [Publish a form](../share/publish.md) — the step that turns an edited draft into something people
+  can answer.

@@ -21,9 +21,9 @@ question and something to see after the last.
 3. Add a sentence under the title if the page needs one. The box says
    **Add a short description for this section (optional)**, and the respondent reads it under the
    heading before the first question.
-4. Turn on **Save progress here** on any section you want a half-finished response from. The hint
-   says what it does: **Save a partial response as soon as the respondent moves past this page**.
-   See below for what that means for you and for them.
+4. Turn on **Save progress here** on any section whose answers you want banked the instant a
+   respondent leaves it. The hint says what it does: **Save a partial response as soon as the
+   respondent moves past this page**. See below for what that buys you, and what it does not.
 5. Press **Add a welcome screen**, at the top of the canvas, if the form needs an introduction.
    Fill in **Title**, **Body** and **Button label** in the panel on the right; **Image** puts a
    picture above them. A form may have exactly one, and **Delete welcome screen** removes it.
@@ -35,18 +35,25 @@ question and something to see after the last.
 
 ## What a partial response means
 
-**Save progress here** is the difference between knowing somebody started and knowing nothing at
-all. With it on, the moment a respondent moves off that page their answers so far are stored as a
-[partial response](../reference/glossary.md), which you can read like any other.
+MJ Forms stores a [partial response](../reference/glossary.md) on its own, as somebody answers, on
+every form. You get one whether or not you switch anything on. What **Save progress here** changes is
+the *timing*: it banks the page the moment the respondent moves off it, rather than leaving it to the
+save that runs on a timer. On a ten-page form whose first page collects contact details, that is the
+difference between reliably having those details from somebody who gave up on page six and hoping the
+timer came round before they closed the tab.
 
-Two things follow that people are surprised by.
+Three things follow that people are surprised by.
 
-- The respondent is not told. There is no account, no email and no resume link — nothing about their
-  half-finished answer is theirs to come back to. Closing the tab ends it. What you keep is a copy
-  of what they had typed when they left.
-- It is per section, not per form. Turn it on at the end of the first page and you learn who got
-  past the questions everybody answers. Turn it on everywhere and you learn where people give up,
-  which is usually the more useful thing.
+- *You cannot open one.* A partial response is saved, but it is not a row in the table on the
+  **Responses** tab, no filter reveals it, and it is not in the export. What you get is the count of
+  people who started and did not finish, and the chart of where they stopped:
+  [Read the insights](../responses/insights.md).
+- *The respondent is not told.* There is no account, no email and no link back that they can be sent.
+  Their answers return if they reopen your link in the same browser on the same device, and not
+  otherwise. What you keep is a copy of what they had typed when they left.
+- *It is per section, not per form.* Turn it on at the end of the page you would least like to lose —
+  usually the one asking who they are — and leave it off on the pages where a few seconds either way
+  costs you nothing.
 
 ## How a respondent reaches an ending
 
@@ -88,5 +95,7 @@ after they submit. An ending screen is how you replace that with something of yo
 - [Show, skip and branch](logic.md) — sending different people to different endings, and skipping
   whole sections.
 - [Add and arrange questions](add-and-arrange-questions.md) — filling the pages you have just made.
-- [Glossary](../reference/glossary.md) — *section*, *partial response*, *ending screen* and
-  *welcome screen*, in the sense MJ Forms means them.
+- [Preview on phone and tablet](../design/preview.md) — walking the welcome screen, the pages and
+  the endings in order, at the width a respondent gets.
+- [Read the insights](../responses/insights.md) — where the people who did not finish are counted,
+  and the chart your pages produce.

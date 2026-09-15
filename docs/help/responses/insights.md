@@ -141,5 +141,6 @@ are **Responses**, for the individual answers behind a number that surprised you
   **Anonymous**.
 - [Export responses](export.md) — the same responses as a file, from the same header.
 - [Add sections and screens](../build/sections-and-screens.md) — pages are what
-  **Where people stop** charts, and **Save progress here** is what makes a half-finished response
-  exist at all.
+  **Where people stop** charts, and **Save progress here** decides how promptly each one is banked.
+- [What MJ Forms cannot do yet](../reference/not-yet.md) — why this view is the only place the
+  people who did not finish are visible at all.

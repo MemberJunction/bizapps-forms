@@ -170,9 +170,20 @@ name, at the moment they can still fix it cheaply, instead of leaving it for a r
   labels occur once or twice — **Save progress here** and **Require a captcha** occur exactly once
   each — so those are checked properly. Quote the whole label wherever the product gives you one.
 - Do not bold inside a heading. Write the label in plain words there.
+- *A tooltip is on screen only while somebody is hovering, so bold one only in an article that tells
+  the reader to hover.* [Publish a form](share/publish.md) does exactly that — it says the full
+  sentence appears on hover, then quotes all four — and that instruction is what makes the bold
+  true. Bolded without it, a tooltip is a claim about text the reader is not looking at, and the
+  gate cannot tell the two cases apart: the string is in the source either way.
 - Bad examples belong in fenced or inline code. The gate skips both, which is why the wrong example
   two bullets above could be written at all. Use that escape hatch for anything you are quoting *as*
   broken.
+- *A string in backticks or a fence is exempt from the gate, so check it against the source by hand
+  — every time.* The exemption is about what gets rendered, not about how sure you are, and it
+  inverts the pressure in the direction nobody expects: a reorder banner quoted in
+  `build/add-and-arrange-questions.md` sat inside backticks and therefore got *less* scrutiny than
+  the labels around it, not more, and one of the sentences was one the product never produces. Read
+  a fenced quotation out of the three source roots exactly as you would read a bold span.
 - The gate skips HTML comments for the same reason it skips code: nothing inside one is rendered, so
   nothing inside one is a claim about the product. That is not a loophole to bold through — it is
   how `_sidebar.md` and `README.md` park the articles that have not been written yet.
@@ -279,7 +290,8 @@ publishing, a payment question type, projecting responses into a queryable view,
 shown in the interface, calculated fields, quotas beyond a simple response limit, and resuming a
 half-finished response by email on another device.
 
-That list lives in exactly one article, `reference/not-yet.md`, so that it can be checked in one
+That list lives in exactly one article,
+[What MJ Forms cannot do yet](reference/not-yet.md), so that it can be checked in one
 place when something does ship. If a reader is going to go looking for a missing feature, say so
 there, plainly, and say what to do instead.
 

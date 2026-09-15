@@ -104,3 +104,5 @@ the one your respondents care about.
   and **Limit reached**.
 - [Publish a form](publish.md) — the other half of "nobody can open it", and the one this page
   cannot fix.
+- [Questions respondents ask](../reference/respondent-questions.md) — every one of these messages
+  read from the respondent's side, written so you can forward it as it stands.

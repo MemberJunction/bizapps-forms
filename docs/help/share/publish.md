@@ -94,3 +94,5 @@ one you are happy for people to be answering.
 - [Why a link is not working](why-a-link-is-not-working.md) — what each state on the **Distribute**
   tab means, and the button that fixes it.
 - [Preview on phone and tablet](../design/preview.md) — the check worth making before every publish.
+- [What MJ Forms cannot do yet](../reference/not-yet.md) — including the review step this button
+  does not have, which is the thing authors most often go looking for here.

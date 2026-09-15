@@ -58,5 +58,9 @@ and you read it in the same place.
 
 - [Where everything lives](where-everything-lives.md) — the two places MJ Forms appears, the five
   tabs inside a form, and where the export hides.
-- [Glossary](../reference/glossary.md) — published version, share link, respondent, partial
-  response, and every other word this help centre uses in a particular way.
+- [Add and arrange questions](../build/add-and-arrange-questions.md) — turning your two questions
+  into the form you actually meant to send.
+- [Read responses](../responses/read-responses.md) — more than one answer at a time, and why the
+  **Respondent** column keeps saying **Anonymous**.
+- [Glossary](../reference/glossary.md) — published version, share link, respondent, and every other
+  word this help centre uses in a particular way.

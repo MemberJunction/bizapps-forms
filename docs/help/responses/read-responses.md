@@ -49,9 +49,9 @@ submission into a person your team can find later is
 
 ## Where the half-finished responses are
 
-The table lists finished responses. Somebody who started your form and stopped is saved — when the
-page they were on has **Save progress here** turned on — but they do not arrive here as a row you
-can open.
+The table lists finished responses. Somebody who started your form and stopped *is* saved — MJ Forms
+does that on its own, on every form, without your having to switch anything on — but they never
+arrive here as a row you can open, and they are not in the export either.
 
 What you get instead is the count, next door. **Responses & Analytics** shows how many people
 started and did not finish beside how many did, and charts where they gave up:
@@ -59,7 +59,9 @@ started and did not finish beside how many did, and charts where they gave up:
 
 This also accounts for a control you may have gone looking for. The filter offering **All**,
 **Complete** and **Partial** appears only when the table holds more than one status, and today it
-never does. If you could not find it, it was not hidden from you and nothing is broken.
+never does. If you could not find it, it was not hidden from you and nothing is broken — opening a
+half-finished response is on the short list of things
+[MJ Forms cannot do yet](../reference/not-yet.md).
 
 ## What this submission did
 

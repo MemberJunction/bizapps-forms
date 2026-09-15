@@ -62,5 +62,7 @@ was a full copy, not a link back to this template.**
 
 - [Let AI draft a form](author-with-ai.md) — the other way to avoid starting from an empty page.
 - [Add and arrange questions](add-and-arrange-questions.md) — reshaping the copy once you have it.
+- [Brand a form](../design/brand-a-form.md) — the look a template carries with it, and the one thing
+  worth settling before you save one.
 - [Glossary](../reference/glossary.md) — *template*, *published version* and the rest, in the sense
   MJ Forms means them.

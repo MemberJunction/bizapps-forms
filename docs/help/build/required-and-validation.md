@@ -75,5 +75,7 @@ nothing else they have typed is lost.
 - [The 25 question types](question-types.md) — which fields each type offers, and which offer none.
 - [Show, skip and branch](logic.md) — the other half of **Question settings**: deciding who sees
   this question at all.
-- [Glossary](../reference/glossary.md) — *validation*, *required*, *respondent* and the rest, in the
-  sense MJ Forms means them.
+- [Preview on phone and tablet](../design/preview.md) — answering your own question badly, which is
+  the only way to read the refusal a respondent gets.
+- [Questions respondents ask](../reference/respondent-questions.md) — the refusals in a respondent's
+  own words, for the message you forward when one writes to you about being rejected.

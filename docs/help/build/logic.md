@@ -194,3 +194,5 @@ survives every other check.
   labels that tell you whether anybody can reach them.
 - [Score answers](scoring.md) — points per option, and using **Total score** to pick an ending.
 - [The 25 question types](question-types.md) — which type gives you which comparisons.
+- [Preview on phone and tablet](../design/preview.md) — answering as each kind of respondent in
+  turn, which is the cheapest way to find a branch that never fires.

@@ -84,6 +84,13 @@ step is not sequential.
 **Position** — **Steps that run in sequence go in this order. Background steps all start together,
 so they can only be moved among themselves.** **Earlier** and **Later** move the selected step.
 
+A step may carry one more fact, which appears beside the others rather than as a setting:
+**Also runs on part-way saves, not just on the finished submission.**, or
+**Only runs on part-way saves, never on the finished submission.** A step reading either of those
+fires on somebody who started your form and stopped, as well as — or instead of — somebody who
+submitted. Nothing on this tab sets that; a step without one of those lines runs on finished
+submissions only, which is every step you can add here.
+
 ## Removing a step
 
 **Remove this step**, then **Remove it** to confirm or **Keep it** to back out. The consequence is

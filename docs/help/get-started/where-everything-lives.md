@@ -53,5 +53,9 @@ on the form. The dashboard is for everything you do with all of them at once.
 
 - [Create your first form](first-form.md) — the whole path, from an empty form to reading your own
   test response, in about ten minutes.
+- [Export responses](../responses/export.md) — the surface this page keeps pointing at, and the one
+  people spend an afternoon looking for on the wrong tab.
+- [What MJ Forms cannot do yet](../reference/not-yet.md) — for when the thing you are hunting for is
+  not on either surface because it does not exist.
 - [Glossary](../reference/glossary.md) — the words these surfaces use, in the sense MJ Forms means
   them.

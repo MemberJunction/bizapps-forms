@@ -85,3 +85,5 @@ have given that person, because that screen is the only thing their total produc
 - [Add sections and screens](sections-and-screens.md) — writing the endings a score routes people
   to, and reading the labels that say whether anyone can reach them.
 - [The 25 question types](question-types.md) — which five types can carry points, and why.
+- [What MJ Forms cannot do yet](../reference/not-yet.md) — calculated fields, and why the total is
+  not one of them.
