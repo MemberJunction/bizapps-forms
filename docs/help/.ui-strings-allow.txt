@@ -21,6 +21,12 @@
 #   - Put the reason in a comment immediately above the entry. An entry without a reason is a bug.
 #   - Keep entries grouped and alphabetical within a group.
 #
-# There are no entries yet. The help centre currently uses 74 bold spans across 7 files, and every
-# one of them is found in the product source, which is the outcome to aim for: needing an entry
-# here should feel like a small defeat.
+# Keep the list short. Every entry here is a label nobody will ever verify against the product
+# again, so the outcome to aim for is a file with nothing in it.
+
+# The heading over the branching half of the Edit logic dialog. The template writes
+# `Then, after this {{ itemNoun }}`, and itemNoun is "question", "section" or "screen" depending
+# on what is selected — so the sentence a reader sees exists only once the dialog has been
+# rendered, and no spelling of it appears in the source. Logic is authored on a question far more
+# often than on the other two, so the question wording is the one the help centre quotes.
+Then, after this question

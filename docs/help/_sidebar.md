@@ -27,6 +27,16 @@
   - [Create your first form](/get-started/first-form.md)
   - [Where everything lives](/get-started/where-everything-lives.md)
 
+- Build
+  - [Add and arrange questions](/build/add-and-arrange-questions.md)
+  - [The 25 question types](/build/question-types.md)
+  - [Require and check answers](/build/required-and-validation.md)
+  - [Add sections and screens](/build/sections-and-screens.md)
+  - [Show, skip and branch](/build/logic.md)
+  - [Score answers](/build/scoring.md)
+  - [Reuse a form as a template](/build/templates.md)
+  - [Let AI draft a form](/build/author-with-ai.md)
+
 - Reference
   - [Glossary](/reference/glossary.md)
 
@@ -34,16 +44,6 @@
   THE PLANNED RUNNING ORDER — fixed once, here, rather than renegotiated seven times by seven
   contributors appending to the end of a file. Each line moves up into the list above in the commit
   that adds its article. When this comment is empty, delete it.
-
-  - Build
-    - [Add and arrange questions](/build/add-and-arrange-questions.md)
-    - [The 25 question types](/build/question-types.md)
-    - [Require and check answers](/build/required-and-validation.md)
-    - [Add sections and screens](/build/sections-and-screens.md)
-    - [Show, skip and branch](/build/logic.md)
-    - [Score answers](/build/scoring.md)
-    - [Reuse a form as a template](/build/templates.md)
-    - [Let AI draft a form](/build/author-with-ai.md)
 
   - Design
     - [Brand a form](/design/brand-a-form.md)
