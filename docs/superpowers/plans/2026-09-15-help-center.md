@@ -122,8 +122,22 @@ docs(help): site shell, house style and glossary
 
 **Files:**
 - Create: `scripts/check-help-docs.mjs`, `scripts/check-help-docs.spec.mjs`
-- Modify: `package.json` (add `check:help`), `.github/workflows/build.yml` (add a step to
-  `build-and-test`)
+- Modify: `package.json` (add `lint:help` and `lint:help:test`),
+  `.github/workflows/changes.yml` (add a step to `changes_and_migrations`),
+  `.github/workflows/build.yml` (add the unit-test step to `build-and-test`)
+
+**Two corrections to an earlier draft of this plan, both load-bearing:**
+
+1. **The gate goes in `changes_and_migrations`, not `build-and-test`.** `build-and-test` is guarded
+   by a path decider whose prefix list does not include `docs/`, so a pull request that only edits
+   an article would skip the job, report `skipped`, and count as passing over a gate that never
+   ran. That is the exact silently-green failure this repository documents at length in
+   `scripts/check-paths-touched.mjs`. `changes_and_migrations` is required, runs unconditionally on
+   every pull request to `next` and `main`, already sets up Node 24, and needs no dependency
+   install for a stdlib-only script.
+2. **Tests use `node --test`, not Vitest.** Every `scripts/*.spec.mjs` in this repository uses
+   Node's built-in test runner with `node:test` and `node:assert/strict`. Vitest here runs the
+   package suites, not the guard scripts.
 
 **Interfaces:**
 - Consumes: `docs/help/**/*.md`, `docs/help/_sidebar.md`, `docs/help/.ui-strings-allow.txt`,
@@ -134,61 +148,61 @@ docs(help): site shell, house style and glossary
 
 - [ ] **Step 1: Write the failing tests**
 
-`scripts/check-help-docs.spec.mjs`, following the repository's existing `scripts/*.spec.mjs`
-convention. Cover at least:
+`scripts/check-help-docs.spec.mjs`, using `node:test` and `node:assert/strict` exactly as
+`scripts/check-paths-touched.spec.mjs` and its siblings do. Cover at least:
 
 ```js
-import { describe, it, expect } from 'vitest';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
 import { extractBoldSpans, extractLinks, findUnverifiedStrings } from './check-help-docs.mjs';
 
-describe('extractBoldSpans', () => {
-  it('finds a double-asterisk span', () => {
-    expect(extractBoldSpans('Click **Publish** now.')).toEqual([{ text: 'Publish', line: 1 }]);
-  });
-  it('ignores a bold marker inside a fenced code block', () => {
-    expect(extractBoldSpans('```\n**not a label**\n```\n')).toEqual([]);
-  });
-  it('ignores inline code', () => {
-    expect(extractBoldSpans('`**literal**`')).toEqual([]);
-  });
-  it('reports the correct line number', () => {
-    expect(extractBoldSpans('a\nb\n**Save**')).toEqual([{ text: 'Save', line: 3 }]);
-  });
+test('extractBoldSpans finds a double-asterisk span', () => {
+  assert.deepEqual(extractBoldSpans('Click **Publish** now.'), [{ text: 'Publish', line: 1 }]);
 });
 
-describe('findUnverifiedStrings', () => {
-  it('passes a span present in the source', () => {
-    expect(findUnverifiedStrings({
-      spans: [{ text: 'Publish', line: 1 }], sourceText: 'x "Publish" y', allowlist: new Set(),
-    })).toEqual([]);
-  });
-  it('flags a span absent from the source', () => {
-    expect(findUnverifiedStrings({
-      spans: [{ text: 'Pubish', line: 4 }], sourceText: 'x "Publish" y', allowlist: new Set(),
-    })).toEqual([{ text: 'Pubish', line: 4 }]);
-  });
-  it('passes an allowlisted span that is absent from the source', () => {
-    expect(findUnverifiedStrings({
-      spans: [{ text: 'Page 2', line: 1 }], sourceText: '', allowlist: new Set(['Page 2']),
-    })).toEqual([]);
-  });
+test('extractBoldSpans ignores a bold marker inside a fenced code block', () => {
+  assert.deepEqual(extractBoldSpans('```\n**not a label**\n```\n'), []);
 });
 
-describe('extractLinks', () => {
-  it('finds a relative markdown link', () => {
-    expect(extractLinks('see [x](../build/logic.md)')).toContainEqual(
-      expect.objectContaining({ target: '../build/logic.md' }));
-  });
-  it('ignores an external link', () => {
-    expect(extractLinks('[x](https://example.com)')).toEqual([]);
-  });
+test('extractBoldSpans ignores inline code', () => {
+  assert.deepEqual(extractBoldSpans('`**literal**`'), []);
+});
+
+test('extractBoldSpans reports the correct line number', () => {
+  assert.deepEqual(extractBoldSpans('a\nb\n**Save**'), [{ text: 'Save', line: 3 }]);
+});
+
+test('findUnverifiedStrings passes a span present in the source', () => {
+  assert.deepEqual(findUnverifiedStrings({
+    spans: [{ text: 'Publish', line: 1 }], sourceText: 'x "Publish" y', allowlist: new Set(),
+  }), []);
+});
+
+test('findUnverifiedStrings flags a span absent from the source', () => {
+  assert.deepEqual(findUnverifiedStrings({
+    spans: [{ text: 'Pubish', line: 4 }], sourceText: 'x "Publish" y', allowlist: new Set(),
+  }), [{ text: 'Pubish', line: 4 }]);
+});
+
+test('findUnverifiedStrings passes an allowlisted span absent from the source', () => {
+  assert.deepEqual(findUnverifiedStrings({
+    spans: [{ text: 'Page 2', line: 1 }], sourceText: '', allowlist: new Set(['Page 2']),
+  }), []);
+});
+
+test('extractLinks finds a relative markdown link', () => {
+  assert.equal(extractLinks('see [x](../build/logic.md)')[0].target, '../build/logic.md');
+});
+
+test('extractLinks ignores an external link', () => {
+  assert.deepEqual(extractLinks('[x](https://example.com)'), []);
 });
 ```
 
 - [ ] **Step 2: Run them and watch them fail**
 
 ```bash
-cd /Users/sohamdesai/Projects/mj-dev/bizapps-forms && npx vitest run scripts/check-help-docs.spec.mjs
+cd /Users/sohamdesai/Projects/mj-dev/bizapps-forms && node --test scripts/check-help-docs.spec.mjs
 ```
 
 Expected: failure, because the module does not exist.
@@ -215,24 +229,40 @@ Export the three pure functions named above. Exit 0 with a one-line summary when
 - [ ] **Step 4: Run the tests and the gate**
 
 ```bash
-npx vitest run scripts/check-help-docs.spec.mjs && node scripts/check-help-docs.mjs
+node --test scripts/check-help-docs.spec.mjs && node scripts/check-help-docs.mjs
 ```
 
 Expected: tests pass, and the gate passes against the Task 1 content.
 
 - [ ] **Step 5: Wire it into `package.json` and CI**
 
-Add `"check:help": "node scripts/check-help-docs.mjs"` to `scripts`. In
-`.github/workflows/build.yml`, add a step to the **existing `build-and-test` job**, after the other
-lint steps:
+Add to `scripts`, matching the naming the other guard scripts use:
 
-```yaml
-      - name: Check help docs
-        run: npm run check:help
+```json
+"lint:help": "node scripts/check-help-docs.mjs",
+"lint:help:test": "node --test scripts/check-help-docs.spec.mjs"
 ```
 
-Do **not** create a new workflow. A new workflow would not be a required check, and making one
-required is an administrator action nobody here can take.
+In `.github/workflows/changes.yml`, add a step to the **existing `changes_and_migrations` job**
+after the migration steps. That job already checks out with full history and sets up Node 24, and
+the script needs no dependency install:
+
+```yaml
+      - name: Help docs stay true to the product
+        run: npm run lint:help
+```
+
+In `.github/workflows/build.yml`, add the unit-test step to the **existing `build-and-test` job**,
+beside the other guard-script test steps:
+
+```yaml
+      - name: Help docs gate tests
+        run: npm run lint:help:test
+```
+
+Do **not** create a new workflow, and do **not** put the gate itself in `build-and-test`. The
+reasons are recorded above this task's steps; a comment in `changes.yml` beside the new step must
+record the second one, because the next person to tidy that workflow will otherwise move it.
 
 - [ ] **Step 6: Commit**
 
