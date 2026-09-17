@@ -55,7 +55,7 @@ describe('responseIsOurs with a response-scoped caller', () => {
   });
 
   it('does not let a blank scope match a row whose id is somehow blank', () => {
-    // Defensive: `foldSessionId('')` is `''` on both sides, so a naive equality would admit
+    // Defensive: `foldId('')` is `''` on both sides, so a naive equality would admit
     // everyone to a row with no id. Rows always have one, which is exactly why nobody would
     // notice this until something upstream handed us a partial row.
     expect(responseIsOurs({ ID: '', AnonymousSessionID: 'someone' }, { sessionId: 'other', scopedResponseId: '' })).toBe(false);

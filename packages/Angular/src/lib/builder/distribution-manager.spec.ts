@@ -38,6 +38,27 @@ const stripComments = (src: string): string => src.replace(/\/\*[\s\S]*?\*\/|\/\
 const component = stripComments(source('distribution-manager.component.ts'));
 
 describe('the Distribute template', () => {
+  it('offers a captcha switch, wired to the toggle', () => {
+    // Before #151 the column was reachable only from a raw entity form, while the submit gate
+    // enforced it — so an author could not see, let alone undo, a setting that made their form
+    // unsubmittable.
+    expect(template).toContain('id="dm-captcha-label"');
+    expect(template).toContain('aria-labelledby="dm-captcha-label"');
+    expect(template).toContain('toggleCaptcha()');
+  });
+
+  it('tells the author what enabling the captcha costs, not just what it does', () => {
+    // Turnstile is fail-closed and the host's environment is invisible from the builder, so a hint
+    // that only described the feature would let someone silently break every submission.
+    expect(template).toMatch(/Turnstile keys configured on the server/);
+    expect(template).toMatch(/every submission[\s\S]{0,40}refused/);
+  });
+
+  it('does not give the captcha row the response-limit row\'s label id', () => {
+    // Two controls sharing one id announce as the same control (WCAG 2.5.3 / 4.1.2).
+    expect(template.match(/id="dm-cap-label"/g) ?? []).toHaveLength(1);
+  });
+
   it('never decides what to show from the channel', () => {
     // The whole point. A link is a link; QR and embed are renderings of it. The moment a
     // branch reads ChannelType, "create a second link to get a QR of the first" is back.
@@ -175,11 +196,12 @@ describe('the Distribute component', () => {
   it('does not rename a button that already says what it does', () => {
     // aria-labelledby REPLACES the accessible name, so pointing the reissue buttons at
     // the "Access token" label would give two controls one name and drop their visible
-    // text out of it (WCAG 2.5.3). The other uses here are on a switch, a number and a
-    // date — controls with no text of their own.
+    // text out of it (WCAG 2.5.3). The other uses here are on two switches, a number and
+    // a date — controls with no text of their own.
     const labelled = template.match(/aria-labelledby="dm-[a-z]+-label"/g) ?? [];
     expect(labelled.sort()).toEqual([
       'aria-labelledby="dm-cap-label"',
+      'aria-labelledby="dm-captcha-label"',
       'aria-labelledby="dm-exp-label"',
       'aria-labelledby="dm-open-label"',
     ]);

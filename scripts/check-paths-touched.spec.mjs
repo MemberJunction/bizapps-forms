@@ -113,7 +113,8 @@ const EXPECTED_SCOPE = {
     'migrations/': 'question-types.spec.ts reads migrations/ and runs inside npm test',
     '.github/scripts/': 'validate-widget-bundle.sh and the package-lock case test run here',
     '.claude/': 'lint:hook-guard:test and lint:git-gate:test run nowhere else',
-    '.github/workflows/build.yml': 'a PR editing only this job must still run it',
+    '.github/workflows/': 'check-release-pushes.mjs reads every workflow, so a PR editing any one of them must run it',
+    'ci/': 'the release scripts that pushed straight to main and next lived here (#177); a PR reintroducing the directory must run the gate that forbids it',
 };
 
 test('every entry build.yml relies on is pinned here, so shortening the list fails a required check', () => {
@@ -180,5 +181,27 @@ test('build-and-test runs when only a migration changes', () => {
         true,
         'a migration-only PR skips build-and-test, and `skipped` passes a required check — over a ' +
         'suite that question-types.spec.ts would have turned red.',
+    );
+});
+
+// #177. The gate that forbids a push to a ruleset-protected branch lives in build-and-test, and a
+// skipped job reports SUCCESS to a required status check — so the pull request most likely to
+// reintroduce the push is precisely the one that would skip the gate. Both shapes are pinned: the
+// workflow-only PR (which is how the push would come back today, publish.yml being a workflow) and
+// the ci/-only PR (which is how it came back before).
+test('build-and-test runs when only a workflow changes', () => {
+    assert.equal(
+        pathsTouched({ changed: ['.github/workflows/publish.yml'], patterns: scopeListFromWorkflow() }),
+        true,
+        'a workflow-only PR skips build-and-test, and `skipped` passes a required check — over the ' +
+        'release-push gate that reads that very file.',
+    );
+});
+
+test('build-and-test runs when only a ci/ script changes', () => {
+    assert.equal(
+        pathsTouched({ changed: ['ci/commit_push.mjs'], patterns: scopeListFromWorkflow() }),
+        true,
+        'reintroducing ci/ must run the gate that forbids what used to be in it.',
     );
 });

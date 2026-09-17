@@ -1,5 +1,188 @@
 # @mj-biz-apps/forms-actions
 
+## 0.11.0
+
+### Minor Changes
+
+- 7293c62: A `Time` question no longer makes the whole form unsubmittable, and the `date` column now reads back as what the respondent entered.
+
+  Answering a `Time` question failed the entire submission with a bare `Invalid time value`, naming no field. `<input type="time">` emits `14:30`, the widget sent it verbatim, and persistence did `new Date('14:30')` — an Invalid Date that `toISOString()` throws on from inside `Save()`. Nothing between the two had an opinion: `validateAnswerFormat` had a `Date` case and no `Time` case, and a draft was held to upper bounds only. Every published form carrying a Time question was collecting nothing. Closes #116.
+
+  **One module owns the format.** `contracts/answer-date.ts` is where the decision lives, and the widget, the validator, persistence, the conditional evaluator, the dashboard and the on-submit actions all read through it. A `Time` travels as the bare clock its control emits and is stored as that clock on the Unix epoch date in UTC — `14:30` → `1970-01-01T14:30:00Z` — so the whole column obeys one rule: **the UTC fields of the stored instant are what the respondent entered.** The epoch rather than the submission day, so two people who both answered `09:00` store the same value and compare equal in reporting. `Date` storage is byte-for-byte unchanged; this generalises the rule `Date` already followed.
+
+  The server parses the clock rather than the widget composing an instant, because the server evaluates conditional rules on the wire value while the widget evaluates on the control's `14:30`. An ISO wire format would have the server see a date where the widget sees a time, so a rule on a Time question would fire in the browser and never on the server.
+
+  **Strict on the wire, and this is the one behaviour change for a non-widget API client.** An ISO instant posted on a `Time` question is now refused with `Enter a valid time.` where it previously succeeded, because the evaluator would compare it on the date scale and a rule written against `14:30` could never match it. No client in this repo does that, and a browser cannot: `<input type="time">` sanitises every non-clock value to empty.
+
+  **Every unstorable date answer is now refused by name.** Validation names the question in every mode, drafts included — a draft `Date` carrying garbage used to reach `Save()` and come back as the same unattributed `Invalid time value`. Persistence checks again, because validation judges only the column a question's _type_ routes to while a caller may post `dateValue` on a question of any type; that path now returns `Answer to "<prompt>" is not a valid date.` instead of a runtime error.
+
+  **Reading a stored answer back.** `dateAnswerText` is the inverse of the parse, and the one reader every consumer should use: a `Time` gives back `14:30`, a `Date` gives back `2026-09-01`.
+
+  - The response detail, the CSV export and the reporting surfaces show both halves as the respondent entered them. Previously a Time rendered as `1970-01-01T14:30:00.000Z` and a Date as `2026-09-01T00:00:00.000Z`.
+  - On-submit Actions and AI Agents get `dateText` beside the raw `dateValue`. The instant stays for actions doing date arithmetic; the text is for anything putting the answer in front of a person, which otherwise had to know that a Time is stored on the epoch date and would render a confirmation email saying "1 Jan 1970".
+  - The dashboard's time-of-day bands read UTC hours. Reading local hours filed a `14:30` answer under "Morning" for every viewer west of Greenwich.
+  - The dashboard's month buckets read UTC too. A `Date` answer is stored as UTC midnight, so local fields gave the previous day — and while that only crosses a month boundary on the 1st, it did so silently: a `2026-09-01` answer was filed under "Aug 2026", and an epoch date under "Dec 1969". Both halves of the bucket move together (the sort key and the `toLocaleDateString` label), because correcting one alone yields a card that sorts under September and is captioned August. The label keeps the viewer's locale — only the timezone was ever wrong.
+
+  Nothing here is localised, deliberately: a stored `Date` is UTC midnight, so a locale formatter renders the **previous day** anywhere west of Greenwich. A date answer carries no zone, so there is no zone in which to localise it, and the ISO calendar date also sorts as text and parses in a spreadsheet.
+
+  **An automation gated on a `Time` question can fire.** Automation conditions are evaluated after persistence from the stored instant, which the evaluator reads on the date scale, while an authored rule value (`"12:00"`) is on the time scale — so every `equals`/`greaterThan`/`lessThan` on a Time question silently evaluated false with nothing logged. Automation answers are now read through the contract in `buildConditionAnswers`, which is the one place that holds the question and can tell a Time from a Date; entity binding still receives the instant, which is the right shape for a datetime column.
+
+  **A `dateValue` of `null` no longer 500s the public write path.** The date branch gated on `!== undefined`, and a caller may legitimately send `null` for a column an answer does not use — so a text answer carrying an explicit `null` reached the parse and threw `TypeError` out of the anonymous mutation. It is the only branch that needs `!= null`, because it is the only one that parses rather than assigns.
+
+  The smoke fixture's Time answer was an ISO instant, which the new format refuses; it now sends a clock reading, so the suites that submit a response keep working against forms carrying a Time question.
+
+  No migration and no schema change: the storage shape of a value that could never be stored is not a change to any existing row.
+
+  `minor` rather than `patch`, on three counts, and matching what sibling changesets use for the same kinds of change: the refused ISO instant is a documented behaviour break for a non-widget API client; `forms-entities` gains public exports (`calendarDateOf`, `dateAnswerText`); and `forms-actions` adds a **required** `dateText` member to the exported `AnswerWithType`, plus `TargetFields` replaces the bare name set `BindingTargetGateway.describeEntity` returned, which any external implementer of that gateway must follow.
+
+- 11a838e: Duplicated core metadata broke CodeGen for anyone who regenerated; one SQL escaper replaces sixteen.
+
+  **The metadata (#64, #66).** `V202608191300` promises idempotency in its own header and delivers it for most of its length — the `Entity` block is fenced on a natural key, every `EntityField` insert is guarded `WHERE ID = '<guid>' OR (EntityID = … AND Name = …)`. Seventeen statements are guarded differently: `IF NOT EXISTS (… WHERE [ID] = '<guid>')` and nothing else. That asks whether _this row_ was inserted before, when the fact that makes an insert safe is whether _the thing it describes_ already exists, under whatever id the host minted for it. Any developer who ran `mj codegen` between `V202608182100` and `V202608191300` — the documented workflow — had those rows under CodeGen's ids, so all seventeen guards missed and all seventeen inserted a second copy. None of the affected tables carries a unique constraint on its natural key upstream, so it landed silently and the migration reported success.
+
+  The cost is #66. CodeGen emits one `@FieldResolver` per `EntityRelationship` row, so the duplicated `Forms → Form Screens` row made the next regeneration emit `mjBizAppsFormsFormScreens_FormIDArray` twice and `forms-server` stopped compiling — which is why every `mj codegen` run on an affected host ended `ERROR running one or more AFTER commands`. The checked-in generated files predate the duplicate and still compiled, so the break appeared only on regeneration, looking like it belonged to whichever branch happened to regenerate.
+
+  `V202608252300` converges by keep-list: for every row `V202608191300` ships, any _other_ row carrying the same natural key is removed, so a repaired host becomes row-for-row identical to a fresh install rather than merely un-duplicated. It is a strict no-op on a clean database and on a partially hand-cleaned one, and it cannot touch host-authored metadata — every delete requires a same-natural-key sibling from the keep-list. It then asserts its own end state, scoped to this app's entities.
+
+  **Two findings beyond the issues.** `EntitySetting` was duplicated too (`FieldCategoryInfo` and `FieldCategoryIcons` on Form Screens) and was in neither issue's sweep; it is converged here. And the ID-only guard is not one migration's slip — it is the guard **CodeGen itself emits** for a relationship row, present in 51 statements across five migrations, four of which are pasted CodeGen output. The real fix is upstream in MJ; until then `scripts/check-distribution-seed.mjs` CHECK 4 refuses the shape at authoring time (watershed after the last shipped offender, like CHECK 3), and `smoke/metadata-integrity-path.mjs` rules on the end state in the database — the half no unit test can reach, since every existing gate reads checked-in files and this defect lives only in `__mj`.
+
+  **The escaper (#67).** The shipped packages carried sixteen implementations of "double the single quotes" — seven named local functions spelled four ways, nine written inline. (Nine more live in `smoke/*.mjs` and stay there deliberately: those are stdlib-only scripts that run in order to test a build, so importing the built package would make the suite depend on the artifact under test.) They had already drifted into four different decisions: one N-prefixes the literal, one tolerated `null`, one escapes LIKE wildcards, the rest do neither. They are now one module in `@mj-biz-apps/forms-entities` (`escapeSqlString` / `quoteSqlString` / `sqlLiteral`), which every consumer package already depended on, so no new coupling was created — the coupling was what had kept the duplication alive.
+
+  Purely a refactor: the SQL each call site emits is byte-identical, including the file-link gateway's `(value || '')` tolerance, which is load-bearing because that package compiles without `strictNullChecks`. Upgrading the plain-quoted sites to the N-prefixed form is a behaviour change — the prefix decides whether SQL Server compares a non-Latin value or a row of `?` — and is deliberately not part of this.
+
+- 1bc7aa3: Ten new question types (Website, Checkbox, Legal, PictureChoice, OpinionScale, Ranking, Matrix, Address, ContactInfo, Doodle) and Welcome/Ending screens as a first-class `FormScreen` entity rather than as question types — a screen is never answered, produces no `FormResponseAnswer` and appears in no aggregation, so it renders as a phase of the widget shell instead of an item in the question list. Many endings are supported, each with its own condition and redirect, resolved by one function shared between the widget and the server.
+
+  Question-type behaviour now comes from a single capability table in forms-entities, with `FormQuestionType` derived from it, replacing six duplicated switches across four packages — including a hand-copied type list in the server's snapshot parser that could not learn when the contract grew. Also adds per-page partial submit points.
+
+  Two migrations: `V202608182100` widens `CK_FormQuestion_QuestionType` to 25 values and adds `FormScreen`, `FormQuestionOption.ImageURL`/`MatrixAxis` and `FormPage.IsPartialSubmitPoint`; `V202608182130` updates the AI Designer prompt to the full taxonomy. Apply both before deploying the code — the reverse order lets the builder offer types the CHECK constraint rejects.
+
+  Fixes a builder save race in which two edits landing in the same tick silently lost the second (`BaseEntity.Save()` re-reads the record it saved, discarding anything written while it was in flight); saves are now coalesced per entity and flushed before publish. Also repairs the `AssertExtends` compile-time drift guards, which could never fail because a naked type parameter distributes over its union — every "fails the build on drift" guard in the repo had been passing vacuously, hiding a blueprint enum stuck at 15 types.
+
+- 1b0f56a: Let a form say it runs NOTHING on submit, and stop the builder silently restoring the four built-in hooks (#47).
+
+  **The overload.** Dispatch was decided by an inline `automations.length > 0` test in the submit pipeline, so an empty automation list meant two different things at once: "this form has never configured anything" (fall back to the four legacy hooks) and "this form deliberately runs nothing". Only the first was reachable. The repo said so in two places that contradicted each other — `snapshot-builder.ts` called an empty array "what keeps an already-published form on the legacy hook list", while `publish.service.ts` called it "this form configures no automations".
+
+  **What it cost.** `Forms: Upsert Respondent Person` is one of the four. It creates a `MJ_BizApps_Common: Person` from the answers and stamps `FormResponse.RespondentPersonID`, and its dedupe covers only rows it created. An app that owns its own subject identity — bizapps-caliber binds an `Applicant` from the same answers — therefore produced a second `Person` for the same human on every submission, one Forms neither knows about nor points at. Nothing errored and nothing logged; the symptom arrived later, as a follow-up task and the record it is about referencing different people. There was no way to decline: no env knob (`FORMS_HOOKS_BLOCKING` only controls whether hooks are awaited), no per-form setting, and the 0.8.0 back-fill covers only forms that existed when it ran, so every form created afterwards is permanently on the legacy path.
+
+  **The same defect, in the product.** `remove()` in the Automate tab had no last-row guard, so an author who deleted their final step published an empty array and silently got the confirmation email, follow-up task, respondent-Person upsert and answer scoring back. Adding **or removing** a step now marks the form authoritative permanently, and nothing anywhere returns a form to the legacy list. Marking on removal is what covers a form this builder did not configure in the first place — `V202608081400__Backfill_Legacy_Automations` gave every form predating 0.8.0 four automation rows and no mode, so its author can reach an empty list without ever having added anything.
+
+  **Publishing reads the form back.** The mark is written through the Automate tab's own Form entity, and the builder's in-memory tree is loaded once when the builder opens, so publishing without leaving the builder used to snapshot the settings as they were BEFORE the change — right in the database, wrong in the snapshot, which is the only thing the server reads. `publish()` now re-reads `Form.Settings` and refuses the publish if that read fails or returns no row, the same guard the automation read already had. Publishing defaults in place of settings it could not confirm would be a silent downgrade well beyond the on-submit mode: those defaults are `anonymousAllowed: true` and `captchaRequired: false` with quota and close date dropped.
+
+  **The fix.** `FormSettings.onSubmitMode` (`'Legacy' | 'Configured'`) is carried in the published snapshot, and the decision moves to `resolveOnSubmitDispatch` in `@mj-biz-apps/forms-entities` — one pure function instead of an inline test. `Configured` means the automation list is authoritative _including when it is empty_. **Absent keeps the exact inference the server has always made**, which is what makes this safe: every snapshot published before this field carries no mode and behaves identically, and a pipeline test now pins that so the compatibility cannot quietly erode. A `Configured` form with no automations also short-circuits before resolving the service principal and re-reading the response, so declining costs nothing on the hot path.
+
+  It rides in `Form.Settings` rather than a new column because a column needs a CodeGen run to be usable and this shipped without a database; the field is optional and the settings blob is already parsed on both sides and mirrored into the snapshot. Promoting it to a real column with a CHECK constraint is worth doing when CodeGen next runs.
+
+  **Authoring on-submit steps programmatically.** `Forms: Generate Form From Brief` and `Forms: Create Form From Template` take two new optional params, `OnSubmitMode` and `Automations`. Steps name their Action **by name** (ids differ per environment) and run in array order, so two can never share a `DisplayOrder`. An Action name this deployment does not have is a hard failure rather than a skipped step — the opposite of the builder's seeding, deliberately: seeding skips an unregistered built-in to reproduce the legacy runner, whereas a caller that named a step and silently did not get it has been lied to. A failed resolve refuses before writing anything, so a form is never left half-configured and marked authoritative.
+
+  `V202608241800` adds the four `ActionParam` records. It is hand-written rather than generated — a seed push needs a database with MJ and both sibling apps — and each insert is guarded on both the id and the `(ActionID, Name)` pair, because `spCreateActionParam` is a bare INSERT and an unguarded collision halts the migration chain.
+
+  **Documented.** `docs/on-submit-automations.md` covers what runs and when, how to configure or decline it, and names `Forms: Upsert Respondent Person` as the owner of respondent identity — consuming apps should read `FormResponse.RespondentPersonID` rather than deriving a second Person. MemberJunction/MJ#3825 (IS-A promotion) is what would make that fully reachable for a consumer whose record must _be_ a Person.
+
+  **An unreadable mode never takes a form offline.** `onSubmitMode` is side-effect configuration, invisible to the respondent — the same class as `automations`, which the snapshot parser deliberately drops rather than allowing one corrupt entry to refuse the whole snapshot. This field did not follow that rule at first: any unrecognised value failed the strict settings parse, which failed the snapshot, which served every respondent "Form unavailable". It is now the one tolerant field in that schema and degrades to absent, which means "infer". The authoring paths stay strict, because a caller that asked for something we cannot honour should be told: `applyOnSubmitConfig` case-folds and then rejects what it cannot map, `formBlueprintSchema` is exact, and both reject `Legacy` supplied alongside automations — a combination that would otherwise write steps that silently never run.
+
+  **No behaviour changes without an explicit opt-in.** Every existing form, published snapshot and caller is unaffected until it declares a mode. Verified against 33 real published snapshots: 28 dispatch as legacy and 5 as configured, identical to the inline test this replaces, with zero behaviour changes.
+
+- 08dacd6: On-submit actions wrote every cross-app record as nulls, on any host but a dev box.
+
+  `Forms: Upsert Respondent Person` reported `First Name cannot be null` for responses whose First name answer was sitting in the row. The extraction was never at fault: `FirstName` is `identity.firstName ?? email.split('@')[0]` and `LastName` is `identity.lastName ?? '(unknown)'`, so neither can be null whatever the answers say — and the real error named **both** of them.
+
+  The cause is one line of typing. `MJ_BizApps_Common: People` and the three `MJ_BizApps_Tasks:` entities belong to sibling apps, so the actions could only name their classes through `import type` — which is erased at compile time. Nothing in the shipped package ever loaded the packages that own them, making them a phantom runtime dependency: correct only on a host that happened to load them for its own reasons. `apps/MJAPI/server.mjs` did, which is precisely why the failure never appeared in this repo's own harness and did everywhere else.
+
+  It fails silently because `Metadata.GetEntityObject` does not throw for an unregistered entity — MJ's ClassFactory falls back to a plain `BaseEntity`, which has `Get`/`Set` but none of the generated typed accessors. `person.FirstName = 'Ada'` then defines a JS own-property the entity never reads. The discriminator, from one submit on a live stack: the upsert action wrote nulls at 17:13:43 while the entity-binding action wrote the _same_ answers to the _same_ entity correctly at 17:13:53 — because bindings go through `record.Set(field, value)`, which works on the fallback.
+
+  `custom/register.ts` now imports both sibling entity packages at module scope, and `forms-server`'s index already side-effect-imports that barrel, so any host loading Forms gets the registrations. The manual loads in `apps/MJAPI/server.mjs` are removed rather than kept: leaving them would hide a regression in the package from the one stack that runs it.
+
+  Two things guard it now. `register.spec.ts` asserts each of the four entity names resolves through its generated class, checking the prototype **chain** rather than the resolved class name so a sibling app adding its own subclass (bizapps-tasks already does, for `Tasks`) does not fail a change that keeps the typed accessors. And both actions now refuse up front, with `ENTITY_CLASS_UNREGISTERED` and a message naming the entity and what the fallback would do, rather than writing nulls — the check is on the class-factory registry, not `instanceof` on the returned object, so test fakes still exercise the real code path.
+
+  `Forms: Create Followup Task` carried the identical defect for `Tasks`, `Task Links` and `Task Types`. It is fixed by the same change; it had been failing earlier for an unrelated reason, which is what kept it hidden.
+
+- 912164c: The AI Designer stops proposing a question type the database rejects, and the release ships one consolidated metadata seed instead of a pile of per-PR deltas.
+
+  **The shipped Designer prompt still said `Signature`.** #97 renamed the type to `Doodle` and `V202608301200` installed a CHECK constraint that accepts only the new spelling — but that migration is pure DDL, and the prompt lives in a metadata record no DDL touches. So a host installing from `migrations/` got a prompt proposing `Signature` and a constraint refusing it. The blueprint validator rejects the value before it ever reaches the database, and the Designer retries with the error fed back, up to `MAX_DESIGNER_ATTEMPTS` — wasted round-trips on every authored form rather than a visible failure, which is why nothing surfaced it. No repo-side check could: `check:release-seed` compares declared ids against shipped SQL, and this record's id already shipped in the v0.8 seed.
+
+  **Two unreleased deltas are folded in and deleted.** `V202608182130` and `V202608241800` appear in no release tag, so neither reached a host and neither was append-only history yet. They are replaced by a single `Metadata_Sync` generated against the shipped chain — the cadence #105 established, and what `check:seed-cadence` has been red on.
+
+  **Operators should expect this**: applying this migration corrects the Designer prompt in place, restores the Designer Template's own `Description` (it still advertised the Phase-1 taxonomy, which the prompt body it owns has not matched since #97), and adds the four `OnSubmit` `ActionParam` records. No form data is touched, and `V202608301200` already migrated any stored `Signature` questions to `Doodle`.
+
+  Closes #111.
+
+### Patch Changes
+
+- 3fa29bf: Move MemberJunction to `6.1.0-edge.5`
+
+  `6.1.0-edge.5` is the current `edge` dist-tag, three releases past the `6.1.0-edge.2` this repo was
+  pinned at. All 54 `@memberjunction/*` specifiers move together — the exact `dependencies` in
+  `apps/MJAPI`, the exact root `devDependencies` and `pnpm.overrides`, and the caret `peerDependencies`
+  floors in all five packages. They move as one because a single stale pin forks the dependency graph,
+  and under pnpm that surfaces as a build failure rather than a silent duplicate.
+
+  `mj-app.json`'s `mjVersionRange` moves to `>=6.1.0-edge.5 <7.0.0`. **This is the part a host has to
+  act on**: `mj app install` validates that range against the installed MJ, so a host still on
+  `6.1.0-edge.4` or below is now refused rather than installed into. Hosts already running our sibling
+  Open Apps are unaffected — `bizapps-common` and `bizapps-tasks`, both hard dependencies of Forms,
+  declare the same floor.
+
+  Nothing in Forms' own source needed to change: a forced rebuild against edge.5 compiled all five
+  packages with no type errors, and all 2,952 tests pass. No respondent-facing or API-facing behaviour
+  differs.
+
+- a064da2: **The shared on-submit context loader quotes its ids like everything else does.** `RunView` takes SQL text and offers no parameter binding, so every `ExtraFilter` in this repo goes through `quoteSqlString` — except the two in `form-response-context.ts`, which built their literals inline: `` `ResponseID='${responseId}'` `` and an `ID IN (…)` list assembled from `` `'${id}'` ``. Both are fed DB-sourced, validated GUIDs by today's only caller, so nothing was exploitable and nothing changes for a valid id; the output is identical.
+
+  **It is where the next caller will be wrong.** This is the _shared_ loader on the on-submit automation path — `Upsert Respondent Person`, `Create Followup Task`, `Send Confirmation Email`, `Analyze Written Responses` and `Bind Response To Entity` all enter through it, and `submit-pipeline` calls it for every completed response. A future hook that resolves a question id from a template, a mapping, or an inbound payload inherits whichever convention this file happens to be using, and an escaping decision that holds only because of who calls it today is not a decision anyone can rely on. `quoteSqlString` is already imported throughout the repo and already the answer; there was no reason for two files to disagree about it.
+
+  **Pinned by assertions on the filter text, not on the rows.** The loader's spec now records the `ExtraFilter` each read sends and asserts a quote is doubled rather than allowed to close the literal — in the id and in every element of the IN list. Asserting on the returned rows cannot tell an escaped literal from an interpolated one, because for a valid GUID they are the same rows; the filter string is the only place the difference is observable. Verified sensitive by reverting the change and watching all three assertions fail, one of them on the filter `ResponseID='resp-1' OR '1'='1'`.
+
+- 75906b8: The CodeGen-append gate checks a main-bound ref against `next`, not against `main`
+
+  A pull request into `main` is a release or a back-merge, and its base is `main` — hundreds of
+  commits back. The gate's banner rule applies only to files the diff adds, so against that base every
+  migration merged since the last release read as newly added, and the four that predate the gate
+  relit. It is a required check with no bypass, so the release pull request would have opened and
+  stalled. The base is now resolved from the branch the ref is aimed at; a hotfix committed straight
+  onto `main` still owes its CodeGen output and still fails.
+
+- d0ac9e2: `Prepare a release` pushes as the App again, not as `github-actions[bot]`
+
+  `actions/checkout` defaults to `persist-credentials: true`, which writes an
+  `http.https://github.com/.extraheader` entry carrying `GITHUB_TOKEN` into the local git config.
+  That header matches every github.com remote — including the one whose URL carries the App token —
+  and outranks URL credentials, so the release branch was pushed as `github-actions[bot]`. The job
+  holds `contents: read` by design, so the push was refused with a 403 that named neither credentials
+  nor the cause. The checkout no longer persists a credential. `publish.yml` is deliberately left
+  alone: it pushes the release tag through `origin` and needs the persisted one.
+
+- Updated dependencies [29789ba]
+- Updated dependencies [925087e]
+- Updated dependencies [7293c62]
+- Updated dependencies [ff19377]
+- Updated dependencies [ea001c3]
+- Updated dependencies [3599074]
+- Updated dependencies [11a838e]
+- Updated dependencies [4831864]
+- Updated dependencies [9eb264b]
+- Updated dependencies [1bc7aa3]
+- Updated dependencies [5935085]
+- Updated dependencies [3a4b449]
+- Updated dependencies [88143e7]
+- Updated dependencies [d117a59]
+- Updated dependencies [89ca16f]
+- Updated dependencies [89f4c0a]
+- Updated dependencies [3fa29bf]
+- Updated dependencies [396d4b5]
+- Updated dependencies [1b0f56a]
+- Updated dependencies [126662f]
+- Updated dependencies [30f73d3]
+- Updated dependencies [3e67383]
+- Updated dependencies [48c0f45]
+- Updated dependencies [64b6385]
+- Updated dependencies [8299fed]
+- Updated dependencies [a8e8a1d]
+- Updated dependencies [75906b8]
+- Updated dependencies [d0ac9e2]
+- Updated dependencies [42819f3]
+- Updated dependencies [912164c]
+- Updated dependencies [3de26d8]
+  - @mj-biz-apps/forms-entities@0.11.0
+
 ## 0.10.0
 
 ### Minor Changes

@@ -57,12 +57,25 @@ jobs:
       - name: No CodeGen capture file is tracked (whole tree)
         run: npm run lint:codegen-append
 
+      # The third argument is the branch this ref is aimed at, and it decides the base. A pull
+      # request into `main` is a release or a back-merge, whose base is hundreds of commits back;
+      # diffing from there reports every migration merged since the last release as newly added and
+      # relights the four that predate this gate. check-codegen-append.mjs resolves such a base to
+      # the tip of `next`, where the question is "what does this introduce that next does not
+      # already carry?". The decision lives there and not here so its spec can pin it: a decision
+      # that only runs during a release cannot be proven by running a release.
       - name: Changed migrations ship their CodeGen output
         if: github.event_name == 'pull_request'
-        run: node scripts/check-codegen-append.mjs "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}"
+        run: >-
+          node scripts/check-codegen-append.mjs
+          "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" "${{ github.base_ref }}"
 
       # On a push, the range is the push itself. `github.event.before` is all-zeroes for a new
       # branch, in which case there is nothing to diff and CHECK 1 above has already run.
+      # `github.ref_name` is the branch being pushed TO -- `main` on the release merge, whose
+      # `before` is the previous tip of main and therefore just as wide as the pull request's base.
       - name: Changed migrations ship their CodeGen output (push)
         if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
-        run: node scripts/check-codegen-append.mjs "${{ github.event.before }}" "${{ github.sha }}"
+        run: >-
+          node scripts/check-codegen-append.mjs
+          "${{ github.event.before }}" "${{ github.sha }}" "${{ github.ref_name }}"

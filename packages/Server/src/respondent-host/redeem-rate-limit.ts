@@ -10,11 +10,17 @@
  * Mirrors `upload/upload-rate-limit.ts` deliberately:
  *  - Keyed on the resolved peer IP, which is the one caller attribute they did not choose. Keying
  *    on the slug would put the bucket back under the caller's control.
- *    The identity does NOT arrive from the globally mounted `RequestIdentityMiddleware`: this
- *    route registers through `ConfigureExpressApp`, which MJServer runs BEFORE it mounts any
- *    pre-auth handler, so the route mounts `requestIdentityHandler()` itself. Getting this wrong
- *    is invisible — the gate below then takes its "cannot identify the caller" branch forever and
- *    admits everyone while looking installed.
+ *    The identity is NOT taken on trust from the globally mounted `RequestIdentityMiddleware`:
+ *    the route mounts `requestIdentityHandler()` itself. Since #181 that is belt-and-braces rather
+ *    than load-bearing — `GET /f/:slug` moved to `GetPreAuthMiddleware`, so it now sits in the same
+ *    `app.use` chain as the global copy instead of ahead of it — but the global copy is only first
+ *    because `packages/Server/src/index.ts` happens to import `RequestIdentityMiddleware` before
+ *    `RespondentHostMiddleware`, and ClassFactory order is import order. Reorder two lines in a
+ *    barrel file and the local mount is all that is left. Getting this wrong is invisible — the gate
+ *    below then takes its "cannot identify the caller" branch forever and admits everyone while
+ *    looking installed — so the assumption is pinned by a test rather than trusted
+ *    (`__tests__/redeem-rate-limit.spec.ts`, "even when the global identity handler is mounted
+ *    after it").
  *  - The window comes from the shared public-submit config (`FORMS_RATELIMIT_WINDOW_MS`), so a
  *    deployment tuning how long it remembers a caller tunes every public route at once.
  *  - WITH NO IP, THE PER-CALLER GATE DOES NOTHING — on purpose. The only alternative identity is
@@ -24,7 +30,10 @@
  *
  * Env vars:
  *  - `FORMS_REDEEM_IP_MAX`            Max `/f/:slug` requests per window per client IP.
- *                                     Default 30 (matches the upload route's per-IP ceiling).
+ *                                     Default 20 — core's own redeem cap, which this gate fronts
+ *                                     on the page route. See `redeemRateLimitMax` below for the
+ *                                     returning-respondent exception, where core's own cap binds
+ *                                     first instead.
  *  - `FORMS_REDEEM_MAX_IN_FLIGHT`     Max simultaneous in-flight redeems (process-wide).
  *                                     Default 25.
  */
@@ -42,9 +51,27 @@ function numberFromEnv(key: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-/** Max `/f/:slug` requests one caller may make per rate-limit window. Read per call (see upload/config). */
+/**
+ * Max `/f/:slug` requests one caller may make per rate-limit window. Read per call (see upload/config).
+ *
+ * The default matches CORE's own `magicLink.redeemRateLimitMax` (20 per 60s), so this gate fronts
+ * core's — ON THE PAGE ROUTE, where one `/f/:slug` open spends exactly one core redeem. A looser
+ * number here made that route's meter unreachable: core refused at 21 first, after the work had
+ * already been done, and the friendlier 429 this door composes could never fire on its own account.
+ * Raising this above core's puts that dead path back; a deployment that wants a higher ceiling has
+ * to raise core's too.
+ *
+ * A RETURNING respondent is the exception to the paragraph above, not covered by it: `host-page.ts`
+ * `resumeThenMount()` auto-POSTs `/f/:slug/resume` whenever a resume cookie is present — no user
+ * action required — and that route performs a SECOND core redeem (`redeemRawToken` → `postRedeem`).
+ * It is charged only to its own `resume:` bucket (`RESUME_RATE_MAX = 30`, `resume-deps.ts`), not to
+ * this meter and not to `redeemInFlightLimiter()` either. So one page open by a returning
+ * respondent spends two of core's 20, and core refuses at the 10th open while this meter still
+ * reads 10-of-20 spent — core's cap binds first, at half the opens this default implies. Closing
+ * that gap means charging the resume redeem to this same meter; this branch does NOT do that.
+ */
 export function redeemRateLimitMax(): number {
-  return numberFromEnv('FORMS_REDEEM_IP_MAX', 30);
+  return numberFromEnv('FORMS_REDEEM_IP_MAX', 20);
 }
 
 /**

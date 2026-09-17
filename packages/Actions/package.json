@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/forms-actions",
   "type": "module",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Generated action subclasses maintained by the CodeGen utility.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -27,24 +27,24 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
-    "@mj-biz-apps/forms-entities": "0.10.0",
+    "@mj-biz-apps/forms-entities": "0.11.0",
     "zod": "^3.25.76"
   },
   "peerDependencies": {
     "@mj-biz-apps/common-entities": ">=5.31.0 <6.0.0",
     "@mj-biz-apps/tasks-entities": ">=1.1.0 <2.0.0",
-    "@memberjunction/actions-base": "^6.1.0-edge.5",
-    "@memberjunction/actions": "^6.1.0-edge.5",
-    "@memberjunction/global": "^6.1.0-edge.5",
-    "@memberjunction/core": "^6.1.0-edge.5",
-    "@memberjunction/core-entities": "^6.1.0-edge.5",
-    "@memberjunction/core-entities-server": "^6.1.0-edge.5",
-    "@memberjunction/ai": "^6.1.0-edge.5",
-    "@memberjunction/aiengine": "^6.1.0-edge.5",
-    "@memberjunction/ai-core-plus": "^6.1.0-edge.5",
-    "@memberjunction/ai-prompts": "^6.1.0-edge.5",
-    "@memberjunction/communication-engine": "^6.1.0-edge.5",
-    "@memberjunction/communication-types": "^6.1.0-edge.5"
+    "@memberjunction/actions-base": "^6.1.1",
+    "@memberjunction/actions": "^6.1.1",
+    "@memberjunction/global": "^6.1.1",
+    "@memberjunction/core": "^6.1.1",
+    "@memberjunction/core-entities": "^6.1.1",
+    "@memberjunction/core-entities-server": "^6.1.1",
+    "@memberjunction/ai": "^6.1.1",
+    "@memberjunction/aiengine": "^6.1.1",
+    "@memberjunction/ai-core-plus": "^6.1.1",
+    "@memberjunction/ai-prompts": "^6.1.1",
+    "@memberjunction/communication-engine": "^6.1.1",
+    "@memberjunction/communication-types": "^6.1.1"
   },
   "repository": {
     "type": "git",

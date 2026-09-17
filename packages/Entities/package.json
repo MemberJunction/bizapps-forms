@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/forms-entities",
   "type": "module",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Forms Entity Subclasses (CodeGen-generated)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -28,8 +28,8 @@
     "zod": "^3.25.76"
   },
   "peerDependencies": {
-    "@memberjunction/core": "^6.1.0-edge.5",
-    "@memberjunction/global": "^6.1.0-edge.5"
+    "@memberjunction/core": "^6.1.1",
+    "@memberjunction/global": "^6.1.1"
   },
   "repository": {
     "type": "git",

@@ -673,7 +673,18 @@ native entities. This is the reporting differentiator no incumbent has.
 - **DG-4 — Anti-abuse provider.** Cloudflare Turnstile (recommended, free, privacy-friendly)
   vs. hCaptcha vs. honeypot-only default. Per-form toggle either way.
 - **DG-5 — Widget hosting/distribution.** CDN host for the Angular element; versioning &
-  cache strategy; iframe vs. direct-element embed default.
+  cache strategy remain **open**. **iframe vs. direct-element embed default: DECIDED — iframe**
+  (2026-09-12, #203). It was already the shipping answer — `distribution.service.ts`'s
+  `embedSnippet` has built an `<iframe>` all along — but #203 turned it from a detail into a
+  decision, because the enforcement model for per-link embed control now rests on it. Inside an
+  iframe the framed document's origin is *ours*, so the widget's API calls report the API's own
+  origin and never the customer's (measured: a `fetch` from the top-level customer page reports
+  that page's origin; the same `fetch` from inside the embedded widget reports the API's). That is
+  why `Content-Security-Policy: frame-ancestors` on `/f/:slug` is the control that constrains which
+  customer sites may embed a link, and why the API-side gate admits the author's list plus our own
+  origin. A direct-element embed would invert this: the widget's document would be the customer's,
+  so `Origin` would carry the customer origin and `frame-ancestors` would have nothing to say.
+  Switching the default later is therefore a change of enforcement mechanism, not just of snippet.
 - **DG-6 — Response store shape.** Confirm typed-columns + JSON-fallback on
   `FormResponseAnswer` (recommended) vs. pure-JSON. Affects query/projection ergonomics.
 
@@ -2251,3 +2262,50 @@ native entities. This is the reporting differentiator no incumbent has.
   page loads in a minute from one client return **20 x 200 and 5 x 502**, because
   `redeem.service.ts` sends no client address on its loopback redeem POST, so every respondent
   shares one rate-limit bucket. Pre-existing on `next`, not caused by #152.
+
+- **2026-09-12 — a share link can name the sites that may show it, and four columns that could
+  never be written.** PR for #203 (branch `feat/203-per-distribution-allowed-origins`) ships
+  `FormDistribution.AllowedOrigins` plus enforcement at the two doors a third-party embed actually
+  goes through. Settles half of DG-5 — see §10.
+
+  **The gap reproduced, on `next`, against the shared host.** `/f/:slug` sent no `X-Frame-Options`
+  and no `Content-Security-Policy`, so a page served from `http://127.0.0.1:8917` framed it in a
+  real Chromium and rendered a live, fillable form. `PublishedForm` with
+  `Origin: https://evil.example` returned the definition; `SubmitFormResponse` with the same header
+  returned `success: true` and wrote a `FormResponse` row (deleted afterwards).
+
+  **The measurement the design rests on.** The embed snippet this product generates is an
+  `<iframe>`, so the framed document's origin is *ours*. Both callers were made to POST to a local
+  echo server: the top-level customer page reported `http://127.0.0.1:8917`; the same `fetch`
+  issued from **inside the embedded widget** reported `http://localhost:4000`. So the API can never
+  see a legitimate embed's customer origin, and `frame-ancestors` — which the browser evaluates
+  against the framing ancestor — is the only control that can. The API-side gate therefore admits
+  the author's list **plus** this API's own origin, which is what bounds a leaked link replayed
+  from somebody else's page. `Referer` is no escape hatch: inside the iframe it is our page too.
+
+  **Four EntityField rows that no host had.** Found while proving the migration on a database built
+  from shipped migrations alone: `spUpdateExistingEntityFieldsFromSchema` only UPDATES rows that
+  already exist — it creates none — so a column's `EntityField` row reaches a host only if shipped
+  SQL inserts it, and `BaseEntity.Set` on a field without one is a silent no-op. `V202609091600`
+  shipped no such INSERT, so `FormDistribution.AllowDeviceResume` and
+  `FormResponse.FormDistributionID` have been unwritable on every host installed by
+  `mj app install` since 2026-09-09. Invisible in dev for the reason
+  `.claude/rules/migrations-codegen.md` names: `MJ_ATS_Dev` has the rows because CodeGen minted them
+  there. This migration heals all three alongside its own.
+
+  **And a captured value that was not portable.** CodeGen emitted `[Sequence] = 18` for the new
+  field — free on the database it ran against, occupied by the virtual `Form` field on a
+  migrations-only host, where it failed the chain with
+  `Violation of UNIQUE KEY constraint 'UQ_EntityField_EntityID_Sequence' ... (1fc60bda…, 18)`.
+  Computed as `MAX(Sequence) + 1` instead. Same lesson as the captured entity ids: "it applied
+  cleanly here" is not evidence of portability, and only running the chain on a second population
+  ever is.
+
+  **Deliberately not in scope, and named so it is a decision rather than an omission.** The
+  `SameSite=Lax` resume cookie still does not travel in a cross-site embed (issue #203 notes it).
+  A CSP header does not touch cookie attributes, so nothing here makes it worse; the fix
+  (`SameSite=None; Secure; Partitioned`) can only be exercised over HTTPS and would remove the
+  property `resume-cookie.ts` names as what makes the resume route CSRF-safe without a token.
+  Filed separately. Per-distribution control of the widget bundle route is not merely unimplemented
+  but unrepresentable: one static asset shared by every link, and a `<script src>` sends no `Origin`
+  at all — confirmed in the same browser probe.

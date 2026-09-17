@@ -229,6 +229,28 @@ async function run() {
   const owner = sql(`SELECT AnonymousSessionID FROM __mj_BizAppsForms.vwFormResponses WHERE ID='${esc(responseId)}'`);
   check(owner.toLowerCase().includes(S1.toLowerCase()), 'the FIRST sitting is still the recorded owner', owner);
 
+  // #193, and it belongs immediately after that owner check: the resumed sitting announces its
+  // partial too, holding a JWT scoped to the RESPONSE and an `x-session-id` the row has never seen.
+  // Both of the facts `/remember` used to require are therefore false on the happy path — and the
+  // absence of exactly this step is how a 403 plus a false ownership alarm shipped through a green
+  // end-to-end run.
+  const rememberedAgain = await hostRoute('remember', {
+    token: resumedToken,
+    sessionId: S2,
+    body: { responseId, sessionId: S2 },
+    cookie: rotated,
+  });
+  check(
+    rememberedAgain.status === 204,
+    `/remember accepts the RESUMED session's own draft (got ${rememberedAgain.status})`,
+    JSON.stringify(rememberedAgain.json),
+  );
+  check(
+    Boolean(cookiePair(rememberedAgain.setCookie)),
+    'the resumed sitting is handed a pointer of its own',
+    rememberedAgain.setCookie ?? '(no Set-Cookie)',
+  );
+
   section('forget');
   const forgotten = await hostRoute('forget', { token: resumedToken, cookie: rotated });
   check(forgotten.status === 204, '/forget answers 204');

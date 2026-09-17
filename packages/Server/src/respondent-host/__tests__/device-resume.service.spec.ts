@@ -17,11 +17,13 @@ const OTHER_ROW_ID = '33910b9e-0000-4000-8000-000000000002';
 const TOKEN = 'mj_ml_cookie';
 const EMAILED_TOKEN = 'mj_ml_emailed';
 const OWNER_SESSION = 'sess-first';
+const HELD_INVITE_ID = 'e7c1b0a2-0000-4000-8000-0000000000aa';
 
 interface Recorder {
   redeems: string[];
   mints: string[];
   revokes: { responseId: string; deviceOnly: boolean }[];
+  revokedInvites: { inviteId: string; responseId: string }[];
 }
 
 interface DepsConfig {
@@ -37,7 +39,7 @@ interface DepsConfig {
 }
 
 function makeDeps(config: DepsConfig = {}): { deps: DeviceResumeDeps; rec: Recorder } {
-  const rec: Recorder = { redeems: [], mints: [], revokes: [] };
+  const rec: Recorder = { redeems: [], mints: [], revokes: [], revokedInvites: [] };
   const distribution: ResumeDistribution | undefined =
     config.distribution === null
       ? undefined
@@ -84,7 +86,14 @@ function makeDeps(config: DepsConfig = {}): { deps: DeviceResumeDeps; rec: Recor
     revoke: async (args) => {
       rec.revokes.push(args);
     },
-    inviteFor: async () => ({ ok: true, resourceId: config.inviteResourceId }),
+    inviteFor: async () => ({
+      ok: true,
+      resourceId: config.inviteResourceId,
+      inviteId: config.inviteResourceId ? HELD_INVITE_ID : undefined,
+    }),
+    revokeInvite: async (args) => {
+      rec.revokedInvites.push(args);
+    },
     scopeOf: () => config.scopeOf ?? ROW_ID,
     allowRequest: () => config.allow !== false,
     cookieFor: (token, maxAge) => `mjf_resume=${token}; Max-Age=${maxAge}`,
@@ -351,6 +360,136 @@ describe('runRemember', () => {
 
     expect(out.status).toBe(204);
     expect(out.setCookie).toBeUndefined();
+  });
+
+  it('mints a pointer for a RESUMED session, whose JWT names the row rather than the link', async () => {
+    // #193. After `/resume` the page swaps in the RESPONSE-scoped session, and the widget mints a
+    // new `x-session-id` on every page load — so on the ordinary happy path NEITHER of the old
+    // clauses could match, and a completely normal fill was logged as an ownership violation once
+    // per resumed sitting.
+    const { deps, rec } = makeDeps();
+
+    const out = await runRemember(deps, { ...args, sessionId: 'sess-second', scopeId: ROW_ID });
+
+    expect(out.status).toBe(204);
+    expect(rec.mints).toEqual([ROW_ID]);
+  });
+
+  it("mints nothing for a session scoped to somebody ELSE's row", async () => {
+    // The refusal that has to survive #193: a verified scope is only ever proof about the row it
+    // names, so naming a different row is exactly as foreign as naming none.
+    const { deps, rec } = makeDeps();
+
+    const out = await runRemember(deps, { ...args, sessionId: 'sess-second', scopeId: OTHER_ROW_ID });
+
+    expect(out.status).toBe(403);
+    expect(rec.mints).toHaveLength(0);
+  });
+
+  it('still refuses a DISTRIBUTION-scoped caller whose link does not match the row', async () => {
+    // Unchanged by #193, and restated beside it: widening the rule for a response-scoped caller
+    // must not widen it for the link-scoped one the design review's finding 2 was about.
+    const { deps, rec } = makeDeps({ response: { formDistributionId: 'another-link' } });
+
+    const out = await runRemember(deps, { ...args, sessionId: 'sess-second', scopeId: DIST_ID });
+
+    expect(out.status).toBe(403);
+    expect(rec.mints).toHaveLength(0);
+  });
+
+  it('folds the case of the scoped id, which SQL Server hands back uppercased', async () => {
+    // MJ mints primary keys client-side in lowercase and SQL Server returns them uppercased, so a
+    // case-sensitive comparison would pass here and refuse every resumed fill on a real host.
+    const { deps, rec } = makeDeps();
+
+    const out = await runRemember(deps, {
+      ...args,
+      sessionId: 'sess-second',
+      scopeId: ROW_ID.toUpperCase(),
+    });
+
+    expect(out.status).toBe(204);
+    expect(rec.mints).toEqual([ROW_ID]);
+  });
+
+  it('refuses a draft that came through a DIFFERENT link than the slug in the URL', async () => {
+    // The slug's distribution decides two things — `allowDeviceResume` and the invite's `closeAt` —
+    // while the only link check compared the row against the caller's JWT scope, never against the
+    // distribution actually in hand. Nothing upstream binds the JWT's scope to the URL's slug, so a
+    // draft belonging to link A, reached at link B's URL with A's own JWT, was minted under B's
+    // switch and B's expiry: A's `AllowDeviceResume=0` bypassed, and a credential outliving A.
+    const { deps, rec } = makeDeps({ distribution: { id: 'a-different-link' } });
+
+    const out = await runRemember(deps, { ...args, scopeId: DIST_ID });
+
+    expect(out.status).toBe(403);
+    expect(rec.mints).toHaveLength(0);
+  });
+
+  it('refuses the cross-link draft even for a RESUMED session, whose scope names the row', async () => {
+    // The response-scoped exemption is about which SESSION may act, not about which FORM this is.
+    // A verified scope proves the caller owns the row; it says nothing about the slug they arrived at.
+    const { deps, rec } = makeDeps({ distribution: { id: 'a-different-link' } });
+
+    const out = await runRemember(deps, { ...args, sessionId: 'sess-second', scopeId: ROW_ID });
+
+    expect(out.status).toBe(403);
+    expect(rec.mints).toHaveLength(0);
+  });
+
+  it('still mints for a resumed session on a row whose link was never recorded', async () => {
+    // NO REGRESSION FOR HISTORICAL ROWS. `FormDistributionID` is nullable and was added by the #138
+    // migration, so every draft created before it has no link at all — 1484 of 1487 rows in the dev
+    // database at the time of writing. Demanding a link match from those would refuse virtually
+    // every existing draft and re-break #193 far more widely than the bug it fixed. An unknown link
+    // stays exactly as it was: refused for a link-scoped caller, allowed for one the row names.
+    const { deps, rec } = makeDeps({
+      distribution: { id: 'a-different-link' },
+      response: { formDistributionId: undefined },
+    });
+
+    const out = await runRemember(deps, { ...args, sessionId: 'sess-second', scopeId: ROW_ID });
+
+    expect(out.status).toBe(204);
+    expect(rec.mints).toEqual([ROW_ID]);
+  });
+
+  it('retires the pointer it supersedes, leaving ONE live invite per draft', async () => {
+    // `pointerConflict` calls the cookie naming THIS draft "the ordinary re-mint" and waves it
+    // through — but the mint that follows only ever INSERTED, so the invite the cookie held stayed
+    // Active, UseCount=0, and genuinely redeemable for up to 15 days. The owner never spends it
+    // again, so a copy of it redeems invisibly instead of surfacing as the "visible failure at the
+    // owner's next reopen" that the one-use rotation is supposed to buy (resume-deps.ts:65-67).
+    const { deps, rec } = makeDeps({ inviteResourceId: ROW_ID });
+
+    const out = await runRemember(deps, {
+      ...args,
+      sessionId: 'sess-second',
+      scopeId: ROW_ID,
+      cookieToken: TOKEN,
+    });
+
+    expect(out.status).toBe(204);
+    expect(rec.mints).toEqual([ROW_ID]);
+    expect(rec.revokedInvites).toEqual([{ inviteId: HELD_INVITE_ID, responseId: ROW_ID }]);
+  });
+
+  it('retires nothing when the mint fails, so a failed re-mint cannot strand the device', async () => {
+    // ORDER IS THE SECURITY DECISION. Retiring the held pointer BEFORE minting would, on a mint
+    // failure, leave the browser holding a cookie that is already dead — and the route's existing
+    // fail-soft deliberately keeps the old pointer alive in exactly that case.
+    const { deps, rec } = makeDeps({ inviteResourceId: ROW_ID, mintFails: true });
+
+    const out = await runRemember(deps, {
+      ...args,
+      sessionId: 'sess-second',
+      scopeId: ROW_ID,
+      cookieToken: TOKEN,
+    });
+
+    expect(out.status).toBe(204);
+    expect(out.setCookie).toBeUndefined();
+    expect(rec.revokedInvites).toHaveLength(0);
   });
 });
 

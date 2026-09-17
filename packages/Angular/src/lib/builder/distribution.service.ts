@@ -1,6 +1,11 @@
 import { Injectable } from '@angular/core';
 import { EntitySaveOptions, Metadata, RunView, LogError, type UserInfo } from '@memberjunction/core';
-import { quoteSqlString } from '@mj-biz-apps/forms-entities';
+import {
+  ALLOWED_ORIGIN_GRAMMAR,
+  authorAllowedOrigins,
+  quoteSqlString,
+  serializeAllowedOrigins,
+} from '@mj-biz-apps/forms-entities';
 import type {
   mjBizAppsFormsFormDistributionEntity,
   mjBizAppsFormsFormDistributionEntityType,
@@ -318,6 +323,67 @@ export class DistributionService {
   public async reissueLink(dist: mjBizAppsFormsFormDistributionEntity): Promise<MutationOutcome> {
     dist.PublicLinkToken = null;
     return this.saveDist(dist, 'reissue this link');
+  }
+
+  /**
+   * Turn this link's captcha requirement on or off.
+   *
+   * One column, one save, in the shape of {@link setName} — but the cost is not symmetric with
+   * its neighbours, which is why the switch's hint says more than theirs do. Turnstile is
+   * fail-closed: with this on and no server-side Turnstile secret configured, every completed
+   * submission through this link is refused, and nothing visible from the builder says whether
+   * the host has keys.
+   *
+   * The server ORs this with the form's own `settings.captchaRequired`, so turning it OFF here
+   * does not turn a captcha off for a form that asks for one itself.
+   */
+  public async setCaptchaRequired(
+    dist: mjBizAppsFormsFormDistributionEntity,
+    required: boolean,
+  ): Promise<MutationOutcome> {
+    dist.CaptchaRequired = required;
+    return this.saveDist(dist, required ? 'turn on the captcha' : 'turn off the captcha');
+  }
+
+  /**
+   * Replace the list of sites permitted to show this link.
+   *
+   * Refuses the WHOLE edit when any entry fails the grammar, and saves nothing. Accepting the
+   * good entries and dropping the bad one is the tempting behaviour and the wrong one: an author
+   * who writes `*.acme.com`, sees the panel settle, and is told nothing believes they restricted
+   * something. They did not, and they will not look again. `authorAllowedOrigins` hands the
+   * refusals back separately for exactly this — so the offending string can be named on the screen
+   * where it was typed, instead of disappearing.
+   *
+   * An empty box clears the column to NULL, which means unrestricted — the state every link is in
+   * until somebody sets one, and the state that keeps existing embeds working.
+   *
+   * Unlike {@link setCaptchaRequired} beside it, turning this on has a cost nothing else on the
+   * panel makes visible: once ANY site is named the link is fail-closed. The respondent host page
+   * is served with a `frame-ancestors` directive naming exactly those origins, and the public form
+   * API refuses a caller whose `Origin` is neither one of them nor this API's own. A link already
+   * pasted into a page nobody listed stops working, with no warning beforehand — which is why the
+   * hint beside the box says so rather than describing the column.
+   */
+  public async setAllowedOrigins(
+    dist: mjBizAppsFormsFormDistributionEntity,
+    authored: string,
+  ): Promise<MutationOutcome & { rejected: string[] }> {
+    const { origins, rejected } = authorAllowedOrigins(authored);
+    if (rejected.length > 0) {
+      // Deliberately before any write: the record must be left exactly as it was, so a refusal
+      // cannot leave a half-applied list behind for the next save to pick up.
+      return {
+        ok: false,
+        error: `Not a usable site address: ${rejected.join(', ')}. Each one must be ${ALLOWED_ORIGIN_GRAMMAR}`,
+        rejected,
+      };
+    }
+    dist.AllowedOrigins = serializeAllowedOrigins(origins);
+    return {
+      ...(await this.saveDist(dist, 'change which sites may show this form')),
+      rejected: [],
+    };
   }
 
   /** Rename a distribution. The caller is responsible for trimming and rejecting blanks. */

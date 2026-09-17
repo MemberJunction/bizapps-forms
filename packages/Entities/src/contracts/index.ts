@@ -28,3 +28,4 @@ export * from './resume';
 export * from './starter-templates';
 export * from './schemas';
 export * from './sql-literal';
+export * from './allowed-origins';

@@ -27,6 +27,14 @@ import {
   addedMigrations,
   readAt,
   OUTPUT_SHIPPED_LATER,
+  remedyCovers,
+  suppressionRefusals,
+  findAddedColumns,
+  findInsertedEntityFieldNames,
+  findAddedForeignKeyColumns,
+  findInsertedRelationshipJoinFields,
+  INTEGRATION_BRANCH,
+  resolveCheckBase,
 } from './check-codegen-append.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -135,7 +143,7 @@ test('FIRES: a description change that never writes EntityField.Description', ()
 
 test('FIRES: a NEW migration ships CodeGen output with no banner', () => {
   const v = classifyMigration('migrations/V1__x.sql',
-    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD X BIT;\nCREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateForm] AS SELECT 1;',
+    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD CONSTRAINT CK_x CHECK (1=1);\nCREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateForm] AS SELECT 1;',
     { isNew: true });
   assert.equal(v.length, 1);
   assert.match(v[0], /banner/);
@@ -145,23 +153,37 @@ test('does NOT fire on the same file when it is merely modified', () => {
   // History cannot be retrofitted (migrations/README.md,
   // "Add a NEW seed migration; never edit an existing one"), so the banner rule is for new files.
   assert.deepEqual(classifyMigration('migrations/V1__x.sql',
-    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD X BIT;\nCREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateForm] AS SELECT 1;',
+    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD CONSTRAINT CK_x CHECK (1=1);\nCREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateForm] AS SELECT 1;',
     { isNew: false }), []);
 });
 
 test('does NOT fire on DDL that ships its output under the banner', () => {
   assert.deepEqual(classifyMigration('migrations/V1__x.sql',
-    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD X BIT;\n-- CodeGen output (appended)\nCREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateForm] AS SELECT 1;',
+    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD CONSTRAINT CK_x CHECK (1=1);\n-- CodeGen output (appended)\nCREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateForm] AS SELECT 1;',
     { isNew: true }), []);
 });
 
 // ── Calibration against this repo's real history ─────────────────────────────────────────────
-// Three migrations are expected to flag, and each is understood. If this list changes, either
+// Four migrations are expected to flag, and each is understood. If this list changes, either
 // the classifier drifted or someone edited history — both need a human.
+//
+// `classifyMigration` (called directly here) doesn't know about OUTPUT_SHIPPED_LATER at all --
+// that lookup lives only in main(), which re-reads the named remedy at headSha and confirms it
+// still carries CodeGen output before suppressing the finding. So all four entries below are
+// raw classifier output, from BEFORE that verified suppression runs: the first two are the
+// pre-existing OUTPUT_SHIPPED_LATER pair (V202608182100, V202608191200), which have always
+// flagged here for the same reason; V202609091600 (#201) is the third such pair's flagged half,
+// newly raised by classifyMigration's PARTIAL-coverage check (the added-column-with-no-
+// EntityField-row case). V202609011500 flags only because it hand-writes the three places a
+// column default lives (SQL default constraint, spCreateFormDistribution, EntityField.DefaultValue
+// via UPDATE) and predates the @codegen-none marker -- its header already explains why it ships no
+// CodeGen run (.claude/rules/migrations-codegen.md says the same). It should carry @codegen-none;
+// nothing is actually missing on a host. Not touched here.
 const KNOWN_HISTORICAL_FLAGS = [
   'migrations/V202608182100__v0.11.x__Element_Parity_And_Screens.sql',
   'migrations/V202608191200__v0.11.x__Ending_Screen_Social_Links.sql',
   'migrations/V202609011500__v0.12.x__Captcha_Opt_In_By_Default.sql',
+  'migrations/V202609091600__v0.12.x__Resume_Own_Response.sql',
 ];
 
 test('the classifier is calibrated against the whole migration directory', () => {
@@ -558,10 +580,406 @@ test('FIRES: OUTPUT_SHIPPED_LATER names a remedy that carries no CodeGen output'
 test('OUTPUT_SHIPPED_LATER only names remedies that are real and still carry CodeGen output', () => {
   const tracked = new Set(execFileSync('git', ['ls-files', 'migrations/*.sql'],
     { cwd: REPO_ROOT, encoding: 'utf8' }).split('\n').filter(Boolean));
-  for (const [flaggedName, remedyName] of OUTPUT_SHIPPED_LATER) {
-    const remedyPath = `migrations/${remedyName}`;
-    assert.ok(tracked.has(remedyPath), `${remedyName}: named as ${flaggedName}'s remedy but is not tracked`);
-    assert.equal(carriesCodeGenOutput(read(remedyPath)), true,
-      `${remedyName}: named as ${flaggedName}'s remedy but carries no CodeGen output`);
+  for (const [flaggedName, recorded] of OUTPUT_SHIPPED_LATER) {
+    const remedyNames = Array.isArray(recorded) ? recorded : [recorded];
+    for (const remedyName of remedyNames) {
+      const remedyPath = `migrations/${remedyName}`;
+      assert.ok(tracked.has(remedyPath), `${remedyName}: named as ${flaggedName}'s remedy but is not tracked`);
+    }
+    // At least one must carry output; coverage of each obligation is asserted separately below.
+    assert.equal(remedyNames.some((n) => carriesCodeGenOutput(read(`migrations/${n}`))), true,
+      `${flaggedName}: no named remedy carries CodeGen output`);
   }
+});
+
+// ── The PARTIAL case: output shipped, but not for every added column (#201) ─────────────────
+// The all-or-nothing check above (`ddl.length && !generated`) cannot see this: V202609091600
+// shipped views, procedures and indexes and no EntityField rows for the two columns it added --
+// `generated` was true, the gate passed, and every Form Response save failed on a host.
+
+test('findAddedColumns names every column an ALTER TABLE ADD introduces', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormDistribution] ADD [AllowDeviceResume] BIT NOT NULL CONSTRAINT DF_x DEFAULT (1);
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL;
+  `;
+  assert.deepEqual(findAddedColumns(sql).sort(), ['AllowDeviceResume', 'FormDistributionID']);
+});
+
+test('findAddedColumns ignores ADD CONSTRAINT — a constraint is not a column', () => {
+  const sql = `ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD CONSTRAINT FK_x FOREIGN KEY ([FormDistributionID]) REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);`;
+  assert.deepEqual(findAddedColumns(sql), []);
+});
+
+test('findInsertedEntityFieldNames reads the Name value out of an EntityField INSERT', () => {
+  const sql = `
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name],[DisplayName])
+    VALUES ('a','b',1,'AllowDeviceResume','Allow Device Resume')
+  `;
+  assert.deepEqual(findInsertedEntityFieldNames(sql), ['AllowDeviceResume']);
+});
+
+test('a migration that adds a column and ships CodeGen output but no EntityField row for it is a violation', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL;
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+    CREATE OR ALTER PROCEDURE [\${flyway:defaultSchema}].[spCreateFormResponse] AS SELECT 1;
+  `;
+  const v = classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true });
+  assert.equal(v.length, 1);
+  assert.match(v[0], /FormDistributionID/);
+  assert.match(v[0], /EntityField/);
+});
+
+test('the same migration passes once it ships the EntityField row', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL;
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name])
+    VALUES ('a','b',1,'FormDistributionID')
+  `;
+  assert.deepEqual(classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true }), []);
+});
+
+test('@codegen-none naming the column excuses it', () => {
+  const sql = `
+    -- @codegen-none: FormResponse.Scratch is a staging column the entity layer never exposes
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [Scratch] INT NULL;
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+  `;
+  assert.deepEqual(classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true }), []);
+});
+
+// ── A SECOND partial case: the FK column has an EntityField row but no EntityRelationship (#201) ──
+// The EntityField row makes the column writable; the EntityRelationship row makes the related-
+// records collection exist. V202609121200 shipped the first and not the second, so a host at
+// `next` today has FormResponse.FormDistributionID and no related-records collection. These fail
+// independently, so they are checked independently -- this block would not have caught the case
+// above, and the block above would not catch this one.
+
+test('findAddedForeignKeyColumns names a column whose ADD carries a REFERENCES clause', () => {
+  const sql = `ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);`;
+  assert.deepEqual(findAddedForeignKeyColumns(sql), ['FormDistributionID']);
+});
+
+test('findAddedForeignKeyColumns also catches the separate ADD CONSTRAINT … FOREIGN KEY form', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL;
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD CONSTRAINT FK_FormResponse_FormDistributionID
+      FOREIGN KEY ([FormDistributionID]) REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);
+  `;
+  assert.deepEqual(findAddedForeignKeyColumns(sql), ['FormDistributionID']);
+});
+
+test('a migration adding an FK column with an EntityField row but no EntityRelationship is a violation', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL
+      REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name])
+    VALUES ('a','b',1,'FormDistributionID')
+  `;
+  const v = classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true });
+  assert.equal(v.length, 1);
+  assert.match(v[0], /EntityRelationship/);
+  assert.match(v[0], /FormDistributionID/);
+});
+
+test('it passes once the EntityRelationship insert is present', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL
+      REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name])
+    VALUES ('a','b',1,'FormDistributionID')
+    INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID],[EntityID],[RelatedEntityID],[RelatedEntityJoinField])
+    VALUES ('c','d','e','FormDistributionID')
+  `;
+  assert.deepEqual(classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true }), []);
+});
+
+// ── Fix round 1: three defects a review found by executing the code, not by inspection ──────
+// All three are in the detection internals the brief specified verbatim -- the coordinator ruled
+// the brief's design wrong here and authorised departing from it. Structure (where the check
+// lives, what it reports) is unaffected; only how a column is judged "foreign key" and "linked"
+// changes.
+
+// Critical 1: `findInsertedRelationshipJoinFields` reads EntityRelationship.RelatedEntityJoinField
+// positionally -- the same way `findInsertedEntityFieldNames` reads EntityField.Name -- instead of
+// a proximity window. A proximity window ("is the column's name anywhere within N characters of
+// the word EntityRelationship") is satisfied by ANY nearby EntityField INSERT naming a *different*
+// FK column, because every FK column ships one of those regardless. That let a migration adding
+// TWO FK columns, with an EntityRelationship row for only the first, read as fully linked.
+test('findInsertedRelationshipJoinFields reads the RelatedEntityJoinField value out of an EntityRelationship INSERT', () => {
+  const sql = `
+    INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID],[EntityID],[RelatedEntityID],[RelatedEntityJoinField])
+    VALUES ('c','d','e','FormDistributionID')
+  `;
+  assert.deepEqual(findInsertedRelationshipJoinFields(sql), ['FormDistributionID']);
+});
+
+test('CRITICAL 1 (was a false pass): two FK columns, EntityRelationship shipped for only the first -- the SECOND is reported, not silently linked by proximity', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD
+      [FormDistributionID] UNIQUEIDENTIFIER NULL REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]),
+      [FormVersionID] UNIQUEIDENTIFIER NULL REFERENCES [\${flyway:defaultSchema}].[FormVersion]([ID]);
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+    INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID],[EntityID],[RelatedEntityID],[RelatedEntityJoinField])
+    VALUES ('c','d','e','FormDistributionID')
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name])
+    VALUES ('a','b',1,'FormDistributionID')
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name])
+    VALUES ('f','g',2,'FormVersionID')
+  `;
+  const v = classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true });
+  assert.equal(v.length, 1);
+  assert.match(v[0], /EntityRelationship/);
+  assert.match(v[0], /FormVersionID/);
+  assert.doesNotMatch(v[0], /FormDistributionID/);
+});
+
+// Critical 2: the inline-REFERENCES check must be evaluated per comma-separated part of the ADD
+// body, not across the whole body -- CLAUDE.md's "single multi-ADD ALTERs" makes a multi-column ADD
+// the expected shape, not an edge case, and the old whole-body regex named whichever column
+// happened to come first after ADD regardless of which one actually carried REFERENCES.
+test('CRITICAL 2 (was misattributed): a multi-column ADD reports the column that actually carries REFERENCES, not just the first name after ADD', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD
+      [ColumnA] INT NULL,
+      [ColumnB] UNIQUEIDENTIFIER NULL REFERENCES [\${flyway:defaultSchema}].[TableB]([ID]);
+  `;
+  assert.deepEqual(findAddedForeignKeyColumns(sql), ['ColumnB']);
+});
+
+// Important 3: the bare `FOREIGN KEY (col)` scan must be scoped to this migration's own
+// `ALTER TABLE … ADD` statements, not the whole file -- otherwise an unrelated CREATE TABLE that
+// happens to constrain a same-named column elsewhere makes a plain ADD read as a foreign key.
+test('IMPORTANT 3 (was over-flagged): an unrelated CREATE TABLE constraining a same-named column does not make a plain ADD read as a foreign key', () => {
+  const sql = `
+    CREATE TABLE [\${flyway:defaultSchema}].[Other] (
+      [ID] UNIQUEIDENTIFIER NOT NULL,
+      [SharedName] UNIQUEIDENTIFIER NULL,
+      CONSTRAINT [FK_Other_SharedName] FOREIGN KEY ([SharedName]) REFERENCES [\${flyway:defaultSchema}].[Elsewhere]([ID])
+    );
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [SharedName] INT NULL;
+  `;
+  assert.deepEqual(findAddedForeignKeyColumns(sql), []);
+});
+
+// ── The remedy must contain the artifact the finding actually asks for ──────────────────────────
+// Suppression used to be per FILE: one `continue` dropped every finding on a flagged migration as
+// soon as the named remedy carried any CodeGen-shaped statement. That was sound while a file could
+// only owe one thing. It can now owe two independent things -- an EntityField row and an
+// EntityRelationship row -- and V202609091600 owes both, with the two halves shipping in two
+// different migrations. A single-file remedy silently covered the half it does not contain.
+
+test('remedyCovers: a remedy supplying the EntityField row does NOT cover an unshipped relationship', () => {
+  const flagged = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL
+      REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+  `;
+  const fieldOnlyRemedy = `
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name])
+    VALUES ('a','b',1,'FormDistributionID')
+  `;
+  const uncovered = remedyCovers(flagged, [fieldOnlyRemedy]);
+  assert.deepEqual(uncovered.fields, [], 'the EntityField obligation IS covered');
+  assert.deepEqual(uncovered.relationships, ['formdistributionid'],
+    'the EntityRelationship obligation is NOT covered and must be reported');
+});
+
+test('remedyCovers: both obligations covered once a second remedy ships the relationship', () => {
+  const flagged = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL
+      REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+  `;
+  const fieldRemedy = `INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name]) VALUES ('a','b',1,'FormDistributionID')`;
+  const relRemedy = `INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID],[EntityID],[RelatedEntityID],[RelatedEntityJoinField]) VALUES ('c','d','e','FormDistributionID')`;
+  const uncovered = remedyCovers(flagged, [fieldRemedy, relRemedy]);
+  assert.deepEqual(uncovered.fields, []);
+  assert.deepEqual(uncovered.relationships, []);
+});
+
+test('OUTPUT_SHIPPED_LATER: every entry names remedies that cover every obligation of the flagged file', () => {
+  // The map is the gate's only escape hatch. An entry that covers one of a file's two obligations
+  // is the same silent pass the gate exists to refuse -- so assert coverage, not mere existence.
+  for (const [flaggedName, remedyNames] of OUTPUT_SHIPPED_LATER) {
+    const flaggedSql = readAt('HEAD', `migrations/${flaggedName}`, REPO_ROOT);
+    assert.ok(flaggedSql, `${flaggedName}: named in OUTPUT_SHIPPED_LATER but not readable at HEAD`);
+    const remedies = (Array.isArray(remedyNames) ? remedyNames : [remedyNames])
+      .map((n) => readAt('HEAD', `migrations/${n}`, REPO_ROOT));
+    for (const [i, sql] of remedies.entries()) {
+      const n = (Array.isArray(remedyNames) ? remedyNames : [remedyNames])[i];
+      assert.ok(sql, `${flaggedName}: remedy ${n} is not readable at HEAD`);
+    }
+    const uncovered = remedyCovers(flaggedSql, remedies);
+    assert.deepEqual(uncovered.fields, [],
+      `${flaggedName}: its remedies ship no EntityField row for ${uncovered.fields.join(', ')}`);
+    assert.deepEqual(uncovered.relationships, [],
+      `${flaggedName}: its remedies ship no EntityRelationship row for ${uncovered.relationships.join(', ')}`);
+  }
+});
+
+// The decision `main()` acts on, tested directly. Mutating the branch that acts on it used to leave
+// this suite entirely green -- the gate's own "a spec that passes on a broken gate is not a gate"
+// rule, applied to its escape hatch.
+
+const FLAGGED_FK = `
+  ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL
+    REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);
+  -- CodeGen output (appended)
+  CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+`;
+const FIELD_REMEDY = `INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name]) VALUES ('a','b',1,'FormDistributionID')`;
+const REL_REMEDY = `INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID],[EntityID],[RelatedEntityID],[RelatedEntityJoinField]) VALUES ('c','d','e','FormDistributionID')`;
+
+test('suppressionRefusals REFUSES a remedy that carries output but not the named artifact', () => {
+  const r = suppressionRefusals('migrations/V1__x.sql', FLAGGED_FK, ['V2__field.sql'], [FIELD_REMEDY], 'HEAD');
+  assert.equal(r.length, 1);
+  assert.match(r[0], /no __mj\.EntityRelationship row for formdistributionid/);
+  assert.match(r[0], /not\s+merely some CodeGen output/);
+});
+
+test('suppressionRefusals SUPPRESSES once every obligation is covered across the named remedies', () => {
+  assert.deepEqual(
+    suppressionRefusals('migrations/V1__x.sql', FLAGGED_FK, ['V2__field.sql', 'V3__rel.sql'], [FIELD_REMEDY, REL_REMEDY], 'HEAD'),
+    []);
+});
+
+test('suppressionRefusals names an unreadable remedy rather than silently suppressing', () => {
+  const r = suppressionRefusals('migrations/V1__x.sql', FLAGGED_FK, ['V2__gone.sql'], [null], 'deadbeef');
+  assert.equal(r.length, 1);
+  assert.match(r[0], /V2__gone\.sql/);
+  assert.match(r[0], /does not exist at deadbeef/);
+});
+
+test('suppressionRefusals refuses a remedy set that carries no CodeGen output at all', () => {
+  const r = suppressionRefusals('migrations/V1__x.sql', FLAGGED_FK, ['V2__prose.sql'], ['-- just a comment'], 'HEAD');
+  assert.equal(r.length, 1);
+  assert.match(r[0], /carries CodeGen output/);
+});
+
+// ── The base a main-bound ref must be checked against ────────────────────────────────────────
+// A pull request into `main` is a release or a back-merge, and its base IS `main` -- 690 commits
+// back at the time of writing. CHECK 2's banner rule applies only to ADDED files, so against that
+// base every migration merged since the last release reads as newly added and the four that
+// predate the gate relight. The `isNew` branch states the invariant it depends on; what it could
+// not anticipate is that a pull request's base can BE main. These pin both directions.
+
+test('resolveCheckBase is identity for anything aimed at the integration branch', () => {
+  assert.equal(INTEGRATION_BRANCH, 'next');
+  assert.equal(resolveCheckBase('deadbeef', 'next', REPO_ROOT), 'deadbeef');
+  assert.equal(resolveCheckBase('deadbeef', undefined, REPO_ROOT), 'deadbeef');
+  assert.equal(resolveCheckBase('deadbeef', '', REPO_ROOT), 'deadbeef');
+});
+
+let mainBound;
+
+before(() => {
+  const dir = mkdtempSync(join(tmpdir(), 'codegen-gate-mainbound-'));
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
+  git('init', '--quiet');
+  git('config', 'user.email', 'fixture@test.local');
+  git('config', 'user.name', 'Fixture');
+  git('config', 'commit.gpgsign', 'false');
+  mkdirSync(join(dir, 'migrations'), { recursive: true });
+
+  // Real content, so the classifier sees exactly what it sees in this repository.
+  // V202608301200 is one of the four the release range relights: it carries hand-written
+  // EntityFieldValue rows and no banner, which fires only when the file reads as ADDED.
+  const bannerless = read('migrations/V202608301200__v0.12.x__Rename_Signature_Question_To_Doodle.sql');
+
+  writeFileSync(join(dir, 'migrations/V202601010000__v0.1.x__Already_Released.sql'),
+    '-- Nothing CodeGen owns.\nSELECT 1;\n');
+  git('add', '.');
+  git('commit', '-m', 'the last release');
+  git('branch', '-M', 'main');
+  const mainSha = git('rev-parse', 'HEAD').trim();
+
+  git('checkout', '--quiet', '-b', 'next');
+  writeFileSync(join(dir, 'migrations/V202602020000__v0.2.x__Merged_Before_The_Gate.sql'), bannerless);
+  git('add', '.');
+  git('commit', '-m', 'merged into next before the gate existed');
+  const nextSha = git('rev-parse', 'HEAD').trim();
+
+  // A hotfix branched from main, not from next: its migration is absent from next, so it must
+  // still read as added even though the ref is aimed at main.
+  // A DIFFERENT bannerless migration, not a copy of the one above. `next` drops V202602020000 on
+  // this branch, and two similar blobs make git score the deletion and the addition as a RENAME --
+  // which --diff-filter=A excludes, so the file this test is about would not appear in the diff at
+  // all. Real branches never hit that: the migrations they add and drop are unrelated files.
+  const otherBannerless = read('migrations/V202608191400__v0.11.x__Form_Screen_Social_Links_Metadata.sql');
+  git('checkout', '--quiet', '-b', 'hotfix', mainSha);
+  writeFileSync(join(dir, 'migrations/V202603030000__v0.2.x__Hotfix.sql'), otherBannerless);
+  git('add', '.');
+  git('commit', '-m', 'a hotfix aimed straight at main');
+  const hotfixSha = git('rev-parse', 'HEAD').trim();
+
+  git('checkout', '--quiet', 'next');
+  mainBound = { dir, mainSha, nextSha, hotfixSha };
+});
+
+after(() => {
+  if (mainBound) rmSync(mainBound.dir, { recursive: true, force: true });
+});
+
+test('resolveCheckBase answers with the tip of next for anything aimed at main', () => {
+  assert.equal(resolveCheckBase(mainBound.mainSha, 'main', mainBound.dir), mainBound.nextSha);
+});
+
+test('resolveCheckBase names both ref spellings when next cannot be resolved', () => {
+  const bare = mkdtempSync(join(tmpdir(), 'codegen-gate-no-next-'));
+  try {
+    execFileSync('git', ['init', '--quiet'], { cwd: bare, encoding: 'utf8' });
+    assert.throws(
+      () => resolveCheckBase('deadbeef', 'main', bare),
+      /refs\/remotes\/origin\/next.*refs\/heads\/next/s,
+    );
+  } finally {
+    rmSync(bare, { recursive: true, force: true });
+  }
+});
+
+test('FIRES: the release range relights merged history when the target is not named', () => {
+  assert.throws(
+    () => execFileSync('node',
+      [join(REPO_ROOT, 'scripts/check-codegen-append.mjs'), mainBound.mainSha, mainBound.nextSha],
+      { cwd: mainBound.dir, encoding: 'utf8', stdio: 'pipe' }),
+    (err) => {
+      assert.equal(err.status, 1);
+      assert.match(String(err.stderr), /V202602020000__v0\.2\.x__Merged_Before_The_Gate\.sql/);
+      assert.match(String(err.stderr), /no "-- CodeGen output \(appended\)" banner/);
+      return true;
+    }
+  );
+});
+
+test('a main-bound ref is checked against next, so merged history does not relight', () => {
+  const out = execFileSync('node',
+    [join(REPO_ROOT, 'scripts/check-codegen-append.mjs'), mainBound.mainSha, mainBound.nextSha, 'main'],
+    { cwd: mainBound.dir, encoding: 'utf8', stdio: 'pipe' });
+  assert.match(out, /Base retargeted/);
+  assert.match(out, /0 changed migration\(s\)/);
+});
+
+test('FIRES: a hotfix aimed at main still owes its CodeGen output', () => {
+  assert.throws(
+    () => execFileSync('node',
+      [join(REPO_ROOT, 'scripts/check-codegen-append.mjs'), mainBound.mainSha, mainBound.hotfixSha, 'main'],
+      { cwd: mainBound.dir, encoding: 'utf8', stdio: 'pipe' }),
+    (err) => {
+      assert.equal(err.status, 1);
+      assert.match(String(err.stderr), /V202603030000__v0\.2\.x__Hotfix\.sql/);
+      return true;
+    }
+  );
 });

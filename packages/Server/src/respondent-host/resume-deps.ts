@@ -16,6 +16,7 @@ import type {
 import {
   findInviteByRawToken,
   mintResponseInvite,
+  revokeInviteById,
   revokeResponseInvites,
 } from '../magic-link/resume-invites.service';
 import { distributionQuotaExceeded } from '../public-submit/quota.service';
@@ -36,6 +37,8 @@ export interface ResumeDepsContext {
   slug: string;
   /** A rate-limit key derived from the resolved peer, never from anything the caller chose. */
   callerKey: string;
+  /** The resolved peer address, forwarded to core so its redeem cap is per respondent. */
+  callerIp?: string;
 }
 
 /** Build the dependency set for one request. */
@@ -46,8 +49,9 @@ export function makeDeviceResumeDeps(ctx: ResumeDepsContext): DeviceResumeDeps {
     loadResponse: (responseId) => loadResponse(responseId, ctx.systemUser),
     redeem: async (rawToken) => {
       const result = await redeemRawToken(
-        { redeemUrl: config.magicLinkRedeemUrl, fetchImpl: fetch },
+        { redeemUrl: config.magicLinkRedeemUrl, fetchImpl: fetch, clientIp: ctx.callerIp },
         rawToken,
+        ctx.slug,
       );
       if (!result || !result.success || !result.token) {
         return { ok: false, errorCode: result?.errorCode, status: result?.status };
@@ -74,7 +78,10 @@ export function makeDeviceResumeDeps(ctx: ResumeDepsContext): DeviceResumeDeps {
     },
     inviteFor: async (rawToken) => {
       const found = await findInviteByRawToken(rawToken, ctx.systemUser);
-      return { ok: found.ok, resourceId: found.resourceId };
+      return { ok: found.ok, resourceId: found.resourceId, inviteId: found.inviteId };
+    },
+    revokeInvite: async ({ inviteId, responseId }) => {
+      await revokeInviteById(inviteId, responseId, ctx.systemUser);
     },
     scopeOf: readScopeClaim,
     allowRequest: (key) => FormsRateLimiter.Instance.charge([{ key, max: RESUME_RATE_MAX }]).allowed,

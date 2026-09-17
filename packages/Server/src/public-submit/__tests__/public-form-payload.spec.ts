@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
 
-import { publicDefinition, publicFormPayload } from '../public-form-payload';
+import { publicDefinition, publicFormPayload, withDistributionCaptcha } from '../public-form-payload';
 
 const SENTINEL_ACTION = '11111111-2222-4333-8444-555555555555';
 const SENTINEL_AGENT = '66666666-7777-4888-8999-000000000000';
@@ -84,20 +84,20 @@ describe('publicFormPayload', () => {
   it('discloses neither the action id nor the agent id anywhere in the serialized payload', () => {
     // The assertion that matters. `automations: []` with the ids leaking through some other key
     // would satisfy a shape check and still hand a respondent the wiring.
-    const serialized = JSON.stringify(publicFormPayload(definitionWithAutomations()));
+    const serialized = JSON.stringify(publicFormPayload(definitionWithAutomations(), false));
 
     expect(serialized).not.toContain(SENTINEL_ACTION);
     expect(serialized).not.toContain(SENTINEL_AGENT);
   });
 
   it('does not disclose a trigger condition value', () => {
-    const serialized = JSON.stringify(publicFormPayload(definitionWithAutomations()));
+    const serialized = JSON.stringify(publicFormPayload(definitionWithAutomations(), false));
 
     expect(serialized).not.toContain('a-secret-knockout-value');
   });
 
   it('still carries everything the widget needs to render', () => {
-    const payload = publicFormPayload(definitionWithAutomations());
+    const payload = publicFormPayload(definitionWithAutomations(), false);
 
     expect(payload.formId).toBe('form-1');
     expect(payload.formVersionId).toBe('ver-1');
@@ -109,8 +109,90 @@ describe('publicFormPayload', () => {
   });
 
   it('round-trips definitionJSON back into a shape whose automations are empty', () => {
-    const parsed = JSON.parse(publicFormPayload(definitionWithAutomations()).definitionJSON) as PublishedFormDefinition;
+    const parsed = JSON.parse(publicFormPayload(definitionWithAutomations(), false).definitionJSON) as PublishedFormDefinition;
 
     expect(parsed.automations).toEqual([]);
+  });
+});
+
+/**
+ * The captcha fact the SUBMIT gate has always acted on, told to the widget that has to satisfy it.
+ *
+ * `submit-pipeline` stage 4 gates on `captchaRequired(settings.captchaRequired, distribution.CaptchaRequired)`
+ * — an OR — while this projection returned the snapshot's half alone. A link with the column on
+ * therefore rendered no challenge, collected no token, and had every completed submission refused
+ * with `missing-token`, which is a form nobody can submit (#151).
+ */
+describe('withDistributionCaptcha', () => {
+  it('turns the flag on when the distribution demands a captcha', () => {
+    expect(withDistributionCaptcha(definitionWithAutomations(), true).settings.captchaRequired).toBe(true);
+  });
+
+  it('leaves a form that already asks for one alone', () => {
+    const definition = definitionWithAutomations();
+    definition.settings.captchaRequired = true;
+
+    expect(withDistributionCaptcha(definition, false).settings.captchaRequired).toBe(true);
+  });
+
+  it('is false only when neither side asks', () => {
+    expect(withDistributionCaptcha(definitionWithAutomations(), false).settings.captchaRequired).toBe(false);
+  });
+
+  it('does not mutate the definition it was given', () => {
+    // The submit pipeline re-resolves this same snapshot; a projection that wrote through would
+    // turn a read into a silent write, exactly as `publicDefinition` must not.
+    const definition = definitionWithAutomations();
+
+    withDistributionCaptcha(definition, true);
+
+    expect(definition.settings.captchaRequired).toBe(false);
+  });
+
+  it('returns the argument itself when there is nothing to change, and says so in its doc', () => {
+    // The contract is NON-MUTATION, not a fresh reference — unlike `publicDefinition`, which
+    // spreads unconditionally. The doc used to claim parity with it; this pins the real behaviour
+    // so the two cannot drift apart again without a test noticing.
+    const unchanged = definitionWithAutomations();
+
+    expect(withDistributionCaptcha(unchanged, false)).toBe(unchanged);
+  });
+
+  it('returns a NEW object on the path that does change the flag', () => {
+    const widened = definitionWithAutomations();
+
+    const out = withDistributionCaptcha(widened, true);
+
+    expect(out).not.toBe(widened);
+    expect(out.settings).not.toBe(widened.settings);
+  });
+
+  it('leaves every other setting untouched', () => {
+    const projected = withDistributionCaptcha(definitionWithAutomations(), true);
+
+    expect(projected.settings.confirmationMessage).toBe('Thanks.');
+    expect(projected.settings.anonymousAllowed).toBe(true);
+  });
+});
+
+describe('publicFormPayload and the distribution captcha flag', () => {
+  it('carries the flag in definitionJSON, which is the field the widget actually reads', () => {
+    // `forms-api.graphql.service.ts` selects `definitionJSON` ALONE and parses it into the whole
+    // definition. A fix that wrote only `settingsJSON` would pass a shape check and change nothing
+    // the respondent sees, so this is the assertion that corresponds to a challenge appearing.
+    const parsed = JSON.parse(publicFormPayload(definitionWithAutomations(), true).definitionJSON) as PublishedFormDefinition;
+
+    expect(parsed.settings.captchaRequired).toBe(true);
+  });
+
+  it('carries it in settingsJSON too, so the two fields cannot disagree', () => {
+    expect(JSON.parse(publicFormPayload(definitionWithAutomations(), true).settingsJSON).captchaRequired).toBe(true);
+  });
+
+  it('leaves both false when neither side asks', () => {
+    const payload = publicFormPayload(definitionWithAutomations(), false);
+
+    expect(JSON.parse(payload.definitionJSON).settings.captchaRequired).toBe(false);
+    expect(JSON.parse(payload.settingsJSON).captchaRequired).toBe(false);
   });
 });

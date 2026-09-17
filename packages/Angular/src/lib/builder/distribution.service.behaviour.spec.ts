@@ -17,6 +17,8 @@ interface FakeDistribution {
   PublicLinkToken: string | null;
   MagicLinkInviteID: string | null;
   MaxResponses: number | null;
+  CaptchaRequired: boolean;
+  AllowedOrigins: string | null;
   LatestResult: { CompleteMessage: string } | null;
   writes: Record<string, unknown>;
   savedWith: EntitySaveOptions | undefined;
@@ -33,6 +35,8 @@ function fakeDistribution(overrides: Partial<FakeDistribution> = {}): FakeDistri
     PublicLinkToken: 'mj_ml_old',
     MagicLinkInviteID: 'invite-old',
     MaxResponses: null,
+    CaptchaRequired: false,
+    AllowedOrigins: null,
     LatestResult: null,
     writes: {},
     savedWith: undefined,
@@ -96,5 +100,100 @@ describe('DistributionService — a refused save', () => {
     const out = await new DistributionService().setMaxResponses(asEntity(d), 99_999_999);
     expect(out).toEqual({ ok: false, error: expect.stringContaining('too big') });
     expect(d.reverted).toBe(true);
+  });
+});
+
+/**
+ * The captcha switch writes the column the SUBMIT gate reads.
+ *
+ * `submit-pipeline` stage 4 ORs this column with the form's own `settings.captchaRequired`, and
+ * until #151 nothing in the builder could see or set it — the only surfaces that could were a raw
+ * entity form and a direct write.
+ */
+describe('DistributionService — the captcha switch', () => {
+  it('writes the column, and nothing else', async () => {
+    const d = fakeDistribution({ CaptchaRequired: false });
+
+    const out = await new DistributionService().setCaptchaRequired(asEntity(d), true);
+
+    expect(out.ok).toBe(true);
+    expect(d.writes).toEqual({ CaptchaRequired: true });
+  });
+
+  it('turns it back off', async () => {
+    const d = fakeDistribution({ CaptchaRequired: true });
+
+    await new DistributionService().setCaptchaRequired(asEntity(d), false);
+
+    expect(d.writes).toEqual({ CaptchaRequired: false });
+  });
+
+  it('reports a refused save rather than claiming success', async () => {
+    // Turning a captcha on is exactly the write an author must not be told succeeded when it did
+    // not: they would go on believing the link is protected.
+    const d = fakeDistribution({ CaptchaRequired: false });
+    d.LatestResult = { CompleteMessage: 'nope' };
+    d.Save = async () => false;
+
+    const out = await new DistributionService().setCaptchaRequired(asEntity(d), true);
+
+    expect(out.ok).toBe(false);
+  });
+});
+
+/**
+ * The list of sites a link may be shown on.
+ *
+ * The last two cases are the point of the whole feature. An author who writes `*.acme.com`, sees
+ * the panel settle, and is told nothing believes they restricted something — they did not, and
+ * they will not look again. So a bad entry refuses the WHOLE edit and writes nothing, rather than
+ * quietly keeping the entries that happened to parse.
+ */
+describe('DistributionService — the sites allowed to show a link', () => {
+  it('writes the normalised JSON array', async () => {
+    const d = fakeDistribution({ AllowedOrigins: null });
+
+    const out = await new DistributionService().setAllowedOrigins(
+      asEntity(d),
+      'HTTPS://Careers.ACME.com\nhttps://acme.com:8443',
+    );
+
+    expect(out.ok).toBe(true);
+    expect(out.rejected).toEqual([]);
+    expect(d.writes).toEqual({
+      AllowedOrigins: '["https://careers.acme.com","https://acme.com:8443"]',
+    });
+  });
+
+  it('clears the column back to NULL when the author empties the box', async () => {
+    // NULL is the unrestricted state every link starts in, and the only way back to it.
+    const d = fakeDistribution({ AllowedOrigins: '["https://careers.acme.com"]' });
+
+    await new DistributionService().setAllowedOrigins(asEntity(d), '   \n  ');
+
+    expect(d.writes).toEqual({ AllowedOrigins: null });
+  });
+
+  it('refuses a wildcard and saves NOTHING, rather than silently dropping it', async () => {
+    const d = fakeDistribution({ AllowedOrigins: null });
+
+    const out = await new DistributionService().setAllowedOrigins(asEntity(d), '*.acme.com');
+
+    expect(out.ok).toBe(false);
+    expect(out.rejected).toEqual(['*.acme.com']);
+    expect(out.error).toContain('*.acme.com');
+    expect(d.writes).toEqual({});
+  });
+
+  it('refuses the whole edit when only SOME entries are bad, so nothing is half-applied', async () => {
+    const d = fakeDistribution({ AllowedOrigins: null });
+
+    const out = await new DistributionService().setAllowedOrigins(
+      asEntity(d),
+      'https://good.example\n*.acme.com',
+    );
+
+    expect(out.rejected).toEqual(['*.acme.com']);
+    expect(d.writes).toEqual({});
   });
 });

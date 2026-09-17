@@ -12,6 +12,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
+import { parseAllowedOrigins } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
 import { LogError } from '@memberjunction/core';
 
@@ -316,6 +317,21 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Flip this link's captcha requirement.
+   *
+   * `run()`, not `runCredentialWrite()` like its neighbour above: this writes one column and
+   * touches neither `PublicLinkToken` nor `MagicLinkInviteID`, so there is nothing a re-read could
+   * discover, and skipping it keeps the panel's scroll position and selection where they were.
+   */
+  protected async toggleCaptcha(): Promise<void> {
+    const link = this.selected;
+    if (!link || this.busy) {
+      return;
+    }
+    await this.run(() => this.service.setCaptchaRequired(link, !link.CaptchaRequired));
+  }
+
+  /**
    * Say so when turning a link OFF did not actually take its access token away.
    *
    * The mirror of {@link warnIfStillUnissued}, and a separate method because the evidence is
@@ -464,6 +480,48 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
       return;
     }
     await this.run(() => this.service.setSchedule(link, link.OpenAt, fromLocalInputValue(raw)));
+  }
+
+  /**
+   * The authored list as one address per line — the shape the box shows.
+   *
+   * Three stored states, three answers. An allowlist shows its origins, one per line. An
+   * UNRESTRICTED link shows an empty box, because empty is what "any site may show this" looks
+   * like. A CLOSED one — authored, but nothing in it parses, which is reachable from Explorer's
+   * raw entity form — shows the raw column back: the author has to see what is actually stored to
+   * fix it, and an empty box would read as "no restriction" while the link was refusing everyone.
+   */
+  protected authoredOrigins(link: mjBizAppsFormsFormDistributionEntity): string {
+    const policy = parseAllowedOrigins(link.AllowedOrigins);
+    if (policy.kind === 'allowlist') {
+      return policy.origins.join('\n');
+    }
+    return policy.kind === 'closed' ? (link.AllowedOrigins ?? '') : '';
+  }
+
+  /**
+   * Save an edited list of sites.
+   *
+   * Takes the element rather than its value for the reason {@link setMax} does: Angular repaints
+   * `[value]` only when the BOUND expression changes, so an edit the service normalised
+   * (`HTTPS://Acme.com` becoming `https://acme.com`) would sit in the box in a spelling the record
+   * does not hold.
+   *
+   * Written back only on success, which is where this parts company with {@link setMax}. A
+   * REFUSED edit must keep the author's text exactly as they typed it — that text is the thing
+   * they have to fix, and `actionError` above already names the entry that failed. Replacing it
+   * with what is stored would delete the work and leave the refusal unexplainable.
+   */
+  protected async saveOrigins(box: HTMLTextAreaElement): Promise<void> {
+    const link = this.selected;
+    if (!link || this.busy) {
+      return;
+    }
+    await this.run(() => this.service.setAllowedOrigins(link, box.value));
+    if (this.actionError === null) {
+      box.value = this.authoredOrigins(link);
+      this.cdr.markForCheck();
+    }
   }
 
   /**
