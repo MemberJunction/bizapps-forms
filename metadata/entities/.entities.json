@@ -1,0 +1,219 @@
+[
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Forms"
+    },
+    "fields": {
+      "AllowUserSearchAPI": true,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
+          },
+          "fields": {
+            "IncludeInUserSearchAPI": true,
+            "UserSearchPredicateAPI": "BeginsWith",
+            "AutoUpdateIncludeInUserSearchAPI": false
+          }
+        },
+        {
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=ID&EntityID=@parent:ID"
+          },
+          "fields": {
+            "IncludeInUserSearchAPI": false,
+            "AutoUpdateIncludeInUserSearchAPI": false
+          }
+        },
+        {
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=Category&EntityID=@parent:ID"
+          },
+          "fields": {
+            "IncludeInUserSearchAPI": false,
+            "AutoUpdateIncludeInUserSearchAPI": false
+          }
+        },
+        {
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=OwnerUser&EntityID=@parent:ID"
+          },
+          "fields": {
+            "IncludeInUserSearchAPI": false,
+            "AutoUpdateIncludeInUserSearchAPI": false
+          }
+        },
+        {
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=Status&EntityID=@parent:ID"
+          },
+          "fields": {
+            "IncludeInUserSearchAPI": false,
+            "AutoUpdateIncludeInUserSearchAPI": false
+          }
+        }
+      ]
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Categories"
+    },
+    "fields": {
+      "AllowUserSearchAPI": true,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
+          },
+          "fields": {
+            "IncludeInUserSearchAPI": true,
+            "UserSearchPredicateAPI": "BeginsWith",
+            "AutoUpdateIncludeInUserSearchAPI": false
+          }
+        },
+        {
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=ID&EntityID=@parent:ID"
+          },
+          "fields": {
+            "IncludeInUserSearchAPI": false,
+            "AutoUpdateIncludeInUserSearchAPI": false
+          }
+        }
+      ]
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Automation Runs"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Automations"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Distributions"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Entity Binding Records"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Entity Bindings"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Pages"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Question Options"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Questions"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Response Answers"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Responses"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Screens"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Styles"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Uploads"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  },
+  {
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Versions"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    }
+  }
+]
