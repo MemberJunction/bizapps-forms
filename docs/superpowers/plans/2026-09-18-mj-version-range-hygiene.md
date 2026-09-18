@@ -214,6 +214,20 @@ EOF
 
 ### Task 2: Prove forms compiles against MJ 6.1.0-edge.6
 
+> **Superseded during execution — this task's probe was run and ruled INVALID. Do not run it as
+> written, and do not act on its verdict.** The symlink-repoint probe below swaps one package's
+> `@memberjunction/*` symlinks while the sibling forms `dist/` still embed MJ-source types, so it
+> manufactures the very two-copy split it was meant to test against: it returned 23 diagnostics,
+> every one traced to that artefact rather than to a real incompatibility (commit `c483356`).
+> Step 4's interpretation is therefore wrong in BOTH directions — a non-zero exit does not mean
+> "the floor claim is false", and `PROBE EXIT=0` would not have meant the floor is honest.
+> Step 4 also still says the floor is `>=6.1.0`; the shipped value is `>=6.1.0-edge.6 <7.0.0`.
+>
+> What actually verified the `edge.6` floor is the **API-surface check**: all 74 `@memberjunction/*`
+> symbols these packages import, checked against the real `6.1.0-edge.6` typings, none absent.
+> That is not a compile, and the PR body says so. A valid compile probe would need forms rebuilt
+> against edge.6 inside the shared dev workspace.
+
 This task changes no repo file. It exists because Task 3 publishes a compatibility **claim**, and `lint:peer-ranges` cannot verify a claim — shipping an unverified floor is precisely what #211 was. If this task fails, **stop and report**; Task 3's floor must then stay higher and the plan needs revising.
 
 **Files:**
@@ -658,6 +672,29 @@ cd /Users/sohamdesai/Projects/mj-dev/bizapps-forms && node --test scripts/check-
 Expected: FAIL — `Cannot find module` for `./check-mj-version-ranges.mjs`.
 
 - [ ] **Step 3: Write the gate**
+
+> **Superseded during execution — the shipped gate is the authority. Do not paste this block.**
+> The block below is the original draft. `scripts/check-mj-version-ranges.mjs` as shipped differs
+> in four ways that matter, each closed by a later commit on this branch:
+>
+> 1. **It must not import `semver`.** The draft's docblock says "stdlib plus `semver`" and its body
+>    has `import semver from 'semver';`. `semver` is declared in no manifest in this repo and CI
+>    installs it standalone, so every run failed with `ERR_MODULE_NOT_FOUND` (`141f39d`). The
+>    shipped header now reads "Do not reintroduce a third-party import here", and
+>    `check-mj-version-ranges.spec.mjs` asserts every import specifier starts with `node:`.
+>    Pasting this block turns CI red.
+> 2. **`isExactVersion` must not be `/^\d/`.** That tests only the first character, so it
+>    misclassifies `6.x` and `6.1.1 - 6.2.0` — real ranges that still defeat workspace linking —
+>    and emits the malformed suggestion `^6.1.1 - 6.2.0` (`eeae2f5`). The shipped version parses
+>    the whole string and also accepts the explicit-exact `=6.1.1` spelling.
+> 3. **Rule 1 must scan the repo-root manifest, not just `packages/`.** One of the two pins this
+>    branch exists for is root `devDependencies["@memberjunction/cli"]`; a `packages/`-only scan
+>    misses half the defect it claims to catch (`fa38198`).
+> 4. **Rule 2 must also require the peer's floor tuple to equal `mj-app.json`'s `mjVersionRange`
+>    floor tuple.** "Admits its own tuple's prereleases" alone passes `^6.0.0-edge.1`, which
+>    refuses every Edge host this app targets (`fa38198`).
+>
+> Read the shipped file, not this block.
 
 ```bash
 cd /Users/sohamdesai/Projects/mj-dev/bizapps-forms
@@ -1218,6 +1255,6 @@ Summarize: CI status per check, smoke-test table, anything fixed, and the PR URL
 
 **Placeholder scan.** No TBDs. Every code step carries runnable content; every expectation states the exact string or exit code to look for.
 
-**Type consistency.** The six exports named in Task 4's *Interfaces* block (`SCANNED_DIRS`, `isExactVersion`, `admitsOwnPrereleases`, `findExactMJDeps`, `findNonPrereleasePeers`, `runCheck`) are the six the spec imports and the six the gate defines. `runCheck` returns `string[]` in all three places.
+**Type consistency.** *(Corrected after execution — the counts below were true of the draft in Task 4's *Interfaces* block, not of the shipped gate.)* The shipped gate defines **eight** exports — `SCANNED_DIRS`, `isExactVersion`, `admitsOwnPrereleases`, `classifyPeerRange`, `findExactMJDeps`, `findNonPrereleasePeers`, `scannedManifests`, `runCheck` — and the spec imports **seven** of them, all but `SCANNED_DIRS`. `classifyPeerRange` and `scannedManifests` were added by `fa38198` (the floor-tuple check, and an export so a spec can assert the scan actually visited manifests rather than finding nothing wrong in a scan of nothing). `runCheck` returns `string[]` in all three places.
 
 **Known risk.** Task 4 Step 6 and Step 7 anchor on existing text in `package.json` and `build.yml`; both verify the substitution happened and throw if the anchor is missing, so a silent no-op is impossible.
