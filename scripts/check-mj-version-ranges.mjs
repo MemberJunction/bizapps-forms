@@ -209,8 +209,28 @@ const MJ_APP_MANIFEST_PATH = 'mj-app.json';
  */
 export const SCANNED_DIRS = Object.freeze(['packages']);
 
-/** Dependency blocks where an exact MJ pin defeats workspace linking. */
-const PINNING_BLOCKS = Object.freeze(['dependencies', 'devDependencies']);
+/**
+ * Dependency blocks where a registry-bound MJ spec defeats workspace linking. All three INSTALL
+ * the package — `optionalDependencies` differs only in tolerating a failed install, so an exact
+ * MJ pin there forks the graph exactly as one in `dependencies` does. `peerDependencies` is
+ * deliberately absent: it declares a requirement rather than installing anything, and Rule 2
+ * governs it.
+ */
+const PINNING_BLOCKS = Object.freeze(['dependencies', 'devDependencies', 'optionalDependencies']);
+
+/**
+ * An `npm:` alias — `npm:@memberjunction/core@6.1.1`, or with a range inside it.
+ *
+ * Rule 1 asks "does this spec name one build?", and an alias defeats that question rather than
+ * answering it: `semver.validRange('npm:@memberjunction/core@6.1.1')` is null, so the version is
+ * invisible to an exactness test. It is reported as its own kind rather than folded into `exact`,
+ * because the reason differs — the defect is the PROTOCOL, not the version inside it. `npm:`
+ * names a registry package; the spelling that links a workspace sibling is `workspace:`. So an
+ * alias to a RANGE is refused too, which an exactness test would have waved through.
+ */
+function isNpmAlias(spec) {
+    return typeof spec === 'string' && spec.trim().startsWith('npm:');
+}
 
 /** True when `spec` names one build rather than a range. */
 export function isExactVersion(spec) {
@@ -276,16 +296,24 @@ export function classifyPeerRange(range, floorSpec) {
     return floor.prerelease === target.prerelease ? null : 'wrong-anchor';
 }
 
-/** Exact `@memberjunction/*` entries in the pinning blocks of one manifest. */
+/**
+ * `@memberjunction/*` entries in the pinning blocks of one manifest that cannot resolve to a
+ * workspace sibling. Each hit carries a `kind` — `'exact'` for a version that names one build,
+ * `'alias'` for an `npm:` spec — because the two need different messages and different fixes.
+ */
 export function findExactMJDeps(manifest, relPath) {
     const hits = [];
     for (const block of PINNING_BLOCKS) {
         for (const [dep, version] of Object.entries(manifest?.[block] ?? {})) {
             if (!dep.startsWith(MJ_SCOPE)) continue;
-            if (!isExactVersion(version)) continue;
             const trimmed = String(version).trim();
+            if (isNpmAlias(version)) {
+                hits.push({ file: relPath, block, dep, version: trimmed, bareVersion: null, kind: 'alias' });
+                continue;
+            }
+            if (!isExactVersion(version)) continue;
             const bareVersion = trimmed.startsWith('=') ? trimmed.slice(1).trim() : trimmed;
-            hits.push({ file: relPath, block, dep, version: trimmed, bareVersion });
+            hits.push({ file: relPath, block, dep, version: trimmed, bareVersion, kind: 'exact' });
         }
     }
     return hits;
@@ -390,8 +418,18 @@ function mjVersionFloor(root) {
         : `${floor.major}.${floor.minor}.${floor.patch}-${floor.prerelease}`;
 }
 
-/** Renders one `findExactMJDeps` hit as a CLI violation message. */
+/** Renders one `findExactMJDeps` hit as a CLI violation message, by kind. */
 function exactPinMessage(hit) {
+    if (hit.kind === 'alias') {
+        return (
+            `${hit.file}: ${hit.block}["${hit.dep}"] is "${hit.version}", an \`npm:\` alias. ` +
+            `That spec names a REGISTRY package explicitly — the spelling that resolves to a ` +
+            `workspace sibling is \`workspace:\` — so it cannot link MJ source whatever version ` +
+            `sits inside it, and a downloaded copy brings its own exact \`@memberjunction/core\` ` +
+            `alongside the linked one. It is also not a semver range, so the exactness check ` +
+            `below cannot see through it. Depend on the package directly: "^X.Y.Z-edge.N".`
+        );
+    }
     return (
         `${hit.file}: ${hit.block}["${hit.dep}"] is the exact version "${hit.version}". ` +
         `MJ is a workspace sibling, so an exact pin does not pick a version — it defeats ` +

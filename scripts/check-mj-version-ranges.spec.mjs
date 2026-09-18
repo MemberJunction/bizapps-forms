@@ -512,3 +512,69 @@ test('the union message names the real problem and does not claim the range is m
     assert.equal(hits.length, 1);
     assert.equal(hits[0].reason, 'union');
 });
+
+// ── two pinning shapes Rule 1 could not see ─────────────────────────────────
+// Found by a systematic smoke pass over the gate's whole input space. Both install an MJ package
+// from the registry, which is the thing Rule 1 exists to refuse; neither is a bare exact version,
+// so `isExactVersion` never saw them.
+
+test('an npm: alias to an MJ package is refused — it cannot resolve to a workspace sibling', () => {
+    const hits = findExactMJDeps(
+        { dependencies: { '@memberjunction/core': 'npm:@memberjunction/core@6.1.1' } },
+        'packages/P/package.json',
+    );
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].kind, 'alias');
+});
+
+test('an npm: alias is refused even when its target is a RANGE', () => {
+    // The defect is the protocol, not the version inside it: `npm:` names a registry package,
+    // and pnpm's workspace protocol is spelled `workspace:`. A range inside the alias does not
+    // make it linkable, so "is it exact?" is the wrong question to ask of it.
+    const hits = findExactMJDeps(
+        { dependencies: { '@memberjunction/core': 'npm:@memberjunction/core@^6.1.1' } },
+        'packages/P/package.json',
+    );
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].kind, 'alias');
+});
+
+test('the alias message names the protocol, not exactness', () => {
+    const root = scratchRepo();
+    writeFileSync(
+        path.join(root, 'packages', 'P', 'package.json'),
+        JSON.stringify({ name: 'p', dependencies: { '@memberjunction/core': 'npm:@memberjunction/core@6.1.1' } }),
+    );
+    const violations = runCheck(root);
+    assert.equal(violations.length, 1);
+    assert.match(violations[0], /npm:/);
+    assert.doesNotMatch(violations[0], /is the exact version/);
+});
+
+test('a plain exact pin still reports as exact, not as an alias', () => {
+    const hits = findExactMJDeps(
+        { dependencies: { '@memberjunction/core': '6.1.1' } },
+        'packages/P/package.json',
+    );
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].kind, 'exact');
+});
+
+test('a workspace: protocol is NOT refused — that is the linking spelling, not a registry one', () => {
+    assert.deepEqual(
+        findExactMJDeps(
+            { dependencies: { '@memberjunction/core': 'workspace:*' } },
+            'packages/P/package.json',
+        ),
+        [],
+    );
+});
+
+test('optionalDependencies is a pinning block too — it installs', () => {
+    const hits = findExactMJDeps(
+        { optionalDependencies: { '@memberjunction/core': '6.1.1' } },
+        'packages/P/package.json',
+    );
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].block, 'optionalDependencies');
+});
