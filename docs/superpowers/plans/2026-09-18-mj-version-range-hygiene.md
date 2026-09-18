@@ -4,7 +4,7 @@
 
 **Goal:** Stop exact `@memberjunction/*` pins from forking the dependency graph in dev workspaces, and widen the published compatibility ranges so MJ Edge and 6.1.0 hosts can install MJ Forms — then gate both against recurrence.
 
-**Architecture:** Three independent commits. (1) Two dev-only exact pins become carets so pnpm links MJ workspace source instead of downloading a second published copy. (2) All 40 `@memberjunction/*` `peerDependencies` entries across the five packages move from `^6.1.1` to `^6.1.0-edge.0`, and `mj-app.json` `mjVersionRange` from `>=6.1.1 <7.0.0` to `>=6.1.0 <7.0.0`, which strictly widens the set of hosts that can install the app. (3) A new stdlib+semver gate, `scripts/check-mj-version-ranges.mjs`, refuses both defects in CI.
+**Architecture:** Three independent commits. (1) Two dev-only exact pins become carets so pnpm links MJ workspace source instead of downloading a second published copy. (2) All 40 `@memberjunction/*` `peerDependencies` entries across the five packages move from `^6.1.1` to `^6.1.0-edge.6`, and `mj-app.json` `mjVersionRange` from `>=6.1.1 <7.0.0` to `>=6.1.0 <7.0.0`, which strictly widens the set of hosts that can install the app. (3) A new stdlib+semver gate, `scripts/check-mj-version-ranges.mjs`, refuses both defects in CI.
 
 **Tech Stack:** Node 22 (ESM `.mjs`), `node:test` for gate specs, `semver` 7.8.5 (hoisted, already used by MJ), pnpm 10 workspaces, Vitest 3 for package tests, Turbo for builds, changesets for release notes.
 
@@ -30,7 +30,7 @@ npm error peer @memberjunction/core@"^6.1.1" from @mj-biz-apps/forms-server@0.11
 
 `mj app install` reports that as *"npm install failed — log in to npm"* and finalizes the app **Disabled** (#211). Semver only admits a prerelease when a comparator shares its exact `major.minor.patch` **and** carries a prerelease tag, so `^6.1.1` admits no `-edge.N` build at all. Measured behaviour of the replacement range, one core copy in every passing case:
 
-| host | today `^6.1.1` | proposed `^6.1.0-edge.0` |
+| host | today `^6.1.1` | proposed `^6.1.0-edge.6` |
 |---|---|---|
 | `6.1.2` stable | OK | **OK** |
 | `6.1.0` stable | blocked | **OK** |
@@ -55,7 +55,7 @@ Copied verbatim from repo policy. Every task's requirements implicitly include t
 - **Changeset level is `patch`** unless the change ships a migration or metadata. This work ships neither.
 - **Gate scripts are plain Node + ESM**, stdlib plus `semver` only, and must run without installing anything.
 - **Run `pnpm install` only at the mj-dev root.** The one exception in this plan is `pnpm install --lockfile-only` inside `bizapps-forms`, which writes no `node_modules` and therefore cannot unlink MJ source.
-- **Exact MJ version values:** peer ranges become exactly `^6.1.0-edge.0`; `mjVersionRange` becomes exactly `>=6.1.0 <7.0.0`. Do not invent other values.
+- **Exact MJ version values:** peer ranges become exactly `^6.1.0-edge.6`; `mjVersionRange` becomes exactly `>=6.1.0 <7.0.0`. Do not invent other values.
 - **Do not downgrade the repo's MJ version.** `apps/MJAPI` dependencies stay at exact `6.1.1` (the documented `apps/*` model), and the root `pnpm.overrides` MJ entries stay at `6.1.1`. Only the two devDeps named in Task 1 change.
 
 ---
@@ -309,7 +309,7 @@ This task produces no repo change. Do not commit.
 
 **Interfaces:**
 - Consumes: Task 2's green verdict. **Do not start this task if Task 2 failed.**
-- Produces: the manifest state Task 4's gate asserts (`^6.1.0-edge.0` peers, `>=6.1.0 <7.0.0` range).
+- Produces: the manifest state Task 4's gate asserts (`^6.1.0-edge.6` peers, `>=6.1.0 <7.0.0` range).
 
 - [ ] **Step 1: Rewrite all 40 MJ peer entries**
 
@@ -330,7 +330,7 @@ for(const f of files){
     if(!k.startsWith('@memberjunction/')) continue;
     if(v!=='^6.1.1') throw new Error(f+' peer '+k+' was '+v+', expected ^6.1.1');
     const re=new RegExp('(\"'+k.replace('/','\\\\/')+'\"\\\\s*:\\\\s*)\"\\\\^6\\\\.1\\\\.1\"');
-    const next=raw.replace(re,'\$1\"^6.1.0-edge.0\"');
+    const next=raw.replace(re,'\$1\"^6.1.0-edge.6\"');
     if(next===raw) throw new Error('no substitution for '+k+' in '+f);
     raw=next; n++;
   }
@@ -389,7 +389,7 @@ Expected: all four hosts `true`/`true`, the 7-era host `false`, then `OK`.
 ```bash
 cd /Users/sohamdesai/Projects/mj-dev/bizapps-forms && npm run lint:peer-ranges; echo "EXIT=$?"
 ```
-Expected: `EXIT=0`. `^6.1.0-edge.0` is a caret, so the exact-peer gate is satisfied.
+Expected: `EXIT=0`. `^6.1.0-edge.6` is a caret, so the exact-peer gate is satisfied.
 
 - [ ] **Step 5: Add the changeset**
 
@@ -412,7 +412,7 @@ tag. A `6.1.0-edge.6` host therefore failed with ERESOLVE, which `mj app install
 as an npm auth problem before finalizing the app as Disabled (#211). Plain `6.1.0` hosts
 were locked out too.
 
-Peers move to `^6.1.0-edge.0` and `mjVersionRange` to `>=6.1.0 <7.0.0`. This is a strict
+Peers move to `^6.1.0-edge.6` and `mjVersionRange` to `>=6.1.0 <7.0.0`. This is a strict
 widening: every host that could install before still can, plus 6.1.0 and the 6.1.0 Edge
 line. The era boundary is unchanged — MJ's installer coerces a prerelease host to its base
 tuple, so a 7.0.0-edge.0 host still correctly fails the `<7.0.0` cap.
@@ -440,7 +440,7 @@ which `mj app install` reports as "npm install failed — log in to npm" before
 finalizing the app Disabled (#211). Plain 6.1.0 hosts were excluded too, which
 nobody had noticed.
 
-All 40 `@memberjunction/*` peers move to `^6.1.0-edge.0` and `mjVersionRange` to
+All 40 `@memberjunction/*` peers move to `^6.1.0-edge.6` and `mjVersionRange` to
 `>=6.1.0 <7.0.0`. Measured, one core copy in every passing case: 6.1.2 OK before
 and after; 6.1.0 and 6.1.0-edge.6 blocked before, OK after. No host that worked
 stops working. The era boundary holds because MJ's installer coerces a prerelease
@@ -524,7 +524,7 @@ test('a caret on a stable version admits no prerelease', () => {
 });
 
 test('a caret anchored at a prerelease admits that tuple', () => {
-    assert.equal(admitsOwnPrereleases('^6.1.0-edge.0'), true);
+    assert.equal(admitsOwnPrereleases('^6.1.0-edge.6'), true);
 });
 
 test('a bare wildcard admits no prerelease', () => {
@@ -571,7 +571,7 @@ test('an MJ peer that admits no prerelease is a violation', () => {
 
 test('an MJ peer anchored at a prerelease is fine', () => {
     const hits = findNonPrereleasePeers(
-        { name: 'p', peerDependencies: { '@memberjunction/core': '^6.1.0-edge.0' } },
+        { name: 'p', peerDependencies: { '@memberjunction/core': '^6.1.0-edge.6' } },
         'packages/P/package.json',
     );
     assert.equal(hits.length, 0);
@@ -621,7 +621,7 @@ test('runCheck passes a clean tree', () => {
         path.join(root, 'packages', 'P', 'package.json'),
         JSON.stringify({
             name: 'p',
-            peerDependencies: { '@memberjunction/core': '^6.1.0-edge.0' },
+            peerDependencies: { '@memberjunction/core': '^6.1.0-edge.6' },
             devDependencies: { '@angular/core': '21.2.22' },
         }),
     );
@@ -684,7 +684,7 @@ cat > scripts/check-mj-version-ranges.mjs <<'EOF'
  * a prerelease tag. So `^6.1.1` admits no `-edge.N` build at all, and
  * `@mj-biz-apps/forms-server@0.11.0` failed on a 6.1.0-edge.6 host with ERESOLVE — which
  * `mj app install` reports as "npm install failed — log in to npm" before finalizing the app
- * Disabled (#211). `^6.1.0-edge.0` admits the whole 6.1.0 Edge line and every stable 6.x.
+ * Disabled (#211). `^6.1.0-edge.6` admits the whole 6.1.0 Edge line and every stable 6.x.
  *
  * Known limit, deliberately not encoded: no npm range covers a NEXT tuple's Edge build such as
  * `6.2.0-edge.1` — not `*`, not `>=6.0.0`. That is npm's constraint, not something a gate can fix;
@@ -1050,7 +1050,7 @@ npm error peer @memberjunction/core@"^6.1.1" from @mj-biz-apps/forms-server@0.11
 `mj app install` reports that as *"npm install failed — log in to npm"* and finalizes the
 app **Disabled** (#211).
 
-All 40 `@memberjunction/*` peers move to `^6.1.0-edge.0`; `mjVersionRange` to
+All 40 `@memberjunction/*` peers move to `^6.1.0-edge.6`; `mjVersionRange` to
 `>=6.1.0 <7.0.0`. Measured, **one** core copy in every passing case:
 
 | host | before | after |
