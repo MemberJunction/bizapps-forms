@@ -401,3 +401,56 @@ test('this repository passes its own gate, having actually scanned its manifests
     );
     assert.deepEqual(runCheck(REPO_ROOT), []);
 });
+
+// ── npm permits whitespace between an operator and its version ──────────────
+// Regression guard for a defect in `rangeFloor`: it tokenized on whitespace BEFORE stripping the
+// operator, so ">= 6.1.0-edge.6" made ">=" its own token and the version was unreachable. npm
+// does not require the operator to be glued on — node-semver accepts ">= 6.1.0-edge.6", "^ 6.1.1"
+// and "~ 6.1.1" and normalizes the space away. The sibling gate check-host-truth-codegen.mjs
+// already allows it (`>=\s*` in its own lower-bound regex); this one did not, and turned a valid
+// range into two different false statements: peers were reported as "not a valid semver range at
+// all", and a spaced `mjVersionRange` made the whole gate throw "is not a usable semver range".
+
+test('a peer range with a space after its operator is read, not called invalid', () => {
+    assert.equal(classifyPeerRange('>= 6.1.0-edge.6', '6.1.0'), null);
+    assert.equal(classifyPeerRange('^ 6.1.0-edge.6', '6.1.0'), null);
+    assert.equal(classifyPeerRange('~ 6.1.0-edge.6', '6.1.0'), null);
+});
+
+test('a spaced operator does not change a range verdict that is genuinely wrong', () => {
+    // Still no prerelease -> still 'no-prerelease', not 'invalid'.
+    assert.equal(classifyPeerRange('^ 6.1.1', '6.1.0'), 'no-prerelease');
+    // Still the wrong line -> still 'wrong-line'.
+    assert.equal(classifyPeerRange('^ 6.0.0-edge.1', '6.1.0'), 'wrong-line');
+});
+
+test('admitsOwnPrereleases sees through a space after the operator', () => {
+    assert.equal(admitsOwnPrereleases('>= 6.1.0-edge.6'), true);
+    assert.equal(admitsOwnPrereleases('>= 6.1.1'), false);
+});
+
+test('a spaced mjVersionRange yields its floor tuple instead of aborting the gate', () => {
+    const root = scratchRepo({ mjAppRange: '>= 6.1.0-edge.6 <7.0.0' });
+    writeFileSync(
+        path.join(root, 'packages', 'P', 'package.json'),
+        JSON.stringify({ name: 'p', peerDependencies: { '@memberjunction/core': '^6.1.0-edge.6' } }),
+    );
+    assert.deepEqual(runCheck(root), []);
+});
+
+test('genuinely unparseable ranges are still reported as invalid', () => {
+    // The fix must not turn the `invalid` classification into a catch-all pass.
+    for (const bad of ['workspace:*', 'latest', '^^6.1.1', 'not-a-range', '>=', '^']) {
+        assert.equal(classifyPeerRange(bad, '6.1.0'), 'invalid', `expected ${JSON.stringify(bad)} to be invalid`);
+    }
+});
+
+test('an empty range stays a wildcard, because npm reads "" as "*"', () => {
+    // Not a defect and not changed by the whitespace fix: `semver.validRange('')` is `'*'`, so an
+    // empty or all-whitespace range genuinely admits every version. It is therefore VALID and
+    // fails Rule 2 on the accurate ground that it admits no prerelease of any specific tuple —
+    // never on the false ground that it is unparseable.
+    assert.equal(classifyPeerRange('', '6.1.0'), 'no-prerelease');
+    assert.equal(classifyPeerRange('   ', '6.1.0'), 'no-prerelease');
+    assert.equal(classifyPeerRange('*', '6.1.0'), 'no-prerelease');
+});

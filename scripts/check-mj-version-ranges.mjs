@@ -94,10 +94,14 @@ function isWildcardToken(token) {
 }
 
 /**
- * Strips a single leading range operator from `token` — longest match first, so `>=` is never
- * mistaken for a lone `>`. `^`, `~`, `>`, and `=` are the one-character operators this gate needs
- * to see; anything else (a bare version, or unparseable garbage) is returned unchanged for
+ * Strips a single leading range operator — longest match first, so `>=` is never mistaken for a
+ * lone `>`. `^`, `~`, `>`, and `=` are the one-character operators this gate needs to see;
+ * anything else (a bare version, or unparseable garbage) is returned unchanged for
  * `parseVersion` to accept or reject on its own.
+ *
+ * Applied to a whole trimmed range rather than to a pre-split token, because npm does not require
+ * an operator to be glued to its version: `">= 6.1.0-edge.6"`, `"^ 6.1.1"` and `"~ 6.1.1"` are all
+ * valid and node-semver normalizes the space away. See `rangeFloor` for why the ordering matters.
  */
 function stripOperator(token) {
     if (token.startsWith('>=')) return token.slice(2);
@@ -120,8 +124,15 @@ function rangeFloor(range) {
     if (typeof range !== 'string') return null;
     const trimmed = range.trim();
     if (isWildcardToken(trimmed)) return WILDCARD_FLOOR;
-    const token = trimmed.split(/\s+/)[0];
-    return parseVersion(stripOperator(token));
+    // Strip the operator BEFORE tokenizing. Splitting first assumes an operator is always glued to
+    // its version, which npm does not require: `">= 6.1.0-edge.6"` then made `">="` its own token
+    // and `stripOperator` reduced it to `""`, so a valid range parsed as no floor at all. That
+    // produced two false statements rather than a missed violation — a peer reported as "not a
+    // valid semver range at all", and a spaced `mjVersionRange` aborting the whole gate with "is
+    // not a usable semver range". The sibling gate `check-host-truth-codegen.mjs` already allows
+    // the space (`>=\s*` in its own lower-bound regex).
+    const afterOperator = stripOperator(trimmed).trimStart();
+    return parseVersion(afterOperator.split(/\s+/)[0]);
 }
 
 /** True when `range` parses under this gate's rules — wildcard or floor-having; see `rangeFloor`. */
