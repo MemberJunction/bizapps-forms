@@ -232,9 +232,12 @@ jobs:
       # type-graphql allowance) that stop a future "flag everything" passing as a fix.
       #
       # Scope note: this answers whether a peer is WRITTEN exact, not whether a host's installed
-      # version can satisfy the range — the `^6.1.0-edge.5` MJ peers are where those two diverge.
+      # version can satisfy the range — the `^6.1.0-edge.6` MJ peers are where those two diverge.
       - name: Peer-range gate
         run: npm run lint:peer-ranges:test && npm run lint:peer-ranges
+
+      - name: MJ version-range hygiene (no exact MJ pins; peers admit Edge hosts)
+        run: npm run lint:mj-ranges:test && npm run lint:mj-ranges
 
       # Same shape: mj-app.json's version and mjVersionRange are derived, not typed, and publish.yml
       # only CHECKS them now (#177) rather than writing them. Drift caught here is a one-line fix;
