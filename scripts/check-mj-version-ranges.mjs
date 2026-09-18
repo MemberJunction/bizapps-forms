@@ -60,7 +60,13 @@ const PINNING_BLOCKS = Object.freeze(['dependencies', 'devDependencies']);
 
 /** True when `spec` names one build rather than a range. */
 export function isExactVersion(spec) {
-    return typeof spec === 'string' && /^\d/.test(spec.trim());
+    if (typeof spec !== 'string' || spec.trim() === '') return false;
+    // Not `/^\d/`: that only checks the FIRST character, so it misclassifies range forms that
+    // merely start with a digit — `6.x` and `6.1.1 - 6.2.0` are both genuine ranges that would
+    // still link to a workspace sibling, and flagging them as exact suggested the malformed fix
+    // `^6.1.1 - 6.2.0`. `semver.valid()` returns non-null only for a single concrete version,
+    // which is the actual property this function is named for.
+    return semver.valid(spec.trim()) !== null;
 }
 
 /**
@@ -123,7 +129,11 @@ function manifestsUnder(root, dir) {
         try {
             if (statSync(manifest).isFile()) found.push(`${dir}/${entry}/package.json`);
         } catch (err) {
-            if (err.code !== 'ENOENT') throw err;
+            // ENOENT: entry is a directory with no package.json — skip it, as intended.
+            // ENOTDIR: entry itself is a plain file (stray README, .DS_Store, …), so
+            // join(entry, 'package.json') stats through a file — also skip it, not a manifest.
+            // Anything else is unexpected and must not be swallowed.
+            if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') throw err;
         }
     }
     return found;

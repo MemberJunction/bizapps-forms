@@ -34,6 +34,14 @@ test('a workspace protocol is not exact', () => {
     assert.equal(isExactVersion('workspace:*'), false);
 });
 
+test('an x-range is not exact — it would still link to a workspace sibling', () => {
+    assert.equal(isExactVersion('6.x'), false);
+});
+
+test('a hyphen range is not exact — it would still link to a workspace sibling', () => {
+    assert.equal(isExactVersion('6.1.1 - 6.2.0'), false);
+});
+
 // ── admitsOwnPrereleases ────────────────────────────────────────────────────
 
 test('a caret on a stable version admits no prerelease', () => {
@@ -147,6 +155,20 @@ test('runCheck passes a clean tree', () => {
 
 test('runCheck scans only packages/ — apps/ exact deps are the documented model', () => {
     assert.deepEqual([...SCANNED_DIRS], ['packages']);
+});
+
+test('runCheck skips a stray non-directory entry directly under packages/ instead of crashing', () => {
+    const root = scratchRepo();
+    // A plain file sitting next to a real package dir — e.g. a stray README or .DS_Store — makes
+    // join(base, entry, 'package.json') stat through a file, which is ENOTDIR, not ENOENT.
+    writeFileSync(path.join(root, 'packages', 'README.md'), 'not a package');
+    writeFileSync(
+        path.join(root, 'packages', 'P', 'package.json'),
+        JSON.stringify({ name: 'p', devDependencies: { '@memberjunction/core': '6.1.1' } }),
+    );
+    const violations = runCheck(root);
+    assert.equal(violations.length, 1);
+    assert.match(violations[0], /workspace sibling/);
 });
 
 // ── the real repository must be clean ───────────────────────────────────────
