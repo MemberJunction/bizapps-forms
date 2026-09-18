@@ -724,13 +724,20 @@ export function isExactVersion(spec) {
  */
 export function admitsOwnPrereleases(range) {
     if (typeof range !== 'string' || range.trim() === '') return false;
-    const parsed = semver.validRange(range.trim());
-    if (parsed === null) return false;
-    const min = semver.minVersion(range.trim());
+    const trimmed = range.trim();
+    if (semver.validRange(trimmed) === null) return false;
+    const min = semver.minVersion(trimmed);
     if (min === null) return false;
-    // Probe the tuple's own lowest prerelease. If the range admits it, the range is anchored.
-    const probe = `${min.major}.${min.minor}.${min.patch}-0`;
-    return semver.satisfies(probe, range.trim());
+    // Semver admits a prerelease only when a comparator shares its major.minor.patch AND carries a
+    // prerelease tag. For a floor-anchored range that comparator IS the minimum, so the range admits
+    // prereleases of its own tuple exactly when its own minimum carries one.
+    //
+    // Do NOT "probe" instead with `satisfies(`${major}.${minor}.${patch}-0`, range)`. Numeric
+    // prerelease identifiers sort BELOW alphanumeric ones, so `6.1.0-0` < `6.1.0-edge.6`: the probe
+    // lands under the floor and the check reports `^6.1.0-edge.6` — the correct, Edge-admitting
+    // range this repo now ships — as a violation. That version of this function was written, and
+    // caught only by running it against the spec's own expectations before shipping.
+    return min.prerelease.length > 0;
 }
 
 /** Exact `@memberjunction/*` entries in the pinning blocks of one manifest. */
