@@ -236,6 +236,9 @@ jobs:
       - name: Peer-range gate
         run: npm run lint:peer-ranges:test && npm run lint:peer-ranges
 
+      - name: MJ version-range hygiene (no exact MJ pins; peers admit Edge hosts)
+        run: npm run lint:mj-ranges:test && npm run lint:mj-ranges
+
       # Same shape: mj-app.json's version and mjVersionRange are derived, not typed, and publish.yml
       # only CHECKS them now (#177) rather than writing them. Drift caught here is a one-line fix;
       # caught at release it is a red publish run.

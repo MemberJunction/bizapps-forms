@@ -29,6 +29,8 @@
     "lint:codegen-compat:test": "node --test scripts/check-generated-api-compat.spec.mjs",
     "lint:migrations": "node scripts/check-migration-order.mjs",
     "lint:peer-ranges": "node scripts/check-peer-ranges.mjs",
+    "lint:mj-ranges": "node scripts/check-mj-version-ranges.mjs",
+    "lint:mj-ranges:test": "node --test scripts/check-mj-version-ranges.spec.mjs",
     "lint:peer-ranges:test": "node --test scripts/check-peer-ranges.spec.mjs",
     "lint:release-pushes": "node scripts/check-release-pushes.mjs",
     "lint:release-pushes:test": "node --test scripts/check-release-pushes.spec.mjs",
