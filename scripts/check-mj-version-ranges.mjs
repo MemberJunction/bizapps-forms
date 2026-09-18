@@ -56,7 +56,14 @@
  * third-party import here for the same reason. Both rules only ever need a version's numeric
  * tuple and its raw prerelease tag off the FLOOR of a range — never a full range parse, never
  * `satisfies()`, never an intersection or a comparison operator — which the small hand-rolled
- * parser below (`parseVersion` / `rangeFloor`) covers completely.
+ * parser below (`parseVersion` / `rangeFloor`) covers for every SINGLE-floor range.
+ *
+ * Its one documented limit: a `||` union has one floor per alternative, so "the floor" is not a
+ * question it can answer. `rangeFloor` reads the first comparator, which for a union would judge
+ * alternative one and silently ignore the rest — so `isUnionRange` intercepts them first and
+ * `classifyPeerRange` refuses them by name. That is a real refusal of a possibly-valid range, and
+ * it is deliberate: Rule 2's invariant (a peer's floor equals `mjVersionRange`'s floor) has no
+ * single answer for a union, so there is nothing honest to compare.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -140,6 +147,23 @@ function isValidRange(range) {
     return rangeFloor(range) !== null;
 }
 
+/**
+ * True when `range` is a `||` union of alternatives.
+ *
+ * `rangeFloor` reads ONE comparator, so for `A || B` it judges A and never looks at B. That is
+ * wrong rather than merely incomplete: `^6.1.1 || ^6.1.0-edge.6` genuinely admits `6.1.0-edge.6`
+ * (semver agrees), and judging the first alternative reported it as admitting no prerelease at
+ * all — a false explanation attached to a correct refusal.
+ *
+ * Unions are refused BY NAME instead of parsed. Rule 2's invariant is that a peer's floor equals
+ * `mjVersionRange`'s floor, which is a single-floor property: a union has one floor per
+ * alternative and no single answer to give. Saying so is the honest classification; silently
+ * judging alternative one is not.
+ */
+function isUnionRange(range) {
+    return typeof range === 'string' && range.includes('||');
+}
+
 /** MJ package namespace this gate governs. */
 const MJ_SCOPE = '@memberjunction/';
 
@@ -158,11 +182,30 @@ const MJ_APP_MANIFEST_PATH = 'mj-app.json';
  * `apps/*` stays unscanned: it uses exact `dependencies` by documented policy — the same policy
  * that makes `apps/*`'s exact `@angular/*` anchors correct.
  *
- * The root's `pnpm.overrides` stay unscanned by BOTH rules, deliberately: pnpm honours
- * `overrides` only at the workspace root, and in the shared `mj dev workspace` this repo is NOT
- * that root, so those entries are inert here — they never influence what gets linked or
- * installed in this repo's own checkout. In CI (no MJ workspace to link against at all) they
- * merely pin a version and do nothing else. Flagging them would gate a no-op.
+ * The root's `pnpm.overrides` stay unscanned by BOTH rules, deliberately — but NOT because those
+ * entries are inert. They are not: this repo's own committed `pnpm-lock.yaml` records
+ * `specifier: 6.1.1` for `@memberjunction/core` and `/global` in all five published-package
+ * importers, displacing the `^6.1.0-edge.6` those manifests declare, and `packages/Angular` is the
+ * control that proves the cause — its twelve other auto-installed MJ peers keep their declared
+ * `^6.1.0-edge.6`, and only the two names in `pnpm.overrides` read `6.1.1`. `CLAUDE.md` says the
+ * same thing from the other side: "the pin that actually binds is `pnpm.overrides` ... an override
+ * outranks every manifest in the tree."
+ *
+ * The exclusion is right for two reasons that survive that correction:
+ *
+ *   1. RULE 1 cannot apply. The harm Rule 1 refuses is an exact pin DEFEATING workspace linking,
+ *      and overrides bind only where this repo IS the workspace root — a standalone or CI install,
+ *      which has no MJ sibling to link against in the first place. In the shared `mj dev
+ *      workspace`, where linking is the whole issue, this repo is not the root and its overrides
+ *      genuinely are ignored. So an exact MJ override can never produce the two-`UserInfo` fork.
+ *   2. RULE 2 cannot apply. `pnpm.overrides` is not a published contract — a host installing
+ *      `@mj-biz-apps/forms-*` honours its OWN root's overrides, never ours — so the #211
+ *      ERESOLVE-on-an-Edge-host failure cannot originate in this block.
+ *
+ * Scanning them would therefore flag a line that cannot cause either defect. An earlier draft of
+ * this comment said they "never influence what gets linked or installed in this repo's own
+ * checkout", which the lockfile refutes; the plan this was written from had the narrower and
+ * correct wording ("inert inside the shared dev workspace") and the docblock widened it.
  */
 export const SCANNED_DIRS = Object.freeze(['packages']);
 
@@ -206,20 +249,31 @@ export function admitsOwnPrereleases(range) {
 
 /**
  * Classifies why an MJ peer range fails the Edge-host requirement, or returns `null` when it
- * passes. Order matters: an invalid range (`workspace:*`, `latest`, `^^6.1.1` — not a tag, not a
- * protocol, not parseable semver at all) must be reported as invalid, not as "admits no
- * prerelease" — that message sends someone hunting for a comparator problem that was never there.
+ * passes. Order matters, and each reason is distinct because each sends a reader somewhere
+ * different: a union is refused by name rather than judged on its first alternative; an invalid
+ * range (`workspace:*`, `latest`, `^^6.1.1`) must not be reported as "admits no prerelease",
+ * which sends someone hunting for a comparator problem that was never there.
  *
- * `floorTuple` is the app's own targeted version line (`major.minor.patch`, from `mj-app.json`'s
- * `mjVersionRange`). A range that admits its own tuple's prereleases still fails if that tuple is
- * not the one this app targets — see the Rule 2 doc comment above for why that case exists.
+ * `floorSpec` is the app's own floor, WHOLE — `major.minor.patch` plus its prerelease tag, read
+ * from `mj-app.json`'s `mjVersionRange`. Comparing only the tuple is not enough, and this gate
+ * originally did exactly that: `^6.1.0-edge.9` shares the `6.1.0` tuple with a floor of
+ * `6.1.0-edge.6`, so it passed — while a `6.1.0-edge.6` host, the one the manifest names as
+ * supported, does not satisfy `^6.1.0-edge.9` and fails with the ERESOLVE this rule exists to
+ * prevent. An anchor BELOW the floor is drift in the other direction: it advertises support the
+ * app's own `mjVersionRange` refuses. The repo already had the precedent — `sync-app-version.mjs`
+ * compares the full floor string, prerelease included.
  */
-export function classifyPeerRange(range, floorTuple) {
+export function classifyPeerRange(range, floorSpec) {
+    if (isUnionRange(range)) return 'union';
     if (!isValidRange(range)) return 'invalid';
     if (!admitsOwnPrereleases(range)) return 'no-prerelease';
     const floor = rangeFloor(range);
+    const target = parseVersion(floorSpec);
+    if (target === null) return 'wrong-line';
     const tuple = `${floor.major}.${floor.minor}.${floor.patch}`;
-    return tuple === floorTuple ? null : 'wrong-line';
+    const targetTuple = `${target.major}.${target.minor}.${target.patch}`;
+    if (tuple !== targetTuple) return 'wrong-line';
+    return floor.prerelease === target.prerelease ? null : 'wrong-anchor';
 }
 
 /** Exact `@memberjunction/*` entries in the pinning blocks of one manifest. */
@@ -239,14 +293,14 @@ export function findExactMJDeps(manifest, relPath) {
 
 /**
  * `@memberjunction/*` peers whose range fails the Edge-host requirement — see `classifyPeerRange`
- * for the three ways a range can fail and why the order between them matters. `floorTuple` is the
- * app's own `mjVersionRange` floor tuple, threaded in by the caller (`runCheck`).
+ * for the ways a range can fail and why the order between them matters. `floorSpec` is the app's
+ * own `mjVersionRange` floor, prerelease included, threaded in by the caller (`runCheck`).
  */
-export function findNonPrereleasePeers(manifest, relPath, floorTuple) {
+export function findNonPrereleasePeers(manifest, relPath, floorSpec) {
     const hits = [];
     for (const [peer, version] of Object.entries(manifest?.peerDependencies ?? {})) {
         if (!peer.startsWith(MJ_SCOPE)) continue;
-        const reason = classifyPeerRange(version, floorTuple);
+        const reason = classifyPeerRange(version, floorSpec);
         if (reason !== null) hits.push({ file: relPath, peer, version: String(version).trim(), reason });
     }
     return hits;
@@ -300,12 +354,13 @@ function loadManifest(root, relPath) {
 }
 
 /**
- * Reads `mjVersionRange`'s floor tuple (`major.minor.patch`) from the repo-root `mj-app.json` —
- * the version line MJ Forms actually targets, and what Rule 2 ties every MJ peer's prerelease
- * anchor to. Throws rather than silently skipping Rule 2's version-line check: a missing or
- * unparseable `mj-app.json` means the check cannot be evaluated, not that it passes.
+ * Reads `mjVersionRange`'s floor from the repo-root `mj-app.json` — WHOLE, prerelease tag
+ * included, because Rule 2 ties every MJ peer's anchor to it exactly and a tuple-only comparison
+ * lets `^6.1.0-edge.9` pass against a `6.1.0-edge.6` floor. Throws rather than silently skipping
+ * Rule 2's check: a missing or unparseable `mj-app.json` means the check cannot be evaluated, not
+ * that it passes.
  */
-function mjVersionFloorTuple(root) {
+function mjVersionFloor(root) {
     const manifestPath = join(root, MJ_APP_MANIFEST_PATH);
     let raw;
     try {
@@ -330,7 +385,9 @@ function mjVersionFloorTuple(root) {
                 `is not a usable semver range to anchor MJ peer ranges against.`,
         );
     }
-    return `${floor.major}.${floor.minor}.${floor.patch}`;
+    return floor.prerelease === null
+        ? `${floor.major}.${floor.minor}.${floor.patch}`
+        : `${floor.major}.${floor.minor}.${floor.patch}-${floor.prerelease}`;
 }
 
 /** Renders one `findExactMJDeps` hit as a CLI violation message. */
@@ -347,6 +404,26 @@ function exactPinMessage(hit) {
 
 /** Renders one `findNonPrereleasePeers` hit as a CLI violation message, by failure reason. */
 function peerRangeMessage(hit) {
+    if (hit.reason === 'union') {
+        return (
+            `${hit.file}: peerDependencies["${hit.peer}"] is "${hit.version}", a \`||\` union. ` +
+            `This gate reads one floor per range, and Rule 2's invariant — a peer's floor equals ` +
+            `\`mj-app.json\`'s \`mjVersionRange\` floor — has no single answer for a range with one ` +
+            `floor per alternative. The union is not necessarily wrong; it is unsupported here, ` +
+            `which is a different statement from "malformed" or "admits no prerelease". Write a ` +
+            `single floor-anchored range, e.g. "^X.Y.Z-edge.N" matching mjVersionRange's floor.`
+        );
+    }
+    if (hit.reason === 'wrong-anchor') {
+        return (
+            `${hit.file}: peerDependencies["${hit.peer}"] is "${hit.version}", which is on the ` +
+            `right version line but anchored at a different prerelease than this app's own floor. ` +
+            `\`mj-app.json\`'s \`mjVersionRange\` floor is the host this app declares it supports, so ` +
+            `an anchor ABOVE it refuses that very host (a 6.1.0-edge.6 host does not satisfy ` +
+            `^6.1.0-edge.9, and fails with the ERESOLVE of #211), while an anchor BELOW it ` +
+            `advertises support the app's own manifest refuses. Match the floor exactly.`
+        );
+    }
     if (hit.reason === 'invalid') {
         return (
             `${hit.file}: peerDependencies["${hit.peer}"] is "${hit.version}", which is not a valid ` +
@@ -379,7 +456,7 @@ function peerRangeMessage(hit) {
 /** Runs both rules over `root`. Returns violation messages; empty means pass. */
 export function runCheck(root) {
     const violations = [];
-    let floorTuple = null;
+    let floorSpec = null;
 
     for (const relPath of scannedManifests(root)) {
         const manifest = loadManifest(root, relPath);
@@ -391,8 +468,8 @@ export function runCheck(root) {
 
         const hasMJPeer = Object.keys(manifest?.peerDependencies ?? {}).some((peer) => peer.startsWith(MJ_SCOPE));
         if (!hasMJPeer) continue;
-        if (floorTuple === null) floorTuple = mjVersionFloorTuple(root);
-        for (const hit of findNonPrereleasePeers(manifest, relPath, floorTuple)) {
+        if (floorSpec === null) floorSpec = mjVersionFloor(root);
+        for (const hit of findNonPrereleasePeers(manifest, relPath, floorSpec)) {
             violations.push(peerRangeMessage(hit));
         }
     }

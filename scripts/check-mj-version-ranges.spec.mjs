@@ -20,10 +20,10 @@ const REPO_ROOT = path.join(HERE, '..');
 /**
  * A synthetic repo shaped like this one: a root manifest (default `{}`, Rule 1 only) plus an
  * empty `packages/P/` a test can populate, plus a default `mj-app.json` (Rule 2's floor tuple —
- * `6.1.0`, matching this repo's own `mjVersionRange`) that a test can suppress with
+ * `6.1.0-edge.6`, matching this repo's own `mjVersionRange`) that a test can suppress with
  * `mjAppRange: null` to exercise the missing/invalid-floor case.
  */
-function scratchRepo({ rootManifest = {}, mjAppRange = '>=6.1.0 <7.0.0' } = {}) {
+function scratchRepo({ rootManifest = {}, mjAppRange = '>=6.1.0-edge.6 <7.0.0' } = {}) {
     const root = mkdtempSync(path.join(tmpdir(), 'mjrange-'));
     mkdirSync(path.join(root, 'packages', 'P'), { recursive: true });
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'root', ...rootManifest }));
@@ -131,40 +131,40 @@ test('a leading "v" on a range floor is accepted the same as on a bare version',
 // ── classifyPeerRange ───────────────────────────────────────────────────────
 
 test('classifyPeerRange passes a range anchored at the target line and its own prerelease', () => {
-    assert.equal(classifyPeerRange('^6.1.0-edge.6', '6.1.0'), null);
+    assert.equal(classifyPeerRange('^6.1.0-edge.6', '6.1.0-edge.6'), null);
 });
 
 test('classifyPeerRange fails a stable-only range as no-prerelease', () => {
-    assert.equal(classifyPeerRange('^6.1.1', '6.1.0'), 'no-prerelease');
+    assert.equal(classifyPeerRange('^6.1.1', '6.1.0-edge.6'), 'no-prerelease');
 });
 
 test('classifyPeerRange fails a range anchored to a different tuple as wrong-line even though it admits its own prereleases', () => {
     // ^6.0.0-edge.1 admits 6.0.0's own prereleases (the property admitsOwnPrereleases checks) but
     // it refuses 6.1.0-edge.6 — the actual floor this app targets — so it must still fail.
-    assert.equal(classifyPeerRange('^6.0.0-edge.1', '6.1.0'), 'wrong-line');
+    assert.equal(classifyPeerRange('^6.0.0-edge.1', '6.1.0-edge.6'), 'wrong-line');
 });
 
 test('classifyPeerRange fails workspace:*, latest, and ^^6.1.1 as invalid, not no-prerelease', () => {
     for (const v of ['workspace:*', 'latest', '^^6.1.1']) {
-        assert.equal(classifyPeerRange(v, '6.1.0'), 'invalid', `expected "${v}" to classify as invalid`);
+        assert.equal(classifyPeerRange(v, '6.1.0-edge.6'), 'invalid', `expected "${v}" to classify as invalid`);
     }
 });
 
 test('classifyPeerRange fails "not-a-range" and non-string values as invalid', () => {
     for (const v of ['not-a-range', 42, null, undefined, {}]) {
-        assert.equal(classifyPeerRange(v, '6.1.0'), 'invalid', `expected ${JSON.stringify(v)} to classify as invalid`);
+        assert.equal(classifyPeerRange(v, '6.1.0-edge.6'), 'invalid', `expected ${JSON.stringify(v)} to classify as invalid`);
     }
 });
 
 test('classifyPeerRange treats bare wildcards as valid ranges, never as invalid', () => {
     for (const v of ['*', 'x', 'X', '']) {
-        assert.equal(classifyPeerRange(v, '6.1.0'), 'no-prerelease', `expected "${v}" not to classify as invalid`);
+        assert.equal(classifyPeerRange(v, '6.1.0-edge.6'), 'no-prerelease', `expected "${v}" not to classify as invalid`);
     }
 });
 
 test('classifyPeerRange reads a ">= <" range\'s floor, ignoring its upper bound', () => {
-    assert.equal(classifyPeerRange('>=6.1.0 <7.0.0', '6.1.0'), 'no-prerelease');
-    assert.equal(classifyPeerRange('>=6.1.0-edge.6 <7.0.0', '6.1.0'), null);
+    assert.equal(classifyPeerRange('>=6.1.0 <7.0.0', '6.1.0-edge.6'), 'no-prerelease');
+    assert.equal(classifyPeerRange('>=6.1.0-edge.6 <7.0.0', '6.1.0-edge.6'), null);
 });
 
 test('classifyPeerRange reads a hyphen range\'s floor as its first comparator, not an intersection', () => {
@@ -224,7 +224,7 @@ test('an MJ peer that admits no prerelease is a violation', () => {
     const hits = findNonPrereleasePeers(
         { name: 'p', peerDependencies: { '@memberjunction/core': '^6.1.1' } },
         'packages/P/package.json',
-        '6.1.0',
+        '6.1.0-edge.6',
     );
     assert.equal(hits.length, 1);
     assert.equal(hits[0].reason, 'no-prerelease');
@@ -234,7 +234,7 @@ test('an MJ peer anchored at the target line and its own prerelease is fine', ()
     const hits = findNonPrereleasePeers(
         { name: 'p', peerDependencies: { '@memberjunction/core': '^6.1.0-edge.6' } },
         'packages/P/package.json',
-        '6.1.0',
+        '6.1.0-edge.6',
     );
     assert.equal(hits.length, 0);
 });
@@ -243,7 +243,7 @@ test('an MJ peer anchored to a different version line than mjVersionRange is a v
     const hits = findNonPrereleasePeers(
         { name: 'p', peerDependencies: { '@memberjunction/core': '^6.0.0-edge.1' } },
         'packages/P/package.json',
-        '6.1.0',
+        '6.1.0-edge.6',
     );
     assert.equal(hits.length, 1);
     assert.equal(hits[0].reason, 'wrong-line');
@@ -253,7 +253,7 @@ test('an unparseable MJ peer range is invalid, not merely non-prerelease', () =>
     const hits = findNonPrereleasePeers(
         { name: 'p', peerDependencies: { '@memberjunction/core': 'workspace:*' } },
         'packages/P/package.json',
-        '6.1.0',
+        '6.1.0-edge.6',
     );
     assert.equal(hits.length, 1);
     assert.equal(hits[0].reason, 'invalid');
@@ -263,7 +263,7 @@ test('a non-MJ peer is ignored', () => {
     const hits = findNonPrereleasePeers(
         { name: 'p', peerDependencies: { 'type-graphql': '2.0.0-beta.3' } },
         'packages/P/package.json',
-        '6.1.0',
+        '6.1.0-edge.6',
     );
     assert.equal(hits.length, 0);
 });
@@ -412,16 +412,16 @@ test('this repository passes its own gate, having actually scanned its manifests
 // all", and a spaced `mjVersionRange` made the whole gate throw "is not a usable semver range".
 
 test('a peer range with a space after its operator is read, not called invalid', () => {
-    assert.equal(classifyPeerRange('>= 6.1.0-edge.6', '6.1.0'), null);
-    assert.equal(classifyPeerRange('^ 6.1.0-edge.6', '6.1.0'), null);
-    assert.equal(classifyPeerRange('~ 6.1.0-edge.6', '6.1.0'), null);
+    assert.equal(classifyPeerRange('>= 6.1.0-edge.6', '6.1.0-edge.6'), null);
+    assert.equal(classifyPeerRange('^ 6.1.0-edge.6', '6.1.0-edge.6'), null);
+    assert.equal(classifyPeerRange('~ 6.1.0-edge.6', '6.1.0-edge.6'), null);
 });
 
 test('a spaced operator does not change a range verdict that is genuinely wrong', () => {
     // Still no prerelease -> still 'no-prerelease', not 'invalid'.
-    assert.equal(classifyPeerRange('^ 6.1.1', '6.1.0'), 'no-prerelease');
+    assert.equal(classifyPeerRange('^ 6.1.1', '6.1.0-edge.6'), 'no-prerelease');
     // Still the wrong line -> still 'wrong-line'.
-    assert.equal(classifyPeerRange('^ 6.0.0-edge.1', '6.1.0'), 'wrong-line');
+    assert.equal(classifyPeerRange('^ 6.0.0-edge.1', '6.1.0-edge.6'), 'wrong-line');
 });
 
 test('admitsOwnPrereleases sees through a space after the operator', () => {
@@ -441,7 +441,7 @@ test('a spaced mjVersionRange yields its floor tuple instead of aborting the gat
 test('genuinely unparseable ranges are still reported as invalid', () => {
     // The fix must not turn the `invalid` classification into a catch-all pass.
     for (const bad of ['workspace:*', 'latest', '^^6.1.1', 'not-a-range', '>=', '^']) {
-        assert.equal(classifyPeerRange(bad, '6.1.0'), 'invalid', `expected ${JSON.stringify(bad)} to be invalid`);
+        assert.equal(classifyPeerRange(bad, '6.1.0-edge.6'), 'invalid', `expected ${JSON.stringify(bad)} to be invalid`);
     }
 });
 
@@ -450,7 +450,65 @@ test('an empty range stays a wildcard, because npm reads "" as "*"', () => {
     // empty or all-whitespace range genuinely admits every version. It is therefore VALID and
     // fails Rule 2 on the accurate ground that it admits no prerelease of any specific tuple —
     // never on the false ground that it is unparseable.
-    assert.equal(classifyPeerRange('', '6.1.0'), 'no-prerelease');
-    assert.equal(classifyPeerRange('   ', '6.1.0'), 'no-prerelease');
-    assert.equal(classifyPeerRange('*', '6.1.0'), 'no-prerelease');
+    assert.equal(classifyPeerRange('', '6.1.0-edge.6'), 'no-prerelease');
+    assert.equal(classifyPeerRange('   ', '6.1.0-edge.6'), 'no-prerelease');
+    assert.equal(classifyPeerRange('*', '6.1.0-edge.6'), 'no-prerelease');
+});
+
+// ── Rule 2 must compare the WHOLE floor, not just its tuple ─────────────────
+// A peer anchored to a HIGHER prerelease than mj-app.json's own floor passes a tuple-only
+// comparison while refusing the very host the manifest names as supported: a 6.1.0-edge.6 host
+// does not satisfy ^6.1.0-edge.9, so it ERESOLVEs — the #211 shape Rule 2 exists to refuse.
+// The repo already had the right precedent: sync-app-version.mjs compares the full floor string,
+// prerelease included, and this gate threw the prerelease away.
+
+test('a peer anchored ABOVE mjVersionRange\'s own floor is a violation', () => {
+    assert.equal(classifyPeerRange('^6.1.0-edge.9', '6.1.0-edge.6'), 'wrong-anchor');
+    assert.equal(classifyPeerRange('^6.1.0-edge.99', '6.1.0-edge.6'), 'wrong-anchor');
+});
+
+test('a peer anchored BELOW mjVersionRange\'s own floor is a violation too', () => {
+    // It claims support for hosts the app's own manifest refuses — drift in the other direction.
+    assert.equal(classifyPeerRange('^6.1.0-edge.0', '6.1.0-edge.6'), 'wrong-anchor');
+});
+
+test('a peer anchored exactly at mjVersionRange\'s floor still passes', () => {
+    assert.equal(classifyPeerRange('^6.1.0-edge.6', '6.1.0-edge.6'), null);
+    assert.equal(classifyPeerRange('>=6.1.0-edge.6 <7.0.0', '6.1.0-edge.6'), null);
+});
+
+test('a wrong TUPLE is still reported as wrong-line, not conflated with a wrong anchor', () => {
+    assert.equal(classifyPeerRange('^6.0.0-edge.1', '6.1.0-edge.6'), 'wrong-line');
+    assert.equal(classifyPeerRange('^6.2.0-edge.1', '6.1.0-edge.6'), 'wrong-line');
+});
+
+test('runCheck catches an above-floor anchor in a real scan', () => {
+    const root = scratchRepo({ mjAppRange: '>=6.1.0-edge.6 <7.0.0' });
+    writeFileSync(
+        path.join(root, 'packages', 'P', 'package.json'),
+        JSON.stringify({ name: 'p', peerDependencies: { '@memberjunction/core': '^6.1.0-edge.9' } }),
+    );
+    const violations = runCheck(root);
+    assert.equal(violations.length, 1);
+    assert.match(violations[0], /anchor/i);
+});
+
+// ── a `||` union is judged on its first alternative, so refuse it by name ────
+// rangeFloor reads one comparator. For "A || B" that silently judges A and ignores B, so
+// "^6.1.1 || ^6.1.0-edge.6" — which semver confirms DOES admit 6.1.0-edge.6 — was reported as
+// admitting no prerelease. Fails closed either way; the defect is the false explanation.
+
+test('a union range is reported as unsupported, not misdiagnosed as no-prerelease', () => {
+    assert.equal(classifyPeerRange('^6.1.1 || ^6.1.0-edge.6', '6.1.0-edge.6'), 'union');
+    assert.equal(classifyPeerRange('^6.1.0-edge.6 || ^7.0.0', '6.1.0-edge.6'), 'union');
+});
+
+test('the union message names the real problem and does not claim the range is malformed', () => {
+    const hits = findNonPrereleasePeers(
+        { name: 'p', peerDependencies: { '@memberjunction/core': '^6.1.1 || ^6.1.0-edge.6' } },
+        'packages/P/package.json',
+        '6.1.0-edge.6',
+    );
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].reason, 'union');
 });
