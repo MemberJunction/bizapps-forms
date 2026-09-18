@@ -11,8 +11,13 @@
 -- therefore reached no host. Search stays ON for the two entities a user actually searches by name
 -- — Forms and Form Categories, each with Name as a BeginsWith predicate and its other columns
 -- excluded — and goes OFF for the fourteen detail / run / response entities behind them. Every one
--- of the sixteen also gets AutoUpdate*UserSearchAPI = 0, which is the half that makes the curation
--- stick: with it left at 1, the host's next CodeGen re-derives these flags and the curation is gone.
+-- of the sixteen also gets AutoUpdate*UserSearchAPI = 0, which is what holds the choice against
+-- CodeGen. Setting it to 0 is MJ's own documented way to hold one -- CodeGenLib's
+-- Database/manage-metadata.ts:7920 says so in as many words. Left at 1, Smart Field Identification
+-- may rewrite the flag: the entity-level one only when the entity is NEW to CodeGen
+-- (`needsEntitySearchConfig = isNewEntity && ...`, :7292), the field-level ones whenever the entity
+-- gains a column or a type reopens (:7289). So this is narrower than "the next run undoes it" --
+-- it is the schema CHANGING that reopens the question, which is exactly when nobody is looking.
 --
 -- GENERATED AGAINST THE SHIPPED CHAIN AT HEAD, on a database built from migrations/ alone
 -- (core __mj at MJ v6.1.1's frontier 202609132006, Forms at 202609142000) and carrying no dev

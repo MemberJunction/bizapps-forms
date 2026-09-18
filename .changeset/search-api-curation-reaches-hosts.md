@@ -15,9 +15,11 @@ Forms and Form Categories, each matching `Name` with a `BeginsWith` predicate an
 other columns — and goes off for the fourteen detail, run and response entities behind them. Before
 this, fourteen of the sixteen were searchable, including Form Responses and Form Response Answers.
 
-**`AutoUpdate*UserSearchAPI` is set to 0 on all sixteen, and that is the half that makes it stick.**
-Left at 1, the next CodeGen run on the host re-derives these flags from the schema and the curation
-is gone again, silently.
+**`AutoUpdate*UserSearchAPI` is set to 0 on all sixteen, which is what holds the choice against
+CodeGen.** Setting it to 0 is MJ's own documented mechanism for that. Left at 1, CodeGen's Smart
+Field Identification may rewrite the flags — the entity-level one only when the entity is new to
+CodeGen, the field-level ones whenever the entity gains a column. It is a schema change that
+reopens the question, not every run.
 
 One generator artifact rides along and changes nothing: a `spUpdateUserView` writing the `All Forms`
 view back with the values it already has. Both earlier seeds carry one for the same reason.
