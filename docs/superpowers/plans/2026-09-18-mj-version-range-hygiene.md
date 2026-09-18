@@ -446,8 +446,17 @@ and after; 6.1.0 and 6.1.0-edge.6 blocked before, OK after. No host that worked
 stops working. The era boundary holds because MJ's installer coerces a prerelease
 host to its base tuple, so 7.0.0-edge.0 still fails `<7.0.0`.
 
-Verified by compiling packages/Server against a real 6.1.0-edge.6 tree, because a
-peer range is a compatibility claim and no gate can check a claim.
+HOW THIS WAS VERIFIED, AND ITS LIMIT. Every `@memberjunction/*` symbol these
+packages import - 74 across all sources - was checked against the real
+6.1.0-edge.6 typings; none is absent. That is an API-surface check, NOT a
+compile. The stronger check was attempted and discarded as invalid: repointing
+one package's MJ symlinks while the sibling forms `dist/` still embed MJ-source
+types manufactures a two-copy split, so it reports artifacts rather than
+incompatibilities. Making it valid needs forms rebuilt against edge.6 inside the
+shared dev workspace, whose host was live. The floor therefore rests on
+API-surface evidence, and edge.6 is the anchor because edge.6 is what was
+checked - and because bizapps-common, a hard dependency, already requires
+>=6.1.0-edge.6.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
@@ -1070,8 +1079,13 @@ A strict widening — no host that worked stops working. Plain `6.1.0` hosts wer
 too, which nobody had noticed. The era boundary holds: MJ's installer coerces a prerelease
 host to its base tuple, so `7.0.0-edge.0` still fails `<7.0.0`.
 
-Verified by compiling `packages/Server` against a real `6.1.0-edge.6` tree, because a peer
-range is a compatibility claim and no gate can check a claim.
+### How this was verified, and its limit
+
+Every `@memberjunction/*` symbol these packages import — **74** across all sources — was checked against the real `6.1.0-edge.6` typings. **None is absent.**
+
+That is an API-surface check, **not a compile**, and the difference matters. The stronger check was attempted and discarded as invalid: repointing one package's MJ symlinks while the sibling forms `dist/` still embed MJ-source types manufactures a two-copy split, so it reports artifacts — 23 of them, every one traceable to that split — rather than real incompatibilities. Making it valid requires rebuilding forms against edge.6 inside the shared dev workspace, whose host was live at the time; breaking a running session was not a price worth paying for a verification step.
+
+So the floor rests on API-surface evidence. `edge.6` is the anchor for two reasons: it is the version actually checked, and `bizapps-common` — a hard dependency of this app — already requires `>=6.1.0-edge.6`, so no host below it can run the chain regardless.
 
 ## 3 — Gate both against recurrence
 
