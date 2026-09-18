@@ -5,16 +5,33 @@ import { fileURLToPath } from 'node:url';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
-    SCANNED_DIRS,
     isExactVersion,
     admitsOwnPrereleases,
+    classifyPeerRange,
     findExactMJDeps,
     findNonPrereleasePeers,
+    scannedManifests,
     runCheck,
 } from './check-mj-version-ranges.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(HERE, '..');
+
+/**
+ * A synthetic repo shaped like this one: a root manifest (default `{}`, Rule 1 only) plus an
+ * empty `packages/P/` a test can populate, plus a default `mj-app.json` (Rule 2's floor tuple —
+ * `6.1.0`, matching this repo's own `mjVersionRange`) that a test can suppress with
+ * `mjAppRange: null` to exercise the missing/invalid-floor case.
+ */
+function scratchRepo({ rootManifest = {}, mjAppRange = '>=6.1.0 <7.0.0' } = {}) {
+    const root = mkdtempSync(path.join(tmpdir(), 'mjrange-'));
+    mkdirSync(path.join(root, 'packages', 'P'), { recursive: true });
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'root', ...rootManifest }));
+    if (mjAppRange !== null) {
+        writeFileSync(path.join(root, 'mj-app.json'), JSON.stringify({ mjVersionRange: mjAppRange }));
+    }
+    return root;
+}
 
 // ── isExactVersion ──────────────────────────────────────────────────────────
 
@@ -24,6 +41,10 @@ test('a bare version is exact', () => {
 
 test('a prerelease version is exact', () => {
     assert.equal(isExactVersion('6.1.0-edge.6'), true);
+});
+
+test('a leading "=" version is exact — npm/pnpm treat it identically to the bare form', () => {
+    assert.equal(isExactVersion('=6.1.1'), true);
 });
 
 test('a caret range is not exact', () => {
@@ -56,6 +77,28 @@ test('a bare wildcard admits no prerelease', () => {
     assert.equal(admitsOwnPrereleases('*'), false);
 });
 
+// ── classifyPeerRange ───────────────────────────────────────────────────────
+
+test('classifyPeerRange passes a range anchored at the target line and its own prerelease', () => {
+    assert.equal(classifyPeerRange('^6.1.0-edge.6', '6.1.0'), null);
+});
+
+test('classifyPeerRange fails a stable-only range as no-prerelease', () => {
+    assert.equal(classifyPeerRange('^6.1.1', '6.1.0'), 'no-prerelease');
+});
+
+test('classifyPeerRange fails a range anchored to a different tuple as wrong-line even though it admits its own prereleases', () => {
+    // ^6.0.0-edge.1 admits 6.0.0's own prereleases (the property admitsOwnPrereleases checks) but
+    // it refuses 6.1.0-edge.6 — the actual floor this app targets — so it must still fail.
+    assert.equal(classifyPeerRange('^6.0.0-edge.1', '6.1.0'), 'wrong-line');
+});
+
+test('classifyPeerRange fails workspace:*, latest, and ^^6.1.1 as invalid, not no-prerelease', () => {
+    for (const v of ['workspace:*', 'latest', '^^6.1.1']) {
+        assert.equal(classifyPeerRange(v, '6.1.0'), 'invalid', `expected "${v}" to classify as invalid`);
+    }
+});
+
 // ── findExactMJDeps ─────────────────────────────────────────────────────────
 
 test('an exact MJ devDependency is a violation', () => {
@@ -66,6 +109,16 @@ test('an exact MJ devDependency is a violation', () => {
     assert.equal(hits.length, 1);
     assert.equal(hits[0].dep, '@memberjunction/core');
     assert.equal(hits[0].block, 'devDependencies');
+});
+
+test('an exact MJ dependency (not devDependency) is a violation', () => {
+    const hits = findExactMJDeps(
+        { name: 'p', dependencies: { '@memberjunction/core': '6.1.1' } },
+        'packages/P/package.json',
+    );
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].dep, '@memberjunction/core');
+    assert.equal(hits[0].block, 'dependencies');
 });
 
 test('a caret MJ devDependency is fine', () => {
@@ -84,39 +137,66 @@ test('an exact NON-MJ devDependency is ignored — Angular anchors are the docum
     assert.equal(hits.length, 0);
 });
 
+test('findExactMJDeps normalizes a leading "=" so the suggested range is not "^=6.1.1"', () => {
+    const hits = findExactMJDeps(
+        { name: 'p', devDependencies: { '@memberjunction/core': '=6.1.1' } },
+        'packages/P/package.json',
+    );
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].bareVersion, '6.1.1');
+});
+
 // ── findNonPrereleasePeers ──────────────────────────────────────────────────
 
 test('an MJ peer that admits no prerelease is a violation', () => {
     const hits = findNonPrereleasePeers(
         { name: 'p', peerDependencies: { '@memberjunction/core': '^6.1.1' } },
         'packages/P/package.json',
+        '6.1.0',
     );
     assert.equal(hits.length, 1);
+    assert.equal(hits[0].reason, 'no-prerelease');
 });
 
-test('an MJ peer anchored at a prerelease is fine', () => {
+test('an MJ peer anchored at the target line and its own prerelease is fine', () => {
     const hits = findNonPrereleasePeers(
         { name: 'p', peerDependencies: { '@memberjunction/core': '^6.1.0-edge.6' } },
         'packages/P/package.json',
+        '6.1.0',
     );
     assert.equal(hits.length, 0);
+});
+
+test('an MJ peer anchored to a different version line than mjVersionRange is a violation', () => {
+    const hits = findNonPrereleasePeers(
+        { name: 'p', peerDependencies: { '@memberjunction/core': '^6.0.0-edge.1' } },
+        'packages/P/package.json',
+        '6.1.0',
+    );
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].reason, 'wrong-line');
+});
+
+test('an unparseable MJ peer range is invalid, not merely non-prerelease', () => {
+    const hits = findNonPrereleasePeers(
+        { name: 'p', peerDependencies: { '@memberjunction/core': 'workspace:*' } },
+        'packages/P/package.json',
+        '6.1.0',
+    );
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].reason, 'invalid');
 });
 
 test('a non-MJ peer is ignored', () => {
     const hits = findNonPrereleasePeers(
         { name: 'p', peerDependencies: { 'type-graphql': '2.0.0-beta.3' } },
         'packages/P/package.json',
+        '6.1.0',
     );
     assert.equal(hits.length, 0);
 });
 
 // ── runCheck against synthetic trees ────────────────────────────────────────
-
-function scratchRepo() {
-    const root = mkdtempSync(path.join(tmpdir(), 'mjrange-'));
-    mkdirSync(path.join(root, 'packages', 'P'), { recursive: true });
-    return root;
-}
 
 test('runCheck flags an exact MJ devDependency under packages/', () => {
     const root = scratchRepo();
@@ -127,6 +207,31 @@ test('runCheck flags an exact MJ devDependency under packages/', () => {
     const violations = runCheck(root);
     assert.equal(violations.length, 1);
     assert.match(violations[0], /workspace sibling/);
+});
+
+test('runCheck flags an exact MJ devDependency in the repo-root manifest', () => {
+    const root = scratchRepo({ rootManifest: { devDependencies: { '@memberjunction/cli': '6.1.1' } } });
+    const violations = runCheck(root);
+    assert.equal(violations.length, 1);
+    assert.match(violations[0], /^package\.json:/);
+    assert.match(violations[0], /workspace sibling/);
+});
+
+test('runCheck does not apply Rule 2 to the repo root — an app root has no peer contract', () => {
+    // peerDependencies on the root manifest would be unusual, but if present must not be policed:
+    // Rule 2 is documented and implemented as packages/*-only.
+    const root = scratchRepo({ rootManifest: { peerDependencies: { '@memberjunction/core': '^6.1.1' } } });
+    assert.deepEqual(runCheck(root), []);
+});
+
+test('runCheck does not flag apps/ — exact MJ deps there are the documented model', () => {
+    const root = scratchRepo();
+    mkdirSync(path.join(root, 'apps', 'MJAPI'), { recursive: true });
+    writeFileSync(
+        path.join(root, 'apps', 'MJAPI', 'package.json'),
+        JSON.stringify({ name: 'mjapi', dependencies: { '@memberjunction/core': '6.1.1' } }),
+    );
+    assert.deepEqual(runCheck(root), []);
 });
 
 test('runCheck flags an MJ peer that locks out Edge hosts', () => {
@@ -140,6 +245,48 @@ test('runCheck flags an MJ peer that locks out Edge hosts', () => {
     assert.match(violations[0], /ERESOLVE/);
 });
 
+test('runCheck flags an MJ peer anchored to the wrong version line with a distinct message', () => {
+    const root = scratchRepo();
+    writeFileSync(
+        path.join(root, 'packages', 'P', 'package.json'),
+        JSON.stringify({ name: 'p', peerDependencies: { '@memberjunction/core': '^6.0.0-edge.1' } }),
+    );
+    const violations = runCheck(root);
+    assert.equal(violations.length, 1);
+    assert.match(violations[0], /different version line/);
+    assert.doesNotMatch(violations[0], /ERESOLVE/);
+});
+
+test('runCheck reports an invalid MJ peer range with a distinct, accurate message', () => {
+    const root = scratchRepo();
+    writeFileSync(
+        path.join(root, 'packages', 'P', 'package.json'),
+        JSON.stringify({ name: 'p', peerDependencies: { '@memberjunction/core': '^^6.1.1' } }),
+    );
+    const violations = runCheck(root);
+    assert.equal(violations.length, 1);
+    assert.match(violations[0], /not a valid.*semver range/);
+    assert.doesNotMatch(violations[0], /ERESOLVE/);
+});
+
+test('runCheck throws a descriptive error when mj-app.json is missing but an MJ peer needs its floor tuple', () => {
+    const root = scratchRepo({ mjAppRange: null });
+    writeFileSync(
+        path.join(root, 'packages', 'P', 'package.json'),
+        JSON.stringify({ name: 'p', peerDependencies: { '@memberjunction/core': '^6.1.0-edge.6' } }),
+    );
+    assert.throws(() => runCheck(root), /mj-app\.json/);
+});
+
+test('runCheck does not require mj-app.json when no manifest declares an MJ peer', () => {
+    const root = scratchRepo({ mjAppRange: null });
+    writeFileSync(
+        path.join(root, 'packages', 'P', 'package.json'),
+        JSON.stringify({ name: 'p', devDependencies: { '@memberjunction/core': '^6.1.1' } }),
+    );
+    assert.deepEqual(runCheck(root), []);
+});
+
 test('runCheck passes a clean tree', () => {
     const root = scratchRepo();
     writeFileSync(
@@ -151,10 +298,6 @@ test('runCheck passes a clean tree', () => {
         }),
     );
     assert.deepEqual(runCheck(root), []);
-});
-
-test('runCheck scans only packages/ — apps/ exact deps are the documented model', () => {
-    assert.deepEqual([...SCANNED_DIRS], ['packages']);
 });
 
 test('runCheck skips a stray non-directory entry directly under packages/ instead of crashing', () => {
@@ -173,6 +316,16 @@ test('runCheck skips a stray non-directory entry directly under packages/ instea
 
 // ── the real repository must be clean ───────────────────────────────────────
 
-test('this repository passes its own gate', () => {
+test('this repository passes its own gate, having actually scanned its manifests', () => {
+    const scanned = scannedManifests(REPO_ROOT);
+    assert.ok(scanned.includes('package.json'), 'expected the root manifest to be scanned');
+    assert.ok(
+        scanned.includes('packages/Entities/package.json'),
+        'expected packages/Entities/package.json to be scanned',
+    );
+    assert.ok(
+        scanned.length >= 6,
+        `expected the root manifest plus at least 5 package manifests, got ${scanned.length}: ${scanned.join(', ')}`,
+    );
     assert.deepEqual(runCheck(REPO_ROOT), []);
 });

@@ -15,6 +15,10 @@ as an npm auth problem before finalizing the app as Disabled (#211). Plain `6.1.
 were locked out too.
 
 Peers move to `^6.1.0-edge.6` and `mjVersionRange` to `>=6.1.0 <7.0.0`. This is a strict
-widening: every host that could install before still can, plus 6.1.0 and Edge builds from
-6.1.0-edge.6 onward. The era boundary is unchanged — MJ's installer coerces a
-prerelease host to its base tuple, so a 7.0.0-edge.0 host still correctly fails the `<7.0.0` cap.
+widening: every host that could install before still can, plus 6.1.0 itself and 6.1.0 Edge
+builds from `edge.6` onward. The era boundary is unchanged — MJ's installer coerces a
+prerelease host to its base tuple, so a 7.0.0-edge.0 host still correctly fails the
+`<7.0.0` cap.
+
+The `edge.6` floor was verified by checking all 74 imported `@memberjunction/*` symbols
+against the real `6.1.0-edge.6` typings — an API-surface check, not a compile.
