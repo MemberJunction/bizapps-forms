@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
     isExactVersion,
@@ -32,6 +32,23 @@ function scratchRepo({ rootManifest = {}, mjAppRange = '>=6.1.0 <7.0.0' } = {}) 
     }
     return root;
 }
+
+// ── stdlib-only regression guard ────────────────────────────────────────────
+// This is the regression guard for the actual defect being fixed: the gate previously
+// `import`ed the `semver` package, which resolved only on the author's machine because that
+// checkout sits inside a larger shared pnpm workspace whose hoisted node_modules happens to
+// contain it. CI installs this repo standalone and has no such hoist, so every run failed with
+// `ERR_MODULE_NOT_FOUND`. Assert directly against the module's own source so nobody can
+// reintroduce a bare-specifier import here without this spec catching it.
+
+test('the gate module imports nothing outside node: builtins', () => {
+    const source = readFileSync(path.join(HERE, 'check-mj-version-ranges.mjs'), 'utf8');
+    const specifiers = [...source.matchAll(/^import\s+.*?\sfrom\s+['"]([^'"]+)['"]/gm)].map((m) => m[1]);
+    assert.ok(specifiers.length > 0, 'expected to find at least one import statement to check');
+    for (const specifier of specifiers) {
+        assert.ok(specifier.startsWith('node:'), `expected "${specifier}" to be a node: builtin import`);
+    }
+});
 
 // ── isExactVersion ──────────────────────────────────────────────────────────
 
@@ -63,6 +80,10 @@ test('a hyphen range is not exact — it would still link to a workspace sibling
     assert.equal(isExactVersion('6.1.1 - 6.2.0'), false);
 });
 
+test('a leading "v" (git-tag spelling) is still exact', () => {
+    assert.equal(isExactVersion('v6.1.1'), true);
+});
+
 // ── admitsOwnPrereleases ────────────────────────────────────────────────────
 
 test('a caret on a stable version admits no prerelease', () => {
@@ -75,6 +96,36 @@ test('a caret anchored at a prerelease admits that tuple', () => {
 
 test('a bare wildcard admits no prerelease', () => {
     assert.equal(admitsOwnPrereleases('*'), false);
+});
+
+test('an x wildcard (either case) admits no prerelease', () => {
+    assert.equal(admitsOwnPrereleases('x'), false);
+    assert.equal(admitsOwnPrereleases('X'), false);
+});
+
+test('the empty-after-trim string admits no prerelease — it is a valid wildcard, not garbage', () => {
+    assert.equal(admitsOwnPrereleases('   '), false);
+});
+
+test('a tilde range reads the floor past a single-character operator', () => {
+    assert.equal(admitsOwnPrereleases('~6.1.0'), false);
+    assert.equal(admitsOwnPrereleases('~6.1.0-edge.1'), true);
+});
+
+test('a ">=" range strips the two-character operator before falling back to single-character ones', () => {
+    assert.equal(admitsOwnPrereleases('>=6.1.0 <7.0.0'), false);
+    assert.equal(admitsOwnPrereleases('>=6.1.0-edge.6 <7.0.0'), true);
+});
+
+test('a hyphen range reads its first comparator only, never the upper bound', () => {
+    // Rule: find the FLOOR from the first comparator. No range intersection, no upper-bound
+    // parsing — "6.1.1 - 6.2.0" must be read as floor 6.1.1, never as spanning to 6.2.0.
+    assert.equal(admitsOwnPrereleases('6.1.1 - 6.2.0'), false);
+    assert.equal(admitsOwnPrereleases('6.1.1-edge.1 - 6.2.0'), true);
+});
+
+test('a leading "v" on a range floor is accepted the same as on a bare version', () => {
+    assert.equal(admitsOwnPrereleases('^v6.1.0-edge.6'), true);
 });
 
 // ── classifyPeerRange ───────────────────────────────────────────────────────
@@ -97,6 +148,27 @@ test('classifyPeerRange fails workspace:*, latest, and ^^6.1.1 as invalid, not n
     for (const v of ['workspace:*', 'latest', '^^6.1.1']) {
         assert.equal(classifyPeerRange(v, '6.1.0'), 'invalid', `expected "${v}" to classify as invalid`);
     }
+});
+
+test('classifyPeerRange fails "not-a-range" and non-string values as invalid', () => {
+    for (const v of ['not-a-range', 42, null, undefined, {}]) {
+        assert.equal(classifyPeerRange(v, '6.1.0'), 'invalid', `expected ${JSON.stringify(v)} to classify as invalid`);
+    }
+});
+
+test('classifyPeerRange treats bare wildcards as valid ranges, never as invalid', () => {
+    for (const v of ['*', 'x', 'X', '']) {
+        assert.equal(classifyPeerRange(v, '6.1.0'), 'no-prerelease', `expected "${v}" not to classify as invalid`);
+    }
+});
+
+test('classifyPeerRange reads a ">= <" range\'s floor, ignoring its upper bound', () => {
+    assert.equal(classifyPeerRange('>=6.1.0 <7.0.0', '6.1.0'), 'no-prerelease');
+    assert.equal(classifyPeerRange('>=6.1.0-edge.6 <7.0.0', '6.1.0'), null);
+});
+
+test('classifyPeerRange reads a hyphen range\'s floor as its first comparator, not an intersection', () => {
+    assert.equal(classifyPeerRange('6.1.1 - 6.2.0', '6.1.1'), 'no-prerelease');
 });
 
 // ── findExactMJDeps ─────────────────────────────────────────────────────────

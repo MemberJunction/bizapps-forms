@@ -45,15 +45,89 @@
  * `6.2.0-edge.1` — not `*`, not `>=6.0.0`. That is npm's constraint, not something a gate can fix;
  * covering a new Edge line means re-revving both the peer ranges and `mjVersionRange` together.
  *
- * Plain Node, stdlib plus `semver`, matching `check-peer-ranges.mjs`: a gate that guards the
- * distribution must run in CI without installing anything.
+ * Plain Node, stdlib only, matching `check-peer-ranges.mjs`, `check-distribution-seed.mjs`, and
+ * `check-migration-order.mjs`: a gate that guards the distribution must run in CI without
+ * installing anything. This file previously `import`ed the `semver` package, which is declared in
+ * no manifest in this repo. It resolved on the author's machine only because that checkout sits
+ * inside a larger shared pnpm workspace whose hoisted `node_modules` happens to contain it — CI
+ * installs this repo standalone (and two sibling gates, `distribution-gate.yml` and
+ * `migration-order-gate.yml`, run with zero `pnpm install` step at all), so `semver` does not
+ * exist there and every CI run failed with `ERR_MODULE_NOT_FOUND`. Do not reintroduce a
+ * third-party import here for the same reason. Both rules only ever need a version's numeric
+ * tuple and its raw prerelease tag off the FLOOR of a range — never a full range parse, never
+ * `satisfies()`, never an intersection or a comparison operator — which the small hand-rolled
+ * parser below (`parseVersion` / `rangeFloor`) covers completely.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import semver from 'semver';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * Matches one concrete version: optional leading `v` (a git-tag spelling), three dot-separated
+ * non-negative integers, an optional `-`-prefixed prerelease tag (captured raw, undissected —
+ * this gate only ever needs to know THAT one is present, never to compare or order it), and an
+ * optional `+`-prefixed build-metadata tag this gate ignores entirely (it carries no ordering or
+ * admission semantics).
+ */
+const VERSION_RE = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z][0-9A-Za-z.-]*))?(?:\+[0-9A-Za-z.-]+)?$/;
+
+/**
+ * Parses a concrete version string into its numeric tuple and raw prerelease tag. Returns `null`
+ * for anything that is not one well-formed version — a range, a dist-tag, a protocol, garbage.
+ */
+function parseVersion(spec) {
+    if (typeof spec !== 'string') return null;
+    const match = VERSION_RE.exec(spec.trim());
+    if (match === null) return null;
+    const [, major, minor, patch, prerelease] = match;
+    return { major: Number(major), minor: Number(minor), patch: Number(patch), prerelease: prerelease ?? null };
+}
+
+/** The floor of any bare-wildcard range: admits everything, so it carries no prerelease. */
+const WILDCARD_FLOOR = Object.freeze({ major: 0, minor: 0, patch: 0, prerelease: null });
+
+/** True when `token` is one of a range's own bare-wildcard spellings: `*`, `x`, `X`, or empty. */
+function isWildcardToken(token) {
+    return token === '' || token === '*' || token.toLowerCase() === 'x';
+}
+
+/**
+ * Strips a single leading range operator from `token` — longest match first, so `>=` is never
+ * mistaken for a lone `>`. `^`, `~`, `>`, and `=` are the one-character operators this gate needs
+ * to see; anything else (a bare version, or unparseable garbage) is returned unchanged for
+ * `parseVersion` to accept or reject on its own.
+ */
+function stripOperator(token) {
+    if (token.startsWith('>=')) return token.slice(2);
+    if (token.startsWith('^') || token.startsWith('~') || token.startsWith('>') || token.startsWith('=')) {
+        return token.slice(1);
+    }
+    return token;
+}
+
+/**
+ * Finds a range's FLOOR version — the version named by its first comparator — without attempting
+ * general range parsing. That is all either rule ever asks: "does the floor carry a prerelease"
+ * and "does the floor's tuple match `mjVersionRange`'s floor". A bare wildcard (`*`, `x`, `X`, or
+ * the empty-after-trim string) is a VALID range whose floor is `0.0.0` with no prerelease — it
+ * must not be reported as invalid alongside genuine garbage like `workspace:*` or `latest`.
+ * Returns `null` when `range` is not a string, or its first token is neither a wildcard nor a
+ * parseable version — the signal `isValidRange` and every caller below treats as "invalid".
+ */
+function rangeFloor(range) {
+    if (typeof range !== 'string') return null;
+    const trimmed = range.trim();
+    if (isWildcardToken(trimmed)) return WILDCARD_FLOOR;
+    const token = trimmed.split(/\s+/)[0];
+    return parseVersion(stripOperator(token));
+}
+
+/** True when `range` parses under this gate's rules — wildcard or floor-having; see `rangeFloor`. */
+function isValidRange(range) {
+    return rangeFloor(range) !== null;
+}
 
 /** MJ package namespace this gate governs. */
 const MJ_SCOPE = '@memberjunction/';
@@ -88,16 +162,16 @@ const PINNING_BLOCKS = Object.freeze(['dependencies', 'devDependencies']);
 export function isExactVersion(spec) {
     if (typeof spec !== 'string' || spec.trim() === '') return false;
     const trimmed = spec.trim();
-    // A leading "=" ("=6.1.1") is npm/pnpm's explicit-exact syntax. semver.valid() does not strip
+    // A leading "=" ("=6.1.1") is npm/pnpm's explicit-exact syntax. parseVersion() does not strip
     // it and returns null for the raw string, which would let "=6.1.1" slip past this check even
     // though it defeats workspace linking identically to the bare form.
     const candidate = trimmed.startsWith('=') ? trimmed.slice(1).trim() : trimmed;
     // Not `/^\d/`: that only checks the FIRST character, so it misclassifies range forms that
     // merely start with a digit — `6.x` and `6.1.1 - 6.2.0` are both genuine ranges that would
     // still link to a workspace sibling, and flagging them as exact suggested the malformed fix
-    // `^6.1.1 - 6.2.0`. `semver.valid()` returns non-null only for a single concrete version,
-    // which is the actual property this function is named for.
-    return semver.valid(candidate) !== null;
+    // `^6.1.1 - 6.2.0`. `parseVersion()` is anchored end-to-end and returns non-null only for a
+    // single concrete version, which is the actual property this function is named for.
+    return parseVersion(candidate) !== null;
 }
 
 /**
@@ -106,21 +180,17 @@ export function isExactVersion(spec) {
  * that requirement on top via `classifyPeerRange`.
  */
 export function admitsOwnPrereleases(range) {
-    if (typeof range !== 'string' || range.trim() === '') return false;
-    const trimmed = range.trim();
-    if (semver.validRange(trimmed) === null) return false;
-    const min = semver.minVersion(trimmed);
-    if (min === null) return false;
     // Semver admits a prerelease only when a comparator shares its major.minor.patch AND carries a
-    // prerelease tag. For a floor-anchored range that comparator IS the minimum, so the range admits
-    // prereleases of its own tuple exactly when its own minimum carries one.
+    // prerelease tag. For a floor-anchored range that comparator IS the floor, so the range admits
+    // prereleases of its own tuple exactly when its own floor carries one.
     //
-    // Do NOT "probe" instead with `satisfies(`${major}.${minor}.${patch}-0`, range)`. Numeric
-    // prerelease identifiers sort BELOW alphanumeric ones, so `6.1.0-0` < `6.1.0-edge.6`: the probe
-    // lands under the floor and the check reports `^6.1.0-edge.6` — the correct, Edge-admitting
-    // range this repo now ships — as a violation. That version of this function was written, and
-    // caught only by running it against the spec's own expectations before shipping.
-    return min.prerelease.length > 0;
+    // Do NOT "probe" instead with something like `satisfies(`${major}.${minor}.${patch}-0`, range)`.
+    // Numeric prerelease identifiers sort BELOW alphanumeric ones, so `6.1.0-0` < `6.1.0-edge.6`:
+    // the probe lands under the floor and the check reports `^6.1.0-edge.6` — the correct,
+    // Edge-admitting range this repo now ships — as a violation. That version of this function was
+    // written, and caught only by running it against the spec's own expectations before shipping.
+    const floor = rangeFloor(range);
+    return floor !== null && floor.prerelease !== null;
 }
 
 /**
@@ -134,12 +204,10 @@ export function admitsOwnPrereleases(range) {
  * not the one this app targets — see the Rule 2 doc comment above for why that case exists.
  */
 export function classifyPeerRange(range, floorTuple) {
-    if (typeof range !== 'string' || range.trim() === '' || semver.validRange(range.trim()) === null) {
-        return 'invalid';
-    }
+    if (!isValidRange(range)) return 'invalid';
     if (!admitsOwnPrereleases(range)) return 'no-prerelease';
-    const min = semver.minVersion(range.trim());
-    const tuple = `${min.major}.${min.minor}.${min.patch}`;
+    const floor = rangeFloor(range);
+    const tuple = `${floor.major}.${floor.minor}.${floor.patch}`;
     return tuple === floorTuple ? null : 'wrong-line';
 }
 
@@ -244,14 +312,14 @@ function mjVersionFloorTuple(root) {
         throw new SyntaxError(`check-mj-version-ranges: ${MJ_APP_MANIFEST_PATH} is not valid JSON — ${err.message}`);
     }
     const range = manifest?.mjVersionRange;
-    if (typeof range !== 'string' || range.trim() === '' || semver.validRange(range.trim()) === null) {
+    const floor = rangeFloor(range);
+    if (floor === null) {
         throw new Error(
             `check-mj-version-ranges: ${MJ_APP_MANIFEST_PATH}'s "mjVersionRange" (${JSON.stringify(range)}) ` +
                 `is not a usable semver range to anchor MJ peer ranges against.`,
         );
     }
-    const min = semver.minVersion(range.trim());
-    return `${min.major}.${min.minor}.${min.patch}`;
+    return `${floor.major}.${floor.minor}.${floor.patch}`;
 }
 
 /** Renders one `findExactMJDeps` hit as a CLI violation message. */
