@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/forms-ng",
   "type": "module",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Forms Angular bootstrap - form components and module for the Forms Open App",
   "main": "dist/public-api.js",
   "types": "dist/public-api.d.ts",
@@ -20,7 +20,7 @@
   "author": "MemberJunction.com",
   "license": "BUSL-1.1",
   "dependencies": {
-    "@mj-biz-apps/forms-entities": "0.11.0"
+    "@mj-biz-apps/forms-entities": "0.12.0"
   },
   "peerDependencies": {
     "@angular/animations": "^21.2.22",
@@ -29,18 +29,18 @@
     "@angular/core": "^21.2.22",
     "@angular/forms": "^21.2.22",
     "@angular/platform-browser": "^21.2.22",
-    "@memberjunction/global": "^6.1.1",
-    "@memberjunction/core": "^6.1.1",
-    "@memberjunction/core-entities": "^6.1.1",
-    "@memberjunction/actions-base": "^6.1.1",
-    "@memberjunction/graphql-dataprovider": "^6.1.1",
-    "@memberjunction/export-engine": "^6.1.1",
-    "@memberjunction/ng-base-forms": "^6.1.1",
-    "@memberjunction/ng-entity-viewer": "^6.1.1",
-    "@memberjunction/ng-export-service": "^6.1.1",
-    "@memberjunction/ng-hierarchy-tree": "^6.1.1",
-    "@memberjunction/ng-link-directives": "^6.1.1",
-    "@memberjunction/ng-shared": "^6.1.1"
+    "@memberjunction/global": "^6.1.0-edge.6",
+    "@memberjunction/core": "^6.1.0-edge.6",
+    "@memberjunction/core-entities": "^6.1.0-edge.6",
+    "@memberjunction/actions-base": "^6.1.0-edge.6",
+    "@memberjunction/graphql-dataprovider": "^6.1.0-edge.6",
+    "@memberjunction/export-engine": "^6.1.0-edge.6",
+    "@memberjunction/ng-base-forms": "^6.1.0-edge.6",
+    "@memberjunction/ng-entity-viewer": "^6.1.0-edge.6",
+    "@memberjunction/ng-export-service": "^6.1.0-edge.6",
+    "@memberjunction/ng-hierarchy-tree": "^6.1.0-edge.6",
+    "@memberjunction/ng-link-directives": "^6.1.0-edge.6",
+    "@memberjunction/ng-shared": "^6.1.0-edge.6"
   },
   "devDependencies": {
     "@angular/cdk": "21.2.14",

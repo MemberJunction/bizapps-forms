@@ -29,7 +29,7 @@ importers:
         specifier: ^2.29.8
         version: 2.31.1(@types/node@22.20.1)
       '@memberjunction/cli':
-        specifier: 6.1.1
+        specifier: ^6.1.1
         version: 6.1.1(@types/node@22.20.1)(chokidar@3.6.0)(typescript@5.9.3)
       '@mj-biz-apps/forms-entities':
         specifier: workspace:*
@@ -122,43 +122,43 @@ importers:
   packages/Actions:
     dependencies:
       '@memberjunction/actions':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/actions-base':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/ai':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/ai-core-plus':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/ai-prompts':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(chokidar@3.6.0)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       '@memberjunction/aiengine':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(encoding@0.1.13)(typescript@5.9.3)
       '@memberjunction/communication-engine':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(chokidar@3.6.0)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       '@memberjunction/communication-types':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/core':
         specifier: 6.1.1
         version: 6.1.1
       '@memberjunction/core-entities':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/core-entities-server':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(chokidar@3.6.0)(typescript@5.9.3)(ws@8.21.3)
       '@memberjunction/global':
         specifier: 6.1.1
         version: 6.1.1
       '@mj-biz-apps/forms-entities':
-        specifier: 0.11.0
+        specifier: 0.12.0
         version: link:../Entities
       zod:
         specifier: ^3.25.76
@@ -183,43 +183,43 @@ importers:
   packages/Angular:
     dependencies:
       '@memberjunction/actions-base':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/core':
         specifier: 6.1.1
         version: 6.1.1
       '@memberjunction/core-entities':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/export-engine':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/global':
         specifier: 6.1.1
         version: 6.1.1
       '@memberjunction/graphql-dataprovider':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(ws@8.21.3)
       '@memberjunction/ng-base-forms':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(dde02ba3642bac54f2fc5e07be67eba7)
       '@memberjunction/ng-entity-viewer':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(3f24f567b9198ae0f17e33ac85b44a1b)
       '@memberjunction/ng-export-service':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(dd2d7930533120e6e233a2fcdb825523)
       '@memberjunction/ng-hierarchy-tree':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(dde02ba3642bac54f2fc5e07be67eba7)
       '@memberjunction/ng-link-directives':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(@angular/common@21.2.22(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2))(@angular/platform-browser@21.2.22(@angular/animations@21.2.22(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2)))(@angular/common@21.2.22(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2)))(@angular/router@21.2.22(@angular/common@21.2.22(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2))(@angular/platform-browser@21.2.22(@angular/animations@21.2.22(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2)))(@angular/common@21.2.22(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2)))(rxjs@7.8.2))(rxjs@7.8.2)(ws@8.21.3)
       '@memberjunction/ng-shared':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(@angular/common@21.2.22(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2))(@angular/platform-browser@21.2.22(@angular/animations@21.2.22(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2)))(@angular/common@21.2.22(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2)))(@angular/router@21.2.22(@angular/common@21.2.22(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2))(@angular/platform-browser@21.2.22(@angular/animations@21.2.22(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2)))(@angular/common@21.2.22(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.2.22(@angular/compiler@21.2.22)(rxjs@7.8.2)))(rxjs@7.8.2))(rxjs@7.8.2)(ws@8.21.3)
       '@mj-biz-apps/forms-entities':
-        specifier: 0.11.0
+        specifier: 0.12.0
         version: link:../Entities
     devDependencies:
       '@angular/animations':
@@ -265,16 +265,16 @@ importers:
         specifier: 6.1.1
         version: 6.1.1
       '@memberjunction/core-entities':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/global':
         specifier: 6.1.1
         version: 6.1.1
       '@memberjunction/sqlserver-dataprovider':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(chokidar@3.6.0)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       '@mj-biz-apps/forms-entities':
-        specifier: 0.11.0
+        specifier: 0.12.0
         version: link:../Entities
     devDependencies:
       typescript:
@@ -309,43 +309,43 @@ importers:
   packages/Server:
     dependencies:
       '@memberjunction/actions':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/actions-base':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/ai-agents':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       '@memberjunction/ai-core-plus':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/core':
         specifier: 6.1.1
         version: 6.1.1
       '@memberjunction/core-entities':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1
       '@memberjunction/global':
         specifier: 6.1.1
         version: 6.1.1
       '@memberjunction/server':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(@aws-sdk/credential-provider-node@3.972.79)(@aws-sdk/credential-providers@3.1109.0)(@azure/identity@4.13.1)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(chokidar@3.6.0)(encoding@0.1.13)(socks@2.8.9)(typescript@5.9.3)
       '@memberjunction/storage':
-        specifier: ^6.1.1
+        specifier: ^6.1.0-edge.6
         version: 6.1.1(encoding@0.1.13)(typescript@5.9.3)
       '@mj-biz-apps/forms-actions':
-        specifier: 0.11.0
+        specifier: 0.12.0
         version: link:../Actions
       '@mj-biz-apps/forms-core-entities-server':
-        specifier: 0.11.0
+        specifier: 0.12.0
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/forms-entities':
-        specifier: 0.11.0
+        specifier: 0.12.0
         version: link:../Entities
       '@mj-biz-apps/forms-ng':
-        specifier: 0.11.0
+        specifier: 0.12.0
         version: link:../Angular
       class-validator:
         specifier: ^0.14.3
@@ -355,7 +355,7 @@ importers:
         specifier: 3.1109.0
         version: 3.1109.0
       '@memberjunction/generic-database-provider':
-        specifier: 6.1.1
+        specifier: ^6.1.1
         version: 6.1.1(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       '@modelcontextprotocol/sdk':
         specifier: 1.30.0

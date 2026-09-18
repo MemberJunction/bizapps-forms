@@ -1,5 +1,70 @@
 # @mj-biz-apps/forms-server
 
+## 0.12.0
+
+### Minor Changes
+
+- ec8b090: Ship the search-API curation, so the sixteen Forms entities stop offering every table to user search.
+
+  #232 curated which Forms entities and fields the MJ user search API may reach, but it did so in
+  `metadata/entities/.entities.json` only — declarative JSON that `mj app install` never reads. The
+  setting therefore existed on nobody's host. `V202609181845__v0.12.x__Metadata_Sync.sql` is this
+  release's one consolidated seed and carries it.
+
+  **What a host gets.** Search stays on for the two entities a person actually searches by name —
+  Forms and Form Categories, each matching `Name` with a `BeginsWith` predicate and excluding its
+  other columns — and goes off for the fourteen detail, run and response entities behind them. Before
+  this, fourteen of the sixteen were searchable, including Form Responses and Form Response Answers.
+
+  **`AutoUpdate*UserSearchAPI` is set to 0 on all sixteen, which is what holds the choice against
+  CodeGen.** Setting it to 0 is MJ's own documented mechanism for that. Left at 1, CodeGen's Smart
+  Field Identification may rewrite the flags — the entity-level one only when the entity is new to
+  CodeGen, the field-level ones whenever the entity gains a column. It is a schema change that
+  reopens the question, not every run.
+
+  One generator artifact rides along and changes nothing: a `spUpdateUserView` writing the `All Forms`
+  view back with the values it already has. Both earlier seeds carry one for the same reason.
+
+  The seed was generated against a database built from `migrations/` alone at MJ 6.1.1, and proved by
+  restoring that database untouched, applying the chain including the new file, and reading the
+  sixteen entities and seven fields back.
+
+### Patch Changes
+
+- c9366ea: The release runbook describes a pipeline that has now been run
+
+  Four files still said the release had never been executed, which stopped being true on 2026-09-15
+  when `v0.11.0` shipped through it. They now record that, the two defects the first run found
+  (#225, #226), and what to expect next time. The "some packages published, others did not" row was
+  the one actively misleading entry: npm's packument is eventually consistent and served a mixed view
+  for about three minutes after `v0.11.0`, so following that advice would have triggered a needless
+  re-run. It now says to wait and read the publish step's own output first.
+
+- 899739b: Widen the MemberJunction compatibility range so Edge and 6.1.0 hosts can install MJ Forms.
+
+  The `^6.1.1` peer range admitted no prerelease build at all — semver only accepts a
+  prerelease when a comparator shares its exact major.minor.patch and carries a prerelease
+  tag. A `6.1.0-edge.6` host therefore failed with ERESOLVE, which `mj app install` reports
+  as an npm auth problem before finalizing the app as Disabled (#211). Plain `6.1.0` hosts
+  were locked out too.
+
+  Peers move to `^6.1.0-edge.6` and `mjVersionRange` to `>=6.1.0-edge.6 <7.0.0`. This is a strict
+  widening: every host that could install before still can, plus 6.1.0 itself and 6.1.0 Edge
+  builds from `edge.6` onward. The era boundary is unchanged — MJ's installer coerces a
+  prerelease host to its base tuple, so a 7.0.0-edge.0 host still correctly fails the
+  `<7.0.0` cap.
+
+  The `edge.6` floor was verified by checking all 74 imported `@memberjunction/*` symbols
+  against the real `6.1.0-edge.6` typings — an API-surface check, not a compile.
+
+- Updated dependencies [ec8b090]
+- Updated dependencies [c9366ea]
+- Updated dependencies [899739b]
+  - @mj-biz-apps/forms-entities@0.12.0
+  - @mj-biz-apps/forms-actions@0.12.0
+  - @mj-biz-apps/forms-ng@0.12.0
+  - @mj-biz-apps/forms-core-entities-server@0.12.0
+
 ## 0.11.0
 
 ### Minor Changes

@@ -6,7 +6,9 @@
 # makes a direct push to either branch permanently impossible: required checks are evaluated against
 # the check runs present on the SHA being INTRODUCED, and a push introduces a SHA the remote has
 # never seen, so no check run can exist for it (GH013). Every push in the release path was deleted
-# and replaced with a hand-run runbook, docs/release.md, which has never once been executed.
+# and replaced with a hand-run runbook, docs/release.md, which was never once executed by hand --
+# #218 automated it again, and it first ran on 2026-09-15 to ship v0.11.0. This workflow ran for the
+# first time that day too, immediately before it, and the credential was live.
 #
 # #177 also concluded that both ways back — a ruleset bypass actor, or routing the writes through
 # workflow-opened pull requests — needed a permission this repo does not have. The second half of
