@@ -4,9 +4,9 @@
 
 **Goal:** Stop exact `@memberjunction/*` pins from forking the dependency graph in dev workspaces, and widen the published compatibility ranges so MJ Edge and 6.1.0 hosts can install MJ Forms — then gate both against recurrence.
 
-**Architecture:** Three independent commits. (1) Two dev-only exact pins become carets so pnpm links MJ workspace source instead of downloading a second published copy. (2) All 40 `@memberjunction/*` `peerDependencies` entries across the five packages move from `^6.1.1` to `^6.1.0-edge.6`, and `mj-app.json` `mjVersionRange` from `>=6.1.1 <7.0.0` to `>=6.1.0 <7.0.0`, which strictly widens the set of hosts that can install the app. (3) A new stdlib+semver gate, `scripts/check-mj-version-ranges.mjs`, refuses both defects in CI.
+**Architecture:** Three independent commits. (1) Two dev-only exact pins become carets so pnpm links MJ workspace source instead of downloading a second published copy. (2) All 40 `@memberjunction/*` `peerDependencies` entries across the five packages move from `^6.1.1` to `^6.1.0-edge.6`, and `mj-app.json` `mjVersionRange` from `>=6.1.1 <7.0.0` to `>=6.1.0-edge.6 <7.0.0`, which strictly widens the set of hosts that can install the app. (3) A new stdlib-only gate, `scripts/check-mj-version-ranges.mjs`, refuses both defects in CI.
 
-**Tech Stack:** Node 22 (ESM `.mjs`), `node:test` for gate specs, `semver` 7.8.5 (hoisted, already used by MJ), pnpm 10 workspaces, Vitest 3 for package tests, Turbo for builds, changesets for release notes.
+**Tech Stack:** Node 22 (ESM `.mjs`), `node:test` for gate specs, pnpm 10 workspaces, Vitest 3 for package tests, Turbo for builds, changesets for release notes.
 
 **Spec:** Embedded below in *Context* and *Global Constraints*. This plan is self-contained; there is no separate design doc.
 
@@ -53,9 +53,9 @@ Copied verbatim from repo policy. Every task's requirements implicitly include t
 - **No `any` types**, no `as any`, no `unknown` as a lazy substitute.
 - **Branch from `next`, never `main`.** Feature branches MUST track the same-named remote (`origin/<branch>`); verify with `git branch -vv` before pushing.
 - **Changeset level is `patch`** unless the change ships a migration or metadata. This work ships neither.
-- **Gate scripts are plain Node + ESM**, stdlib plus `semver` only, and must run without installing anything.
+- **Gate scripts are plain Node + ESM**, stdlib only (no third-party imports), and must run without installing anything.
 - **Run `pnpm install` only at the mj-dev root.** The one exception in this plan is `pnpm install --lockfile-only` inside `bizapps-forms`, which writes no `node_modules` and therefore cannot unlink MJ source.
-- **Exact MJ version values:** peer ranges become exactly `^6.1.0-edge.6`; `mjVersionRange` becomes exactly `>=6.1.0 <7.0.0`. Do not invent other values.
+- **Exact MJ version values:** peer ranges become exactly `^6.1.0-edge.6`; `mjVersionRange` becomes exactly `>=6.1.0-edge.6 <7.0.0`. Do not invent other values.
 - **Do not downgrade the repo's MJ version.** `apps/MJAPI` dependencies stay at exact `6.1.1` (the documented `apps/*` model), and the root `pnpm.overrides` MJ entries stay at `6.1.1`. Only the two devDeps named in Task 1 change.
 
 ---
@@ -309,7 +309,7 @@ This task produces no repo change. Do not commit.
 
 **Interfaces:**
 - Consumes: Task 2's green verdict. **Do not start this task if Task 2 failed.**
-- Produces: the manifest state Task 4's gate asserts (`^6.1.0-edge.6` peers, `>=6.1.0 <7.0.0` range).
+- Produces: the manifest state Task 4's gate asserts (`^6.1.0-edge.6` peers, `>=6.1.0-edge.6 <7.0.0` range).
 
 - [ ] **Step 1: Rewrite all 40 MJ peer entries**
 
@@ -351,13 +351,13 @@ node -e "
 const fs=require('fs');
 const raw=fs.readFileSync('mj-app.json','utf8');
 if(JSON.parse(raw).mjVersionRange!=='>=6.1.1 <7.0.0') throw new Error('unexpected current range');
-const next=raw.replace('\">=6.1.1 <7.0.0\"','\">=6.1.0 <7.0.0\"');
+const next=raw.replace('\">=6.1.1 <7.0.0\"','\">=6.1.0-edge.6 <7.0.0\"');
 if(next===raw) throw new Error('no substitution made');
 fs.writeFileSync('mj-app.json',next);
 console.log('mjVersionRange ->', JSON.parse(next).mjVersionRange);
 "
 ```
-Expected: `mjVersionRange -> >=6.1.0 <7.0.0`.
+Expected: `mjVersionRange -> >=6.1.0-edge.6 <7.0.0`.
 
 - [ ] **Step 3: Verify the widening with the real semver resolver**
 
@@ -412,7 +412,7 @@ tag. A `6.1.0-edge.6` host therefore failed with ERESOLVE, which `mj app install
 as an npm auth problem before finalizing the app as Disabled (#211). Plain `6.1.0` hosts
 were locked out too.
 
-Peers move to `^6.1.0-edge.6` and `mjVersionRange` to `>=6.1.0 <7.0.0`. This is a strict
+Peers move to `^6.1.0-edge.6` and `mjVersionRange` to `>=6.1.0-edge.6 <7.0.0`. This is a strict
 widening: every host that could install before still can, plus 6.1.0 and the 6.1.0 Edge
 line. The era boundary is unchanged — MJ's installer coerces a prerelease host to its base
 tuple, so a 7.0.0-edge.0 host still correctly fails the `<7.0.0` cap.
@@ -441,7 +441,7 @@ finalizing the app Disabled (#211). Plain 6.1.0 hosts were excluded too, which
 nobody had noticed.
 
 All 40 `@memberjunction/*` peers move to `^6.1.0-edge.6` and `mjVersionRange` to
-`>=6.1.0 <7.0.0`. Measured, one core copy in every passing case: 6.1.2 OK before
+`>=6.1.0-edge.6 <7.0.0`. Measured, one core copy in every passing case: 6.1.2 OK before
 and after; 6.1.0 and 6.1.0-edge.6 blocked before, OK after. No host that worked
 stops working. The era boundary holds because MJ's installer coerces a prerelease
 host to its base tuple, so 7.0.0-edge.0 still fails `<7.0.0`.
@@ -1067,7 +1067,7 @@ npm error peer @memberjunction/core@"^6.1.1" from @mj-biz-apps/forms-server@0.11
 app **Disabled** (#211).
 
 All 40 `@memberjunction/*` peers move to `^6.1.0-edge.6`; `mjVersionRange` to
-`>=6.1.0 <7.0.0`. Measured, **one** core copy in every passing case:
+`>=6.1.0-edge.6 <7.0.0`. Measured, **one** core copy in every passing case:
 
 | host | before | after |
 |---|---|---|
