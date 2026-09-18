@@ -17,6 +17,10 @@
             "IncludeInUserSearchAPI": true,
             "UserSearchPredicateAPI": "BeginsWith",
             "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "sync": {
+            "lastModified": "2026-09-18T18:45:48.093Z",
+            "checksum": "a466f182b244c1a8245c11a1df92cf1ec368e5456934ce8351c40d7a5b6f0f0f"
           }
         },
         {
@@ -26,6 +30,10 @@
           "fields": {
             "IncludeInUserSearchAPI": false,
             "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "sync": {
+            "lastModified": "2026-09-18T18:45:48.134Z",
+            "checksum": "882b1c4b195c7cc964188965e4b057dc2624ed5517b4ddd7b2e2fb41bd664a8c"
           }
         },
         {
@@ -35,6 +43,10 @@
           "fields": {
             "IncludeInUserSearchAPI": false,
             "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "sync": {
+            "lastModified": "2026-09-18T18:45:48.162Z",
+            "checksum": "882b1c4b195c7cc964188965e4b057dc2624ed5517b4ddd7b2e2fb41bd664a8c"
           }
         },
         {
@@ -44,6 +56,10 @@
           "fields": {
             "IncludeInUserSearchAPI": false,
             "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "sync": {
+            "lastModified": "2026-09-18T18:45:48.186Z",
+            "checksum": "882b1c4b195c7cc964188965e4b057dc2624ed5517b4ddd7b2e2fb41bd664a8c"
           }
         },
         {
@@ -53,9 +69,17 @@
           "fields": {
             "IncludeInUserSearchAPI": false,
             "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "sync": {
+            "lastModified": "2026-09-18T18:45:48.213Z",
+            "checksum": "882b1c4b195c7cc964188965e4b057dc2624ed5517b4ddd7b2e2fb41bd664a8c"
           }
         }
       ]
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:47.875Z",
+      "checksum": "0baff3649c31ed20ff60ec19d166dca22a08387e38072e637e0d28aec06cf5d6"
     }
   },
   {
@@ -76,6 +100,10 @@
             "IncludeInUserSearchAPI": true,
             "UserSearchPredicateAPI": "BeginsWith",
             "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "sync": {
+            "lastModified": "2026-09-18T18:45:48.093Z",
+            "checksum": "a466f182b244c1a8245c11a1df92cf1ec368e5456934ce8351c40d7a5b6f0f0f"
           }
         },
         {
@@ -85,9 +113,17 @@
           "fields": {
             "IncludeInUserSearchAPI": false,
             "AutoUpdateIncludeInUserSearchAPI": false
+          },
+          "sync": {
+            "lastModified": "2026-09-18T18:45:48.135Z",
+            "checksum": "882b1c4b195c7cc964188965e4b057dc2624ed5517b4ddd7b2e2fb41bd664a8c"
           }
         }
       ]
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:47.880Z",
+      "checksum": "0baff3649c31ed20ff60ec19d166dca22a08387e38072e637e0d28aec06cf5d6"
     }
   },
   {
@@ -97,6 +133,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:47.880Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   },
   {
@@ -106,6 +146,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:47.878Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   },
   {
@@ -115,6 +159,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:47.879Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   },
   {
@@ -124,6 +172,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:47.883Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   },
   {
@@ -133,6 +185,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:47.878Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   },
   {
@@ -142,6 +198,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:47.881Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   },
   {
@@ -151,6 +211,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:47.879Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   },
   {
@@ -160,6 +224,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:47.893Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   },
   {
@@ -169,6 +237,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:48.001Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   },
   {
@@ -178,6 +250,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:48.006Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   },
   {
@@ -187,6 +263,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:48.006Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   },
   {
@@ -196,6 +276,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:47.999Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   },
   {
@@ -205,6 +289,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:47.993Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   },
   {
@@ -214,6 +302,10 @@
     "fields": {
       "AllowUserSearchAPI": false,
       "AutoUpdateAllowUserSearchAPI": false
+    },
+    "sync": {
+      "lastModified": "2026-09-18T18:45:47.993Z",
+      "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
     }
   }
 ]
