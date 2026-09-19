@@ -23,6 +23,9 @@ concurrency:
   group: ui-gate-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   ui-token-gate:
     runs-on: ubuntu-latest
