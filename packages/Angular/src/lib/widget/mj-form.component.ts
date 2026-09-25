@@ -110,6 +110,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
   private readonly banner = viewChild<ElementRef<HTMLElement>>('bannerError');
 
   protected readonly phase = signal<WidgetPhase>('loading');
+
+  /**
+   * Welcome and ending phases, where the logo and the screen centre together as one hero rather
+   * than the logo sitting in a top bar over a question list.
+   */
+  protected readonly isHeroPhase = computed(() => this.phase() === 'welcome' || this.phase() === 'done');
   protected readonly errorText = signal<string>('');
   protected readonly definition = signal<PublishedFormDefinition | null>(null);
   protected readonly runtime = signal<FormRuntime | null>(null);

@@ -16,26 +16,21 @@ import { socialPlatform, type PublishedFormScreen } from '@mj-biz-apps/forms-ent
 import { IconComponent } from './icon.component';
 
 const FORM_SCREEN_CSS = /* css */ `
-/* A welcome or ending screen is a HERO, not a paragraph: it owns the whole surface and centres
-   in it. It used to be a short content-height block pinned to the top, which on a full-window
-   preview (and on a phone) left most of the screen empty below it and read as a page that had
-   failed to load rather than a deliberate opening.
+/* A welcome or ending screen is a HERO, not a paragraph: it centres in the surface rather than
+   pinning to the top, which on a full-window page (and on a phone) left most of the screen empty
+   below it and read as a page that had failed to load.
 
-   flex all the way down, never a percentage height: a percentage would resolve against an auto
-   parent as zero, and this element also runs embedded on pages that give it no height at all.
-   Growing to fill is something flex does when there IS room and ignores when there is not. */
+   The centring is the SHELL's job (.mjf-shell--hero in mj-form.component.css), not this
+   component's. It used to be done here, with this element growing to fill the shell — and that
+   split the hero in two: the form's logo lives in the shell, above this element, so it stayed
+   pinned to the top-left corner while the image, headline and button centred in the middle of
+   the window. Centring the group one level up keeps logo, image, title, body and button one
+   stack. This element is content-height so the shell can centre it. */
 :host {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
+  display: block;
 }
 
 .mjf-screen {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
   padding: 2.5rem 1.25rem;
 }
 
@@ -88,6 +83,11 @@ const FORM_SCREEN_CSS = /* css */ `
   font-size: 1.0625rem;
   line-height: 1.6;
   color: var(--mjf-page-ink-soft);
+}
+
+/* See the template: a row exists only to break the line before an inline-level child. */
+.mjf-screen__row {
+  display: block;
 }
 
 .mjf-screen__cta {
@@ -211,12 +211,11 @@ const FORM_SCREEN_CSS = /* css */ `
     @let s = screen();
     <div class="mjf-screen" [attr.role]="isWelcome() ? null : 'status'" [attr.aria-live]="isWelcome() ? null : 'polite'">
       <!--
-        The wrapper exists so ONE token can place everything. .mjf-screen stays a flex column
-        because that is what centres the block vertically in whatever height the widget gets;
-        inside it, ordinary flow plus text-align places the image, the headline, the body, the
-        button and the social row together. Aligning flex ITEMS instead would need a second,
-        flex-flavoured copy of the same author choice (flex-start beside left), and two
-        spellings of one decision is how they end up disagreeing.
+        The wrapper exists so ONE token can place everything: ordinary flow plus text-align
+        places the image, the headline, the body, the button and the social row together.
+        (Vertical centring is the shell's — see the :host rule.) Aligning flex ITEMS instead
+        would need a second, flex-flavoured copy of the same author choice (flex-start beside
+        left), and two spellings of one decision is how they end up disagreeing.
       -->
       <div class="mjf-screen__inner">
       @if (s.mediaURL) {
@@ -231,11 +230,20 @@ const FORM_SCREEN_CSS = /* css */ `
         <p class="mjf-screen__body">{{ s.body }}</p>
       }
 
+      <!--
+        The button and the social row each get a block-level ROW. Every piece of this screen is
+        inline-level so text-align can place it, and inline-level boxes share a line whenever
+        they fit — so a short description and the Start button sat side by side on every width
+        wider than their sum. The row forces the stack; text-align on it still places the box.
+      -->
       @if (buttonLabel(); as label) {
-        <button type="button" class="mjf-screen__cta" (click)="activated.emit()">{{ label }}</button>
+        <div class="mjf-screen__row">
+          <button type="button" class="mjf-screen__cta" (click)="activated.emit()">{{ label }}</button>
+        </div>
       }
 
       @if (socialLinks().length > 0) {
+        <div class="mjf-screen__row">
         <nav class="mjf-screen__social" aria-label="Follow us">
           @for (link of socialLinks(); track link.platform) {
             <a
@@ -249,6 +257,7 @@ const FORM_SCREEN_CSS = /* css */ `
             ><svg class="mjf-screen__social-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path [attr.d]="link.svgPath" /></svg></a>
           }
         </nav>
+        </div>
       }
       </div>
     </div>

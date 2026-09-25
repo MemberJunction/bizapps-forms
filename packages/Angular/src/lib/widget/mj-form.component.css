@@ -1,9 +1,11 @@
 /* Host is the themable surface: style tokens are set on the element by applyStyleTokens.
    Fallbacks keep the widget legible before any FormStyle is applied. */
 :host {
-  /* A flex column so a welcome or ending screen can grow into whatever height the host gives
-     the widget. Where the host gives none — an ordinary embed — this measures identically to
-     the block it replaced, because a flex column with no spare room is just a stack. */
+  /* A flex column so .mjf-shell (flex: 1) can grow into whatever height the host gives the
+     widget — the room a welcome or ending screen and the logo above it centre in, together
+     (.mjf-shell--hero). Where the host gives none — an ordinary embed — this measures
+     identically to the block it replaced, because a flex column with no spare room is just a
+     stack. */
   display: flex;
   flex-direction: column;
   /* The widget's responsive rules ask THIS element how wide it is, not the window — see the
@@ -177,6 +179,42 @@
     max-width: 980px;
     padding: 2rem;
   }
+}
+
+/* Welcome and ending phases: the logo and the screen beneath it are ONE hero, centred together
+   in whatever height the widget has. Auto margins on the first and last child rather than
+   justify-content: center, because centring a column taller than its box pushes the top of it
+   above the scroll origin where nobody can reach it — a phone with a tall welcome image would
+   lose its logo. Auto margins collapse to zero when there is no room, so the stack just scrolls. */
+.mjf-shell--hero > :first-child {
+  margin-top: auto;
+}
+
+.mjf-shell--hero > :last-child {
+  margin-bottom: auto;
+}
+
+/* Centred by default here, where the plain bar above a question list reads left: on a hero the
+   logo sits directly over a centred image and headline, and a left-pinned mark over a centred
+   stack reads as two unrelated things. An author's explicit alignment still wins in both. */
+.mjf-shell--hero .mjf-logo-bar {
+  margin-bottom: 0;
+  text-align: var(--mjf-title-align, center);
+}
+
+/* A resumed respondent's notice sits between the logo and the screen, so on a hero it is part
+   of the stack and follows the stack's alignment. Block flow with the icon inline, for the reason
+   .mjf-state--done gives: as a flex row, align-items and justify-content would place the boxes
+   whatever the token said. The gap above it is set only after a logo, because the logo bar's own
+   margin is zeroed here — and a margin-top on the notice when it is the FIRST child would beat
+   the auto margin that centres the whole stack. */
+.mjf-shell--hero .mjf-resume-notice {
+  display: block;
+  text-align: var(--mjf-title-align, center);
+}
+
+.mjf-shell--hero .mjf-logo-bar + .mjf-resume-notice {
+  margin-top: 1rem;
 }
 
 /* A wrapper carries the alignment because .mjf-shell is a flex COLUMN, where text-align does

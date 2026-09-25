@@ -24,7 +24,7 @@
 import { ApplicationRef, ComponentRef, createComponent } from '@angular/core';
 import { createApplication } from '@angular/platform-browser';
 
-import { ELEMENT_ATTRIBUTES, configFromAttributes, effectOf } from './element-attributes';
+import { ELEMENT_ATTRIBUTES, configFromAttributes, effectOf, inputsFromAttributes } from './element-attributes';
 import { formsWidgetProviders } from './widget-providers';
 import { MjFormComponent } from './mj-form.component';
 
@@ -69,7 +69,7 @@ class MjFormElement extends HTMLElement {
     }
     switch (effectOf(name)) {
       case 'input':
-        this.componentRef?.setInput('slug', value ?? '');
+        this.componentRef?.setInput(name, value ?? '');
         break;
       case 'rebuild':
         // Only once something is running: before that, mount() reads the attributes itself.
@@ -114,7 +114,9 @@ class MjFormElement extends HTMLElement {
         environmentInjector: app.injector,
         hostElement: this,
       });
-      componentRef.setInput('slug', this.getAttribute('slug') ?? '');
+      for (const [name, value] of inputsFromAttributes((n) => this.getAttribute(n))) {
+        componentRef.setInput(name, value);
+      }
       app.attachView(componentRef.hostView);
       this.appRef = app;
       this.componentRef = componentRef;
