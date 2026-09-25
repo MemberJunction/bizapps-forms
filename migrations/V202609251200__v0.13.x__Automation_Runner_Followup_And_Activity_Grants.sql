@@ -74,8 +74,14 @@
 -- to 1 and NOTHING lowered. V202608242100 forced CanDelete = 0 because Delete on People could let an
 -- anonymous submission destroy a subject record; these are the floor a set of shipped hooks needs
 -- on entities other apps own, and an operator's wider hand grant there is their decision to make,
--- not this repair's to revoke. `__mj.EntityPermission` has no unique constraint on
--- (EntityID, RoleID), so an existing row is widened in place rather than joined by a rival.
+-- not this repair's to revoke. An existing row is widened in place rather than joined by a rival:
+-- MJ 6.1.0-edge.7+ allows one row per (EntityID, RoleID, Type), and earlier cores allow any number.
+--
+-- ALLOW ROWS ONLY. Every read and write below is limited to `Type = 'Allow'`. On a `Deny` row a set
+-- flag DENIES that verb (core subtracts Deny from Allow), so a Deny row is not "a row that exists":
+-- widening one would turn an operator's deny-Create into deny-Read+Create, and counting it would
+-- skip the Allow insert. An operator's Deny is left exactly as written, as their decision, and the
+-- boot readiness report names the effective gap it leaves.
 --
 -- Role and entities matched by NAME, not GUID: `Role.Name` is UNIQUE and a host where a sibling app
 -- minted the role first carries it under a different ID (the lesson the 0.8.0 seed, #39 and the
@@ -146,9 +152,9 @@ BEGIN
     END
     ELSE IF NOT EXISTS (
         SELECT 1 FROM [${mjSchema}].[EntityPermission]
-        WHERE RoleID = @RunnerRoleID AND EntityID = @EntityID)
+        WHERE RoleID = @RunnerRoleID AND EntityID = @EntityID AND Type = N'Allow')
     BEGIN
-        -- No row yet for the pair: insert exactly the documented flags, under the metadata's id.
+        -- No Allow row yet for the pair: insert exactly the documented flags, under the metadata's id.
         INSERT INTO [${mjSchema}].[EntityPermission]
             (ID, EntityID, RoleID, CanCreate, CanRead, CanUpdate, CanDelete)
         VALUES
@@ -156,20 +162,20 @@ BEGIN
     END
     ELSE
     BEGIN
-        -- A row exists (hand-applied, or a sibling's): widen-only — raise each needed flag that
-        -- is 0 and lower nothing (see header). Every row for the pair, so no duplicate is left
-        -- narrower than the floor.
+        -- An Allow row exists (hand-applied, or a sibling's): widen-only — raise each needed flag
+        -- that is 0 and lower nothing (see header). Every Allow row for the pair, so no duplicate on
+        -- a pre-edge.7 core is left narrower than the floor. Deny rows are never touched.
         UPDATE [${mjSchema}].[EntityPermission]
         SET CanRead   = CASE WHEN @NeedRead   = 1 THEN 1 ELSE CanRead   END,
             CanCreate = CASE WHEN @NeedCreate = 1 THEN 1 ELSE CanCreate END
-        WHERE RoleID = @RunnerRoleID AND EntityID = @EntityID
+        WHERE RoleID = @RunnerRoleID AND EntityID = @EntityID AND Type = N'Allow'
           AND ((@NeedRead = 1 AND CanRead = 0) OR (@NeedCreate = 1 AND CanCreate = 0));
     END
 
     SET @Seq = @Seq + 1;
 END
 
--- Postcondition, per entity that exists: some row for the pair carries every needed flag.
+-- Postcondition, per entity that exists: some ALLOW row for the pair carries every needed flag.
 -- (No role-wide counts — shared-role discipline, per #39.)
 DECLARE @Unmet NVARCHAR(MAX) = (
     SELECT STRING_AGG(CAST(g.EntityName AS NVARCHAR(MAX)), N', ')
@@ -177,7 +183,7 @@ DECLARE @Unmet NVARCHAR(MAX) = (
     WHERE g.EntityID IS NOT NULL
       AND NOT EXISTS (
           SELECT 1 FROM [${mjSchema}].[EntityPermission] ep
-          WHERE ep.RoleID = @RunnerRoleID AND ep.EntityID = g.EntityID
+          WHERE ep.RoleID = @RunnerRoleID AND ep.EntityID = g.EntityID AND ep.Type = N'Allow'
             AND (g.NeedRead = 0 OR ep.CanRead = 1)
             AND (g.NeedCreate = 0 OR ep.CanCreate = 1)));
 IF @Unmet IS NOT NULL
