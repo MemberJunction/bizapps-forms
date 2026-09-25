@@ -92,11 +92,12 @@ describe('FormsHomeService.loadForms', () => {
     expect(counted).toEqual(['f1', 'f2']);
   });
 
-  it('still lists the forms when counting fails, and logs why', async () => {
+  it('still lists the forms when counting fails, logs why, and shows no count rather than a false zero', async () => {
     countsSucceed = false;
     const rows = await new FormsHomeService().loadForms();
     expect(rows.map((r) => r.id).sort()).toEqual(['f1', 'f2']);
-    expect(rows.every((r) => r.responseCount === 0)).toBe(true);
+    // "0 Responses" would be a claim about the data; a failed count makes no claim.
+    expect(rows.every((r) => r.responseCount === null)).toBe(true);
     expect(logged.join('\n')).toMatch(/2 forms on Forms home[\s\S]*count query refused/);
   });
 });

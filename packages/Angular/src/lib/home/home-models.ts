@@ -39,7 +39,8 @@ export interface FormSummaryRow {
   status: FormStatus;
   categoryName: string | null;
   updatedAt: Date | null;
-  responseCount: number;
+  /** Complete responses; `null` when the count could not be loaded (shown as unknown, never 0). */
+  responseCount: number | null;
 }
 
 /** Raw `Forms` columns pulled by the simple RunView (subset we display). */

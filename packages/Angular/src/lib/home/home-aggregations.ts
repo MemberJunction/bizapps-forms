@@ -26,7 +26,8 @@ export function categoryNameMap(
 export function buildFormRows(
   forms: readonly FormSimpleRecord[],
   categories: readonly FormCategorySimpleRecord[],
-  counts: ReadonlyMap<string, number>,
+  /** `null` when the counts could not be loaded — every row's count is then unknown, not zero. */
+  counts: ReadonlyMap<string, number> | null,
 ): FormSummaryRow[] {
   const catName = categoryNameMap(categories);
 
@@ -36,10 +37,22 @@ export function buildFormRows(
     status: f.Status,
     categoryName: f.CategoryID ? (catName.get(f.CategoryID) ?? null) : null,
     updatedAt: toDate(f.__mj_UpdatedAt),
-    responseCount: counts.get(f.ID) ?? 0,
+    responseCount: counts ? (counts.get(f.ID) ?? 0) : null,
   }));
 
   return sortByUpdatedDesc(rows);
+}
+
+/** Sum of the rows' response counts, or `null` if any is unknown (a partial sum would under-report). */
+export function totalResponses(rows: readonly FormSummaryRow[]): number | null {
+  let total = 0;
+  for (const r of rows) {
+    if (r.responseCount === null) {
+      return null;
+    }
+    total += r.responseCount;
+  }
+  return total;
 }
 
 /** Newest-updated first; rows without a date sort last, then by name. */

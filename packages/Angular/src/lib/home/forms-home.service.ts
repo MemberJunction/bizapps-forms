@@ -67,17 +67,17 @@ export class FormsHomeService {
     }
     // Categories and counts are enrichment-only: the grid still loads without them.
     const cats = catsRes.Success ? catsRes.Results : [];
-    const counts = await this.loadCountsOrEmpty(formsRes.Results.map((f) => f.ID));
+    const counts = await this.loadCountsOrNull(formsRes.Results.map((f) => f.ID));
     return buildFormRows(formsRes.Results, cats, counts);
   }
 
-  private async loadCountsOrEmpty(formIds: readonly string[]): Promise<Map<string, number>> {
+  private async loadCountsOrNull(formIds: readonly string[]): Promise<Map<string, number> | null> {
     try {
       return await loadCompleteResponseCounts(this.rv, formIds);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       LogError(`Counting Complete responses for ${formIds.length} forms on Forms home failed: ${reason}`);
-      return new Map();
+      return null;
     }
   }
 

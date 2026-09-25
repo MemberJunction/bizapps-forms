@@ -4,6 +4,7 @@ import type { ActionParam } from '@memberjunction/actions-base';
 import {
   buildFormRows,
   categoryNameMap,
+  totalResponses,
   readFormIdFromParams,
   readFormIdFromResult,
   sortByUpdatedDesc,
@@ -70,6 +71,25 @@ describe('buildFormRows', () => {
     const rows = buildFormRows(forms, cats, counts);
     expect(rows[0].id).toBe('f2'); // March beats January
     expect(rows[1].id).toBe('f1');
+  });
+
+  it('marks every count unknown when no counts could be loaded', () => {
+    const rows = buildFormRows(forms, cats, null);
+    expect(rows.map((r) => r.responseCount)).toEqual([null, null]);
+  });
+});
+
+describe('totalResponses', () => {
+  const row = (responseCount: number | null): FormSummaryRow => ({
+    id: 'x', name: 'x', status: 'Draft', categoryName: null, updatedAt: null, responseCount,
+  });
+
+  it('sums the known counts', () => {
+    expect(totalResponses([row(2), row(0), row(5)])).toBe(7);
+  });
+
+  it('is unknown when any count is unknown, so the subtitle never under-reports', () => {
+    expect(totalResponses([row(2), row(null)])).toBeNull();
   });
 });
 
