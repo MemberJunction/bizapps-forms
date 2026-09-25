@@ -5,14 +5,12 @@ import type { ResourceData } from '@memberjunction/core-entities';
 import { CompositeKey, LogError } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import type { ExportFormat } from '@memberjunction/export-engine';
-import type { mjBizAppsFormsFormResponseAnswerEntityType } from '@mj-biz-apps/forms-entities';
 
 import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
 import { FORMS_REPORTING_CSS } from './forms-reporting-dashboard.styles';
 import { FormsReportingService } from './services/forms-reporting.service';
 import { FormsReportingExportService } from './services/forms-reporting-export.service';
 import {
-  mockAnswerRows,
   mockReport,
   mockReportableForms,
   mockResponseDetail,
@@ -21,6 +19,7 @@ import type { FormReportData, ReportableForm } from './models/reporting.model';
 import type { ResponseDetail, ResponseRecordLink } from '../responses/response-models';
 import { ResponsesDataService } from '../responses/responses-data.service';
 import {
+  failureMessage,
   filterForms,
   percent,
   plural,
@@ -137,9 +136,6 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   /** Selected response for the detail view; null shows the list. */
   public responseDetail: ResponseDetail | null = null;
 
-  /** Raw answer rows for the current report, kept for export pivoting. */
-  private rawAnswers: mjBizAppsFormsFormResponseAnswerEntityType[] = [];
-
   public async GetResourceDisplayName(_data: ResourceData): Promise<string> {
     // Matches the Forms app's nav label. The two used to disagree ("Forms Reporting"),
     // which costs the reader a beat working out whether they are where they meant to go.
@@ -209,19 +205,14 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     this.errorMessage = null;
     this.cdr.markForCheck();
     try {
-      if (this.useMock) {
-        this.report = mockReport();
-        this.rawAnswers = mockAnswerRows();
-      } else {
-        this.report = await this.data.loadReport(form);
-        this.rawAnswers = await this.responses.loadAnswersForForm(form.formId);
-      }
+      // The report carries its own answer rows for the export; reading them again here is
+      // what doubled every selection's payload (#246).
+      this.report = this.useMock ? mockReport() : await this.data.loadReport(form);
       this.loadedAt = new Date();
     } catch (err) {
       // A failed report must not leave the previous form's numbers on screen under the new
       // form's name — every figure would be a lie about the form the header claims.
       this.report = null;
-      this.rawAnswers = [];
       this.fail(err, 'Failed to load the report.');
     } finally {
       this.loadingReport = false;
@@ -326,7 +317,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     this.errorMessage = null;
     this.cdr.markForCheck();
     try {
-      await this.exporter.exportResponses(this.report, this.rawAnswers, format);
+      await this.exporter.exportResponses(this.report, format);
     } catch (err) {
       this.fail(err, 'Export failed.');
     } finally {
@@ -346,8 +337,8 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     return mockResponseDetail(responseId, this.report?.questions ?? [], row);
   }
 
-  private fail(err: unknown, fallback: string): void {
-    const message = err instanceof Error ? err.message : fallback;
+  private fail(err: unknown, action: string): void {
+    const message = failureMessage(err, action);
     this.errorMessage = message;
     LogError(message);
     this.Error.emit(err instanceof Error ? err : new Error(message));
