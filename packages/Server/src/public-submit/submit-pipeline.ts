@@ -1293,11 +1293,17 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
     if (!principal) {
       return;
     }
-    const context = await loadFormResponseContext(responseId, principal);
-    if (!context) {
-      console.warn(`[forms] automations skipped: response ${responseId} could not be read back.`);
+    const loaded = await loadFormResponseContext(responseId, principal);
+    if (loaded.status === 'absent') {
+      console.warn(`[forms] automations skipped: response ${responseId} does not exist.`);
       return;
     }
+    if (loaded.status === 'failed') {
+      // Usually a missing grant on the automation principal (#239) — name it, don't just skip.
+      LogError(`[forms] automations skipped: response ${responseId} could not be loaded as the automation principal: ${loaded.error}`);
+      return;
+    }
+    const context = loaded.context;
 
     const answers = buildConditionAnswers(resolved.definition, context.canonicalAnswers);
     const plan = planAutomations(resolved.definition.automations, {

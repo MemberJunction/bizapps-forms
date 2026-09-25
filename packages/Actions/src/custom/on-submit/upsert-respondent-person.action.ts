@@ -61,10 +61,14 @@ export class UpsertRespondentPersonAction extends BaseAction {
       return fail(missingClasses, 'ENTITY_CLASS_UNREGISTERED');
     }
 
-    const ctx = await loadFormResponseContext(responseId, params.ContextUser);
-    if (!ctx) {
+    const loaded = await loadFormResponseContext(responseId, params.ContextUser);
+    if (loaded.status === 'absent') {
       return skip(`FormResponse '${responseId}' not found; nothing to upsert.`);
     }
+    if (loaded.status === 'failed') {
+      return fail(`Could not load FormResponse '${responseId}': ${loaded.error}`, 'RESPONSE_LOAD_FAILED');
+    }
+    const ctx = loaded.context;
     if (ctx.response.RespondentPersonID) {
       setOutputParam(params, 'PersonID', ctx.response.RespondentPersonID);
       setOutputParam(params, 'Created', false);
@@ -87,7 +91,14 @@ export class UpsertRespondentPersonAction extends BaseAction {
     params: RunActionParams,
   ): Promise<ActionResultSimple> {
     const contextUser = params.ContextUser;
-    const existing = await findPersonByEmail(email, contextUser);
+    const lookup = await findPersonByEmail(email, contextUser);
+    if ('error' in lookup) {
+      // Never fall through to create: a read that FAILED (a missing Read grant, #239) says nothing
+      // about whether this respondent already has a Person, and creating one here would mint a
+      // duplicate for every returning respondent — the very thing the match exists to prevent.
+      return fail(`Could not read ${PERSON_ENTITY} to match the respondent: ${lookup.error}`, 'PERSON_LOOKUP_FAILED');
+    }
+    const existing = lookup.person;
     const created = !existing;
     let person = existing;
     if (!person) {
@@ -159,10 +170,14 @@ function assignName(identity: RespondentIdentity, prompt: string, value: string)
   }
 }
 
+/**
+ * The Person with this email, `{ person: null }` when the read succeeded and matched nothing, or
+ * `{ error }` when the read FAILED (RunView does not throw) — which must not be taken for "no match".
+ */
 async function findPersonByEmail(
   email: string,
   contextUser: UserInfo,
-): Promise<mjBizAppsCommonPersonEntity | null> {
+): Promise<{ person: mjBizAppsCommonPersonEntity | null } | { error: string }> {
   const rv = new RunView();
   const escaped = escapeSqlString(email);
   const result = await rv.RunView<mjBizAppsCommonPersonEntity>(
@@ -174,10 +189,10 @@ async function findPersonByEmail(
     },
     contextUser,
   );
-  if (result.Success && result.Results.length > 0) {
-    return result.Results[0];
+  if (!result.Success) {
+    return { error: result.ErrorMessage || 'RunView reported failure with no message' };
   }
-  return null;
+  return { person: result.Results[0] ?? null };
 }
 
 async function createPerson(

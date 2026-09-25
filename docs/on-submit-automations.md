@@ -40,6 +40,11 @@ They predate configurable automations and remain the fallback so that a form nob
 reconfigured keeps its confirmation email, follow-up task, respondent-Person upsert and answer
 scoring. They fire on **complete** submissions only — never on a partial autosave.
 
+They run as the `Forms Automation Service` principal, whose `Forms Automation Runner` role carries
+exactly the grants these hooks need (see `metadata/users/README.md`). If one of those grants is
+missing on a host, the server says so at startup — `[Forms] On-submit automations are NOT ready:` —
+naming the entity, the missing permission and the hook that needs it.
+
 ## Configuring a form programmatically
 
 Both authoring actions accept two optional input params:

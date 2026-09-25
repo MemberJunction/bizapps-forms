@@ -5,7 +5,7 @@
  * C-B (gauntlet #207, F2). The redeem is a PROCESS-LOCAL call: core's magic-link router is mounted
  * on the very same Express app (`MJ/packages/MJServer/src/index.ts:1221`). It was nevertheless
  * addressed to `MJAPI_PUBLIC_URL`, the externally-reachable origin — and that variable cannot
- * quietly be repointed inward, because `resolveGraphqlUrl()` derives from it too and that value is
+ * quietly be repointed inward, because `resolveConfiguredGraphqlUrl()` derives from it too and that value is
  * handed to the RESPONDENT'S BROWSER as `data-graphql-url`.
  *
  * So behind any real proxy the call left the perimeter, resolved to the proxy, and came back in —
@@ -20,14 +20,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { getRespondentHostConfig, resetRespondentHostConfigForTests } from '../config';
+import { getGraphqlUrlForRequest, getRespondentHostConfig, resetRespondentHostConfigForTests } from '../config';
 
 const SAVED = { ...process.env };
 
 beforeEach(() => {
   // Cleared up front, not in a trailing line: a test that throws mid-body never reaches its own
   // cleanup and the next test then runs under someone else's environment.
-  for (const k of ['FORMS_MAGICLINK_REDEEM_URL', 'MJAPI_PUBLIC_URL', 'GRAPHQL_PORT']) {
+  for (const k of ['FORMS_MAGICLINK_REDEEM_URL', 'MJAPI_PUBLIC_URL', 'GRAPHQL_PORT', 'FORMS_GRAPHQL_URL', 'GRAPHQL_ROOT_PATH']) {
     delete process.env[k];
   }
   resetRespondentHostConfigForTests();
@@ -84,5 +84,51 @@ describe('magicLinkRedeemUrl — the redeem never leaves the host', () => {
     resetRespondentHostConfigForTests();
 
     expect(getRespondentHostConfig().graphqlUrl).toBe('https://forms.example.com');
+  });
+});
+
+/**
+ * Where the respondent's BROWSER is told to send GraphQL (#238).
+ *
+ * The page used to fall back to a hardcoded `http://localhost:4121` when no public URL was set, so a
+ * host on any other port — MJ's own host on :4000, a branch harness on :4131 — served a page that
+ * submitted to a server that was not there, or worse, to another checkout's. The process serving
+ * `/f/:slug` is the one serving GraphQL, so with nothing configured the right answer is the origin
+ * the page request arrived on. An explicit setting still wins: behind a proxy that rewrites Host,
+ * only the operator knows the public URL.
+ */
+describe('getGraphqlUrlForRequest — the page addresses the server that served it', () => {
+  it('prefers an explicit FORMS_GRAPHQL_URL over the request origin', () => {
+    process.env.FORMS_GRAPHQL_URL = 'https://api.example.com/graphql';
+    resetRespondentHostConfigForTests();
+    expect(getGraphqlUrlForRequest(getRespondentHostConfig(), 'http://localhost:4131')).toBe(
+      'https://api.example.com/graphql',
+    );
+  });
+
+  it('prefers MJAPI_PUBLIC_URL over the request origin', () => {
+    process.env.MJAPI_PUBLIC_URL = 'https://forms.example.com/';
+    resetRespondentHostConfigForTests();
+    expect(getGraphqlUrlForRequest(getRespondentHostConfig(), 'http://localhost:4131')).toBe(
+      'https://forms.example.com',
+    );
+  });
+
+  it('uses the request origin when neither is set — never a hardcoded port', () => {
+    expect(getGraphqlUrlForRequest(getRespondentHostConfig(), 'http://localhost:4131')).toBe('http://localhost:4131');
+  });
+
+  it('composes GRAPHQL_ROOT_PATH onto the request origin', () => {
+    process.env.GRAPHQL_ROOT_PATH = 'graphql';
+    resetRespondentHostConfigForTests();
+    expect(getGraphqlUrlForRequest(getRespondentHostConfig(), 'http://localhost:4131')).toBe(
+      'http://localhost:4131/graphql',
+    );
+  });
+
+  it('refuses, naming the settings, when there is neither a configured URL nor a request origin', () => {
+    expect(() => getGraphqlUrlForRequest(getRespondentHostConfig(), undefined)).toThrow(
+      /FORMS_GRAPHQL_URL.*MJAPI_PUBLIC_URL/,
+    );
   });
 });
