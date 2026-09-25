@@ -387,5 +387,138 @@
       "entities. Holding only this one leaves this principal with the panel's harmless 'Unlink from",
       "Record' and nothing more."
     ]
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Tasks: Task Types",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "BB7D52C9-4DF6-4D65-87DD-A2B2FF991D35"
+    },
+    "_comments": [
+      "Shipped by V202609251200__v0.13.x__Automation_Runner_Followup_And_Activity_Grants.sql under this SAME id, so a regenerated seed reproduces this row rather than minting a duplicate.",
+      "",
+      "Read ONLY. 'Forms: Create Followup Task' resolves the required Task.TypeID here; without it the action failed on every host (#239).",
+      "bizapps-tasks is a hard dependency, but a database not built by mj app install may lack it; the migration then SKIPS this grant with a PRINT rather than failing, and the boot readiness report names it if the entity appears later."
+    ]
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Tasks: Tasks",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": false,
+      "CanCreate": true,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "354FD02B-55B1-455E-8C56-B8EDDACC307F"
+    },
+    "_comments": [
+      "Shipped by V202609251200__v0.13.x__Automation_Runner_Followup_And_Activity_Grants.sql under this SAME id, so a regenerated seed reproduces this row rather than minting a duplicate.",
+      "",
+      "Create ONLY -- the followup task itself. Read is not needed (measured with CanRead = 0, #239) and is not granted.",
+      "bizapps-tasks is a hard dependency, but a database not built by mj app install may lack it; the migration then SKIPS this grant with a PRINT rather than failing, and the boot readiness report names it if the entity appears later."
+    ]
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Tasks: Task Links",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": false,
+      "CanCreate": true,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "299CEC61-B47E-4A30-9F31-E018588CAA7A"
+    },
+    "_comments": [
+      "Shipped by V202609251200__v0.13.x__Automation_Runner_Followup_And_Activity_Grants.sql under this SAME id, so a regenerated seed reproduces this row rather than minting a duplicate.",
+      "",
+      "Create ONLY -- links the followup task to the form response. Read is not needed (measured, #239).",
+      "bizapps-tasks is a hard dependency, but a database not built by mj app install may lack it; the migration then SKIPS this grant with a PRINT rather than failing, and the boot readiness report names it if the entity appears later."
+    ]
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ: Actions",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "B415C9FE-FF65-4D6D-A3E2-6D2F72C343CA"
+    },
+    "_comments": [
+      "Shipped by V202609251200__v0.13.x__Automation_Runner_Followup_And_Activity_Grants.sql under this SAME id, so a regenerated seed reproduces this row rather than minting a duplicate.",
+      "",
+      "Read ONLY. Creating a Person fires bizapps-common's People AfterCreate entity action Common.LogActivity as this runner, and MJ resolves it BY NAME first; without Read it reads as 'unknown action' (#239).",
+      "Core task-graph write (MJ: Task Types / Tasks / Task Dependencies) is DELIBERATELY withheld -- even UI holds only Read there, and an anonymous-driven principal must not create task graphs -- so durable dispatch falls back to inline, as it does for every ordinary user."
+    ]
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Common: Activity Types",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "986DF264-F17F-4678-BDC4-72139738E3DB"
+    },
+    "_comments": [
+      "Shipped by V202609251200__v0.13.x__Automation_Runner_Followup_And_Activity_Grants.sql under this SAME id, so a regenerated seed reproduces this row rather than minting a duplicate.",
+      "",
+      "Read ONLY. The inline Common.LogActivity resolves its activity type here (#239).",
+      "CONDITIONAL: Activities arrived in bizapps-common 5.35 while Forms accepts >=5.31.0, so this entity may be absent; the migration then SKIPS this grant with a PRINT, and the boot readiness report names it if common is upgraded later."
+    ]
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Common: Activities",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": true,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "FDBABDF8-090F-404F-A0B2-18D713EE7D35"
+    },
+    "_comments": [
+      "Shipped by V202609251200__v0.13.x__Automation_Runner_Followup_And_Activity_Grants.sql under this SAME id, so a regenerated seed reproduces this row rather than minting a duplicate.",
+      "",
+      "Read + Create. Create for the activity; Read because ActivityWriter.findByExternalKey dedupes through RunView and a failed read silently reads as 'not found' (#239).",
+      "CONDITIONAL: Activities arrived in bizapps-common 5.35 while Forms accepts >=5.31.0, so this entity may be absent; the migration then SKIPS this grant with a PRINT, and the boot readiness report names it if common is upgraded later."
+    ]
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Common: Activity Links",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": false,
+      "CanCreate": true,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "1E1A1369-B200-4948-A653-10FAACCC1ACA"
+    },
+    "_comments": [
+      "Shipped by V202609251200__v0.13.x__Automation_Runner_Followup_And_Activity_Grants.sql under this SAME id, so a regenerated seed reproduces this row rather than minting a duplicate.",
+      "",
+      "Create ONLY -- links the activity to the Person (#239).",
+      "CONDITIONAL: Activities arrived in bizapps-common 5.35 while Forms accepts >=5.31.0, so this entity may be absent; the migration then SKIPS this grant with a PRINT, and the boot readiness report names it if common is upgraded later."
+    ]
   }
 ]
