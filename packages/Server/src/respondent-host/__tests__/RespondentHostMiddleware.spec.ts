@@ -25,6 +25,9 @@ vi.mock('@memberjunction/generic-database-provider', () => ({
   UserCache: { Instance: { GetSystemUser: () => ({ ID: 'system-user-id' }) } },
 }));
 
+/** Every `LogError` message, so a test can assert what the operator is told at boot. */
+const loggedErrors = vi.hoisted((): string[] => []);
+
 /** Rows the faked `RunView` answers with, keyed by entity name; set per test. */
 const rowsByEntity: Record<string, unknown[]> = {};
 
@@ -43,7 +46,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
       } as RunViewResult<T>;
     }
   }
-  return { ...actual, RunView, LogStatus: () => undefined, LogError: () => undefined };
+  return { ...actual, RunView, LogStatus: () => undefined, LogError: (message: string) => loggedErrors.push(message) };
 });
 
 /** The outcome the faked redeem returns; set per test. */
@@ -98,6 +101,7 @@ beforeEach(() => {
   redeemOutcome = { ok: true, token: 'session-jwt', distribution: DISTRIBUTION };
   redeemDeps = undefined;
   resumeDepsCtx = undefined;
+  loggedErrors.length = 0;
   rowsByEntity['MJ_BizApps_Forms: Forms'] = [{ Description: 'Tell us how we did. Takes two minutes.' }];
 });
 
@@ -135,7 +139,7 @@ function mountLikeMJServer(app: Express, middleware: RespondentHostMiddleware): 
 
 /** Boot the middleware's routes on a real express server and always close the listener. */
 async function withServer(
-  assertions: (get: (route: string, init?: RequestInit) => Promise<Response>) => Promise<void>,
+  assertions: (get: (route: string, init?: RequestInit) => Promise<Response>, origin: string) => Promise<void>,
 ): Promise<void> {
   const app = express();
   await mountLikeMJServer(app, new RespondentHostMiddleware());
@@ -143,7 +147,8 @@ async function withServer(
   try {
     await new Promise<void>((resolveListening) => server.once('listening', () => resolveListening()));
     const { port } = server.address() as AddressInfo;
-    await assertions((route, init) => fetch(`http://127.0.0.1:${port}${route}`, init));
+    const origin = `http://127.0.0.1:${port}`;
+    await assertions((route, init) => fetch(`${origin}${route}`, init), origin);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
@@ -197,6 +202,57 @@ describe('GET /f/:slug — the link carries the form\'s identity', () => {
       const html = await (await get('/f/customer-survey')).text();
       expect(html).toContain('data-token="session-jwt"');
       expect(html).toContain('name="robots" content="noindex"');
+    });
+  });
+});
+
+describe('GET /f/:slug — the page sends GraphQL to the server that served it (#238)', () => {
+  const SAVED_PUBLIC_URL = process.env.MJAPI_PUBLIC_URL;
+  const SAVED_GRAPHQL_URL = process.env.FORMS_GRAPHQL_URL;
+
+  beforeEach(() => {
+    delete process.env.MJAPI_PUBLIC_URL;
+    delete process.env.FORMS_GRAPHQL_URL;
+    resetRespondentHostConfigForTests();
+  });
+
+  afterEach(() => {
+    if (SAVED_PUBLIC_URL === undefined) delete process.env.MJAPI_PUBLIC_URL;
+    else process.env.MJAPI_PUBLIC_URL = SAVED_PUBLIC_URL;
+    if (SAVED_GRAPHQL_URL === undefined) delete process.env.FORMS_GRAPHQL_URL;
+    else process.env.FORMS_GRAPHQL_URL = SAVED_GRAPHQL_URL;
+  });
+
+  // The defect: with no public URL configured the page named `http://localhost:4121`, so on any
+  // host not listening there every respondent's submit went to a server that was not there.
+  it('addresses the origin the page request arrived on when no public URL is configured', async () => {
+    await withServer(async (get, origin) => {
+      const html = await (await get('/f/customer-survey')).text();
+      expect(html).toContain(`data-graphql-url="${origin}"`);
+      expect(html).not.toContain('localhost:4121');
+    });
+  });
+
+  it('still addresses the configured public URL when there is one', async () => {
+    process.env.MJAPI_PUBLIC_URL = 'https://forms.example.com';
+    resetRespondentHostConfigForTests();
+    await withServer(async (get) => {
+      const html = await (await get('/f/customer-survey')).text();
+      expect(html).toContain('data-graphql-url="https://forms.example.com"');
+    });
+  });
+
+  it('tells the operator at boot that the public URL is unset', async () => {
+    await withServer(async () => {
+      expect(loggedErrors.some((m) => m.includes('MJAPI_PUBLIC_URL is not set'))).toBe(true);
+    });
+  });
+
+  it('says nothing about it when the public URL is set', async () => {
+    process.env.MJAPI_PUBLIC_URL = 'https://forms.example.com';
+    resetRespondentHostConfigForTests();
+    await withServer(async () => {
+      expect(loggedErrors.some((m) => m.includes('MJAPI_PUBLIC_URL is not set'))).toBe(false);
     });
   });
 });

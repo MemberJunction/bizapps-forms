@@ -172,10 +172,19 @@ export function isPublicAssetKey(providerKey: string | null | undefined): boolea
  * Absolute rather than relative because `<mj-form>` is an embeddable custom element: on a
  * customer's own page a relative `/forms/asset/…` resolves against THEIR origin and 404s.
  * `MJAPI_PUBLIC_URL` is the same setting the respondent host page builds its links from;
- * `requestOrigin` is the dev fallback for a host that has not set it.
+ * `requestOrigin` is the fallback for a host that has not set it — the upload request reached this
+ * process, so its origin reaches the asset route too. With neither this throws rather than naming
+ * a dev port: the URL is stored in the form, and a `localhost:4121` there is a broken image on every
+ * other host (#238). The upload route's catch turns the throw into a logged 500.
  */
-export function assetPublicUrl(fileId: string, requestOrigin?: string): string {
-  const base = (process.env.MJAPI_PUBLIC_URL?.trim() || requestOrigin || 'http://localhost:4121').replace(/\/+$/, '');
+export function assetPublicUrl(fileId: string, requestOrigin: string | undefined): string {
+  const base = (process.env.MJAPI_PUBLIC_URL?.trim() || requestOrigin)?.replace(/\/+$/, '');
+  if (!base) {
+    throw new Error(
+      `Cannot build a public URL for asset ${fileId}: MJAPI_PUBLIC_URL is unset and the upload ` +
+        'request carried no Host header to derive an origin from.',
+    );
+  }
   return `${base}${ASSET_ROUTE}/${encodeURIComponent(fileId)}`;
 }
 
