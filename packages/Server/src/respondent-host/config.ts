@@ -1,13 +1,17 @@
 /**
  * Environment-driven configuration for the public respondent host page (TASK 2).
  *
- * Read once and memoized. Defaults are safe for local dev (MJAPI on :4121, GraphQL at the
- * root path); production overrides via the MJAPI `.env`.
+ * Read once and memoized. Nothing here names a port: where a public URL is not configured, the
+ * GraphQL endpoint handed to the browser is derived from each page request's own origin
+ * ({@link getGraphqlUrlForRequest}). Production sets it via the MJAPI `.env`.
  *
  * Env vars:
  *  - `FORMS_RESPONDENT_HOST_ENABLED`  `false` to turn the page off. Default on.
  *  - `FORMS_GRAPHQL_URL`              Absolute GraphQL endpoint the widget submits to.
- *                                     Defaults to `MJAPI_PUBLIC_URL` + `GRAPHQL_ROOT_PATH`.
+ *                                     Defaults to `MJAPI_PUBLIC_URL` + `GRAPHQL_ROOT_PATH`, and
+ *                                     with neither set, to the page request's own origin +
+ *                                     `GRAPHQL_ROOT_PATH` (announced at boot — wrong behind a
+ *                                     proxy that rewrites Host).
  *  - `FORMS_WIDGET_BUNDLE_URL`        URL of the built `<mj-form>` element bundle the page
  *                                     loads. Defaults to `/forms/widget/mj-form.js`
  *                                     (served once the widget bundle build is wired — see
@@ -42,7 +46,14 @@
 /** Frozen configuration for the respondent host page. */
 export interface RespondentHostConfig {
   enabled: boolean;
-  graphqlUrl: string;
+  /**
+   * The CONFIGURED GraphQL endpoint (`FORMS_GRAPHQL_URL`, else `MJAPI_PUBLIC_URL` + root path), or
+   * `undefined` when neither is set. Never read this to address the browser — ask
+   * {@link getGraphqlUrlForRequest}, which knows what to do when it is undefined.
+   */
+  graphqlUrl: string | undefined;
+  /** `GRAPHQL_ROOT_PATH` normalised for appending to an origin: `''` for the root, else `/path`. */
+  graphqlPath: string;
   widgetBundleUrl: string;
   /** Absolute URL of core's magic-link redeem endpoint (server-side redeem target). */
   magicLinkRedeemUrl: string;
@@ -83,7 +94,8 @@ export function getRespondentHostConfig(): RespondentHostConfig {
   }
   cached = Object.freeze({
     enabled: process.env.FORMS_RESPONDENT_HOST_ENABLED?.trim() !== 'false',
-    graphqlUrl: resolveGraphqlUrl(),
+    graphqlUrl: resolveConfiguredGraphqlUrl(),
+    graphqlPath: resolveGraphqlPath(),
     widgetBundleUrl: process.env.FORMS_WIDGET_BUNDLE_URL?.trim() || DEFAULT_WIDGET_BUNDLE_URL,
     magicLinkRedeemUrl: resolveMagicLinkRedeemUrl(),
     turnstileSiteKey: process.env.FORMS_TURNSTILE_SITE_KEY?.trim() || undefined,
@@ -106,10 +118,10 @@ export function getRespondentHostConfig(): RespondentHostConfig {
  * is served from (`MJServer/src/index.ts`, `app.use(MAGIC_LINK_MOUNT_PATH, ...)` at the app root).
  *
  * It used to be composed from `MJAPI_PUBLIC_URL`, which is the externally-reachable origin — and
- * that variable cannot simply be repointed inward, because {@link resolveGraphqlUrl} derives from
- * it too and that value is handed to the RESPONDENT'S BROWSER in the host page. So behind a real
- * proxy the call left the perimeter, resolved back to the proxy, and re-entered — and a reverse
- * proxy APPENDS its peer to `X-Forwarded-For`. `proxy-addr` at `trust proxy = 1` then returns the
+ * that variable cannot simply be repointed inward, because {@link resolveConfiguredGraphqlUrl}
+ * derives from it too and that value is handed to the RESPONDENT'S BROWSER in the host page. So
+ * behind a real proxy the call left the perimeter, resolved back to the proxy, and re-entered —
+ * and a reverse proxy APPENDS its peer to `X-Forwarded-For`. `proxy-addr` at `trust proxy = 1` then returns the
  * right-most entry, which is MJAPI's own egress address: one constant for the whole deployment.
  * The respondent address the door forwards was overwritten before core ever read it, so the per-IP
  * bucket this app works to give each respondent silently collapsed back into one — and only in the
@@ -132,19 +144,58 @@ function resolveMagicLinkRedeemUrl(): string {
 }
 
 /**
- * Resolve the GraphQL endpoint the widget posts to. Prefers an explicit `FORMS_GRAPHQL_URL`;
- * otherwise composes it from the API's public URL + the GraphQL root path (defaults match
- * the MJAPI dev config: `http://localhost:4121` + `/`).
+ * The GraphQL endpoint the operator configured: an explicit `FORMS_GRAPHQL_URL`, else the API's
+ * public URL + the GraphQL root path. `undefined` when neither is set — deliberately NOT a
+ * localhost default. That default (`http://localhost:4121`) was handed to every respondent's
+ * browser on any host that had not set `MJAPI_PUBLIC_URL`, so on MJ's own host (:4000) or a branch
+ * harness every submit went to a server that was not there, or to another checkout's (#238).
  */
-function resolveGraphqlUrl(): string {
+function resolveConfiguredGraphqlUrl(): string | undefined {
   const explicit = process.env.FORMS_GRAPHQL_URL?.trim();
   if (explicit) {
     return explicit;
   }
-  const base = (process.env.MJAPI_PUBLIC_URL?.trim() || 'http://localhost:4121').replace(/\/$/, '');
+  const publicUrl = process.env.MJAPI_PUBLIC_URL?.trim();
+  return publicUrl ? joinGraphqlPath(publicUrl, resolveGraphqlPath()) : undefined;
+}
+
+/** `GRAPHQL_ROOT_PATH` as a suffix for an origin: `''` for the root, else a leading-slash path. */
+function resolveGraphqlPath(): string {
   const rootPath = process.env.GRAPHQL_ROOT_PATH?.trim() || '/';
   const path = rootPath.startsWith('/') ? rootPath : `/${rootPath}`;
-  return `${base}${path === '/' ? '' : path}` || base;
+  return path === '/' ? '' : path;
+}
+
+function joinGraphqlPath(base: string, graphqlPath: string): string {
+  return `${base.replace(/\/+$/, '')}${graphqlPath}`;
+}
+
+/**
+ * The GraphQL endpoint to hand the browser that requested one host page.
+ *
+ * The configured URL wins when there is one: behind a proxy that rewrites Host, only the operator
+ * knows the public address. Otherwise it is the origin this request arrived on, because the page
+ * at `/f/:slug` is served by the very process that serves GraphQL. Absolute rather than relative
+ * on purpose: the widget derives its upload URL from this value, and a bare `/` there becomes the
+ * protocol-relative `//forms/upload`, i.e. a request to a host named `forms`.
+ *
+ * Throws when it has neither, rather than inventing an address. The route turns that into its
+ * ordinary 500 page and logs this message.
+ */
+export function getGraphqlUrlForRequest(
+  cfg: Pick<RespondentHostConfig, 'graphqlUrl' | 'graphqlPath'>,
+  requestOrigin: string | undefined,
+): string {
+  if (cfg.graphqlUrl) {
+    return cfg.graphqlUrl;
+  }
+  if (!requestOrigin) {
+    throw new Error(
+      'Cannot address GraphQL for the respondent page: FORMS_GRAPHQL_URL and MJAPI_PUBLIC_URL are ' +
+        'unset and the request carried no Host header to derive an origin from.',
+    );
+  }
+  return joinGraphqlPath(requestOrigin, cfg.graphqlPath);
 }
 
 /** Test-only: clear the memoized config so env changes take effect. */

@@ -245,6 +245,16 @@ describe('getRespondentHostConfig', () => {
     expect(getRespondentHostConfig().graphqlUrl).toBe('http://localhost:4121');
   });
 
+  // #238: this used to be 'http://localhost:4121' — a dev port handed to every respondent's browser
+  // on any host that had not set MJAPI_PUBLIC_URL. Unset now means "not configured"; the route
+  // addresses the request's own origin instead (`getGraphqlUrlForRequest`).
+  it('leaves the graphql url unset when neither FORMS_GRAPHQL_URL nor MJAPI_PUBLIC_URL is set', () => {
+    delete process.env.MJAPI_PUBLIC_URL;
+    delete process.env.FORMS_GRAPHQL_URL;
+    resetRespondentHostConfigForTests();
+    expect(getRespondentHostConfig().graphqlUrl).toBeUndefined();
+  });
+
   it('honors an explicit FORMS_GRAPHQL_URL', () => {
     process.env.FORMS_GRAPHQL_URL = 'https://api.example.com/graphql';
     resetRespondentHostConfigForTests();
