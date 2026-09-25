@@ -7,6 +7,7 @@
  *   1. new email  → creates a Person AND stamps FormResponse.RespondentPersonID
  *   2. known email → links the EXISTING Person (no duplicate create)
  *   3. a failed response Save surfaces the error (does not silently succeed)
+ *   4. a failed People read fails the action rather than reading as "no match" and creating (#239)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
@@ -97,6 +98,7 @@ const PERSON_REQUIRED_FIELDS = ['FirstName', 'LastName'] as const;
 interface RunViewResult {
   Success: boolean;
   Results: unknown[];
+  ErrorMessage?: string;
 }
 
 // State the mock implementation reads — reset per test.
@@ -107,6 +109,8 @@ const state: {
   answers: unknown[];
   questions: unknown[];
   existingPeople: unknown[];
+  /** When set, the People read FAILS with this message (e.g. a missing Read grant, #239). */
+  peopleReadError: string | undefined;
   getEntityCalls: string[];
 } = {
   formResponse: new FakeEntity(),
@@ -115,6 +119,7 @@ const state: {
   answers: [],
   questions: [],
   existingPeople: [],
+  peopleReadError: undefined,
   getEntityCalls: [],
 };
 
@@ -141,6 +146,9 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   }
   class RunView {
     async RunView<T>(opts: { EntityName: string }): Promise<RunViewResult & { Results: T[] }> {
+      if (opts.EntityName === 'MJ_BizApps_Common: People' && state.peopleReadError) {
+        return { Success: false, Results: [], ErrorMessage: state.peopleReadError };
+      }
       let results: unknown[] = [];
       if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') results = state.answers;
       else if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') results = state.questions;
@@ -202,6 +210,7 @@ beforeEach(() => {
   state.answers = [];
   state.questions = [];
   state.existingPeople = [];
+  state.peopleReadError = undefined;
   state.getEntityCalls = [];
 });
 
@@ -257,6 +266,24 @@ describe('Forms: Upsert Respondent Person', () => {
     expect(state.getEntityCalls).not.toContain('MJ_BizApps_Common: People');
     expect(state.formResponse.RespondentPersonID).toBe('person-existing');
     expect(outValue(params, 'PersonID')).toBe('person-existing');
+  });
+
+  it('a FAILED People read fails the action and creates nothing (never reads as "no match") (#239)', async () => {
+    // Without Read on People the match-by-email read fails; the action used to take that as "no
+    // such person" and create one — a duplicate for every respondent who already had a record.
+    emailAnswerFixture('known@example.com');
+    state.existingPeople = [{ ID: 'person-existing', Email: 'known@example.com' }];
+    state.peopleReadError = 'User forms-automation does not have read permissions on MJ_BizApps_Common: People';
+    const params = makeParams();
+
+    const result = await new UpsertRespondentPersonAction().Run(params);
+
+    expect(result.Success).toBe(false);
+    expect(result.ResultCode).toBe('PERSON_LOOKUP_FAILED');
+    expect(result.Message).toContain('MJ_BizApps_Common: People');
+    expect(result.Message).toContain(state.peopleReadError);
+    expect(state.getEntityCalls).not.toContain('MJ_BizApps_Common: People');
+    expect(state.formResponse.RespondentPersonID).toBeNull();
   });
 
   it('surfaces a failure when stamping the response Save() returns false', async () => {
