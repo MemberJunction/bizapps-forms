@@ -11,7 +11,7 @@
  * reach a respondent's answers.
  */
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
-import { socialPlatform, type PublishedFormScreen } from '@mj-biz-apps/forms-entities';
+import { socialPlatform, type PublishedFormScreen } from '@mj-biz-apps/forms-entities/contracts';
 
 import { IconComponent } from './icon.component';
 

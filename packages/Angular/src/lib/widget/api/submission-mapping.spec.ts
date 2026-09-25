@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { FormAnswerInput, FormSubmissionInput, FormSubmissionResult } from '@mj-biz-apps/forms-entities';
+import type { FormAnswerInput, FormSubmissionInput, FormSubmissionResult } from '@mj-biz-apps/forms-entities/contracts';
 import { toInputType, toAnswerInputType, SUBMISSION_INPUT_FIELDS, ANSWER_INPUT_FIELDS } from './submission-mapping';
 
 // NOTE: the COMPILE-TIME contract lock lives in submission-mapping.ts (built by ngc); these are

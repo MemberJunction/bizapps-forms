@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { dateAnswerInstant, dateAnswerText } from '@mj-biz-apps/forms-entities';
-import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
+import { dateAnswerInstant, dateAnswerText } from '@mj-biz-apps/forms-entities/contracts';
+import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 import { toAnswerInputs } from './answer-value';
 
 function q(id: string, type: PublishedFormQuestion['type']): PublishedFormQuestion {

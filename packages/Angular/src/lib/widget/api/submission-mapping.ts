@@ -8,7 +8,7 @@
  * transport-only `responseId` (autosave upsert target) is folded in here too, keeping it out of
  * the frozen contract.
  */
-import type { ClientMeta, FormAnswerInput, FormSubmissionInput } from '@mj-biz-apps/forms-entities';
+import type { ClientMeta, FormAnswerInput, FormSubmissionInput } from '@mj-biz-apps/forms-entities/contracts';
 
 /**
  * `FormAnswerInputType` per WP-B's SDL: `jsonValue` is a JSON STRING, `dateValue` a String.

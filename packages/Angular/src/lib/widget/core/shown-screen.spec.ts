@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PublishedFormDefinition, PublishedFormScreen } from '@mj-biz-apps/forms-entities';
+import type { PublishedFormDefinition, PublishedFormScreen } from '@mj-biz-apps/forms-entities/contracts';
 
 import { availableScreens, resolveShownScreen, sameScreen, shownScreenFor } from './shown-screen';
 

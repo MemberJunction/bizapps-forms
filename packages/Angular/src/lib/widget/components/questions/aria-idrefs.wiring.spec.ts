@@ -25,7 +25,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { FORM_QUESTION_TYPES, isAnswerableQuestionType } from '@mj-biz-apps/forms-entities';
+import { FORM_QUESTION_TYPES, isAnswerableQuestionType } from '@mj-biz-apps/forms-entities/contracts';
 
 const template = readFileSync(join(__dirname, 'form-question.component.html'), 'utf8').replace(
   /<!--[\s\S]*?-->/g,

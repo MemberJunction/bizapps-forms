@@ -22,7 +22,7 @@ import {
   type AnswerValue,
   type PublishedFormPage,
   type PublishedFormQuestion,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/forms-entities/contracts';
 
 /** One thing a section renders: a question, or a note about questions a jump passed over. */
 export type SectionEntry =

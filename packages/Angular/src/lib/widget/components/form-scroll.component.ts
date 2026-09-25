@@ -24,7 +24,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import type { AnswerValue, PublishedFormPage, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
+import type { AnswerValue, PublishedFormPage, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
 import { FormRuntime } from '../core/form-runtime';
 import { entryKey, sectionEntries, skippedMessage, type SectionEntry } from '../core/section-content';
