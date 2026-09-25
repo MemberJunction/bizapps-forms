@@ -28,6 +28,7 @@ import { UserCache } from '@memberjunction/generic-database-provider';
 import type { MJFileEntity } from '@memberjunction/core-entities';
 
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
+import { getRequestOrigin } from '../http/request-origin.js';
 import { matchSingleSegmentRoute } from '../http/route-match.js';
 import { parseMultipart } from '../upload/multipart.js';
 import {
@@ -180,7 +181,7 @@ export class AssetMiddleware extends BaseServerMiddleware {
     res
       .status(200)
       .set('Cache-Control', 'no-store')
-      .json({ ...result.success, url: assetPublicUrl(result.success.fileId, requestOrigin(req)) });
+      .json({ ...result.success, url: assetPublicUrl(result.success.fileId, getRequestOrigin(req)) });
   }
 
   /** Serve one stored asset's bytes to an anonymous caller. */
@@ -227,10 +228,4 @@ async function loadFileRecord(fileId: string, user: UserInfo): Promise<StoredAss
     ProviderKey: file.ProviderKey,
     Status: file.Status,
   };
-}
-
-/** The origin this request arrived on — the dev fallback when `MJAPI_PUBLIC_URL` is unset. */
-function requestOrigin(req: Request): string | undefined {
-  const host = req.get('host');
-  return host ? `${req.protocol}://${host}` : undefined;
 }
