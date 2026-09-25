@@ -6,7 +6,7 @@ import { CompositeKey, LogError } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import type { ExportFormat } from '@memberjunction/export-engine';
 
-import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
+import { FORMS_UI_CSS, FORMS_VIZ_CSS, failureMessage } from '../shared';
 import { FORMS_REPORTING_CSS } from './forms-reporting-dashboard.styles';
 import { FormsReportingService } from './services/forms-reporting.service';
 import { FormsReportingExportService } from './services/forms-reporting-export.service';
@@ -19,7 +19,6 @@ import type { FormReportData, ReportableForm } from './models/reporting.model';
 import type { ResponseDetail, ResponseRecordLink } from '../responses/response-models';
 import { ResponsesDataService } from '../responses/responses-data.service';
 import {
-  failureMessage,
   filterForms,
   percent,
   plural,
