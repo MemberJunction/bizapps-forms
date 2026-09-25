@@ -43,10 +43,10 @@ function deferred<T>(): Deferred<T> {
 const FORM_A: ReportableForm = { formId: 'form-a', formVersionId: 'ver-a', name: 'Form A', responseCount: 11 };
 const FORM_B: ReportableForm = { formId: 'form-b', formVersionId: 'ver-b', name: 'Form B', responseCount: 22 };
 
-/** A real report shape, told apart from the others by its response total. */
-function reportWithTotal(totalResponses: number): FormReportData {
+/** A real report shape, told apart from the others by its response total (and, optionally, its form). */
+function reportWithTotal(totalResponses: number, form?: ReportableForm): FormReportData {
   const report = mockReport();
-  return { ...report, summary: { ...report.summary, totalResponses } };
+  return { ...report, form: form ?? report.form, summary: { ...report.summary, totalResponses } };
 }
 
 type ReportingSurface = Pick<FormsReportingService, 'loadReport'>;
@@ -242,7 +242,7 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
   it('does not put a failed export of the previous form on the newer form\'s screen', async () => {
     const { c, reportCalls, exports, errors } = construct();
     const a = c.selectForm(FORM_A);
-    reportCalls[0].load.resolve(reportWithTotal(111));
+    reportCalls[0].load.resolve(reportWithTotal(111, FORM_A));
     await a;
 
     const run = c.export('csv');
