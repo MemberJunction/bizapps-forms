@@ -21,11 +21,11 @@ import {
   HOME_ENTITY,
   type FormStatus,
   type FormCategorySimpleRecord,
-  type FormResponseSimpleRecord,
   type FormSimpleRecord,
   type FormSummaryRow,
 } from './home-models';
 import { buildFormRows, readFormIdFromResult } from './home-aggregations';
+import { loadCompleteResponseCounts } from '../shared/complete-response-counts';
 
 /** Outcome of running an authoring/template action. */
 export interface AuthoringResult {
@@ -38,9 +38,13 @@ export interface AuthoringResult {
 export class FormsHomeService {
   private readonly rv = new RunView();
 
-  /** Loads the full Forms grid in one batched round-trip. */
+  /**
+   * Loads the Forms grid: forms + categories in one batch, then their Complete response
+   * counts (the ids are needed first). What "a response" means lives in
+   * `../shared/complete-response-counts`.
+   */
   public async loadForms(): Promise<FormSummaryRow[]> {
-    const [formsRes, catsRes, responsesRes] = (await this.rv.RunViews([
+    const [formsRes, catsRes] = (await this.rv.RunViews([
       {
         EntityName: HOME_ENTITY.forms,
         // Templates are Form rows too (see form-clone.service.ts for why). They are offered in
@@ -56,29 +60,25 @@ export class FormsHomeService {
         ResultType: 'simple',
         Fields: ['ID', 'Name'],
       },
-      {
-        EntityName: HOME_ENTITY.responses,
-        // COMPLETE only, matching the reporting dashboard. A Partial row is an in-progress
-        // autosave, not a submitted response, and counting it here made the same form read
-        // "43 responses" on this page and "32 responses" on Responses & Analytics — two
-        // numbers for one fact, which sends the reader looking for the missing eleven.
-        ExtraFilter: `Status='Complete'`,
-        ResultType: 'simple',
-        Fields: ['FormID'],
-      },
-    ])) as [
-      RunViewResult<FormSimpleRecord>,
-      RunViewResult<FormCategorySimpleRecord>,
-      RunViewResult<FormResponseSimpleRecord>,
-    ];
+    ])) as [RunViewResult<FormSimpleRecord>, RunViewResult<FormCategorySimpleRecord>];
 
     if (!formsRes.Success) {
       throw new Error(formsRes.ErrorMessage || 'Failed to load forms.');
     }
-    // Categories / responses are enrichment-only; degrade gracefully if absent.
+    // Categories and counts are enrichment-only: the grid still loads without them.
     const cats = catsRes.Success ? catsRes.Results : [];
-    const responses = responsesRes.Success ? responsesRes.Results : [];
-    return buildFormRows(formsRes.Results, cats, responses);
+    const counts = await this.loadCountsOrEmpty(formsRes.Results.map((f) => f.ID));
+    return buildFormRows(formsRes.Results, cats, counts);
+  }
+
+  private async loadCountsOrEmpty(formIds: readonly string[]): Promise<Map<string, number>> {
+    try {
+      return await loadCompleteResponseCounts(this.rv, formIds);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      LogError(`Counting Complete responses for ${formIds.length} forms on Forms home failed: ${reason}`);
+      return new Map();
+    }
   }
 
   /**

@@ -18,19 +18,15 @@ const source = (file: string): string =>
     .replace(/\/\/[^\n]*/g, '');
 
 describe('the home list counts submitted responses only', () => {
-  it('filters its response query to Complete', () => {
-    const home = source('forms-home.service.ts');
-    // The filter must sit on the RESPONSES view, not merely appear somewhere in the file.
-    expect(home).toMatch(
-      /EntityName: HOME_ENTITY\.responses,[\s\S]{0,200}ExtraFilter: `Status='Complete'`/,
-    );
+  it('counts through the shared Complete-only counter', () => {
+    expect(source('forms-home.service.ts')).toMatch(/loadCompleteResponseCounts\(/);
   });
 
   it('uses the same predicate the reporting dashboard uses', () => {
     const reporting = source('../dashboard/services/forms-reporting.service.ts');
-    const home = source('forms-home.service.ts');
+    const shared = source('../shared/complete-response-counts.ts');
     const predicate = /ExtraFilter: `Status='Complete'`/;
     expect(reporting).toMatch(predicate);
-    expect(home).toMatch(predicate);
+    expect(shared).toMatch(predicate);
   });
 });

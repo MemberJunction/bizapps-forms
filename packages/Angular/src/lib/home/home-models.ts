@@ -15,7 +15,6 @@ import type { mjBizAppsFormsFormEntityType } from '@mj-biz-apps/forms-entities';
 export const HOME_ENTITY = {
   forms: 'MJ_BizApps_Forms: Forms',
   categories: 'MJ_BizApps_Forms: Form Categories',
-  responses: 'MJ_BizApps_Forms: Form Responses',
   actions: 'MJ: Actions',
 } as const;
 
@@ -56,9 +55,4 @@ export interface FormSimpleRecord {
 export interface FormCategorySimpleRecord {
   ID: string;
   Name: string;
-}
-
-/** Raw `Form Responses` columns for per-form counts. */
-export interface FormResponseSimpleRecord {
-  FormID: string;
 }

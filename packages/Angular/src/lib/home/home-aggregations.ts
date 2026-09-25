@@ -5,7 +5,6 @@ import type { ActionParam } from '@memberjunction/actions-base';
 import { toDate } from '../shared/runview-dates';
 import type {
   FormCategorySimpleRecord,
-  FormResponseSimpleRecord,
   FormSimpleRecord,
   FormSummaryRow,
 } from './home-models';
@@ -21,27 +20,15 @@ export function categoryNameMap(
   return map;
 }
 
-/** Counts responses per form id. */
-export function responseCountMap(
-  responses: readonly FormResponseSimpleRecord[],
-): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const r of responses) {
-    map.set(r.FormID, (map.get(r.FormID) ?? 0) + 1);
-  }
-  return map;
-}
-
 /**
- * Folds the three simple result sets into display rows, newest first.
+ * Folds forms, categories and per-form response counts into display rows, newest first.
  */
 export function buildFormRows(
   forms: readonly FormSimpleRecord[],
   categories: readonly FormCategorySimpleRecord[],
-  responses: readonly FormResponseSimpleRecord[],
+  counts: ReadonlyMap<string, number>,
 ): FormSummaryRow[] {
   const catName = categoryNameMap(categories);
-  const counts = responseCountMap(responses);
 
   const rows: FormSummaryRow[] = forms.map((f) => ({
     id: f.ID,
