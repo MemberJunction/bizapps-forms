@@ -151,6 +151,10 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
     expect(c.report).toBe(reportB);
     expect(c.errorMessage).toBeNull();
     expect(errors).toEqual([]);
+    // Not shown, but never swallowed: the failure is still logged against the form it belongs to.
+    const logged = vi.mocked(console.error).mock.calls.flat().map(String).join('\n');
+    expect(logged).toContain('form-a');
+    expect(logged).toContain('A timed out');
   });
 
   it('still surfaces a failure of the latest selection', async () => {

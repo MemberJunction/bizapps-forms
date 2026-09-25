@@ -105,9 +105,9 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
    * there is nothing to navigate. `loadingReport` blanks the report but KEEPS the rail —
    * the rail is the navigation, and unmounting it mid-switch throws away the reader's
    * place and makes the click feel like a page load. The rail also stays clickable: a
-   * newer selection supersedes the one loading (`selectionStamp`), so nothing needs locking. `busy` blanks nothing at all; it
-   * disables controls while a response opens or an export runs, so the list the reader
-   * clicked stays under their cursor.
+   * newer selection supersedes the one loading (`selectionStamp`), so nothing needs
+   * locking. `busy` blanks nothing at all; it disables controls while a response opens or
+   * an export runs, so the list the reader clicked stays under their cursor.
    */
   public loadingForms = false;
   public loadingReport = false;
