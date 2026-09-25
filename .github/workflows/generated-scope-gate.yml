@@ -21,6 +21,9 @@ concurrency:
   group: generated-scope-gate-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   generated-scope-gate:
     runs-on: ubuntu-latest
