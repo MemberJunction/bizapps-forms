@@ -21,6 +21,9 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   # Answers one question — is there anything here for build-and-test to do? — and nothing else.
   # It exists because the path list can no longer live in `on:` (see the header above), and a

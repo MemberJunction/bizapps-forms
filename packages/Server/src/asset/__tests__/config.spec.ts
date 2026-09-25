@@ -138,18 +138,23 @@ describe('the public-prefix invariant', () => {
 describe('assetPublicUrl', () => {
   it('builds against MJAPI_PUBLIC_URL, trimming a trailing slash', () => {
     process.env.MJAPI_PUBLIC_URL = 'https://api.example.com/';
-    expect(assetPublicUrl('abc')).toBe('https://api.example.com/forms/asset/abc');
+    expect(assetPublicUrl('abc', undefined)).toBe('https://api.example.com/forms/asset/abc');
   });
 
-  it('falls back to the request origin, then to the local API port', () => {
+  it('falls back to the request origin', () => {
     expect(assetPublicUrl('abc', 'http://10.0.0.5:4121')).toBe('http://10.0.0.5:4121/forms/asset/abc');
-    expect(assetPublicUrl('abc')).toBe('http://localhost:4121/forms/asset/abc');
+  });
+
+  // #238: the last resort used to be a hardcoded `http://localhost:4121`, which on any other host is
+  // a URL to nothing that the author's form then stores. Refusing is louder and truthful.
+  it('refuses rather than inventing an origin when it has neither a public URL nor a request origin', () => {
+    expect(() => assetPublicUrl('abc', undefined)).toThrow(/MJAPI_PUBLIC_URL/);
   });
 
   it('is absolute, because the widget is embedded on other origins', () => {
     // A relative URL would resolve against the CUSTOMER's site inside an embedded <mj-form>
     // and 404 there while looking perfectly fine in the builder preview.
     process.env.MJAPI_PUBLIC_URL = 'https://api.example.com';
-    expect(assetPublicUrl('abc').startsWith('https://')).toBe(true);
+    expect(assetPublicUrl('abc', undefined).startsWith('https://')).toBe(true);
   });
 });

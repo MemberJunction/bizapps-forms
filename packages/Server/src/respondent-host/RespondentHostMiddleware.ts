@@ -55,7 +55,8 @@ import { getMagicLinkProvisioningConfig } from '@mj-biz-apps/forms-core-entities
 import { frameAncestorsDirective, parseAllowedOrigins } from '@mj-biz-apps/forms-entities';
 
 import { matchesExactRoute, matchSingleSegmentRoute } from '../http/route-match.js';
-import { getRespondentHostConfig } from './config.js';
+import { getRequestOrigin } from '../http/request-origin.js';
+import { getGraphqlUrlForRequest, getRespondentHostConfig } from './config.js';
 import { getPublicSubmitConfig } from '../public-submit/config.js';
 import { renderRespondentHostPage } from './host-page.js';
 import { redeemSlugToToken, type RedeemRunViewProvider } from './redeem.service.js';
@@ -160,8 +161,20 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
 
     LogStatus(
       `[Forms] Respondent host page served at ${RESPONDENT_HOST_ROUTE} ` +
-        `(graphql: ${cfg.graphqlUrl}, widget: ${cfg.widgetBundleUrl}, redeem: ${cfg.magicLinkRedeemUrl})`,
+        `(graphql: ${cfg.graphqlUrl ?? `<origin of each request>${cfg.graphqlPath || '/'}`}, ` +
+        `widget: ${cfg.widgetBundleUrl}, redeem: ${cfg.magicLinkRedeemUrl})`,
     );
+    if (cfg.graphqlUrl === undefined) {
+      // An error, not a status line: the page still works on a direct connection, which is exactly
+      // why this would otherwise go unnoticed until a deployment behind a proxy submits nowhere.
+      LogError(
+        '[Forms] MJAPI_PUBLIC_URL is not set (nor FORMS_GRAPHQL_URL), so the respondent page tells ' +
+          "each browser to call GraphQL at the origin that browser's page request arrived on. That " +
+          'is right on a direct connection and wrong behind a proxy that rewrites Host, and without ' +
+          "it the embed-origin gate cannot recognise this API's own origin either. Set " +
+          'MJAPI_PUBLIC_URL to the URL this API is reached at.',
+      );
+    }
     LogStatus(
       `[Forms] Same-device resume routes registered at POST ${RESPONDENT_RESUME_ROUTE}, ` +
         `/f/:slug/remember and /f/:slug/forget ` +
@@ -246,8 +259,12 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
         // here and the token is never read.
         const hasDraft = readResumeCookie(req.headers.cookie) !== undefined;
         // Never let an unexpected error crash the route — always render a page.
-        void this.handleMetered(slug, hasDraft, res).catch((e: unknown) => {
-          LogError(`[Forms] Respondent host route error: ${e instanceof Error ? e.message : String(e)}`);
+        void this.handleMetered(slug, hasDraft, getRequestOrigin(req), res).catch((e: unknown) => {
+          LogError(
+            // JSON-quoted: the slug is percent-decoded caller input and may carry a newline.
+            `[Forms] Respondent host route error for slug ${JSON.stringify(slug)}: ` +
+              `${e instanceof Error ? e.message : String(e)}`,
+          );
           this.sendError(res, {
             status: 500,
             message: 'We could not open this form right now. Please try again later.',
@@ -331,7 +348,12 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
    * The in-flight cap goes FIRST so a request shed for load is never charged to anyone's window,
    * and the slot wraps the whole request in a `finally` so it releases on every exit path.
    */
-  private async handleMetered(slug: string, hasDraft: boolean, res: Response): Promise<void> {
+  private async handleMetered(
+    slug: string,
+    hasDraft: boolean,
+    requestOrigin: string | undefined,
+    res: Response,
+  ): Promise<void> {
     if (!redeemInFlightLimiter().TryEnter()) {
       // 503 (load), not 429 (over budget): this clears the instant in-flight work drains.
       LogStatus('[Forms] Respondent host refused: too many redeems in flight. Clears as work drains.');
@@ -352,15 +374,26 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
         );
         return;
       }
-      await this.handleRequest(slug, hasDraft, res);
+      await this.handleRequest(slug, hasDraft, requestOrigin, res);
     } finally {
       redeemInFlightLimiter().Exit();
     }
   }
 
-  /** Resolve the slug, do the server-side redeem, and render the host page or a friendly error. */
-  private async handleRequest(slug: string, hasDraft: boolean, res: Response): Promise<void> {
+  /**
+   * Resolve the slug, do the server-side redeem, and render the host page or a friendly error.
+   *
+   * The GraphQL URL is settled FIRST: when it cannot be (no configured URL, no Host header) it throws,
+   * and doing that before the redeem means no session is minted for a page that is never served.
+   */
+  private async handleRequest(
+    slug: string,
+    hasDraft: boolean,
+    requestOrigin: string | undefined,
+    res: Response,
+  ): Promise<void> {
     const cfg = getRespondentHostConfig();
+    const graphqlUrl = getGraphqlUrlForRequest(cfg, requestOrigin);
     const outcome = await redeemSlugToToken(
       {
         provider: this.systemProvider(),
@@ -394,7 +427,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     // `loadFormIdentity` logs and degrades rather than costing the respondent the form.
     const identity = await loadFormIdentity(this.systemProvider(), this.systemUser(), outcome.distribution);
     const html = renderRespondentHostPage({
-      graphqlUrl: cfg.graphqlUrl,
+      graphqlUrl,
       widgetBundleUrl: cfg.widgetBundleUrl,
       pageTitle: identity.name,
       pageDescription: identity.description,
