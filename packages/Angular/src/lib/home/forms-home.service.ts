@@ -63,7 +63,10 @@ export class FormsHomeService {
     ])) as [RunViewResult<FormSimpleRecord>, RunViewResult<FormCategorySimpleRecord>];
 
     if (!formsRes.Success) {
-      throw new Error(formsRes.ErrorMessage || 'Failed to load forms.');
+      // This message is the DETAIL of the home alert, which already leads with "Failed to load
+      // forms" (see failureMessage in ../shared) — so the fallback states a reason, not the
+      // headline again.
+      throw new Error(formsRes.ErrorMessage || 'the Forms view reported a failure with no error message');
     }
     // Categories and counts are enrichment-only: the grid still loads without them.
     const cats = catsRes.Success ? catsRes.Results : [];
