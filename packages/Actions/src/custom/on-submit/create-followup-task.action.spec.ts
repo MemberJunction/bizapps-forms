@@ -126,10 +126,13 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 // The action loads the response via a shared helper; stub it to return our fake context.
 vi.mock('../shared/form-response-context', () => ({
   loadFormResponseContext: async () => ({
-    response: state.response,
-    form: state.form,
-    answers: state.answers,
-    questions: state.questions,
+    status: 'loaded',
+    context: {
+      response: state.response,
+      form: state.form,
+      answers: state.answers,
+      questions: state.questions,
+    },
   }),
 }));
 

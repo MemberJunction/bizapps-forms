@@ -5,8 +5,14 @@
  *
  * All reads go through RunView with `.Success` checks (RunView never throws);
  * `contextUser` is always passed (CLAUDE.md MJ patterns).
+ *
+ * The outcome distinguishes a response that does not exist (`absent` — a hook skips) from one
+ * that could not be READ (`failed` — a hook fails, with the reason). They used to share `null`,
+ * and a failed answer or question read degraded to an empty list; on a host where the automation
+ * principal lacked a grant (#239) both presented as "nothing to do", which is the one reading an
+ * operator can never trace back to a permission.
  */
-import { LogError, Metadata, RunView } from '@memberjunction/core';
+import { Metadata, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import {
   CanonicalAnswers,
@@ -79,44 +85,88 @@ export interface FormResponseContext {
 }
 
 /**
- * Load the response + answers + questions + form for a response id. Returns null if
- * the response can't be found, so each hook can skip cleanly (idempotent/safe).
+ * What {@link loadFormResponseContext} found. Switch on `status`:
+ * - `loaded` — everything read; `context` is complete.
+ * - `absent` — the response does not exist. Hooks skip cleanly (idempotent/safe).
+ * - `failed` — something exists but could not be read; `error` says what and why. Never treat it
+ *   as `absent`: the usual cause is a missing grant, and a skip hides it.
  */
+export type FormResponseContextResult =
+  | { status: 'loaded'; context: FormResponseContext }
+  | { status: 'absent' }
+  | { status: 'failed'; error: string };
+
+/** A read that did not produce its rows: the message for a `failed` outcome. */
+type ReadOutcome<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** Load the response + answers + questions + form for a response id. */
 export async function loadFormResponseContext(
   responseId: string,
   contextUser: UserInfo,
-): Promise<FormResponseContext | null> {
+): Promise<FormResponseContextResult> {
   const md = new Metadata();
   const response = await md.GetEntityObject<mjBizAppsFormsFormResponseEntity>(ENTITY.FormResponse, contextUser);
-  const loaded = await response.Load(responseId);
-  if (!loaded) {
-    return null;
+  // `Load` returns false only when no row came back; a refused read (no Read grant) THROWS.
+  const responseLoad = await loadRecord(response, responseId, ENTITY.FormResponse);
+  if (!responseLoad.ok) {
+    return { status: 'failed', error: responseLoad.error };
+  }
+  if (!responseLoad.value) {
+    return { status: 'absent' };
   }
 
   const form = await md.GetEntityObject<mjBizAppsFormsFormEntity>(ENTITY.Form, contextUser);
-  const formLoaded = await form.Load(response.FormID);
-  if (!formLoaded) {
-    return null;
+  const formLoad = await loadRecord(form, response.FormID, ENTITY.Form);
+  if (!formLoad.ok || !formLoad.value) {
+    // The response exists, so a missing form is not "nothing to do" — it is a read that failed.
+    const why = formLoad.ok ? 'no such record' : formLoad.error;
+    return { status: 'failed', error: `form ${response.FormID} of response ${responseId} could not be loaded: ${why}` };
   }
 
   const answerRows = await loadAnswerRows(responseId, contextUser);
+  if (!answerRows.ok) {
+    return { status: 'failed', error: answerRows.error };
+  }
   const questionsById = await loadQuestionsById(
-    answerRows.map((a) => a.QuestionID),
+    answerRows.value.map((a) => a.QuestionID),
     responseId,
     contextUser,
   );
-  const answers = answerRows.map((a) => toAnswerWithType(a, questionsById.get(a.QuestionID)));
+  if (!questionsById.ok) {
+    return { status: 'failed', error: questionsById.error };
+  }
+  const answers = answerRows.value.map((a) => toAnswerWithType(a, questionsById.value.get(a.QuestionID)));
 
   // The generated answer entities structurally satisfy `StoredAnswerRow` (same column names and
   // types), so the canonical view is built straight from the rows — no second projection to keep
   // in step with the first.
-  return { response, form, answers, canonicalAnswers: new CanonicalAnswers(answerRows) };
+  return {
+    status: 'loaded',
+    context: { response, form, answers, canonicalAnswers: new CanonicalAnswers(answerRows.value) },
+  };
+}
+
+/**
+ * `entity.Load(id)`, with its two failure modes kept apart: `{ ok: true, value: false }` is "no
+ * such row", while a throw (BaseEntity's CheckPermissions refusing the read) becomes `{ ok: false }`
+ * carrying the entity, the id and the reason.
+ */
+async function loadRecord(
+  entity: { Load(id: string): Promise<boolean> },
+  id: string,
+  entityName: string,
+): Promise<ReadOutcome<boolean>> {
+  try {
+    return { ok: true, value: await entity.Load(id) };
+  } catch (e) {
+    return { ok: false, error: `could not read ${entityName} ${id}: ${e instanceof Error ? e.message : String(e)}` };
+  }
 }
 
 async function loadAnswerRows(
   responseId: string,
   contextUser: UserInfo,
-): Promise<mjBizAppsFormsFormResponseAnswerEntity[]> {
+): Promise<ReadOutcome<mjBizAppsFormsFormResponseAnswerEntity[]>> {
   const rv = new RunView();
   const answerResult = await rv.RunView<mjBizAppsFormsFormResponseAnswerEntity>(
     {
@@ -127,17 +177,14 @@ async function loadAnswerRows(
     contextUser,
   );
   if (!answerResult.Success) {
-    // A failed read and a genuinely unanswered response both used to return `[]`, which is a
-    // dangerous pair to conflate now that consumers WRITE from these answers: a transient read
-    // failure would present as "the respondent answered nothing" and a binding would happily
-    // create a record with every mapped field blank. The callers' contract still degrades to an
-    // empty list, but the failure is no longer silent.
-    LogError(
-      `loadFormResponseContext: failed to read answers for response ${responseId}: ${answerResult.ErrorMessage}`,
-    );
-    return [];
+    // A failed read is NOT an unanswered response: consumers WRITE from these answers, and a
+    // binding handed `[]` would create a record with every mapped field blank.
+    return {
+      ok: false,
+      error: `could not read ${ENTITY.FormResponseAnswer} for response ${responseId}: ${answerResult.ErrorMessage}`,
+    };
   }
-  return answerResult.Results;
+  return { ok: true, value: answerResult.Results };
 }
 
 function toAnswerWithType(
@@ -165,11 +212,11 @@ async function loadQuestionsById(
   questionIds: string[],
   responseId: string,
   contextUser: UserInfo,
-): Promise<Map<string, mjBizAppsFormsFormQuestionEntity>> {
+): Promise<ReadOutcome<Map<string, mjBizAppsFormsFormQuestionEntity>>> {
   const map = new Map<string, mjBizAppsFormsFormQuestionEntity>();
   const unique = Array.from(new Set(questionIds));
   if (unique.length === 0) {
-    return map;
+    return { ok: true, value: map };
   }
   const inList = unique.map((id) => quoteSqlString(id)).join(',');
   const rv = new RunView();
@@ -182,18 +229,16 @@ async function loadQuestionsById(
     contextUser,
   );
   if (!result.Success) {
-    // Same hazard as the answer read above, and worth stating separately because the degradation
-    // is quieter: without the questions, EVERY answer falls back to `questionType: 'ShortText'`
-    // and an empty prompt, which no consumer can tell apart from a form genuinely built that way.
-    // `Forms: Analyze Written Responses` treats ShortText as analyzable, so it would ship every
-    // answer to the scoring prompt and persist a Score against it.
-    LogError(
-      `loadFormResponseContext: failed to read questions for response ${responseId}: ${result.ErrorMessage}`,
-    );
-    return map;
+    // Without the questions EVERY answer would fall back to `questionType: 'ShortText'` and an
+    // empty prompt, indistinguishable from a form genuinely built that way — and
+    // `Forms: Analyze Written Responses` would score every one of them.
+    return {
+      ok: false,
+      error: `could not read ${ENTITY.FormQuestion} for response ${responseId}: ${result.ErrorMessage}`,
+    };
   }
   for (const q of result.Results) {
     map.set(q.ID, q);
   }
-  return map;
+  return { ok: true, value: map };
 }

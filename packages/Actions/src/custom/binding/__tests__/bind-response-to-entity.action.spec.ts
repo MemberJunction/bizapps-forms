@@ -98,33 +98,36 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 
 vi.mock('../../shared/form-response-context', () => ({
   loadFormResponseContext: async () => ({
-    canonicalAnswers: {
-      Has: (id: string) => id === 'q1',
-      Get: (id: string) => (id === 'q1' ? 'a@b.com' : undefined),
-      Size: 1,
-      Entries: () => [['q1', 'a@b.com']],
-    },
-    // `FormResponseContext` carries BOTH shapes: the collapsed values and the typed projection
-    // beside them. The mock returned only the first, so it modelled a context the loader never
-    // produces — and the action reads the second to tell the binding executor what type each
-    // answer is. A fixture narrower than its contract is a fixture that passes for the wrong
-    // reason right up until the code uses the part it left out.
-    answers: [
-      {
-        answerId: 'a1',
-        questionId: 'q1',
-        questionType: 'Email',
-        prompt: 'Email',
-        textValue: 'a@b.com',
-        numericValue: null,
-        dateValue: null,
-        dateText: null,
-        booleanValue: null,
-        jsonValue: null,
-        fileId: null,
-        score: null,
+    status: 'loaded',
+    context: {
+      canonicalAnswers: {
+        Has: (id: string) => id === 'q1',
+        Get: (id: string) => (id === 'q1' ? 'a@b.com' : undefined),
+        Size: 1,
+        Entries: () => [['q1', 'a@b.com']],
       },
-    ],
+      // `FormResponseContext` carries BOTH shapes: the collapsed values and the typed projection
+      // beside them. The mock returned only the first, so it modelled a context the loader never
+      // produces — and the action reads the second to tell the binding executor what type each
+      // answer is. A fixture narrower than its contract is a fixture that passes for the wrong
+      // reason right up until the code uses the part it left out.
+      answers: [
+        {
+          answerId: 'a1',
+          questionId: 'q1',
+          questionType: 'Email',
+          prompt: 'Email',
+          textValue: 'a@b.com',
+          numericValue: null,
+          dateValue: null,
+          dateText: null,
+          booleanValue: null,
+          jsonValue: null,
+          fileId: null,
+          score: null,
+        },
+      ],
+    },
   }),
 }));
 

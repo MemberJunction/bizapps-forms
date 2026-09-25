@@ -111,6 +111,8 @@ const state: {
   existingPeople: unknown[];
   /** When set, the People read FAILS with this message (e.g. a missing Read grant, #239). */
   peopleReadError: string | undefined;
+  /** When set, the answers read FAILS with this message. */
+  answersReadError: string | undefined;
   getEntityCalls: string[];
 } = {
   formResponse: new FakeEntity(),
@@ -120,6 +122,7 @@ const state: {
   questions: [],
   existingPeople: [],
   peopleReadError: undefined,
+  answersReadError: undefined,
   getEntityCalls: [],
 };
 
@@ -148,6 +151,9 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
     async RunView<T>(opts: { EntityName: string }): Promise<RunViewResult & { Results: T[] }> {
       if (opts.EntityName === 'MJ_BizApps_Common: People' && state.peopleReadError) {
         return { Success: false, Results: [], ErrorMessage: state.peopleReadError };
+      }
+      if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers' && state.answersReadError) {
+        return { Success: false, Results: [], ErrorMessage: state.answersReadError };
       }
       let results: unknown[] = [];
       if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') results = state.answers;
@@ -211,6 +217,7 @@ beforeEach(() => {
   state.questions = [];
   state.existingPeople = [];
   state.peopleReadError = undefined;
+  state.answersReadError = undefined;
   state.getEntityCalls = [];
 });
 
@@ -284,6 +291,19 @@ describe('Forms: Upsert Respondent Person', () => {
     expect(result.Message).toContain(state.peopleReadError);
     expect(state.getEntityCalls).not.toContain('MJ_BizApps_Common: People');
     expect(state.formResponse.RespondentPersonID).toBeNull();
+  });
+
+  it('an unreadable answer set fails the action, instead of skipping as "no email answer" (#239)', async () => {
+    emailAnswerFixture('known@example.com');
+    state.answersReadError = 'User does not have read permissions on MJ_BizApps_Forms: Form Response Answers';
+    const params = makeParams();
+
+    const result = await new UpsertRespondentPersonAction().Run(params);
+
+    expect(result.Success).toBe(false);
+    expect(result.ResultCode).toBe('RESPONSE_LOAD_FAILED');
+    expect(result.Message).toContain(state.answersReadError);
+    expect(state.getEntityCalls).not.toContain('MJ_BizApps_Common: People');
   });
 
   it('surfaces a failure when stamping the response Save() returns false', async () => {

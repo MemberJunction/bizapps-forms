@@ -8,6 +8,8 @@ interface MockState {
   answersReadSucceeds: boolean;
   questionsReadSucceeds: boolean;
   responseLoads: boolean;
+  /** When set, the response `Load` THROWS with this message — what BaseEntity does without Read permission. */
+  responseLoadThrows: string | undefined;
   /**
    * The `ExtraFilter` each read actually sent. `RunView` takes SQL TEXT and offers no parameter
    * binding, so the filter string is this module's real contract with the database — asserting on
@@ -22,11 +24,9 @@ const state: MockState = {
   answersReadSucceeds: true,
   questionsReadSucceeds: true,
   responseLoads: true,
+  responseLoadThrows: undefined,
   filters: {},
 };
-
-/** Spy on the real LogError so the failure paths can assert they actually reported. */
-const logError = vi.fn();
 
 // Partial mock — see the note in upsert-respondent-person.action.spec.ts: the real module must be
 // spread back in so the generated entity classes can reach `BaseEntity` at runtime.
@@ -35,7 +35,14 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   class Metadata {
     async GetEntityObject<T>(entityName: string): Promise<T> {
       if (entityName === 'MJ_BizApps_Forms: Form Responses') {
-        return { ID: 'resp-1', FormID: 'form-1', Load: async () => state.responseLoads } as unknown as T;
+        return {
+          ID: 'resp-1',
+          FormID: 'form-1',
+          Load: async () => {
+            if (state.responseLoadThrows) throw new Error(state.responseLoadThrows);
+            return state.responseLoads;
+          },
+        } as unknown as T;
       }
       if (entityName === 'MJ_BizApps_Forms: Forms') {
         return { ID: 'form-1', Load: async () => true } as unknown as T;
@@ -60,13 +67,23 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
       throw new Error(`Unexpected RunView('${opts.EntityName}')`);
     }
   }
-  return { ...actual, Metadata, RunView, LogError: logError };
+  return { ...actual, Metadata, RunView };
 });
 
 // Import AFTER the mock is declared so the loader binds to the mocked core.
 const { loadFormResponseContext } = await import('./form-response-context');
+type FormResponseContext = import('./form-response-context').FormResponseContext;
 
 const fakeUser = { Name: 'tester' } as unknown as UserInfo;
+
+/** Load and insist on the `loaded` outcome — the shape every projection test below reads. */
+async function loadedContext(): Promise<FormResponseContext> {
+  const result = await loadFormResponseContext('resp-1', fakeUser);
+  if (result.status !== 'loaded') {
+    throw new Error(`expected a loaded context, got ${JSON.stringify(result)}`);
+  }
+  return result.context;
+}
 
 /** A fully-populated answer row, one typed column at a time. */
 function answerRow(overrides: Record<string, unknown>): Record<string, unknown> {
@@ -91,14 +108,26 @@ beforeEach(() => {
   state.answersReadSucceeds = true;
   state.questionsReadSucceeds = true;
   state.responseLoads = true;
+  state.responseLoadThrows = undefined;
   state.filters = {};
-  logError.mockClear();
 });
 
 describe('loadFormResponseContext', () => {
-  it('returns null when the response cannot be loaded', async () => {
+  it("reports 'absent' when the response genuinely does not exist, so hooks can skip", async () => {
     state.responseLoads = false;
-    expect(await loadFormResponseContext('resp-1', fakeUser)).toBeNull();
+    expect(await loadFormResponseContext('resp-1', fakeUser)).toEqual({ status: 'absent' });
+  });
+
+  it("reports 'failed' — not 'absent' — when the response cannot be READ (#239)", async () => {
+    // BaseEntity.Load throws on a missing Read grant; that used to escape as an exception, and the
+    // caller's only other answer was "not found", which would tell a hook to skip quietly.
+    state.responseLoadThrows = 'User does not have read permissions on MJ_BizApps_Forms: Form Responses';
+
+    const result = await loadFormResponseContext('resp-1', fakeUser);
+
+    expect(result.status).toBe('failed');
+    expect(result.status === 'failed' && result.error).toContain('resp-1');
+    expect(result.status === 'failed' && result.error).toContain(state.responseLoadThrows);
   });
 
   describe('typed-column projection (the columns hooks used to be blind to)', () => {
@@ -107,7 +136,7 @@ describe('loadFormResponseContext', () => {
       state.answers = [answerRow({ QuestionID: 'q-date', DateValue: when })];
       state.questions = [{ ID: 'q-date', QuestionType: 'Date', Prompt: 'Start date' }];
 
-      const ctx = await loadFormResponseContext('resp-1', fakeUser);
+      const ctx = await loadedContext();
 
       expect(ctx?.answers[0].dateValue).toEqual(when);
       expect(ctx?.answers[0].questionType).toBe('Date');
@@ -121,7 +150,7 @@ describe('loadFormResponseContext', () => {
       state.answers = [answerRow({ QuestionID: 'q-time', DateValue: new Date('1970-01-01T14:30:00.000Z') })];
       state.questions = [{ ID: 'q-time', QuestionType: 'Time', Prompt: 'What time suits you' }];
 
-      const ctx = await loadFormResponseContext('resp-1', fakeUser);
+      const ctx = await loadedContext();
 
       expect(ctx?.answers[0].dateText).toBe('14:30');
       expect(ctx?.answers[0].dateValue).toEqual(new Date('1970-01-01T14:30:00.000Z'));
@@ -131,7 +160,7 @@ describe('loadFormResponseContext', () => {
       state.answers = [answerRow({ QuestionID: 'q-date', DateValue: new Date('2026-08-07T00:00:00Z') })];
       state.questions = [{ ID: 'q-date', QuestionType: 'Date', Prompt: 'Start date' }];
 
-      const ctx = await loadFormResponseContext('resp-1', fakeUser);
+      const ctx = await loadedContext();
 
       expect(ctx?.answers[0].dateText).toBe('2026-08-07');
     });
@@ -140,7 +169,7 @@ describe('loadFormResponseContext', () => {
       state.answers = [answerRow({ QuestionID: 'q-text', TextValue: 'hello' })];
       state.questions = [{ ID: 'q-text', QuestionType: 'ShortText', Prompt: 'Name' }];
 
-      const ctx = await loadFormResponseContext('resp-1', fakeUser);
+      const ctx = await loadedContext();
 
       expect(ctx?.answers[0].dateText).toBeNull();
     });
@@ -149,7 +178,7 @@ describe('loadFormResponseContext', () => {
       state.answers = [answerRow({ QuestionID: 'q-file', FileID: 'file-guid-1' })];
       state.questions = [{ ID: 'q-file', QuestionType: 'FileUpload', Prompt: 'Resume' }];
 
-      const ctx = await loadFormResponseContext('resp-1', fakeUser);
+      const ctx = await loadedContext();
 
       expect(ctx?.answers[0].fileId).toBe('file-guid-1');
     });
@@ -158,7 +187,7 @@ describe('loadFormResponseContext', () => {
       state.answers = [answerRow({ QuestionID: 'q-text', TextValue: 'an essay', Score: 4.5 })];
       state.questions = [{ ID: 'q-text', QuestionType: 'LongText', Prompt: 'Tell us more' }];
 
-      const ctx = await loadFormResponseContext('resp-1', fakeUser);
+      const ctx = await loadedContext();
 
       expect(ctx?.answers[0].score).toBe(4.5);
     });
@@ -173,7 +202,7 @@ describe('loadFormResponseContext', () => {
       ];
       state.questions = [];
 
-      const ctx = await loadFormResponseContext('resp-1', fakeUser);
+      const ctx = await loadedContext();
 
       // stored uppercase, looked up lowercase — the defect class this folding exists to kill
       expect(ctx?.canonicalAnswers.Get('3e4f1a2b-0000-4000-8000-000000000001')).toBe('a@b.com');
@@ -186,7 +215,7 @@ describe('loadFormResponseContext', () => {
       state.answers = [answerRow({ QuestionID: 'q-skipped' })];
       state.questions = [];
 
-      const ctx = await loadFormResponseContext('resp-1', fakeUser);
+      const ctx = await loadedContext();
 
       expect(ctx?.answers).toHaveLength(1);
       expect(ctx?.canonicalAnswers.Has('q-skipped')).toBe(false);
@@ -223,36 +252,31 @@ describe('loadFormResponseContext', () => {
     });
   });
 
-  describe('read failures are reported, never silently degraded', () => {
-    it('reports a failed answer read instead of presenting it as an unanswered response', async () => {
+  describe('read failures fail the load, never degrade silently (#239)', () => {
+    // These used to degrade to an empty answer list / typeless answers and log. That was the best
+    // the old `context | null` contract could express, and its own comments named the harm: a
+    // binding would create a record with every mapped field blank, and Analyze would score every
+    // answer as ShortText. With an outcome callers switch on, the honest answer is a failure.
+    it('fails when the answers cannot be read, instead of presenting an unanswered response', async () => {
       state.answersReadSucceeds = false;
 
-      const ctx = await loadFormResponseContext('resp-1', fakeUser);
+      const result = await loadFormResponseContext('resp-1', fakeUser);
 
-      expect(ctx).not.toBeNull();
-      expect(ctx?.answers).toEqual([]);
-      expect(ctx?.canonicalAnswers.Size).toBe(0);
-      // The degradation above is what the code did BEFORE the failure was reported, so asserting
-      // only that would leave the log free to be deleted by a later tidy-up. This is the assertion
-      // that actually pins the change.
-      expect(logError).toHaveBeenCalledTimes(1);
-      expect(logError.mock.calls[0][0]).toContain('resp-1');
-      expect(logError.mock.calls[0][0]).toContain('connection reset');
+      expect(result.status).toBe('failed');
+      expect(result.status === 'failed' && result.error).toContain('MJ_BizApps_Forms: Form Response Answers');
+      expect(result.status === 'failed' && result.error).toContain('resp-1');
+      expect(result.status === 'failed' && result.error).toContain('connection reset');
     });
 
-    it('reports a failed question read, which would otherwise relabel every answer as ShortText', async () => {
+    it('fails when the questions cannot be read, instead of relabelling every answer ShortText', async () => {
       state.answers = [answerRow({ QuestionID: 'q-email', TextValue: 'a@b.com' })];
       state.questionsReadSucceeds = false;
 
-      const ctx = await loadFormResponseContext('resp-1', fakeUser);
+      const result = await loadFormResponseContext('resp-1', fakeUser);
 
-      // The answer itself still survives — the value was read fine, only its metadata was lost.
-      expect(ctx?.canonicalAnswers.Get('q-email')).toBe('a@b.com');
-      // ...but the type is now a fallback, not a fact, so the failure has to be on the record.
-      expect(ctx?.answers[0].questionType).toBe('ShortText');
-      expect(logError).toHaveBeenCalledTimes(1);
-      expect(logError.mock.calls[0][0]).toContain('resp-1');
-      expect(logError.mock.calls[0][0]).toContain('deadlock victim');
+      expect(result.status).toBe('failed');
+      expect(result.status === 'failed' && result.error).toContain('MJ_BizApps_Forms: Form Questions');
+      expect(result.status === 'failed' && result.error).toContain('deadlock victim');
     });
   });
 });

@@ -68,10 +68,14 @@ export class AnalyzeWrittenResponsesAction extends BaseAction {
       return fail('FormResponseID parameter is required', 'MISSING_PARAMETERS');
     }
 
-    const ctx = await loadFormResponseContext(responseId, params.ContextUser);
-    if (!ctx) {
+    const loaded = await loadFormResponseContext(responseId, params.ContextUser);
+    if (loaded.status === 'absent') {
       return skip(`FormResponse '${responseId}' not found; nothing to analyze.`);
     }
+    if (loaded.status === 'failed') {
+      return fail(`Could not load FormResponse '${responseId}': ${loaded.error}`, 'RESPONSE_LOAD_FAILED');
+    }
+    const ctx = loaded.context;
 
     const selected = selectFreeTextAnswers(ctx.answers);
     if (selected.length === 0) {
