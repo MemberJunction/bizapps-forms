@@ -19,6 +19,7 @@ import type { FormReportData, ReportableForm } from './models/reporting.model';
 import type { ResponseDetail, ResponseRecordLink } from '../responses/response-models';
 import { ResponsesDataService } from '../responses/responses-data.service';
 import {
+  failureMessage,
   filterForms,
   percent,
   plural,
@@ -336,8 +337,8 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     return mockResponseDetail(responseId, this.report?.questions ?? [], row);
   }
 
-  private fail(err: unknown, fallback: string): void {
-    const message = err instanceof Error ? err.message : fallback;
+  private fail(err: unknown, action: string): void {
+    const message = failureMessage(err, action);
     this.errorMessage = message;
     LogError(message);
     this.Error.emit(err instanceof Error ? err : new Error(message));
