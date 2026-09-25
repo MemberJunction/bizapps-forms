@@ -51,6 +51,7 @@ function reportWithTotal(totalResponses: number): FormReportData {
 
 type ReportingSurface = Pick<FormsReportingService, 'loadReport'>;
 type ResponsesSurface = Pick<ResponsesDataService, 'loadResponseDetail'>;
+type ExportSurface = Pick<FormsReportingExportService, 'exportResponses'>;
 
 /** Every `loadReport` call, in call order, each with the deferred the test settles by hand. */
 interface ReportCall {
@@ -62,6 +63,7 @@ interface Harness {
   c: FormsReportingDashboardComponent;
   reportCalls: ReportCall[];
   detailLoads: Deferred<ResponseDetail>[];
+  exports: Deferred<void>[];
   errors: Error[];
 }
 
@@ -82,10 +84,18 @@ function construct(): Harness {
       return load.promise;
     },
   };
+  const exports: Deferred<void>[] = [];
+  const exporter: ExportSurface = {
+    exportResponses: () => {
+      const run = deferred<void>();
+      exports.push(run);
+      return run.promise;
+    },
+  };
   const injector = Injector.create({
     providers: [
       { provide: FormsReportingService, useValue: reporting },
-      { provide: FormsReportingExportService, useValue: {} },
+      { provide: FormsReportingExportService, useValue: exporter },
       { provide: ResponsesDataService, useValue: responses },
       { provide: NavigationService, useValue: {} },
       { provide: ChangeDetectorRef, useValue: { markForCheck: () => undefined, detectChanges: () => undefined } },
@@ -94,7 +104,7 @@ function construct(): Harness {
   const c = runInInjectionContext(injector, () => new FormsReportingDashboardComponent());
   const errors: Error[] = [];
   c.Error.subscribe((e: Error) => errors.push(e));
-  return { c, reportCalls, detailLoads, errors };
+  return { c, reportCalls, detailLoads, exports, errors };
 }
 
 describe('FormsReportingDashboardComponent — only the latest selection applies its report (#252)', () => {
@@ -227,5 +237,41 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
 
     reportCalls[1].load.resolve(reportWithTotal(222));
     await b;
+  });
+
+  it('does not put a failed export of the previous form on the newer form\'s screen', async () => {
+    const { c, reportCalls, exports, errors } = construct();
+    const a = c.selectForm(FORM_A);
+    reportCalls[0].load.resolve(reportWithTotal(111));
+    await a;
+
+    const run = c.export('csv');
+    const b = c.selectForm(FORM_B);
+    reportCalls[1].load.resolve(reportWithTotal(222));
+    await b;
+    exports[0].reject(new Error('A export timed out'));
+    await run;
+
+    expect(c.errorMessage).toBeNull();
+    expect(errors).toEqual([]);
+    expect(c.busy).toBe(false);
+    const logged = vi.mocked(console.error).mock.calls.flat().map(String).join('\n');
+    expect(logged).toContain('form-a');
+    expect(logged).toContain('A export timed out');
+  });
+
+  it('still surfaces a failed export of the form on screen', async () => {
+    // Control: the guard must not hide the failure the reader is looking at.
+    const { c, reportCalls, exports, errors } = construct();
+    const a = c.selectForm(FORM_A);
+    reportCalls[0].load.resolve(reportWithTotal(111));
+    await a;
+
+    const run = c.export('csv');
+    exports[0].reject(new Error('disk full'));
+    await run;
+
+    expect(c.errorMessage).toContain('disk full');
+    expect(errors).toHaveLength(1);
   });
 });
