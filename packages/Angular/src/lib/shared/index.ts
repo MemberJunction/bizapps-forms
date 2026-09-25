@@ -1,5 +1,5 @@
 /**
- * Cross-area primitives — used by the builder, the reporting dashboard and the
+ * Cross-area primitives — used by the builder, the reporting dashboard, Forms home and the
  * responses surface alike. Nothing Angular, nothing that does I/O.
  */
 export { FORMS_ENTITY, MJ_CORE_ENTITY } from './entity-names';

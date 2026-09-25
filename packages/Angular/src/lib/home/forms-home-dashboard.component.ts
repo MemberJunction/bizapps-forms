@@ -12,7 +12,7 @@ import { BaseEntity, CompositeKey, LogError } from '@memberjunction/core';
 import { MJGlobal, MJEventType, RegisterClass } from '@memberjunction/global';
 import type { ActionParam } from '@memberjunction/actions-base';
 
-import { FORMS_UI_CSS } from '../shared';
+import { FORMS_UI_CSS, failureMessage } from '../shared';
 import { FormsHomeService } from './forms-home.service';
 import { FORMS_HOME_CSS } from './forms-home-dashboard.styles';
 import { totalResponses } from './home-aggregations';
@@ -402,8 +402,8 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.cdr.markForCheck();
   }
 
-  private fail(err: unknown, fallback: string): void {
-    const message = err instanceof Error ? err.message : fallback;
+  private fail(err: unknown, action: string): void {
+    const message = failureMessage(err, action);
     this.errorMessage = message;
     LogError(message);
     this.Error.emit(err instanceof Error ? err : new Error(message));
