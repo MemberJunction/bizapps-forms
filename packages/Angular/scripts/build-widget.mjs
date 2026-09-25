@@ -21,6 +21,10 @@
  * `files: ["/dist"]`, so anything `build` does not produce simply never reaches a host — which
  * is exactly how 0.2.0 through 0.4.0 shipped with no `<mj-form>` bundle at all.
  * `.github/scripts/validate-widget-bundle.sh` is the gate that now holds that line.
+ *
+ * After bundling, a postcondition guard (`assertNoServerOnlyInputs`) reads esbuild's metafile —
+ * what was ACTUALLY bundled, not what the source imports — and fails the build if any
+ * server-only module (MJCore and friends, the generated entity subclasses) made it in (#245).
  */
 import { build } from 'esbuild';
 import { transformAsync } from '@babel/core';
@@ -86,6 +90,68 @@ const result = await build({
   metafile: true,
   logLevel: 'info',
 });
+
+/**
+ * Inputs that must never reach the respondent bundle (#245). The widget runs on anonymous
+ * visitors' phones, so every byte is download + parse time on a slow device. These all arrive the
+ * same way — through the `@mj-biz-apps/forms-entities` barrel, whose generated entity subclasses
+ * carry `@RegisterClass` side effects that esbuild must keep — so the fix is always the same:
+ * import from `@mj-biz-apps/forms-entities/contracts` instead.
+ */
+const SERVER_ONLY_INPUTS = [
+  // Any MemberJunction package: MJCore, MJGlobal, sql-dialect… — the entity runtime, never
+  // needed to render or submit a form.
+  { label: '@memberjunction/*', pattern: /node_modules\/@memberjunction\// },
+  // Arrives with MJCore (it parses expressions); its presence alone means the barrel leaked.
+  { label: 'acorn', pattern: /node_modules\/acorn\// },
+  // The Entities generated modules themselves: the `entity_subclasses` barrel and the
+  // per-schema `entities/<schema>` module it re-exports (MJ 6.1 layout). Matched by path
+  // fragment, not `node_modules/`, because the workspace symlink resolves them to
+  // `packages/Entities/dist/…`.
+  {
+    label: 'forms-entities generated subclasses',
+    pattern: /\/generated\/(entity_subclasses|entities\/)/,
+  },
+];
+
+/**
+ * Names the package an esbuild input path belongs to (the segment after its LAST
+ * `node_modules/`), so the failure groups files by what to go and remove rather than listing
+ * hundreds of paths one by one.
+ */
+function packageOfInput(inputPath) {
+  const marker = 'node_modules/';
+  const at = inputPath.lastIndexOf(marker);
+  if (at < 0) return inputPath;
+  const parts = inputPath.slice(at + marker.length).split('/');
+  return parts[0].startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0];
+}
+
+/** Fails the build when esbuild bundled any SERVER_ONLY_INPUTS module. */
+function assertNoServerOnlyInputs(metafile) {
+  const offendersByPackage = new Map();
+  for (const inputPath of Object.keys(metafile.inputs)) {
+    const hit = SERVER_ONLY_INPUTS.find((entry) => entry.pattern.test(inputPath));
+    if (!hit) continue;
+    const key = `${packageOfInput(inputPath)} [${hit.label}]`;
+    offendersByPackage.set(key, [...(offendersByPackage.get(key) ?? []), inputPath]);
+  }
+  if (offendersByPackage.size === 0) return;
+
+  console.error(
+    '[build:widget] The <mj-form> bundle contains server-only modules (#245). The respondent ' +
+      'widget runs on anonymous visitors\' phones, and these packages arrive through a barrel ' +
+      "import — import from '@mj-biz-apps/forms-entities/contracts', not " +
+      "'@mj-biz-apps/forms-entities'. Offending inputs by package:",
+  );
+  for (const [pkg, paths] of offendersByPackage) {
+    console.error(`  ${pkg}: ${paths.length} file(s)`);
+    for (const path of paths) console.error(`    ${path}`);
+  }
+  process.exit(1);
+}
+
+assertNoServerOnlyInputs(result.metafile);
 
 const out = result.metafile.outputs['dist/widget/mj-form.js'];
 const bytes = out ? out.bytes : 0;
