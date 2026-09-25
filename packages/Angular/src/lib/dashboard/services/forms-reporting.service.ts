@@ -11,17 +11,18 @@
  * Responses tab and the Form Response entity-form override consume directly. This service
  * adds only the dashboard-only concerns: the form picker and the summary/breakdown/funnel
  * aggregations. It does NOT re-expose the response reads — callers that want a single
- * response's detail or the export's answer rows inject `ResponsesDataService` themselves,
- * rather than reaching them through a pass-through method here.
+ * response's detail inject `ResponsesDataService` themselves, rather than reaching it
+ * through a pass-through method here. The export's answer rows are not a separate read at
+ * all: the report carries the rows it was built from (`FormReportData.answers`).
  */
 import { Injectable, inject } from '@angular/core';
 import { RunView, RunViewResult } from '@memberjunction/core';
 import type {
-  mjBizAppsFormsFormResponseEntityType,
   mjBizAppsFormsFormVersionEntityType,
   mjBizAppsFormsFormEntityType,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../../shared/entity-names';
+import { loadCompleteResponseCounts } from '../../shared/complete-response-counts';
 import { flattenQuestions } from '../../shared/published-questions';
 import { buildResponseRows } from '../../responses/response-aggregations';
 import { ResponsesDataService } from '../../responses/responses-data.service';
@@ -43,11 +44,11 @@ export class FormsReportingService {
 
   /**
    * Lists forms that have at least one published version, with their latest
-   * published version id and COMPLETE response count, for the form picker. Partial
-   * (in-progress) autosaves are excluded from the count.
+   * published version id and COMPLETE response count, for the form picker. The count
+   * is computed server-side, for the listed forms only.
    */
   public async loadReportableForms(): Promise<ReportableForm[]> {
-    const [formsRes, versionsRes, responsesRes] = await this.rv.RunViews([
+    const [formsRes, versionsRes] = await this.rv.RunViews([
       {
         EntityName: FORMS_ENTITY.Form,
         ResultType: 'simple',
@@ -61,27 +62,14 @@ export class FormsReportingService {
         Fields: ['ID', 'FormID', 'VersionNumber'],
         OrderBy: 'VersionNumber DESC',
       },
-      {
-        EntityName: FORMS_ENTITY.FormResponse,
-        // Headline response count is COMPLETE-only: in-progress Partial autosaves are not
-        // "responses". (Partials still feed the drop-off funnel in loadReport, which reads
-        // its own rows.)
-        ExtraFilter: `Status='Complete'`,
-        ResultType: 'simple',
-        Fields: ['ID', 'FormID', 'Status'],
-      },
     ]) as [
       RunViewResult<mjBizAppsFormsFormEntityType>,
       RunViewResult<mjBizAppsFormsFormVersionEntityType>,
-      RunViewResult<mjBizAppsFormsFormResponseEntityType>,
     ];
 
-    if (!formsRes.Success || !versionsRes.Success || !responsesRes.Success) {
+    if (!formsRes.Success || !versionsRes.Success) {
       throw new Error(
-        formsRes.ErrorMessage ||
-          versionsRes.ErrorMessage ||
-          responsesRes.ErrorMessage ||
-          'Failed to load reportable forms.',
+        formsRes.ErrorMessage || versionsRes.ErrorMessage || 'Failed to load reportable forms.',
       );
     }
 
@@ -93,25 +81,27 @@ export class FormsReportingService {
       }
     }
 
-    const responseCountByForm = new Map<string, number>();
-    for (const r of responsesRes.Results) {
-      responseCountByForm.set(r.FormID, (responseCountByForm.get(r.FormID) ?? 0) + 1);
-    }
-
-    const out: ReportableForm[] = [];
+    const reportable: Omit<ReportableForm, 'responseCount'>[] = [];
     for (const f of formsRes.Results) {
       const formVersionId = latestVersionByForm.get(f.ID);
-      if (!formVersionId) {
-        continue; // skip forms with no published version
+      if (formVersionId) {
+        reportable.push({ formId: f.ID, formVersionId, name: f.Name });
       }
-      out.push({
-        formId: f.ID,
-        formVersionId,
-        name: f.Name,
-        responseCount: responseCountByForm.get(f.ID) ?? 0,
-      });
     }
-    return out;
+
+    const counts = await loadCompleteResponseCounts(
+      this.rv,
+      reportable.map((f) => f.formId),
+    );
+    return reportable.map((f) => {
+      // The counter already guarantees an entry per id; this re-check only narrows the type,
+      // and refuses to show an invented zero if that guarantee ever breaks.
+      const responseCount = counts.get(f.formId);
+      if (responseCount === undefined) {
+        throw new Error(`No Complete-response count came back for form ${f.formId}.`);
+      }
+      return { ...f, responseCount };
+    });
   }
 
   /**
@@ -125,9 +115,14 @@ export class FormsReportingService {
    * come from the latest published definition; answers map back by `QuestionID`.
    */
   public async loadReport(form: ReportableForm): Promise<FormReportData> {
-    const definition = await this.responses.loadDefinition(form.formVersionId);
+    // Neither read needs the other's result, so they run together: serial awaits cost the
+    // reader a full extra round trip on every form they click (#246). Either one failing
+    // rejects the whole report — there is no half-built report to fall back to.
+    const [definition, { responses, answers }] = await Promise.all([
+      this.responses.loadDefinition(form.formVersionId),
+      this.responses.loadResponsesForForm(form.formId),
+    ]);
     const questions = flattenQuestions(definition);
-    const { responses, answers } = await this.responses.loadResponsesForForm(form.formId);
 
     const summary = buildSummary(responses);
     // Every rate on the Insights view divides by the RESPONSE count rather than by the
@@ -163,6 +158,9 @@ export class FormsReportingService {
       ),
       funnel: buildFunnel(definition, answers),
       responses: buildResponseRows(responses, answers, questions),
+      // The UNFILTERED rows, never `completeAnswers`: the export has always included partial
+      // responses' cells, and the report must not change what the sheet contains.
+      answers,
     };
   }
 }

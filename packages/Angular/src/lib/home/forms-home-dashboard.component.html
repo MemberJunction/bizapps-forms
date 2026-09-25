@@ -141,7 +141,7 @@
 
               <div class="mjf-metrics">
                 <div class="mjf-metric">
-                  <span class="mjf-metric-value">{{ row.responseCount }}</span>
+                  <span class="mjf-metric-value" [attr.title]="row.responseCount === null ? 'Response count unavailable' : null">{{ row.responseCount ?? '—' }}</span>
                   <span class="mjf-metric-label">Responses</span>
                 </div>
               </div>
