@@ -179,6 +179,27 @@
   }
 }
 
+/* Welcome and ending phases: the logo and the screen beneath it are ONE hero, centred together
+   in whatever height the widget has. Auto margins on the first and last child rather than
+   justify-content: center, because centring a column taller than its box pushes the top of it
+   above the scroll origin where nobody can reach it — a phone with a tall welcome image would
+   lose its logo. Auto margins collapse to zero when there is no room, so the stack just scrolls. */
+.mjf-shell--hero > :first-child {
+  margin-top: auto;
+}
+
+.mjf-shell--hero > :last-child {
+  margin-bottom: auto;
+}
+
+/* Centred by default here, where the plain bar above a question list reads left: on a hero the
+   logo sits directly over a centred image and headline, and a left-pinned mark over a centred
+   stack reads as two unrelated things. An author's explicit alignment still wins in both. */
+.mjf-shell--hero .mjf-logo-bar {
+  margin-bottom: 0;
+  text-align: var(--mjf-title-align, center);
+}
+
 /* A wrapper carries the alignment because .mjf-shell is a flex COLUMN, where text-align does
    nothing to its items and align-self cannot branch on a token value. Inside a plain block,
    text-align moves an inline-block image exactly as it moves the titles — one token, one
