@@ -92,16 +92,12 @@ export function mockDefinition(): PublishedFormDefinition {
 }
 
 /**
- * The raw mock answer rows, in the same shape `loadAnswersForForm` returns.
+ * Builds the full mock report bundle.
  *
- * Mock mode used to hand the export an empty array, so "export" in mock mode produced a
- * sheet of empty cells — the one operation a preview most needs to show honestly.
+ * `answers` is the same set of rows the aggregations were built from, so exporting in mock
+ * mode produces real cells — mock mode once handed the export an empty array and produced a
+ * sheet of blanks, the one operation a preview most needs to show honestly.
  */
-export function mockAnswerRows(): AnswerRow[] {
-  return mockAnswers(mockResponses());
-}
-
-/** Builds the full mock report bundle. */
 export function mockReport(): FormReportData {
   const definition = mockDefinition();
   const questions = flattenQuestions(definition);
@@ -126,6 +122,7 @@ export function mockReport(): FormReportData {
     breakdowns: buildBreakdowns(questions, completeAnswers),
     funnel: buildFunnel(definition, answers),
     responses: buildResponseRows(responses, answers, questions),
+    answers,
   };
 }
 
