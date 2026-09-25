@@ -5,7 +5,8 @@
  * `RunView` (resolve the TaskType), so we mock `@memberjunction/core` and drive the action
  * through its public `Run()` entry point. We assert the seam-S3 behaviours:
  *   1. happy path → creates a Task AND a TaskLink pointing at the response, sets outputs
- *   2. no resolvable TaskType → fails loudly (does not create an orphaned/typeless task)
+ *   2. no resolvable TaskType → fails loudly (does not create an orphaned/typeless task), and a
+ *      FAILED TaskType read is reported as that failure, distinct from "none exists" (#239)
  *   3. a failed Task Save surfaces the failure (no silent success, no dangling link)
  *   4. missing FormResponseID → MISSING_PARAMETERS (the input contract)
  */
@@ -60,6 +61,8 @@ const state: {
   answers: unknown[];
   questions: unknown[];
   taskTypes: unknown[];
+  /** When set, the Task Types read FAILS with this message (e.g. a missing Read grant, #239). */
+  taskTypeReadError: string | undefined;
   task: FakeEntity;
   taskLink: FakeEntity;
   responseEntityId: string | undefined;
@@ -70,6 +73,7 @@ const state: {
   answers: [],
   questions: [],
   taskTypes: [],
+  taskTypeReadError: undefined,
   task: new FakeEntity(),
   taskLink: new FakeEntity(),
   responseEntityId: 'entity-form-responses',
@@ -105,7 +109,10 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
     }
   }
   class RunView {
-    async RunView<T>(opts: { EntityName: string }): Promise<{ Success: boolean; Results: T[] }> {
+    async RunView<T>(opts: { EntityName: string }): Promise<{ Success: boolean; Results: T[]; ErrorMessage?: string }> {
+      if (opts.EntityName === 'MJ_BizApps_Tasks: Task Types' && state.taskTypeReadError) {
+        return { Success: false, Results: [], ErrorMessage: state.taskTypeReadError };
+      }
       let results: unknown[] = [];
       if (opts.EntityName === 'MJ_BizApps_Tasks: Task Types') results = state.taskTypes;
       else if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') results = state.answers;
@@ -119,10 +126,13 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 // The action loads the response via a shared helper; stub it to return our fake context.
 vi.mock('../shared/form-response-context', () => ({
   loadFormResponseContext: async () => ({
-    response: state.response,
-    form: state.form,
-    answers: state.answers,
-    questions: state.questions,
+    status: 'loaded',
+    context: {
+      response: state.response,
+      form: state.form,
+      answers: state.answers,
+      questions: state.questions,
+    },
   }),
 }));
 
@@ -154,6 +164,7 @@ beforeEach(() => {
   state.answers = [];
   state.questions = [];
   state.taskTypes = [{ ID: 'type-1', Name: 'General', IsActive: true }];
+  state.taskTypeReadError = undefined;
   state.task = new FakeEntity({ idOnSave: 'task-new' });
   state.taskLink = new FakeEntity({ idOnSave: 'link-new' });
   state.responseEntityId = 'entity-form-responses';
@@ -192,6 +203,21 @@ describe('Forms: Create Followup Task', () => {
     expect(result.Success).toBe(false);
     expect(result.ResultCode).toBe('NO_TASK_TYPE');
     // The Task entity was never fetched/created.
+    expect(state.getEntityCalls).not.toContain('MJ_BizApps_Tasks: Tasks');
+  });
+
+  it('reports a FAILED Task Types read as that failure, not as "no TaskType available" (#239)', async () => {
+    // What a host without Read on Task Types produced: RunView answers Success=false, and the
+    // action used to read that as "zero rows" and blame the (fully populated) TaskType table.
+    state.taskTypeReadError = 'User forms-automation does not have read permissions on MJ_BizApps_Tasks: Task Types';
+    const params = makeParams();
+
+    const result = await new CreateFollowupTaskAction().Run(params);
+
+    expect(result.Success).toBe(false);
+    expect(result.ResultCode).toBe('TASK_TYPE_LOOKUP_FAILED');
+    expect(result.Message).toContain('MJ_BizApps_Tasks: Task Types');
+    expect(result.Message).toContain(state.taskTypeReadError);
     expect(state.getEntityCalls).not.toContain('MJ_BizApps_Tasks: Tasks');
   });
 

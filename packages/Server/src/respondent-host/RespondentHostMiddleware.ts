@@ -49,7 +49,7 @@
 import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware, configInfo } from '@memberjunction/server';
-import { LogStatus, LogError, RunView, type UserInfo } from '@memberjunction/core';
+import { LogStatus, LogError, Metadata, RunView, type UserInfo } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import { getMagicLinkProvisioningConfig } from '@mj-biz-apps/forms-core-entities-server';
 import { frameAncestorsDirective, parseAllowedOrigins } from '@mj-biz-apps/forms-entities';
@@ -62,6 +62,8 @@ import { renderRespondentHostPage } from './host-page.js';
 import { redeemSlugToToken, type RedeemRunViewProvider } from './redeem.service.js';
 import { loadFormIdentity } from './form-identity.js';
 import { assessRespondentReadiness } from './host-readiness.js';
+import { assessAutomationReadiness } from '../automation/automation-readiness.js';
+import { resolveAutomationPrincipal } from '../automation/service-principal.js';
 import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.js';
 import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
 import { runForget, runRemember, runResume, type ResumeRouteOutcome } from './device-resume.service.js';
@@ -184,6 +186,10 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     // the captcha gate fails closed at submit — so a misconfigured host stays quiet until a
     // respondent pays for it, by which time nobody connects it to an install-time setting.
     await this.reportReadiness();
+    // Same reasoning for the on-submit automations: a runner grant that never shipped shows up
+    // only as a per-submit log line on a best-effort hook, which is how #239 and four before it
+    // went unnoticed.
+    this.reportAutomationReadiness();
   }
 
   /**
@@ -300,6 +306,35 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     });
     for (const reason of reasons) {
       LogError(`[Forms] Anonymous respondent path is NOT ready: ${reason}`);
+    }
+  }
+
+  /**
+   * Log every entity grant the automation principal lacks, under one grep-able prefix.
+   *
+   * The lookup is core's own `EntityInfo.GetUserPermisions` — the aggregation (Allow rows OR-ed
+   * across roles, Deny rows subtracted) MJ's permission checks apply — so the report cannot
+   * disagree with the check that would refuse the write. A principal that does not resolve is
+   * skipped: `resolveAutomationPrincipal` has just logged that automations are disabled, and saying
+   * so twice adds nothing. Must never throw out of boot (it would take down all of MJAPI, which
+   * also serves other apps), so a failure is logged with what was being checked and boot goes on.
+   */
+  private reportAutomationReadiness(): void {
+    try {
+      const principal = resolveAutomationPrincipal();
+      if (!principal) return;
+      const md = new Metadata();
+      const reasons = assessAutomationReadiness(principal.Name, (entityName) =>
+        md.EntityByName(entityName)?.GetUserPermisions(principal),
+      );
+      for (const reason of reasons) {
+        LogError(`[Forms] On-submit automations are NOT ready: ${reason}`);
+      }
+    } catch (e) {
+      LogError(
+        `[Forms] Could not check the on-submit automation principal's grants at boot: ` +
+          `${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 

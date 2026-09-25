@@ -67,17 +67,30 @@ export class CreateFollowupTaskAction extends BaseAction {
       return fail(missingClasses, 'ENTITY_CLASS_UNREGISTERED');
     }
 
-    const ctx = await loadFormResponseContext(responseId, params.ContextUser);
-    if (!ctx) {
+    const loaded = await loadFormResponseContext(responseId, params.ContextUser);
+    if (loaded.status === 'absent') {
       return skip(`FormResponse '${responseId}' not found; no task created.`);
     }
+    if (loaded.status === 'failed') {
+      return fail(`Could not load FormResponse '${responseId}': ${loaded.error}`, 'RESPONSE_LOAD_FAILED');
+    }
+    const ctx = loaded.context;
 
-    const typeId = await resolveTaskTypeId(getStringParam(params, 'TaskTypeName'), params.ContextUser);
-    if (!typeId) {
+    const typeOutcome = await resolveTaskTypeId(getStringParam(params, 'TaskTypeName'), params.ContextUser);
+    if ('error' in typeOutcome) {
+      // Distinct from NO_TASK_TYPE: the read itself failed (a missing Read grant, #239), which
+      // says nothing about whether any TaskType exists. Reporting it as "none available" sent the
+      // reader to a fully populated table instead of to the permission.
+      return fail(
+        `Could not read ${ENTITY.TaskType} to resolve the task's type: ${typeOutcome.error}`,
+        'TASK_TYPE_LOOKUP_FAILED',
+      );
+    }
+    if (typeOutcome.id === null) {
       return fail('No TaskType available to assign to the task.', 'NO_TASK_TYPE');
     }
 
-    return this.createTaskAndLink(ctx, typeId, params);
+    return this.createTaskAndLink(ctx, typeOutcome.id, params);
   }
 
   private async createTaskAndLink(
@@ -152,8 +165,15 @@ async function createTaskLink(
   return outcome.ok ? { link: outcome.entity } : { error: outcome.error };
 }
 
-/** Resolve the required Task.TypeID — by name when supplied, else the first active type. */
-async function resolveTaskTypeId(typeName: string | undefined, contextUser: UserInfo): Promise<string | null> {
+/**
+ * Resolve the required Task.TypeID — by name when supplied, else the first active type.
+ * `{ id: null }` means the read succeeded and matched nothing; `{ error }` means the read FAILED
+ * (RunView does not throw), which must not be mistaken for an empty table.
+ */
+async function resolveTaskTypeId(
+  typeName: string | undefined,
+  contextUser: UserInfo,
+): Promise<{ id: string | null } | { error: string }> {
   const rv = new RunView();
   const filter = typeName ? `Name=${quoteSqlString(typeName)}` : 'IsActive=1';
   const result = await rv.RunView<mjBizAppsTasksTaskTypeEntity>(
@@ -165,10 +185,10 @@ async function resolveTaskTypeId(typeName: string | undefined, contextUser: User
     },
     contextUser,
   );
-  if (result.Success && result.Results.length > 0) {
-    return result.Results[0].ID;
+  if (!result.Success) {
+    return { error: result.ErrorMessage || 'RunView reported failure with no message' };
   }
-  return null;
+  return { id: result.Results[0]?.ID ?? null };
 }
 
 function resolvePriority(value: string | undefined): TaskPriority {

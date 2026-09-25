@@ -34,13 +34,31 @@ identities are `UserInfo` records fetched from `UserCache` and used as a `contex
 server-side work. MJ's own `System` user works exactly this way. The `.invalid` email domain is
 reserved by RFC 2606 precisely so an address can be unroutable on purpose.
 
-**What it can do is deliberately almost nothing.** Its role, `Forms Automation Runner`, grants read
-on the response entities and write on the Forms-owned bookkeeping tables (automation runs and the
-binding ledger). The one exception worth naming: it also has **update** on `Form Responses`, not
-merely read, because `Forms: Upsert Respondent Person` stamps `FormResponse.RespondentPersonID`
-back onto the response it just matched. It has **no grant on any binding target entity**, so out of
-the box a binding that tries to write a business record fails with a permission error naming that
-entity.
+**What it can do is the floor the shipped automations need, and nothing wider.** Its role,
+`Forms Automation Runner`, holds (full list and reasons: `metadata/entity-permissions/`, and
+`AUTOMATION_RUNNER_GRANTS` in `packages/Server/src/automation/automation-readiness.ts`):
+
+- **Forms-owned:** read on the form, its questions, uploads, automations and bindings; read +
+  update on responses and answers (`Upsert Respondent Person` stamps `RespondentPersonID`,
+  `Analyze Written Responses` writes scores); read + create + update on the automation-run and
+  binding ledgers.
+- **MJ engines every action run goes through:** `MJ: Action Execution Logs` and `MJ: AI Prompt
+  Runs` (read + create + update), `MJ: File Entity Record Links` (read + create + delete, for
+  binding attachments), and read on `MJ: Actions` (MJ resolves an entity action by name before
+  running it).
+- **The built-in hooks' targets in the two sibling apps:** `People` (read + create + update);
+  Task Types (read), Tasks and Task Links (create only) for `Create Followup Task`; Activity Types
+  (read), Activities (read + create) and Activity Links (create) for the `Common.LogActivity`
+  action that creating a Person fires.
+
+No Delete anywhere except the attachment links. Write on core's task-graph entities is withheld on
+purpose, so `Common.LogActivity`'s durable dispatch falls back to running inline, exactly as it does
+for every interactive user. It has **no grant on any binding target entity**, so out of the box a
+binding that tries to write a business record fails with a permission error naming that entity.
+
+At every server start, Forms checks this principal's effective permissions against that list and
+logs each gap as `[Forms] On-submit automations are NOT ready: …`, so a grant that never reached a
+host is named at boot rather than as a per-submit log line.
 
 **Granting it on a target entity is the security decision, and it is yours.** That grant set is
 the real ceiling on what a form author can reach through a binding — the deployment allow-list

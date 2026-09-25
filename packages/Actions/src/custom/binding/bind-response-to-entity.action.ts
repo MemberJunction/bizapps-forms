@@ -49,10 +49,18 @@ export class BindResponseToEntityAction extends BaseAction {
       return { Success: true, ResultCode: 'SKIPPED', Message: 'Binding is disabled.' };
     }
 
-    const context = await loadFormResponseContext(responseId, contextUser);
-    if (!context) {
-      return { Success: false, ResultCode: 'RESPONSE_NOT_FOUND', Message: `Response ${responseId} could not be read.` };
+    const loaded = await loadFormResponseContext(responseId, contextUser);
+    if (loaded.status === 'absent') {
+      return { Success: false, ResultCode: 'RESPONSE_NOT_FOUND', Message: `Response ${responseId} does not exist.` };
     }
+    if (loaded.status === 'failed') {
+      return {
+        Success: false,
+        ResultCode: 'RESPONSE_LOAD_FAILED',
+        Message: `Response ${responseId} could not be loaded: ${loaded.error}`,
+      };
+    }
+    const context = loaded.context;
 
     try {
       const config = parseBindingConfig(
