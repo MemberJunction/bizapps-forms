@@ -82,10 +82,6 @@ export class FormsHomeService {
   }
 
   /**
-   * Runs an authoring/template Action by name with the given input params and
-   * returns the created form id from the action's output params.
-   */
-  /**
    * Moves a form between lifecycle states — the archive/restore path behind the list's
    * row actions.
    *
@@ -115,6 +111,10 @@ export class FormsHomeService {
     return message;
   }
 
+  /**
+   * Runs an authoring/template Action by name with the given input params and
+   * returns the created form id from the action's output params.
+   */
   public async runAuthoringAction(
     actionName: string,
     inputs: ActionParam[],
