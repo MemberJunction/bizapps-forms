@@ -371,20 +371,23 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   }
 
   public async export(format: ExportFormat): Promise<void> {
-    if (!this.report) return;
+    // A report is only ever on screen under a selected form; both are read here so the failure
+    // below can be told apart from one belonging to a form the reader has since left.
+    if (!this.report || !this.selectedForm) return;
     const report = this.report;
-    // The rail is not locked by `busy`, so the reader can move to another form mid-export;
-    // its failure then belongs to a form no longer on screen and must not be shown there.
-    const stamp = this.selectionStamp;
+    const exportedForm = this.selectedForm;
     this.busy = true;
     this.errorMessage = null;
     this.cdr.markForCheck();
     try {
       await this.exporter.exportResponses(report, format);
     } catch (err) {
-      if (stamp !== this.selectionStamp) {
+      // The rail is not locked by `busy`, so the reader can move to another form mid-export.
+      // Ask whether the export's form is still the one on screen, not whether a selection
+      // happened: leaving and coming back is two selections, but the failure is theirs again.
+      if (this.selectedForm?.formId !== exportedForm.formId) {
         LogError(
-          `Superseded export for form ${report.form.formId} ("${report.form.name}"): ${failureMessage(err, 'Export failed.')}`,
+          `Superseded export for form ${exportedForm.formId} ("${exportedForm.name}"): ${failureMessage(err, 'Export failed.')}`,
         );
         return;
       }

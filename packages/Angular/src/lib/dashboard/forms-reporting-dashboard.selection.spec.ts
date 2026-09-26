@@ -282,6 +282,29 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
     expect(errors).toHaveLength(1);
   });
 
+  it('still surfaces a failed export once the reader is back on the form it was for', async () => {
+    // Leaving a form and returning starts two selections, but the export's form is on screen
+    // again: its failure is the reader's to see, not a superseded one to log away.
+    const { c, reportCalls, exports, errors } = construct();
+    const a = c.selectForm(FORM_A);
+    reportCalls[0].load.resolve(reportWithTotal(111, FORM_A));
+    await a;
+
+    const run = c.export('csv');
+    const b = c.selectForm(FORM_B);
+    reportCalls[1].load.resolve(reportWithTotal(222, FORM_B));
+    await b;
+    const back = c.selectForm(FORM_A);
+    reportCalls[2].load.resolve(reportWithTotal(111, FORM_A));
+    await back;
+    exports[0].reject(new Error('A export timed out'));
+    await run;
+
+    expect(c.selectedForm).toBe(FORM_A);
+    expect(c.errorMessage).toContain('A export timed out');
+    expect(errors).toHaveLength(1);
+  });
+
   it('ends the forms-loading state once the list is known, not when the first report settles', async () => {
     // The rail is clickable as soon as it renders, so the reader can pick another form while the
     // first form's report is still loading. The page-wide "Loading forms…" state must not wait on
