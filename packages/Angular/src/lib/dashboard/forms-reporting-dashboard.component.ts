@@ -106,9 +106,10 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
    * `loadingForms` is the only one that may take the whole surface: until the rail exists
    * there is nothing to navigate. `loadingReport` blanks the report but KEEPS the rail —
    * the rail is the navigation, and unmounting it mid-switch throws away the reader's
-   * place and makes the click feel like a page load. `busy` blanks nothing at all; it
-   * disables controls while a response opens or an export runs, so the list the reader
-   * clicked stays under their cursor.
+   * place and makes the click feel like a page load. The rail also stays clickable: a
+   * newer selection supersedes the one loading (`selectionStamp`), so nothing needs
+   * locking. `busy` blanks nothing at all; it disables controls while a response opens or
+   * an export runs, so the list the reader clicked stays under their cursor.
    */
   public loadingForms = false;
   public loadingReport = false;
@@ -143,6 +144,9 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
 
   /** Selected response for the detail view; null shows the list. */
   public responseDetail: ResponseDetail | null = null;
+
+  /** Stamp of the latest selection; a load holding an older stamp was superseded and applies nothing. */
+  private selectionStamp = 0;
 
   public async GetResourceDisplayName(_data: ResourceData): Promise<string> {
     // Matches the Forms app's nav label. The two used to disagree ("Forms Reporting"),
@@ -217,25 +221,45 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   }
 
   public async selectForm(form: ReportableForm): Promise<void> {
+    // The rail stays clickable during a load, so two loads can be in flight and they settle
+    // in network order, not click order. Only the load holding the latest stamp may touch
+    // the report, the error or the loading flag (#252).
+    const stamp = ++this.selectionStamp;
     this.selectedForm = form;
     this.responseDetail = null;
     this.mode = 'insights';
     this.loadingReport = true;
     this.errorMessage = null;
+    // The previous form's report must not sit under the new form's name while this one
+    // loads: the header line and the Export buttons both read it.
+    this.report = null;
     this.cdr.markForCheck();
     try {
       // The report carries its own answer rows for the export; reading them again here is
       // what doubled every selection's payload (#246).
-      this.report = this.useMock ? mockReport() : await this.data.loadReport(form);
+      const report = this.useMock ? mockReport() : await this.data.loadReport(form);
+      if (stamp !== this.selectionStamp) return;
+      this.report = report;
       this.loadedAt = new Date();
     } catch (err) {
+      if (stamp !== this.selectionStamp) {
+        // Nobody is looking at this form any more, so it is not shown — but it still failed.
+        LogError(
+          `Superseded report load for form ${form.formId} ("${form.name}"): ${failureMessage(err, 'Failed to load the report.')}`,
+        );
+        return;
+      }
       // A failed report must not leave the previous form's numbers on screen under the new
       // form's name — every figure would be a lie about the form the header claims.
       this.report = null;
       this.fail(err, 'Failed to load the report.');
     } finally {
-      this.loadingReport = false;
-      this.cdr.markForCheck();
+      // The latest request owns the flag; a superseded one clearing it would end the
+      // spinner while the report the reader asked for is still loading.
+      if (stamp === this.selectionStamp) {
+        this.loadingReport = false;
+        this.cdr.markForCheck();
+      }
     }
   }
 
@@ -299,16 +323,27 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     // the response has file answers — so without this, two fast clicks resolve in
     // data-dependent order and the user can land on the response they did not pick.
     if (!this.report || this.busy) return;
+    // A selection made while the detail loads makes it belong to a form no longer on screen.
+    const stamp = this.selectionStamp;
     this.busy = true;
     this.errorMessage = null;
     this.cdr.markForCheck();
     try {
-      this.responseDetail = this.useMock
+      const detail = this.useMock
         ? this.mockDetail(responseId)
         : await this.responses.loadResponseDetail(responseId, this.report.questions);
+      if (stamp !== this.selectionStamp) return;
+      this.responseDetail = detail;
     } catch (err) {
+      if (stamp !== this.selectionStamp) {
+        LogError(
+          `Superseded response load for response ${responseId}: ${failureMessage(err, 'Failed to load the response.')}`,
+        );
+        return;
+      }
       this.fail(err, 'Failed to load the response.');
     } finally {
+      // Per-operation, not per-selection: whichever load set it clears it.
       this.busy = false;
       this.cdr.markForCheck();
     }
@@ -332,12 +367,22 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
 
   public async export(format: ExportFormat): Promise<void> {
     if (!this.report) return;
+    const report = this.report;
+    // The rail is not locked by `busy`, so the reader can move to another form mid-export;
+    // its failure then belongs to a form no longer on screen and must not be shown there.
+    const stamp = this.selectionStamp;
     this.busy = true;
     this.errorMessage = null;
     this.cdr.markForCheck();
     try {
-      await this.exporter.exportResponses(this.report, format);
+      await this.exporter.exportResponses(report, format);
     } catch (err) {
+      if (stamp !== this.selectionStamp) {
+        LogError(
+          `Superseded export for form ${report.form.formId} ("${report.form.name}"): ${failureMessage(err, 'Export failed.')}`,
+        );
+        return;
+      }
       this.fail(err, 'Export failed.');
     } finally {
       this.busy = false;

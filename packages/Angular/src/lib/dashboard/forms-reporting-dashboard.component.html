@@ -32,7 +32,6 @@
                 class="rp-form"
                 [class.is-on]="isSelected(f)"
                 [attr.aria-current]="isSelected(f) ? 'true' : null"
-                [disabled]="loadingReport"
                 (click)="selectForm(f)">
                 <span class="rp-form-name">{{ f.name }}</span>
                 <span class="rp-form-count" [class.is-none]="f.responseCount === 0">{{ f.responseCount }}</span>
