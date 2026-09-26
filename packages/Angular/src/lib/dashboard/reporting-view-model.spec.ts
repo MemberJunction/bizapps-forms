@@ -20,7 +20,9 @@ import {
   npsSegments,
   percent,
   plural,
+  portfolioLine,
   portfolioSummary,
+  railState,
   relativeTime,
   sortFormsForRail,
 } from './reporting-view-model';
@@ -301,5 +303,40 @@ describe('percent and plural', () => {
     expect(plural(1, 'response')).toBe('1 response');
     expect(plural(0, 'response')).toBe('0 responses');
     expect(plural(2, 'response')).toBe('2 responses');
+  });
+});
+
+describe('railState and portfolioLine — a failed load is not an empty portfolio', () => {
+  const forms = [form('Event RSVP', 12), form('Member Survey', 108)];
+
+  it('reports loading first, whatever else is true', () => {
+    expect(railState(true, 'boom', 0)).toBe('loading');
+  });
+
+  it('reports a failed load as failed, not as "nothing to report on yet"', () => {
+    // The count query can fail (#247); forms stays [] and used to read as "no forms published".
+    expect(railState(false, 'GraphQL Error', 0)).toBe('failed');
+  });
+
+  it('reports empty only when the load succeeded and found no published form', () => {
+    expect(railState(false, null, 0)).toBe('empty');
+    expect(railState(false, null, 2)).toBe('ready');
+  });
+
+  it('never states "0 forms · 0 responses" about a load that failed', () => {
+    expect(portfolioLine([], 'GraphQL Error')).not.toMatch(/\b0 (forms|responses)\b/);
+    expect(portfolioLine([], 'GraphQL Error')).toBe('Forms could not be loaded');
+  });
+
+  it('keeps a list it already has usable when a reload fails (the error banner reports it)', () => {
+    // Refresh() re-runs the load; a failure there must not pin the pane to "could not be
+    // loaded" beside a rail that still lists — and lets you click — every form.
+    expect(railState(false, 'GraphQL Error', 2)).toBe('ready');
+    expect(portfolioLine(forms, 'GraphQL Error')).toBe('2 forms · 120 responses');
+  });
+
+  it('totals the portfolio when the load succeeded', () => {
+    expect(portfolioLine(forms, null)).toBe('2 forms · 120 responses');
+    expect(portfolioLine([], null)).toBe('0 forms · 0 responses');
   });
 });

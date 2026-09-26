@@ -180,6 +180,9 @@ export class ResponsesDataService {
   /**
    * Loads every response of a form (across ALL its versions) together with their answers.
    * Batched into one round trip — see invariant (2) for why the scope is `FormID`.
+   *
+   * `IgnoreMaxRows` on both: without it MJ caps each view at the entity's `UserViewMaxRows`
+   * (1000) and the report, the export and the Responses tab are built from an arbitrary subset.
    */
   public async loadResponsesForForm(formId: string): Promise<FormResponseRows> {
     const [responsesRes, answersRes] = (await this.rv.RunViews([
@@ -189,12 +192,14 @@ export class ResponsesDataService {
         ResultType: 'simple',
         Fields: [...RESPONSE_FIELDS],
         OrderBy: 'SubmittedAt DESC',
+        IgnoreMaxRows: true,
       },
       {
         EntityName: FORMS_ENTITY.FormResponseAnswer,
         ExtraFilter: answersForFormFilter(formId),
         ResultType: 'simple',
         Fields: [...ANSWER_FIELDS],
+        IgnoreMaxRows: true,
       },
     ])) as [
       RunViewResult<mjBizAppsFormsFormResponseEntityType>,
@@ -343,7 +348,8 @@ export class ResponsesDataService {
 
   /**
    * Loads all answer rows for a form (across ALL its versions' responses). Used by the
-   * export service to pivot responses into a wide matrix.
+   * export service to pivot responses into a wide matrix. Uncapped for the same reason as
+   * {@link loadResponsesForForm}: an export of 1,000 arbitrary answers is a wrong file.
    */
   public async loadAnswersForForm(
     formId: string,
@@ -353,6 +359,7 @@ export class ResponsesDataService {
       ExtraFilter: answersForFormFilter(formId),
       ResultType: 'simple',
       Fields: [...ANSWER_FIELDS],
+      IgnoreMaxRows: true,
     })) as RunViewResult<mjBizAppsFormsFormResponseAnswerEntityType>;
     if (!res.Success) {
       throw new Error(res.ErrorMessage || 'Failed to load answers.');
