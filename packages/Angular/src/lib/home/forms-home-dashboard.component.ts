@@ -12,7 +12,7 @@ import { BaseEntity, CompositeKey, LogError } from '@memberjunction/core';
 import { MJGlobal, MJEventType, RegisterClass } from '@memberjunction/global';
 import type { ActionParam } from '@memberjunction/actions-base';
 
-import { FORMS_UI_CSS } from '../shared';
+import { FORMS_UI_CSS, failureMessage } from '../shared';
 import { FormsHomeService } from './forms-home.service';
 import { FORMS_HOME_CSS } from './forms-home-dashboard.styles';
 import { totalResponses } from './home-aggregations';
@@ -45,6 +45,9 @@ const STATUS_TONE: Record<FormStatus, string> = {
  * archive semantics are one constant rather than a string repeated in four predicates.
  */
 const ARCHIVED_STATUS: FormStatus = 'Closed';
+
+/** Headline for an authoring failure, whether the action threw or reported `success: false`. */
+const AUTHORING_FAILED = 'The authoring action failed.';
 
 /**
  * The handle returned by subscribing to MJGlobal's event stream.
@@ -241,18 +244,21 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
    */
   public async toggleArchive(row: FormSummaryRow): Promise<void> {
     const next: FormStatus = this.isArchived(row) ? 'Draft' : ARCHIVED_STATUS;
+    const action = `Could not ${next === ARCHIVED_STATUS ? 'archive' : 'restore'} this form.`;
     this.busy = true;
     this.errorMessage = null;
     this.cdr.markForCheck();
     try {
+      // A failed Save() RETURNS its message rather than throwing, so this is the usual failure
+      // path, not the catch below — it needs the same "what failed" prefix.
       const failure = await this.data.setStatus(row.id, next);
       if (failure) {
-        this.errorMessage = failure;
+        this.fail(new Error(failure), action);
         return;
       }
       await this.loadForms();
     } catch (err) {
-      this.fail(err, `Could not ${next === ARCHIVED_STATUS ? 'archive' : 'restore'} this form.`);
+      this.fail(err, action);
     } finally {
       this.busy = false;
       this.cdr.markForCheck();
@@ -367,9 +373,11 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.errorMessage = null;
     this.cdr.markForCheck();
     try {
+      // MJ's action client reports a transport failure as { success: false } rather than
+      // throwing, so this branch, not the catch, is where most authoring failures land.
       const result = await this.data.runAuthoringAction(actionName, inputs);
       if (!result.success) {
-        this.errorMessage = result.message;
+        this.fail(new Error(result.message), AUTHORING_FAILED);
         return;
       }
       this.closePanel();
@@ -382,7 +390,7 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
       }
       await this.loadForms();
     } catch (err) {
-      this.fail(err, 'The authoring action failed.');
+      this.fail(err, AUTHORING_FAILED);
     } finally {
       this.busy = false;
       this.cdr.markForCheck();
@@ -402,10 +410,11 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.cdr.markForCheck();
   }
 
-  private fail(err: unknown, fallback: string): void {
-    const message = err instanceof Error ? err.message : fallback;
+  /** Alert, log and emitted Error all say what failed; the original failure rides along as `cause`. */
+  private fail(err: unknown, action: string): void {
+    const message = failureMessage(err, action);
     this.errorMessage = message;
     LogError(message);
-    this.Error.emit(err instanceof Error ? err : new Error(message));
+    this.Error.emit(new Error(message, { cause: err }));
   }
 }

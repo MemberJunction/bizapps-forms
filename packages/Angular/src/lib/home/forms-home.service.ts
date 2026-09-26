@@ -63,7 +63,10 @@ export class FormsHomeService {
     ])) as [RunViewResult<FormSimpleRecord>, RunViewResult<FormCategorySimpleRecord>];
 
     if (!formsRes.Success) {
-      throw new Error(formsRes.ErrorMessage || 'Failed to load forms.');
+      // This message is the DETAIL of the home alert, which already leads with "Failed to load
+      // forms" (see failureMessage in ../shared) — so the fallback states a reason, not the
+      // headline again.
+      throw new Error(formsRes.ErrorMessage || 'the Forms view reported a failure with no error message');
     }
     // Categories and counts are enrichment-only: the grid still loads without them.
     const cats = catsRes.Success ? catsRes.Results : [];
@@ -96,9 +99,12 @@ export class FormsHomeService {
   public async setStatus(formId: string, status: FormStatus): Promise<string | null> {
     const md = new Metadata();
     const form = await md.GetEntityObject<mjBizAppsFormsFormEntity>(HOME_ENTITY.forms);
+    // The returned text is the DETAIL of Forms home's alert, which already leads with "Could not
+    // archive/restore this form" (see failureMessage in ../shared) — so it states a reason, not a
+    // second headline. The log line carries the context the reason leaves out.
     if (!(await form.Load(formId))) {
-      const message = `Could not load form ${formId} to set its status to ${status}.`;
-      LogError(message);
+      const message = `form ${formId} could not be loaded`;
+      LogError(`setStatus(${formId}, ${status}) failed: ${message}`);
       return message;
     }
     form.Status = status;
@@ -106,7 +112,7 @@ export class FormsHomeService {
       return null;
     }
     const message =
-      form.LatestResult?.CompleteMessage ?? `Saving form ${formId} as ${status} failed.`;
+      form.LatestResult?.CompleteMessage ?? 'the save reported a failure with no error message';
     LogError(`setStatus(${formId}, ${status}) failed: ${message}`);
     return message;
   }
@@ -129,7 +135,8 @@ export class FormsHomeService {
       return {
         success: false,
         formId: null,
-        message: result.Message || 'The action did not complete successfully.',
+        // A reason, not a headline: Forms home prefixes it with "The authoring action failed".
+        message: result.Message || 'the action reported a failure with no error message',
       };
     }
     return {

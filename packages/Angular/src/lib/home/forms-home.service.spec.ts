@@ -13,6 +13,8 @@ import { FORMS_ENTITY } from '../shared/entity-names';
 const batches: RunViewParams[][] = [];
 const logged: string[] = [];
 let countsSucceed = true;
+/** When set, the Forms view fails with this ErrorMessage (possibly empty). */
+let formsViewError: string | null = null;
 
 function ok(results: object[], aggregates?: RunViewResult['AggregateResults']): RunViewResult {
   return {
@@ -28,6 +30,9 @@ function ok(results: object[], aggregates?: RunViewResult['AggregateResults']): 
 
 function answer(params: RunViewParams): RunViewResult {
   if (params.EntityName === FORMS_ENTITY.Form) {
+    if (formsViewError !== null) {
+      return { ...ok([]), Success: false, ErrorMessage: formsViewError };
+    }
     return ok([
       { ID: 'f1', Name: 'Alpha', Status: 'Published', CategoryID: null, __mj_UpdatedAt: null },
       { ID: 'f2', Name: 'Beta', Status: 'Draft', CategoryID: null, __mj_UpdatedAt: null },
@@ -67,6 +72,7 @@ beforeEach(() => {
   batches.length = 0;
   logged.length = 0;
   countsSucceed = true;
+  formsViewError = null;
 });
 
 describe('FormsHomeService.loadForms', () => {
@@ -99,5 +105,21 @@ describe('FormsHomeService.loadForms', () => {
     // "0 Responses" would be a claim about the data; a failed count makes no claim.
     expect(rows.every((r) => r.responseCount === null)).toBe(true);
     expect(logged.join('\n')).toMatch(/2 forms on Forms home[\s\S]*count query refused/);
+  });
+});
+
+describe('FormsHomeService.loadForms when the Forms view itself fails (#253)', () => {
+  it("rejects with the view's own error message", async () => {
+    formsViewError = 'Invalid column name IsTemplate';
+    await expect(new FormsHomeService().loadForms()).rejects.toThrow('Invalid column name IsTemplate');
+  });
+
+  it('gives a reason, not a second "Failed to load forms" headline, when the view says nothing', async () => {
+    // The component prefixes this with "Failed to load forms: ", so a fallback that repeated the
+    // headline would render "Failed to load forms: Failed to load forms."
+    formsViewError = '';
+    const failure = new FormsHomeService().loadForms();
+    await expect(failure).rejects.toThrow('the Forms view reported a failure with no error message');
+    await expect(failure).rejects.not.toThrow(/^Failed to load forms/);
   });
 });
