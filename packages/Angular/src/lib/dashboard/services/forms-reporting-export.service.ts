@@ -17,8 +17,8 @@ export class FormsReportingExportService {
 
   /**
    * Exports the response matrix for a report, pivoting the answer rows the report carries
-   * (`report.answers`, partials included) to one row per response with a column per
-   * non-display question. The rows come from the report rather than from the caller so the
+   * (`report.answers`) to one row per entry of `report.responses` — Complete responses only —
+   * with a column per non-display question. The rows come from the report rather than from the caller so the
    * dashboard never has to read them a second time to export (#246).
    */
   public async exportResponses(report: FormReportData, format: ExportFormat): Promise<void> {

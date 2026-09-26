@@ -15,6 +15,7 @@ import type { ActionParam } from '@memberjunction/actions-base';
 import { FORMS_UI_CSS } from '../shared';
 import { FormsHomeService } from './forms-home.service';
 import { FORMS_HOME_CSS } from './forms-home-dashboard.styles';
+import { totalResponses } from './home-aggregations';
 import {
   HOME_ACTION,
   HOME_ENTITY,
@@ -185,8 +186,9 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
 
   /** "12 forms · 340 responses" — the page subtitle. */
   public get summaryLine(): string {
-    const responses = this.forms.reduce((sum, f) => sum + f.responseCount, 0);
-    return `${plural(this.forms.length, 'form')} · ${plural(responses, 'response')}`;
+    const forms = plural(this.forms.length, 'form');
+    const responses = totalResponses(this.forms);
+    return responses === null ? forms : `${forms} · ${plural(responses, 'response')}`;
   }
 
   /** Shown beside the search box; only interesting once a search is narrowing the list. */

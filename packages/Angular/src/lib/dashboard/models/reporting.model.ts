@@ -125,7 +125,8 @@ export interface FormReportData {
   responses: ResponseListRow[];
   /**
    * Every answer row of every response — partials included — exactly as fetched. The export
-   * pivots these; the Insights use the complete-only subset `loadReport` derives from them.
+   * pivots these onto `responses` (Complete only, so a partial's rows never reach the sheet); the
+   * Insights use the complete-only subset `loadReport` derives from them.
    *
    * Carried on the report because the export needs the raw rows and the read-model above
    * discards them: without this field the dashboard re-read every answer of the form a second

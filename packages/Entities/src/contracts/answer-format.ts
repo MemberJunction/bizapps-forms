@@ -506,7 +506,20 @@ function isMatrixAnswer(value: AnswerValue): boolean {
  * Failing open is safe: an uncompilable pattern never expressed a constraint in the first
  * place, and the type floor ({@link validateAnswerFormat}) still applies underneath it.
  */
+/**
+ * SECURITY: an author-supplied `pattern` is compiled and run against respondent input on the
+ * anonymous submit path. A catastrophic-backtracking pattern against a large value can pin a CPU
+ * core (ReDoS). Node has no native per-regex timeout, so we bound the ONLY attacker-controlled
+ * growth factor — input length. A value longer than this cap skips the pattern test (fail-open,
+ * consistent with the uncompilable-pattern case below); the answer's own type/maxLength floor
+ * still bounds what is stored, so no realistic format constraint is lost.
+ */
+const MAX_PATTERN_TEST_LENGTH = 4096;
+
 export function matchesValidationPattern(value: string, pattern: string): boolean {
+  if (value.length > MAX_PATTERN_TEST_LENGTH) {
+    return true;
+  }
   try {
     return new RegExp(`^(?:${pattern})$`).test(value);
   } catch {

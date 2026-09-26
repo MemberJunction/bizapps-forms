@@ -39,7 +39,7 @@ import {
   type AnswerValue,
   type PublishedFormQuestion,
   type PublishedFormQuestionOption,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/forms-entities/contracts';
 
 import { NgTemplateOutlet } from '@angular/common';
 

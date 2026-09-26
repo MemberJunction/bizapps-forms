@@ -37,7 +37,7 @@ import {
   type PublishedFormDefinition,
   type PublishedFormScreen,
   type ResumeSnapshot,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/forms-entities/contracts';
 
 import { FORMS_API_SERVICE, SessionExpiredError } from './api/forms-api.interface';
 import { FORMS_API_CONFIG } from './api/forms-api.config';

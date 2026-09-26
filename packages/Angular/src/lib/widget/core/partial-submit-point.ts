@@ -14,7 +14,7 @@
  *
  * Pure and framework-free; the widget owns the "already banked" bookkeeping.
  */
-import type { PublishedFormPage } from '@mj-biz-apps/forms-entities';
+import type { PublishedFormPage } from '@mj-biz-apps/forms-entities/contracts';
 
 /**
  * Ids of submit-point pages the respondent has moved past, in page order.

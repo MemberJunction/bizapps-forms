@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { FormSubmissionResult } from '@mj-biz-apps/forms-entities';
+import type { FormSubmissionResult } from '@mj-biz-apps/forms-entities/contracts';
 import { outcomeForResult, shouldIgnoreSubmit, type WidgetPhase } from './submit-phase';
 
 describe('shouldIgnoreSubmit (double-submit guard)', () => {

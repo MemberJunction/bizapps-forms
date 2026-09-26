@@ -10,13 +10,18 @@
  * The shapes (`PublishedFormDefinition`, `FormSubmissionInput`, `FormSubmissionResult`)
  * are imported from the frozen contract in `@mj-biz-apps/forms-entities`; they are NOT
  * redefined here.
+ *
+ * Every widget file imports the `/contracts` subpath, never the package root (#245). The root
+ * also re-exports the CodeGen entity subclasses, whose `@RegisterClass` side effects drag MJCore,
+ * MJGlobal, sql-dialect and acorn into the respondent bundle on anonymous visitors' phones.
+ * `scripts/build-widget.mjs` fails the build if any of them get bundled again.
  */
 import type {
   PublishedFormDefinition,
   FormSubmissionInput,
   FormSubmissionResult,
   ResumeSnapshot,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/forms-entities/contracts';
 
 import { InjectionToken } from '@angular/core';
 

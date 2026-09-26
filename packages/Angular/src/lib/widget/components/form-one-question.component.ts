@@ -16,7 +16,7 @@ import {
   untracked,
   ElementRef,
 } from '@angular/core';
-import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
+import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
 import { FormRuntime } from '../core/form-runtime';
 import { clampCursor } from '../core/stepper';

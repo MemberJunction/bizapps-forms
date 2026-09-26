@@ -264,6 +264,28 @@ export function portfolioSummary(forms: readonly ReportableForm[]): PortfolioSum
   };
 }
 
+/** What the report pane shows before a form is picked. */
+export type RailState = 'loading' | 'failed' | 'empty' | 'ready';
+
+/**
+ * `failed` is its own state because a load that fails with no list to show would otherwise read
+ * as "nothing published yet" — a claim about the data the page cannot make. A list already on
+ * screen wins: a failed reload keeps it usable (the rail is drawn from it either way), and the
+ * error banner in the ready pane reports the failure.
+ */
+export function railState(loading: boolean, loadError: string | null, formCount: number): RailState {
+  if (loading) return 'loading';
+  if (formCount > 0) return 'ready';
+  return loadError !== null ? 'failed' : 'empty';
+}
+
+/** "12 forms · 1,204 responses" — or, with no list after a failed load, no totals rather than zeros. */
+export function portfolioLine(forms: readonly ReportableForm[], loadError: string | null): string {
+  if (forms.length === 0 && loadError !== null) return 'Forms could not be loaded';
+  const { formCount, responseCount } = portfolioSummary(forms);
+  return `${plural(formCount, 'form')} · ${plural(responseCount, 'response')}`;
+}
+
 /**
  * The rail's search. Matches on name only — the rail shows nothing else to match against,
  * and a hit the reader cannot see the reason for is worse than a miss.

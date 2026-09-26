@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
 import { FormRuntime } from './form-runtime';
 import { FormUploadStore, IDLE_UPLOAD } from './upload-store';
