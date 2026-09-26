@@ -1,5 +1,52 @@
 # @mj-biz-apps/forms-server
 
+## 0.13.0
+
+### Minor Changes
+
+- 5e7d492: Two built-in on-submit hooks failed on every installed host, and the server now names a missing automation grant at startup (#239).
+
+  **What was broken.** `Forms: Create Followup Task` could not read `MJ_BizApps_Tasks: Task Types` as the automation principal, so it created no task and reported the misleading `No TaskType available to assign to the task.` And creating a Person in `Forms: Upsert Respondent Person` fires bizapps-common's `Common.LogActivity` action as the same principal, which failed first as `references 1 unknown action(s): Common.LogActivity` (no Read on `MJ: Actions`) and then on `MJ_BizApps_Common: Activity Types`, so no activity was ever logged for a respondent. Each failure showed up only as a per-submit log line on a best-effort hook.
+
+  **What the migration grants.** `V202609251200` gives the `Forms Automation Runner` role, and nothing wider: Read on Task Types; Create only on Tasks and Task Links; Read on `MJ: Actions`; Read on Activity Types; Read + Create on Activities (the read is the action's dedupe check); Create only on Activity Links. No Update or Delete. It widens an existing row without lowering anything an operator granted by hand. When a sibling entity does not exist on the database — Activities arrived in bizapps-common 5.35, and a database not built by `mj app install` may lack bizapps-tasks — that grant is skipped with a printed message instead of failing the migration. The same seven records are declared in `metadata/`.
+
+  **An expected log line that stays.** After a respondent's Person is created you will still see MJ report that `Common.LogActivity` asked for durable dispatch but ran inline instead. That is deliberate: durable dispatch would need write on core's task-graph entities, which not even the `UI` role holds, and a principal driven by anonymous submissions must not be able to create task graphs. The action runs inline and the activity is written.
+
+  **New at startup.** Forms checks the automation principal's effective permissions against every grant the shipped hooks need and logs each gap as `[Forms] On-submit automations are NOT ready: <entity, missing permission, which hook needs it>`. A clean start logs nothing.
+
+  **New result code.** When `Forms: Create Followup Task` cannot read Task Types, it now fails with `TASK_TYPE_LOOKUP_FAILED` and the underlying error, instead of `NO_TASK_TYPE`, which now means only that no matching task type exists.
+
+  **A failed read is no longer mistaken for missing data.** The built-in hooks and `Forms: Bind Response To Entity` now fail with `RESPONSE_LOAD_FAILED` (and the underlying error) when the response, its form, its answers or its questions cannot be read, instead of skipping as if the response did not exist or running on an empty answer set. `Forms: Upsert Respondent Person` fails with `PERSON_LOOKUP_FAILED` when it cannot search People, where before it treated the failed search as "no match" and created a duplicate Person. A response that genuinely does not exist is still skipped. `loadFormResponseContext` (exported from `@mj-biz-apps/forms-actions`) now returns a result with a `status` of `loaded`, `absent` or `failed` instead of `context | null`; callers must switch on it.
+
+- 4833470: Adds the v0.13.0 consolidated metadata seed, `V202609262310__v0.13.x__Metadata_Sync.sql`. It changes nothing on a host: the only record `metadata/` gained since v0.12.0 is the seven `Forms Automation Runner` grants of #239, and `V202609251200` already ships those under the same ids. A push against a database built from the shipped chain found no difference for any of them. The file carries the one statement the push emits, a rewrite of the All Forms view with its existing values, which every earlier seed also carries. It exists so the release ships the seed that `check:seed-cadence` requires whenever `metadata/` moves.
+
+### Patch Changes
+
+- 53f61fc: The respondent page no longer sends submissions to `localhost:4121` on hosts that have not set `MJAPI_PUBLIC_URL`.
+
+  With neither `FORMS_GRAPHQL_URL` nor `MJAPI_PUBLIC_URL` set, the page at `/f/:slug` fell back to a
+  hardcoded `http://localhost:4121` as the GraphQL endpoint it handed the respondent's browser. On any
+  host not listening there — MJ's own host on `:4000`, a branch harness on another port — every submit
+  went to a server that was not there, or to a different checkout's (#238). The page now addresses the
+  origin its own request arrived on (honouring `X-Forwarded-Host` / `X-Forwarded-Proto` behind a
+  trusted proxy), and MJAPI logs an error at boot saying `MJAPI_PUBLIC_URL` is unset. A configured
+  `FORMS_GRAPHQL_URL` or `MJAPI_PUBLIC_URL` still wins, and should be set on any deployment behind a
+  proxy. Authoring-asset URLs lost the same `localhost:4121` fallback: with no public URL and no
+  request origin the upload now fails with a logged 500 instead of storing a broken image URL.
+
+- Updated dependencies [5e7d492]
+- Updated dependencies [49d4e87]
+- Updated dependencies [b8d4392]
+- Updated dependencies [3415120]
+- Updated dependencies [0c9c2a4]
+- Updated dependencies [0a41474]
+- Updated dependencies [a0382ef]
+- Updated dependencies [65c053c]
+  - @mj-biz-apps/forms-actions@0.13.0
+  - @mj-biz-apps/forms-entities@0.13.0
+  - @mj-biz-apps/forms-ng@0.13.0
+  - @mj-biz-apps/forms-core-entities-server@0.13.0
+
 ## 0.12.0
 
 ### Minor Changes

@@ -1,5 +1,39 @@
 # @mj-biz-apps/forms-ng
 
+## 0.13.0
+
+### Patch Changes
+
+- b8d4392: Forms home's error alert now says what failed before why: "Failed to load forms: GraphQL Error (Code: unknown)" instead of only the transport error. The same applies to archive/restore, create-from-template and authoring failures — including the usual case where the save or action reports its failure rather than throwing — and to the Error the dashboard emits, which keeps the original failure as its `cause` (#253).
+- 3415120: Responses & Analytics now reads a form's answers once per selection. Every click on a form, and every Refresh, used to read all of that form's answers twice, one read after the other — about 430 KB of extra transfer per click on a form with a few hundred responses (434 KB measured on one with 359), and a full extra round trip before the report appeared. The answers are now read once, and the form definition and the responses load together instead of one after the other. The exported CSV/Excel sheet is unchanged. A failed load or export on Responses & Analytics now says what failed ("Failed to load the report: …") instead of showing only the transport error.
+
+  API changes for code that calls these services directly: `ResponsesDataService.loadAnswersForForm` was removed — use `loadResponsesForForm(formId).answers`, or the new `FormReportData.answers`, which carries every answer row the report was built from (partial responses included). `FormsReportingExportService.exportResponses` now takes `(report, format)` and exports `report.answers`.
+
+- 0c9c2a4: Responses & Analytics now always shows the report for the form you picked last. Clicking a second form while the first was still loading could leave the first form's numbers on screen under the second form's name, depending on which load finished first. The form list is no longer locked while a report loads, so you can move straight on to another form, and the previous form's figures clear as soon as you do. A response still opening for the form you left no longer appears, or reports a failure, on the new one. An export that fails after you have moved to a different form is recorded in the log rather than shown there; if you are back on the form it was for when it fails, the failure is shown. An export that succeeds still downloads its file wherever you are.
+- 0a41474: Response counts on the Forms home list and the Responses & Analytics rail are now computed by the database, which fixes counts that were silently truncated once a host held more than 1000 responses (#247).
+
+  Both surfaces used to download one row per Complete response across every form and count them in the browser. The entity's 1000-row view cap cut that download short, so a form with 712 responses could read 536, and the payload grew with every response. Each surface now asks for one aggregate count per form in a single request that returns no rows. On the home list a failed count is logged and the grid still loads, showing the count as unavailable (—) rather than a false 0; on the rail a failed load now says the forms could not be loaded, with a retry, instead of the "Nothing to report on yet" empty state and "0 forms · 0 responses".
+
+  The same 1000-row cap also truncated the per-form reads behind the Responses & Analytics report, its CSV/Excel export and the builder's Responses tab: a form with 712 responses and 4,338 answers was reported from 1,000 of them ("First name · 176 answered · 536 skipped" instead of 703 and 9). Those reads now fetch every row.
+
+- a0382ef: Welcome and ending screens now render as one centred stack — logo, image, title, description, button, social links — at every width. The form's logo used to stay pinned to the top-left corner while the rest of the screen centred in the middle of the window, and a short description sat on the same line as the Start button (or the social links) whenever both fit.
+
+  The "we couldn't reopen your saved answers" notice now appears. The `/f/:slug` page set it on `<mj-form>` as a `resume-notice` attribute, but the element only ever forwarded `slug` to the form, so a respondent whose saved draft could not be reopened was never told.
+
+- 65c053c: The respondent widget bundle (`mj-form.js`) is less than half its former size (#245).
+
+  **What was wrong.** The widget imported the forms contract from the root of `@mj-biz-apps/forms-entities`, which also loads the generated entity classes. Those register themselves with MemberJunction when loaded, so the bundler had to keep them, and with them MJCore, MJGlobal, the SQL dialect layer, acorn and lodash. None of it is used to show or submit a form, but every anonymous visitor downloaded and parsed it on their phone.
+
+  **What changed.** `mj-form.js` drops from 1,320,575 to 611,236 bytes, and from 362,744 to 175,452 bytes gzipped. The widget now imports only the contract, and the widget build fails if any MemberJunction package, acorn, or the generated entity classes end up in the bundle again.
+
+  **New subpath export.** `@mj-biz-apps/forms-entities/contracts` exposes the contract (form definition, submission types, rule evaluators, zod schemas) without the entity classes. Use it from browser code. The package root is unchanged for server code.
+
+  **Deep imports are closed.** `@mj-biz-apps/forms-entities` now has an `exports` map listing only `.`, `./contracts` and `./package.json`, so an import of a path inside `dist/` no longer resolves. Nothing in this repo did that; if your code does, import from the package root or `/contracts` instead.
+
+- Updated dependencies [49d4e87]
+- Updated dependencies [65c053c]
+  - @mj-biz-apps/forms-entities@0.13.0
+
 ## 0.12.0
 
 ### Patch Changes
