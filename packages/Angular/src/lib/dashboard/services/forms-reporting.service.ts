@@ -11,8 +11,9 @@
  * Responses tab and the Form Response entity-form override consume directly. This service
  * adds only the dashboard-only concerns: the form picker and the summary/breakdown/funnel
  * aggregations. It does NOT re-expose the response reads — callers that want a single
- * response's detail or the export's answer rows inject `ResponsesDataService` themselves,
- * rather than reaching them through a pass-through method here.
+ * response's detail inject `ResponsesDataService` themselves, rather than reaching it
+ * through a pass-through method here. The export's answer rows are not a separate read at
+ * all: the report carries the rows it was built from (`FormReportData.answers`).
  */
 import { Injectable, inject } from '@angular/core';
 import { RunView, RunViewResult } from '@memberjunction/core';
@@ -114,9 +115,14 @@ export class FormsReportingService {
    * come from the latest published definition; answers map back by `QuestionID`.
    */
   public async loadReport(form: ReportableForm): Promise<FormReportData> {
-    const definition = await this.responses.loadDefinition(form.formVersionId);
+    // Neither read needs the other's result, so they run together: serial awaits cost the
+    // reader a full extra round trip on every form they click (#246). Either one failing
+    // rejects the whole report — there is no half-built report to fall back to.
+    const [definition, { responses, answers }] = await Promise.all([
+      this.responses.loadDefinition(form.formVersionId),
+      this.responses.loadResponsesForForm(form.formId),
+    ]);
     const questions = flattenQuestions(definition);
-    const { responses, answers } = await this.responses.loadResponsesForForm(form.formId);
 
     const summary = buildSummary(responses);
     // Every rate on the Insights view divides by the RESPONSE count rather than by the
@@ -152,6 +158,10 @@ export class FormsReportingService {
       ),
       funnel: buildFunnel(definition, answers),
       responses: buildResponseRows(responses, answers, questions),
+      // The UNFILTERED rows, as fetched: this is the record of what the report was built from.
+      // The export's rows are chosen by `responses` (Complete only, see `buildResponseRows`), so
+      // filtering here too would put that decision in a second place without changing the sheet.
+      answers,
     };
   }
 }

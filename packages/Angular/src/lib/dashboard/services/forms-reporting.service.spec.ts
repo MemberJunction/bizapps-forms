@@ -1,16 +1,28 @@
 /**
- * `FormsReportingService.loadReportableForms` exercised as a class over a fake RunView.
+ * `FormsReportingService` exercised as a class.
  *
- * The rail's counts used to be tallied from downloaded response rows, which the 1000-row view
- * cap truncated (#247). They now come from the shared server-side counter, for the forms the
- * rail actually lists.
+ * `loadReportableForms` (#247): the rail's counts used to be tallied from downloaded response
+ * rows, which the 1000-row view cap truncated. They now come from the shared server-side
+ * counter, for the forms the rail actually lists. Exercised over a fake RunView.
+ *
+ * `loadReport` (#246): the dashboard used to read a form's answers twice per selection: once
+ * inside `loadReport` (through `loadResponsesForForm`) and again through a separate answers-only
+ * query, only so the export had the raw rows. These specs pin the fix: the report carries the
+ * rows it was built from, the answers are read exactly once, and the definition and responses
+ * reads run together. `ResponsesDataService` is replaced by a fake whose reads are deferred
+ * promises, so a test can hold both open and observe that both STARTED before either resolved.
  */
 import '@angular/compiler';
 import { Injector, runInInjectionContext } from '@angular/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunViewParams, RunViewResult } from '@memberjunction/core';
+import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../../shared/entity-names';
-import { ResponsesDataService } from '../../responses/responses-data.service';
+import { ResponsesDataService, type FormResponseRows } from '../../responses/responses-data.service';
+import { mockDefinition } from './forms-reporting-mock';
+import { buildExportMatrix } from './export-pivot';
+import type { ReportableForm } from '../models/reporting.model';
+import { response, answer as answerRow } from '../../shared/testing/entity-row-fixtures';
 
 const batches: RunViewParams[][] = [];
 let countsSucceed = true;
@@ -92,5 +104,138 @@ describe('FormsReportingService.loadReportableForms', () => {
   it('fails the load when counting fails, rather than showing zeros', async () => {
     countsSucceed = false;
     await expect(service().loadReportableForms()).rejects.toThrow(/count query refused/);
+  });
+});
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: Error) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** Records every read it is asked for; the test decides when (and how) each one settles. */
+class FakeResponses {
+  public readonly calls: string[] = [];
+  public readonly def = deferred<PublishedFormDefinition>();
+  public readonly rows = deferred<FormResponseRows>();
+
+  public loadDefinition(formVersionId: string): Promise<PublishedFormDefinition> {
+    this.calls.push(`definition:${formVersionId}`);
+    return this.def.promise;
+  }
+
+  public loadResponsesForForm(formId: string): Promise<FormResponseRows> {
+    this.calls.push(`responses:${formId}`);
+    return this.rows.promise;
+  }
+}
+
+const FORM: ReportableForm = {
+  formId: 'form-1',
+  formVersionId: 'version-1',
+  name: 'Feedback',
+  responseCount: 1,
+};
+
+/** One complete and one partial response, each answering questions from the mock definition. */
+function rowsWithAPartial(): FormResponseRows {
+  const started = new Date('2026-09-01T10:00:00Z');
+  const submitted = new Date('2026-09-01T10:02:00Z');
+  return {
+    responses: [
+      response('r-complete', 'Complete', started, submitted),
+      response('r-partial', 'Partial', started, null),
+    ],
+    answers: [
+      answerRow('r-complete', 'q-channel', { TextValue: 'search' }),
+      answerRow('r-complete', 'q-rating', { NumericValue: 4 }),
+      answerRow('r-partial', 'q-channel', { TextValue: 'social' }),
+    ],
+  };
+}
+
+function make(): { fake: FakeResponses; svc: InstanceType<typeof FormsReportingService> } {
+  const fake = new FakeResponses();
+  const injector = Injector.create({
+    providers: [{ provide: ResponsesDataService, useValue: fake }],
+  });
+  return { fake, svc: runInInjectionContext(injector, () => new FormsReportingService()) };
+}
+
+describe('FormsReportingService.loadReport', () => {
+  it('reads the answers once, through loadResponsesForForm, and hands the raw rows to the report', async () => {
+    const { fake, svc } = make();
+    const rows = rowsWithAPartial();
+    fake.def.resolve(mockDefinition());
+    fake.rows.resolve(rows);
+
+    const report = await svc.loadReport(FORM);
+
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls).toContain('definition:version-1');
+    expect(fake.calls).toContain('responses:form-1');
+    // The UNFILTERED rows, partials included: `answers` is the record of what the report was
+    // built from (the funnel and the response rows read the same unfiltered set).
+    expect(report.answers).toEqual(rows.answers);
+    expect(report.answers).toHaveLength(3);
+    expect(report.answers.some((a) => a.ResponseID === 'r-partial')).toBe(true);
+  });
+
+  it('exports no partial response: the sheet has a row per Complete response only', async () => {
+    const { fake, svc } = make();
+    fake.def.resolve(mockDefinition());
+    fake.rows.resolve(rowsWithAPartial());
+
+    const report = await svc.loadReport(FORM);
+    const questions = report.questions.filter((q) => q.type !== 'Statement');
+    const sheet = buildExportMatrix(report.responses, questions, report.answers);
+    const completeOnly = report.answers.filter((a) => a.ResponseID !== 'r-partial');
+
+    // The row set is decided by `report.responses` (Complete only), not by `report.answers`, so
+    // the partial's answer rows the report carries never reach the sheet — on base and head alike.
+    expect(sheet.map((row) => (Array.isArray(row) ? null : row.responseId))).toEqual(['r-complete']);
+    expect(sheet).toEqual(buildExportMatrix(report.responses, questions, completeOnly));
+  });
+
+  it('starts the definition and the responses reads together', async () => {
+    const { fake, svc } = make();
+
+    const pending = svc.loadReport(FORM);
+    await Promise.resolve();
+
+    // Neither read has settled, yet both have been asked for: they are concurrent, not serial.
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls).toContain('definition:version-1');
+    expect(fake.calls).toContain('responses:form-1');
+
+    fake.def.resolve(mockDefinition());
+    fake.rows.resolve(rowsWithAPartial());
+    await pending;
+  });
+
+  it('rejects when the responses read fails', async () => {
+    const { fake, svc } = make();
+    fake.def.resolve(mockDefinition());
+    fake.rows.reject(new Error('boom'));
+
+    await expect(svc.loadReport(FORM)).rejects.toThrow('boom');
+  });
+
+  it('rejects when the definition read fails', async () => {
+    const { fake, svc } = make();
+    fake.def.reject(new Error('no snapshot'));
+    fake.rows.resolve(rowsWithAPartial());
+
+    await expect(svc.loadReport(FORM)).rejects.toThrow('no snapshot');
   });
 });

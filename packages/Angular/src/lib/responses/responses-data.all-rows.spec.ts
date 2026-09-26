@@ -6,6 +6,10 @@
  * Responses and Form Response Answers) and says so only in `TotalRowCount`, which nothing here
  * reads. A form with 714 responses has 4,338 answers on the shared dev database; the report was
  * built from an arbitrary 1,000 of them ("First name · 176 answered · 536 skipped").
+ *
+ * All three now read through `loadResponsesForForm`: the export pivots the answer rows the report
+ * carries (`FormReportData.answers`, #246) rather than reading them a second time, so the one
+ * uncapped read below is the export's read too.
  */
 import '@angular/compiler';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,12 +52,5 @@ describe('ResponsesDataService — whole-form reads are not capped at UserViewMa
       FORMS_ENTITY.FormResponseAnswer,
     ]);
     expect(requested.every((p) => p.IgnoreMaxRows === true)).toBe(true);
-  });
-
-  it('loadAnswersForForm (the export) asks for every answer', async () => {
-    await new ResponsesDataService().loadAnswersForForm('form-1');
-    expect(requested).toHaveLength(1);
-    expect(requested[0].EntityName).toBe(FORMS_ENTITY.FormResponseAnswer);
-    expect(requested[0].IgnoreMaxRows).toBe(true);
   });
 });

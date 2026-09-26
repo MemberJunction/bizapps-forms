@@ -346,27 +346,6 @@ export class ResponsesDataService {
     return names;
   }
 
-  /**
-   * Loads all answer rows for a form (across ALL its versions' responses). Used by the
-   * export service to pivot responses into a wide matrix. Uncapped for the same reason as
-   * {@link loadResponsesForForm}: an export of 1,000 arbitrary answers is a wrong file.
-   */
-  public async loadAnswersForForm(
-    formId: string,
-  ): Promise<mjBizAppsFormsFormResponseAnswerEntityType[]> {
-    const res = (await this.rv.RunView({
-      EntityName: FORMS_ENTITY.FormResponseAnswer,
-      ExtraFilter: answersForFormFilter(formId),
-      ResultType: 'simple',
-      Fields: [...ANSWER_FIELDS],
-      IgnoreMaxRows: true,
-    })) as RunViewResult<mjBizAppsFormsFormResponseAnswerEntityType>;
-    if (!res.Success) {
-      throw new Error(res.ErrorMessage || 'Failed to load answers.');
-    }
-    return res.Results;
-  }
-
   /** Loads + parses the published `DefinitionSnapshot` for a version. */
   public async loadDefinition(formVersionId: string): Promise<PublishedFormDefinition> {
     const res = (await this.rv.RunView(

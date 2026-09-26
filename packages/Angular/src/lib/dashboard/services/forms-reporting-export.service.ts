@@ -8,30 +8,24 @@
 import { Injectable, inject } from '@angular/core';
 import { ExportService } from '@memberjunction/ng-export-service';
 import type { ExportFormat } from '@memberjunction/export-engine';
-import type { mjBizAppsFormsFormResponseAnswerEntityType } from '@mj-biz-apps/forms-entities';
 import type { FormReportData } from '../models/reporting.model';
 import { buildExportColumns, buildExportMatrix } from './export-pivot';
-
-type AnswerRow = mjBizAppsFormsFormResponseAnswerEntityType;
 
 @Injectable()
 export class FormsReportingExportService {
   private readonly exporter = inject(ExportService);
 
   /**
-   * Exports the response matrix for a report. The caller supplies the raw answer rows (the
-   * dashboard already holds them) so we can pivot to one row per response with a column per
-   * non-display question.
+   * Exports the response matrix for a report, pivoting the answer rows the report carries
+   * (`report.answers`) to one row per entry of `report.responses` — Complete responses only —
+   * with a column per non-display question. The rows come from the report rather than from the caller so the
+   * dashboard never has to read them a second time to export (#246).
    */
-  public async exportResponses(
-    report: FormReportData,
-    answers: AnswerRow[],
-    format: ExportFormat,
-  ): Promise<void> {
+  public async exportResponses(report: FormReportData, format: ExportFormat): Promise<void> {
     const questions = report.questions.filter((q) => q.type !== 'Statement');
 
     await this.exporter.exportAndDownload(
-      buildExportMatrix(report.responses, questions, answers),
+      buildExportMatrix(report.responses, questions, report.answers),
       {
         format,
         columns: buildExportColumns(questions),
