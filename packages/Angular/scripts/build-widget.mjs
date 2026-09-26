@@ -32,7 +32,7 @@ import linkerPlugin from '@angular/compiler-cli/linker/babel';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
-import { findServerOnlyInputs } from './widget-bundle-guard.mjs';
+import { createPackageNameResolver, findServerOnlyInputs } from './widget-bundle-guard.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(here, '..');
@@ -94,7 +94,9 @@ const result = await build({
 
 /** Fails the build when esbuild bundled any server-only module (see `widget-bundle-guard.mjs`). */
 function assertNoServerOnlyInputs(metafile) {
-  const offendersByPackage = findServerOnlyInputs(Object.keys(metafile.inputs));
+  // esbuild keys metafile inputs relative to its working directory, which is process.cwd() here.
+  const packageNameOf = createPackageNameResolver(process.cwd());
+  const offendersByPackage = findServerOnlyInputs(Object.keys(metafile.inputs), packageNameOf);
   if (offendersByPackage.size === 0) return;
 
   console.error(
