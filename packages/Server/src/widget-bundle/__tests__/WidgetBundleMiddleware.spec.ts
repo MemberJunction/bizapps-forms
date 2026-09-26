@@ -33,7 +33,7 @@ import { resetWidgetBundleConfigForTests, WIDGET_BUNDLE_ROUTE, WIDGET_SOURCEMAP_
 
 /**
  * Stand-in for the real bundle. Repeated past MJ's 1 KB compression threshold on purpose: the
- * real bundle is 1.2 MB, and a fixture small enough to fall under the threshold would make the
+ * real bundle is far above it, and a fixture small enough to fall under the threshold would make the
  * compression test pass-by-absence — no `Content-Encoding` because nothing was worth encoding.
  */
 const BUNDLE_BYTES = 'customElements.define("mj-form", class extends HTMLElement {});\n'.repeat(40);
