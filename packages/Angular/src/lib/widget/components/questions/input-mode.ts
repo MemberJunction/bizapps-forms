@@ -9,7 +9,7 @@
  * every consumer needs (is it answerable, which column, how is it analysed); this carries what
  * only the widget needs.
  */
-import type { FormQuestionType } from '@mj-biz-apps/forms-entities';
+import type { FormQuestionType } from '@mj-biz-apps/forms-entities/contracts';
 
 /** HTML `inputmode` for the soft keyboard a text-style question should summon. */
 export function inputModeFor(type: FormQuestionType): string {

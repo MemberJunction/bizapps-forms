@@ -4,14 +4,13 @@ import type { ActionParam } from '@memberjunction/actions-base';
 import {
   buildFormRows,
   categoryNameMap,
+  totalResponses,
   readFormIdFromParams,
   readFormIdFromResult,
-  responseCountMap,
   sortByUpdatedDesc,
 } from './home-aggregations';
 import type {
   FormCategorySimpleRecord,
-  FormResponseSimpleRecord,
   FormSimpleRecord,
   FormSummaryRow,
 } from './home-models';
@@ -36,7 +35,7 @@ describe('toDate', () => {
   });
 });
 
-describe('categoryNameMap / responseCountMap', () => {
+describe('categoryNameMap', () => {
   it('maps category ids to names', () => {
     const cats: FormCategorySimpleRecord[] = [
       { ID: 'c1', Name: 'Intake' },
@@ -47,18 +46,6 @@ describe('categoryNameMap / responseCountMap', () => {
     expect(map.get('c2')).toBe('Survey');
     expect(map.get('missing')).toBeUndefined();
   });
-
-  it('counts responses per form', () => {
-    const responses: FormResponseSimpleRecord[] = [
-      { FormID: 'f1' },
-      { FormID: 'f1' },
-      { FormID: 'f2' },
-    ];
-    const counts = responseCountMap(responses);
-    expect(counts.get('f1')).toBe(2);
-    expect(counts.get('f2')).toBe(1);
-    expect(counts.get('f3')).toBeUndefined();
-  });
 });
 
 describe('buildFormRows', () => {
@@ -67,10 +54,10 @@ describe('buildFormRows', () => {
     { ID: 'f2', Name: 'Beta', Status: 'Published', CategoryID: null, __mj_UpdatedAt: '2026-03-01T00:00:00Z' },
   ];
   const cats: FormCategorySimpleRecord[] = [{ ID: 'c1', Name: 'Intake' }];
-  const responses: FormResponseSimpleRecord[] = [{ FormID: 'f2' }, { FormID: 'f2' }];
+  const counts: ReadonlyMap<string, number> = new Map([['f2', 2]]);
 
   it('resolves category names, counts and dates', () => {
-    const rows = buildFormRows(forms, cats, responses);
+    const rows = buildFormRows(forms, cats, counts);
     const alpha = rows.find((r) => r.id === 'f1')!;
     const beta = rows.find((r) => r.id === 'f2')!;
     expect(alpha.categoryName).toBe('Intake');
@@ -81,9 +68,28 @@ describe('buildFormRows', () => {
   });
 
   it('orders newest-updated first', () => {
-    const rows = buildFormRows(forms, cats, responses);
+    const rows = buildFormRows(forms, cats, counts);
     expect(rows[0].id).toBe('f2'); // March beats January
     expect(rows[1].id).toBe('f1');
+  });
+
+  it('marks every count unknown when no counts could be loaded', () => {
+    const rows = buildFormRows(forms, cats, null);
+    expect(rows.map((r) => r.responseCount)).toEqual([null, null]);
+  });
+});
+
+describe('totalResponses', () => {
+  const row = (responseCount: number | null): FormSummaryRow => ({
+    id: 'x', name: 'x', status: 'Draft', categoryName: null, updatedAt: null, responseCount,
+  });
+
+  it('sums the known counts', () => {
+    expect(totalResponses([row(2), row(0), row(5)])).toBe(7);
+  });
+
+  it('is unknown when any count is unknown, so the subtitle never under-reports', () => {
+    expect(totalResponses([row(2), row(null)])).toBeNull();
   });
 });
 

@@ -5,7 +5,6 @@ import type { ActionParam } from '@memberjunction/actions-base';
 import { toDate } from '../shared/runview-dates';
 import type {
   FormCategorySimpleRecord,
-  FormResponseSimpleRecord,
   FormSimpleRecord,
   FormSummaryRow,
 } from './home-models';
@@ -21,27 +20,16 @@ export function categoryNameMap(
   return map;
 }
 
-/** Counts responses per form id. */
-export function responseCountMap(
-  responses: readonly FormResponseSimpleRecord[],
-): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const r of responses) {
-    map.set(r.FormID, (map.get(r.FormID) ?? 0) + 1);
-  }
-  return map;
-}
-
 /**
- * Folds the three simple result sets into display rows, newest first.
+ * Folds forms, categories and per-form response counts into display rows, newest first.
  */
 export function buildFormRows(
   forms: readonly FormSimpleRecord[],
   categories: readonly FormCategorySimpleRecord[],
-  responses: readonly FormResponseSimpleRecord[],
+  /** `null` when the counts could not be loaded — every row's count is then unknown, not zero. */
+  counts: ReadonlyMap<string, number> | null,
 ): FormSummaryRow[] {
   const catName = categoryNameMap(categories);
-  const counts = responseCountMap(responses);
 
   const rows: FormSummaryRow[] = forms.map((f) => ({
     id: f.ID,
@@ -49,10 +37,22 @@ export function buildFormRows(
     status: f.Status,
     categoryName: f.CategoryID ? (catName.get(f.CategoryID) ?? null) : null,
     updatedAt: toDate(f.__mj_UpdatedAt),
-    responseCount: counts.get(f.ID) ?? 0,
+    responseCount: counts ? (counts.get(f.ID) ?? 0) : null,
   }));
 
   return sortByUpdatedDesc(rows);
+}
+
+/** Sum of the rows' response counts, or `null` if any is unknown (a partial sum would under-report). */
+export function totalResponses(rows: readonly FormSummaryRow[]): number | null {
+  let total = 0;
+  for (const r of rows) {
+    if (r.responseCount === null) {
+      return null;
+    }
+    total += r.responseCount;
+  }
+  return total;
 }
 
 /** Newest-updated first; rows without a date sort last, then by name. */

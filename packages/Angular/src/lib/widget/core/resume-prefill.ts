@@ -25,7 +25,7 @@ import {
   type PublishedFormQuestion,
   type ResumeSnapshot,
   type StoredAnswerRow,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/forms-entities/contracts';
 
 /** What a prefill did, and what it could not do. */
 export interface PrefillResult {

@@ -1,12 +1,13 @@
 /**
  * The Forms home list and Responses & Analytics must agree on what "a response" is.
  *
- * `responseCountMap` counts whatever rows it is handed, so the definition lives entirely in
- * the QUERY — which is why this guards the service's view spec rather than the pure helper.
- * The two surfaces disagreed on live data: the same form read "43 responses" on the home
- * list and "32 responses" on the analytics rail, because only one of them excluded partial
- * (in-progress) autosaves. Two numbers for one fact sends the reader hunting for the missing
- * eleven, and the reporting side's reading is the documented one.
+ * They once disagreed on live data — the same form read "43 responses" on the home list and
+ * "32" on the analytics rail, because only one excluded partial (in-progress) autosaves. Later
+ * both tallied downloaded rows, which the 1000-row view cap silently truncated (#247). Both now
+ * count through `loadCompleteResponseCounts`, so the definition lives in one place.
+ *
+ * Source-text checks: they assert the wiring exists, not how it behaves. The behaviour is
+ * covered by `complete-response-counts.spec.ts` and the two services' own specs.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,20 +18,29 @@ const source = (file: string): string =>
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/[^\n]*/g, '');
 
-describe('the home list counts submitted responses only', () => {
-  it('filters its response query to Complete', () => {
-    const home = source('forms-home.service.ts');
-    // The filter must sit on the RESPONSES view, not merely appear somewhere in the file.
-    expect(home).toMatch(
-      /EntityName: HOME_ENTITY\.responses,[\s\S]{0,200}ExtraFilter: `Status='Complete'`/,
+const SERVICES = {
+  home: 'forms-home.service.ts',
+  reporting: '../dashboard/services/forms-reporting.service.ts',
+} as const;
+
+describe('both surfaces count responses the same way', () => {
+  it.each(Object.entries(SERVICES))('%s counts through the shared counter', (_, file) => {
+    const text = source(file);
+    expect(text).toMatch(
+      /import \{ loadCompleteResponseCounts \} from '(\.\.\/)+shared\/complete-response-counts';/,
     );
+    expect(text).toMatch(/loadCompleteResponseCounts\(/);
   });
 
-  it('uses the same predicate the reporting dashboard uses', () => {
-    const reporting = source('../dashboard/services/forms-reporting.service.ts');
-    const home = source('forms-home.service.ts');
-    const predicate = /ExtraFilter: `Status='Complete'`/;
-    expect(reporting).toMatch(predicate);
-    expect(home).toMatch(predicate);
+  it.each(Object.entries(SERVICES))('%s no longer queries response rows itself', (_, file) => {
+    const text = source(file);
+    expect(text).not.toMatch(/FORMS_ENTITY\.FormResponse\b|HOME_ENTITY\.responses/);
+    expect(text).not.toMatch(/Form Responses/);
+  });
+
+  it('the shared counter holds the Complete-only predicate', () => {
+    expect(source('../shared/complete-response-counts.ts')).toMatch(
+      /ExtraFilter: `Status='Complete'`/,
+    );
   });
 });

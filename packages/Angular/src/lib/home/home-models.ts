@@ -15,7 +15,6 @@ import type { mjBizAppsFormsFormEntityType } from '@mj-biz-apps/forms-entities';
 export const HOME_ENTITY = {
   forms: 'MJ_BizApps_Forms: Forms',
   categories: 'MJ_BizApps_Forms: Form Categories',
-  responses: 'MJ_BizApps_Forms: Form Responses',
   actions: 'MJ: Actions',
 } as const;
 
@@ -40,7 +39,8 @@ export interface FormSummaryRow {
   status: FormStatus;
   categoryName: string | null;
   updatedAt: Date | null;
-  responseCount: number;
+  /** Complete responses; `null` when the count could not be loaded (shown as unknown, never 0). */
+  responseCount: number | null;
 }
 
 /** Raw `Forms` columns pulled by the simple RunView (subset we display). */
@@ -56,9 +56,4 @@ export interface FormSimpleRecord {
 export interface FormCategorySimpleRecord {
   ID: string;
   Name: string;
-}
-
-/** Raw `Form Responses` columns for per-form counts. */
-export interface FormResponseSimpleRecord {
-  FormID: string;
 }

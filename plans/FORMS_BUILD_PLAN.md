@@ -1045,7 +1045,7 @@ native entities. This is the reporting differentiator no incumbent has.
   1. **`<mj-form>` widget bundle** (DG-5, `01c0ae6`) — `packages/Angular/scripts/build-widget.mjs` runs esbuild
      with an **Angular Linker AOT pass** (`@angular/compiler-cli/linker/babel`; published `@angular/*` ship
      partially-compiled `ɵɵngDeclare*`, so plain esbuild threw "JIT unavailable" at load). `npm run build:widget`
-     → `packages/Angular/dist/widget/mj-form.js` (~900 kB IIFE, zoneless, calls `customElements.define('mj-form')`).
+     → `packages/Angular/dist/widget/mj-form.js` (~600 kB IIFE since #245 — ~175 kB gzipped — zoneless, calls `customElements.define('mj-form')`).
      Served by `WidgetBundleMiddleware` (`@RegisterClass(BaseServerMiddleware,'mj:formsWidgetBundle')`) at
      `GET /forms/widget/mj-form.js`; path resolves via `FORMS_WIDGET_BUNDLE_PATH` → `require.resolve('@mj-biz-apps/forms-ng/dist/widget/mj-form.js')` → monorepo fallback; missing bundle → 404, never crashes boot.
   2. **`/f/:slug` server-side redeem** (`4f2396e`) — `redeem.service.ts` (pure/injectable): slug →

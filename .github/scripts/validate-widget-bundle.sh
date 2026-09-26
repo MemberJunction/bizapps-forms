@@ -25,9 +25,9 @@ PKG="@mj-biz-apps/forms-ng"
 BUNDLE_PATH="dist/widget/mj-form.js"
 DISK_PATH="packages/Angular/${BUNDLE_PATH}"
 
-# A real AOT-compiled Angular bundle is ~835 kB. A stub, a truncated write or an entry
-# that bundled nothing lands orders of magnitude below this, and existence alone would
-# wave it through.
+# A real AOT-compiled Angular bundle is ~600 kB (611,236 bytes once #245 dropped MJCore from
+# it). A stub, a truncated write or an entry that bundled nothing lands orders of magnitude
+# below this, and existence alone would wave it through.
 MIN_BYTES=200000
 
 ERRORS=0

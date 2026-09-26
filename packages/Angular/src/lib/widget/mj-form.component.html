@@ -39,7 +39,7 @@
   </div>
 }
 
-<div class="mjf-shell" [attr.inert]="phase() === 'expired' ? '' : null">
+<div class="mjf-shell" [class.mjf-shell--hero]="isHeroPhase()" [attr.inert]="phase() === 'expired' ? '' : null">
   <!--
     The form's logo, above every phase.
     A logo is the form's IDENTITY, not decoration on one screen, so it stays put while the

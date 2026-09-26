@@ -6,7 +6,7 @@
  * these to its `phase` signal. This is the guard layer that closes the "success but no
  * thank-you screen" and "double-submit" bugs.
  */
-import type { FormSubmissionResult, PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import type { FormSubmissionResult, PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
 /**
  * Lifecycle phase of the widget. Mirrors the component's `WidgetPhase`.

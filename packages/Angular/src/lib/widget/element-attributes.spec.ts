@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { ELEMENT_ATTRIBUTES, configFromAttributes, effectOf } from './element-attributes';
+import { ELEMENT_ATTRIBUTES, configFromAttributes, effectOf, inputsFromAttributes } from './element-attributes';
 
 describe('element attribute contract', () => {
   it('acts on every attribute it declares it observes', () => {
@@ -21,8 +21,43 @@ describe('element attribute contract', () => {
     expect(effectOf('slug')).toBe('input');
   });
 
+  it('treats the resume notice as a plain input, since the transport does not change', () => {
+    // The /f/:slug host page sets `resume-notice` before appending the element. With no row
+    // here the element never observed it and never read it, so a respondent whose saved draft
+    // could not be reopened was never told.
+    expect(effectOf('resume-notice')).toBe('input');
+  });
+
   it('ignores an attribute nobody declared', () => {
     expect(effectOf('data-whatever')).toBeUndefined();
+  });
+});
+
+describe('inputsFromAttributes', () => {
+  it('hands every input attribute to the component under its own name', () => {
+    const inputs = inputsFromAttributes((n) =>
+      ({ slug: 'apply', 'resume-notice': "We couldn't reopen your saved answers." })[n] ?? null,
+    );
+
+    expect(inputs).toEqual([
+      ['slug', 'apply'],
+      ['resume-notice', "We couldn't reopen your saved answers."],
+    ]);
+  });
+
+  it('passes an absent input attribute as empty, which is each input’s own default', () => {
+    expect(inputsFromAttributes(() => null)).toEqual([
+      ['slug', ''],
+      ['resume-notice', ''],
+    ]);
+  });
+
+  it('never hands a connection attribute to the component — those rebuild the transport', () => {
+    const names = inputsFromAttributes(() => 'x').map(([name]) => name);
+
+    expect(names).not.toContain('api-url');
+    expect(names).not.toContain('token');
+    expect(names).not.toContain('turnstile-site-key');
   });
 });
 

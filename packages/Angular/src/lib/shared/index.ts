@@ -1,5 +1,5 @@
 /**
- * Cross-area primitives — used by the builder, the reporting dashboard and the
+ * Cross-area primitives — used by the builder, the reporting dashboard, Forms home and the
  * responses surface alike. Nothing Angular, nothing that does I/O.
  */
 export { FORMS_ENTITY, MJ_CORE_ENTITY } from './entity-names';
@@ -12,6 +12,7 @@ export {
   respondentLabel,
 } from './answer-values';
 export { toDate } from './runview-dates';
+export { failureMessage } from './failure-message';
 export { flattenQuestions } from './published-questions';
 export { FORMS_UI_CSS, FORMS_UI_TOKENS, FORMS_UI_PRIMITIVES } from './forms-ui';
 export {
