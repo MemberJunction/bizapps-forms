@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
+import type { PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 import { validateQuestion, hasValue } from './validation';
 
 function q(overrides: Partial<PublishedFormQuestion>): PublishedFormQuestion {
