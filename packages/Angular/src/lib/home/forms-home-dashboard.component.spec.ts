@@ -16,12 +16,13 @@ import { FormsHomeService } from './forms-home.service';
 import { FormCloneService } from '../templates/form-clone.service';
 import type { FormStatus, FormSummaryRow } from './home-models';
 
-type HomeServiceSurface = Pick<FormsHomeService, 'loadForms' | 'setStatus'>;
+type HomeServiceSurface = Pick<FormsHomeService, 'loadForms' | 'setStatus' | 'runAuthoringAction'>;
 
 function homeService(overrides: Partial<HomeServiceSurface>): HomeServiceSurface {
   return {
     loadForms: async () => [],
     setStatus: async (_id: string, _status: FormStatus) => null,
+    runAuthoringAction: async () => ({ success: true, formId: null, message: 'Form created.' }),
     ...overrides,
   };
 }
@@ -57,7 +58,7 @@ const draftRow: FormSummaryRow = {
 };
 
 describe('FormsHomeDashboardComponent failure alert (#253)', () => {
-  it('keeps "Failed to load forms" in front of a real Error, and still emits the Error', async () => {
+  it('keeps "Failed to load forms" in front of a real Error, in the alert and in the emitted Error', async () => {
     const cause = new Error('GraphQL Error (Code: unknown)');
     const component = makeComponent(homeService({ loadForms: async () => Promise.reject(cause) }));
     const errors = emitted(component);
@@ -65,7 +66,10 @@ describe('FormsHomeDashboardComponent failure alert (#253)', () => {
     await component.loadForms();
 
     expect(component.errorMessage).toBe('Failed to load forms: GraphQL Error (Code: unknown)');
-    expect(errors).toEqual([cause]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe('Failed to load forms: GraphQL Error (Code: unknown)');
+    // The original failure travels as the cause, so its stack is not lost.
+    expect(errors[0].cause).toBe(cause);
   });
 
   it('shows the action sentence alone when the rejection is not an Error', async () => {
@@ -89,5 +93,36 @@ describe('FormsHomeDashboardComponent failure alert (#253)', () => {
     await component.toggleArchive(draftRow);
 
     expect(component.errorMessage).toBe('Could not archive this form: timeout');
+  });
+
+  // A failed Save() does not throw — BaseEntity.Save() returns false and setStatus hands back
+  // LatestResult.CompleteMessage — so this, not a rejection, is what a live archive failure looks like.
+  it('says the archive failed when setStatus reports a failure instead of throwing', async () => {
+    const component = makeComponent(homeService({ setStatus: async () => 'Simulated save failure' }));
+    const errors = emitted(component);
+
+    await component.toggleArchive(draftRow);
+
+    expect(component.errorMessage).toBe('Could not archive this form: Simulated save failure');
+    expect(errors.map((e) => e.message)).toEqual(['Could not archive this form: Simulated save failure']);
+  });
+
+  // MJ's action client turns a transport failure into { Success: false, Message: 'Error: …' }
+  // rather than throwing, so an authoring failure arrives as a result, not a rejection.
+  it('says the authoring action failed when it reports a failure instead of throwing', async () => {
+    const component = makeComponent(
+      homeService({
+        runAuthoringAction: async () => ({
+          success: false,
+          formId: null,
+          message: 'Error: GraphQL Error (Code: unknown)',
+        }),
+      }),
+    );
+    component.brief = 'An event RSVP';
+
+    await component.authorWithAI();
+
+    expect(component.errorMessage).toBe('The authoring action failed: Error: GraphQL Error (Code: unknown)');
   });
 });
