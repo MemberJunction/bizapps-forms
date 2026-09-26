@@ -5,7 +5,7 @@
  * purely by the `cssVariables` map the builder captured at publish time. No hardcoded
  * colors anywhere downstream.
  */
-import type { FormStyleTokens } from '@mj-biz-apps/forms-entities';
+import type { FormStyleTokens } from '@mj-biz-apps/forms-entities/contracts';
 
 import { contrastRatio, inkRepair, parseCssColor, readableInk, toCssRgb } from './readable-ink';
 

@@ -24,12 +24,15 @@ import { normalizeApiConfig, type FormsApiConfig } from './api/forms-api.config'
 /**
  * What a change to each attribute has to do.
  *
- * `input` — hand the new value to the running component.
+ * `input` — hand the new value to the running component, under the attribute's own name. That
+ * name is the component input's public alias (`input('', { alias: 'resume-notice' })`), which is
+ * what `ComponentRef.setInput` takes — so a row here is the whole wiring, with no per-input code.
  * `rebuild` — tear the Angular application down and build it again. The connection is baked
  * into the injector by `formsWidgetProviders`, so there is no in-place way to change it.
  */
 const ATTRIBUTE_EFFECTS = {
   slug: 'input',
+  'resume-notice': 'input',
   'api-url': 'rebuild',
   token: 'rebuild',
   'turnstile-site-key': 'rebuild',
@@ -46,6 +49,21 @@ export function effectOf(name: string): AttributeEffect | undefined {
   return Object.prototype.hasOwnProperty.call(ATTRIBUTE_EFFECTS, name)
     ? ATTRIBUTE_EFFECTS[name as ElementAttribute]
     : undefined;
+}
+
+/**
+ * Every `input` attribute as `[input name, value]`, for the element to hand to the component.
+ *
+ * The element used to set exactly one input, `slug`, by name at both of its call sites, so any
+ * other `input` row was observed and then dropped — the resume notice the host page sets was
+ * never shown. Deriving the list from the table means a new input needs a row and nothing else.
+ * An absent attribute is passed as `''`, which is the default of every input listed here.
+ */
+export function inputsFromAttributes(read: (name: string) => string | null): Array<[ElementAttribute, string]> {
+  return ELEMENT_ATTRIBUTES.filter((name) => ATTRIBUTE_EFFECTS[name] === 'input').map((name) => [
+    name,
+    read(name) ?? '',
+  ]);
 }
 
 /**

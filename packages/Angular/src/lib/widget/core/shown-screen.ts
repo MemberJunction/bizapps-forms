@@ -10,7 +10,7 @@
  * `submit-phase.ts` — the component wires these to its `phase` signal and owns nothing about
  * which screens exist.
  */
-import type { PublishedFormDefinition, PublishedFormScreen } from '@mj-biz-apps/forms-entities';
+import type { PublishedFormDefinition, PublishedFormScreen } from '@mj-biz-apps/forms-entities/contracts';
 
 import type { WidgetPhase } from './submit-phase';
 

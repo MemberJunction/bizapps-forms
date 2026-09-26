@@ -13,7 +13,7 @@
  * the respondent has to work out how to leave.
  */
 import { describe, expect, it } from 'vitest';
-import type { PublishedFormPage, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
+import type { PublishedFormPage, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
 import { steppableSections } from './section-stepper';
 

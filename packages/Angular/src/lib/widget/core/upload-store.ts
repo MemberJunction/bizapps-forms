@@ -18,7 +18,7 @@
  */
 import { signal } from '@angular/core';
 
-import { type AnswerValue } from '@mj-biz-apps/forms-entities';
+import { type AnswerValue } from '@mj-biz-apps/forms-entities/contracts';
 
 export type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 

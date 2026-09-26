@@ -28,8 +28,9 @@
  * — it is behind them. That includes MJ's own `RateLimitMiddleware`, a global IP-keyed limiter
  * (`enabled: false` by default). Under the old registration this route bypassed it entirely; it
  * no longer does, and a host that switches rate limiting on will see the bundle counted and
- * eventually answer 429. That is the right trade — a 1.2 MB unauthenticated asset is the largest
- * amplification target here, and exempting it would be the surprising choice — but the failure
+ * eventually answer 429. That is the right trade — the bundle is the largest unauthenticated asset a
+ * production host serves (the sourcemap is off there by default), so it is the amplification target
+ * here, and exempting it would be the surprising choice — but the failure
  * mode is worth knowing, because a respondent whose bundle is refused sees a BLANK FORM rather
  * than any rate-limit message. Forms cannot pick its position in that chain anyway: the order
  * comes from ClassFactory registration order across every middleware the host loads.

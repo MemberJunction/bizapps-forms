@@ -15,7 +15,7 @@ import type {
   FormSubmissionInput,
   FormSubmissionResult,
   ResumeSnapshot,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/forms-entities/contracts';
 
 import { SessionExpiredError, type IFormsApiService, type PublishedFormLoad } from './forms-api.interface';
 import { FORMS_API_CONFIG } from './forms-api.config';

@@ -42,7 +42,7 @@ import {
   type DoodlePen,
   type DoodlePenColor,
   type DoodlePenWidth,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/forms-entities/contracts';
 
 import { PadCaptures, type CaptureClaim } from './pad-captures';
 import { addStroke, drawStroke, type DoodlePoint, type DoodleStroke } from './doodle-strokes';
