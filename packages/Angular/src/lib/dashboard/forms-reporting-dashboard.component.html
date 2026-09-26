@@ -47,11 +47,24 @@
 
   <!-- ================================================================== the report -->
   <section class="rp-main">
-    @if (loadingForms) {
+    @if (railState === 'loading') {
       <div class="rp-pad">
         <p class="mjf-state"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading forms…</p>
       </div>
-    } @else if (forms.length === 0) {
+    } @else if (railState === 'failed') {
+      <!-- A load that failed with no list to show; saying "nothing to report on" here would be
+           a claim about the data that the page could not make. -->
+      <div class="rp-pad">
+        <div class="mjf-empty" role="alert">
+          <span class="mjf-empty-icon"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i></span>
+          <span class="mjf-empty-title">Forms could not be loaded</span>
+          <p class="mjf-empty-body">{{ formsLoadError }}</p>
+          <button type="button" class="mjf-btn mjf-btn--primary" (click)="retryLoadForms()">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Try again
+          </button>
+        </div>
+      </div>
+    } @else if (railState === 'empty') {
       <div class="rp-pad">
         <div class="mjf-empty">
           <span class="mjf-empty-icon"><i class="fa-solid fa-chart-column" aria-hidden="true"></i></span>
