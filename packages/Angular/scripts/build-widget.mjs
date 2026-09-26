@@ -32,6 +32,7 @@ import linkerPlugin from '@angular/compiler-cli/linker/babel';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
+import { findServerOnlyInputs } from './widget-bundle-guard.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(here, '..');
@@ -91,51 +92,9 @@ const result = await build({
   logLevel: 'info',
 });
 
-/**
- * Inputs that must never reach the respondent bundle (#245). The widget runs on anonymous
- * visitors' phones, so every byte is download + parse time on a slow device. These all arrive the
- * same way — through the `@mj-biz-apps/forms-entities` barrel, whose generated entity subclasses
- * carry `@RegisterClass` side effects that esbuild must keep — so the fix is always the same:
- * import from `@mj-biz-apps/forms-entities/contracts` instead.
- */
-const SERVER_ONLY_INPUTS = [
-  // Any MemberJunction package: MJCore, MJGlobal, sql-dialect… — the entity runtime, never
-  // needed to render or submit a form.
-  { label: '@memberjunction/*', pattern: /node_modules\/@memberjunction\// },
-  // Arrives with MJCore (it parses expressions); its presence alone means the barrel leaked.
-  { label: 'acorn', pattern: /node_modules\/acorn\// },
-  // The Entities generated modules themselves: the `entity_subclasses` barrel and the
-  // per-schema `entities/<schema>` module it re-exports (MJ 6.1 layout). Matched by path
-  // fragment, not `node_modules/`, because the workspace symlink resolves them to
-  // `packages/Entities/dist/…`.
-  {
-    label: 'forms-entities generated subclasses',
-    pattern: /\/generated\/(entity_subclasses|entities\/)/,
-  },
-];
-
-/**
- * Names the package an esbuild input path belongs to (the segment after its LAST
- * `node_modules/`), so the failure groups files by what to go and remove rather than listing
- * hundreds of paths one by one.
- */
-function packageOfInput(inputPath) {
-  const marker = 'node_modules/';
-  const at = inputPath.lastIndexOf(marker);
-  if (at < 0) return inputPath;
-  const parts = inputPath.slice(at + marker.length).split('/');
-  return parts[0].startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0];
-}
-
-/** Fails the build when esbuild bundled any SERVER_ONLY_INPUTS module. */
+/** Fails the build when esbuild bundled any server-only module (see `widget-bundle-guard.mjs`). */
 function assertNoServerOnlyInputs(metafile) {
-  const offendersByPackage = new Map();
-  for (const inputPath of Object.keys(metafile.inputs)) {
-    const hit = SERVER_ONLY_INPUTS.find((entry) => entry.pattern.test(inputPath));
-    if (!hit) continue;
-    const key = `${packageOfInput(inputPath)} [${hit.label}]`;
-    offendersByPackage.set(key, [...(offendersByPackage.get(key) ?? []), inputPath]);
-  }
+  const offendersByPackage = findServerOnlyInputs(Object.keys(metafile.inputs));
   if (offendersByPackage.size === 0) return;
 
   console.error(
