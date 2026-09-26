@@ -17,7 +17,7 @@
  * the wiring between those two IS the thing that has to survive the trip.
  */
 import { describe, it, expect } from 'vitest';
-import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
 import { FormRuntime } from './form-runtime';
 import { FormUploadStore } from './upload-store';

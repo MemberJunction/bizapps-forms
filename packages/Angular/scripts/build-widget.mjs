@@ -21,6 +21,10 @@
  * `files: ["/dist"]`, so anything `build` does not produce simply never reaches a host — which
  * is exactly how 0.2.0 through 0.4.0 shipped with no `<mj-form>` bundle at all.
  * `.github/scripts/validate-widget-bundle.sh` is the gate that now holds that line.
+ *
+ * After bundling, a postcondition guard (`assertNoServerOnlyInputs`) reads esbuild's metafile —
+ * what was ACTUALLY bundled, not what the source imports — and fails the build if any
+ * server-only module (MJCore and friends, the generated entity subclasses) made it in (#245).
  */
 import { build } from 'esbuild';
 import { transformAsync } from '@babel/core';
@@ -28,6 +32,7 @@ import linkerPlugin from '@angular/compiler-cli/linker/babel';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
+import { createPackageNameResolver, findServerOnlyInputs } from './widget-bundle-guard.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(here, '..');
@@ -86,6 +91,28 @@ const result = await build({
   metafile: true,
   logLevel: 'info',
 });
+
+/** Fails the build when esbuild bundled any server-only module (see `widget-bundle-guard.mjs`). */
+function assertNoServerOnlyInputs(metafile) {
+  // esbuild keys metafile inputs relative to its working directory, which is process.cwd() here.
+  const packageNameOf = createPackageNameResolver(process.cwd());
+  const offendersByPackage = findServerOnlyInputs(Object.keys(metafile.inputs), packageNameOf);
+  if (offendersByPackage.size === 0) return;
+
+  console.error(
+    '[build:widget] The <mj-form> bundle contains server-only modules (#245). The respondent ' +
+      'widget runs on anonymous visitors\' phones, and these packages arrive through a barrel ' +
+      "import — import from '@mj-biz-apps/forms-entities/contracts', not " +
+      "'@mj-biz-apps/forms-entities'. Offending inputs by package:",
+  );
+  for (const [pkg, paths] of offendersByPackage) {
+    console.error(`  ${pkg}: ${paths.length} file(s)`);
+    for (const path of paths) console.error(`    ${path}`);
+  }
+  process.exit(1);
+}
+
+assertNoServerOnlyInputs(result.metafile);
 
 const out = result.metafile.outputs['dist/widget/mj-form.js'];
 const bytes = out ? out.bytes : 0;

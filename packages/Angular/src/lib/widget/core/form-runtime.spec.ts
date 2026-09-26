@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { PublishedFormDefinition, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
-import { resolveVisibleQuestions } from '@mj-biz-apps/forms-entities';
+import type { PublishedFormDefinition, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
+import { resolveVisibleQuestions } from '@mj-biz-apps/forms-entities/contracts';
 import { FormRuntime } from './form-runtime';
 
 /** A small two-page form with a conditional follow-up + a required field. */

@@ -15,7 +15,7 @@
  * just typed.
  */
 import { describe, expect, it } from 'vitest';
-import type { AnswerValue, PublishedFormPage, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
+import type { AnswerValue, PublishedFormPage, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
 import { entryKey, sectionEntries, skippedMessage } from './section-content';
 

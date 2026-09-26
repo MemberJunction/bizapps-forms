@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { DOODLE_PEN_COLORS } from '@mj-biz-apps/forms-entities';
+import { DOODLE_PEN_COLORS } from '@mj-biz-apps/forms-entities/contracts';
 
 import { contrastRatio, parseCssColor, readableInk, type Rgb } from '../../core/readable-ink';
 

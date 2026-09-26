@@ -48,7 +48,7 @@ export interface WidgetBundleConfig {
    * Whether the sourcemap route serves the map at all (#121).
    *
    * The route is public and unauthenticated, so on a production host it hands the widget's full
-   * annotated source (8.5 MB) to anyone who opens devtools on a form. Default: ON unless
+   * annotated source to anyone who opens devtools on a form. Default: ON unless
    * `NODE_ENV=production`. `FORMS_WIDGET_SOURCEMAP_ENABLED=true|false` overrides in either
    * direction. When off, the route stays registered and answers 404, never the 401 that an
    * unserved path falls through to.
@@ -67,7 +67,7 @@ export interface WidgetBundleConfig {
    * So the default is allowed to fail OPEN, and is made AUDIBLE instead: a host that never
    * declared `NODE_ENV` warns once at boot that the map is public (see
    * {@link resolveSourcemapEnabled}). What leaks is annotated source of a **public,
-   * source-available** repository, so the real cost is 8.5 MB of bandwidth per devtools session
+   * source-available** repository, so the real cost is the map's bandwidth per devtools session
    * rather than disclosure — which is what makes "warn loudly" proportionate here where
    * "redact unconditionally" was right for stack traces carrying filesystem paths.
    */
@@ -122,7 +122,7 @@ function resolveSourcemapEnabled(): boolean {
     if (process.env.NODE_ENV === undefined) {
       LogStatus(
         `[Forms] WARNING: NODE_ENV is not set, so the widget sourcemap at ${WIDGET_SOURCEMAP_ROUTE} ` +
-          `is being served PUBLICLY (8.5 MB of annotated source, no authentication). Set ` +
+          `is being served PUBLICLY (the widget's full annotated source, no authentication). Set ` +
           `NODE_ENV=production on a production host, or FORMS_WIDGET_SOURCEMAP_ENABLED=false to ` +
           `withhold it here.`,
       );
