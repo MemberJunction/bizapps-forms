@@ -20,6 +20,7 @@ import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../../shared/entity-names';
 import { ResponsesDataService, type FormResponseRows } from '../../responses/responses-data.service';
 import { mockDefinition } from './forms-reporting-mock';
+import { buildExportMatrix } from './export-pivot';
 import type { ReportableForm } from '../models/reporting.model';
 import { response, answer as answerRow } from '../../shared/testing/entity-row-fixtures';
 
@@ -183,11 +184,27 @@ describe('FormsReportingService.loadReport', () => {
     expect(fake.calls).toHaveLength(2);
     expect(fake.calls).toContain('definition:version-1');
     expect(fake.calls).toContain('responses:form-1');
-    // The UNFILTERED rows, partials included: the export must match what it produced before,
-    // and a report built from `completeAnswers` would silently drop the partial's cells.
+    // The UNFILTERED rows, partials included: `answers` is the record of what the report was
+    // built from (the funnel and the response rows read the same unfiltered set).
     expect(report.answers).toEqual(rows.answers);
     expect(report.answers).toHaveLength(3);
     expect(report.answers.some((a) => a.ResponseID === 'r-partial')).toBe(true);
+  });
+
+  it('exports no partial response: the sheet has a row per Complete response only', async () => {
+    const { fake, svc } = make();
+    fake.def.resolve(mockDefinition());
+    fake.rows.resolve(rowsWithAPartial());
+
+    const report = await svc.loadReport(FORM);
+    const questions = report.questions.filter((q) => q.type !== 'Statement');
+    const sheet = buildExportMatrix(report.responses, questions, report.answers);
+    const completeOnly = report.answers.filter((a) => a.ResponseID !== 'r-partial');
+
+    // The row set is decided by `report.responses` (Complete only), not by `report.answers`, so
+    // the partial's answer rows the report carries never reach the sheet — on base and head alike.
+    expect(sheet.map((row) => (Array.isArray(row) ? null : row.responseId))).toEqual(['r-complete']);
+    expect(sheet).toEqual(buildExportMatrix(report.responses, questions, completeOnly));
   });
 
   it('starts the definition and the responses reads together', async () => {

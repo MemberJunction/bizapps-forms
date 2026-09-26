@@ -158,8 +158,9 @@ export class FormsReportingService {
       ),
       funnel: buildFunnel(definition, answers),
       responses: buildResponseRows(responses, answers, questions),
-      // The UNFILTERED rows, never `completeAnswers`: the export has always included partial
-      // responses' cells, and the report must not change what the sheet contains.
+      // The UNFILTERED rows, as fetched: this is the record of what the report was built from.
+      // The export's rows are chosen by `responses` (Complete only, see `buildResponseRows`), so
+      // filtering here too would put that decision in a second place without changing the sheet.
       answers,
     };
   }
