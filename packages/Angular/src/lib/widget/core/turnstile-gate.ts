@@ -10,7 +10,7 @@
  * These functions are deliberately free of Angular/DOM so they can be unit-tested
  * without a browser or the Turnstile global (the package's Vitest suite is node-only).
  */
-import { CAPTCHA_NOT_CONFIGURED_MESSAGE, type PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import { CAPTCHA_NOT_CONFIGURED_MESSAGE, type PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
 /**
  * Server-side Turnstile error codes that reach the client inside a message

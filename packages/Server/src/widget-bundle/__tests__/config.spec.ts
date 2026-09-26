@@ -144,7 +144,7 @@ describe('widget sourcemap', () => {
 
 describe('widget sourcemap gate (#121)', () => {
   // The route is public and unauthenticated, so on a production host it publishes the widget's
-  // full annotated source (8.5 MB) to anyone who opens devtools on a form. Off by default there.
+  // full annotated source to anyone who opens devtools on a form. Off by default there.
   // `NODE_ENV` is the switch this host already uses for the same class of decision (Apollo
   // stack traces), so no second notion of "production" is introduced.
   it('withholds the sourcemap under NODE_ENV=production unless explicitly enabled', () => {

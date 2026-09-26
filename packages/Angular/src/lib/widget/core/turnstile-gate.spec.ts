@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CAPTCHA_NOT_CONFIGURED_MESSAGE, type PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import { CAPTCHA_NOT_CONFIGURED_MESSAGE, type PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
 import {
   canRenderChallenge,

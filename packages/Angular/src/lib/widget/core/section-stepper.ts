@@ -11,7 +11,7 @@
  * reactive cursor and routes every write through the clamp; this owns only the question of what
  * the cursor is counting.
  */
-import { type PublishedFormPage, type PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
+import { type PublishedFormPage, type PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
 /**
  * The visible sections that actually render something, in order.
