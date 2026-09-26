@@ -175,6 +175,11 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
       const loaded = this.useMock ? mockReportableForms() : await this.data.loadReportableForms();
       this.forms = sortFormsForRail(loaded);
       this.applyRailFilter();
+      // The rail exists now, so the page-wide state ends here rather than when the first report
+      // does. The rail is clickable from this point, and a reader who picks another form would
+      // otherwise wait behind "Loading forms…" for a report they no longer want; the report
+      // pane's own `loadingReport` covers this first load like any other.
+      this.loadingForms = false;
       if (this.forms.length > 0) {
         await this.selectForm(this.forms[0]);
       }

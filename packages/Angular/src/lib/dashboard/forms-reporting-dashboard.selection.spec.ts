@@ -49,7 +49,7 @@ function reportWithTotal(totalResponses: number, form?: ReportableForm): FormRep
   return { ...report, form: form ?? report.form, summary: { ...report.summary, totalResponses } };
 }
 
-type ReportingSurface = Pick<FormsReportingService, 'loadReport'>;
+type ReportingSurface = Pick<FormsReportingService, 'loadReport' | 'loadReportableForms'>;
 type ResponsesSurface = Pick<ResponsesDataService, 'loadResponseDetail'>;
 type ExportSurface = Pick<FormsReportingExportService, 'exportResponses'>;
 
@@ -61,6 +61,7 @@ interface ReportCall {
 
 interface Harness {
   c: FormsReportingDashboardComponent;
+  formLists: Deferred<ReportableForm[]>[];
   reportCalls: ReportCall[];
   detailLoads: Deferred<ResponseDetail>[];
   exports: Deferred<void>[];
@@ -68,9 +69,15 @@ interface Harness {
 }
 
 function construct(): Harness {
+  const formLists: Deferred<ReportableForm[]>[] = [];
   const reportCalls: ReportCall[] = [];
   const detailLoads: Deferred<ResponseDetail>[] = [];
   const reporting: ReportingSurface = {
+    loadReportableForms: () => {
+      const load = deferred<ReportableForm[]>();
+      formLists.push(load);
+      return load.promise;
+    },
     loadReport: (form) => {
       const load = deferred<FormReportData>();
       reportCalls.push({ form, load });
@@ -104,7 +111,7 @@ function construct(): Harness {
   const c = runInInjectionContext(injector, () => new FormsReportingDashboardComponent());
   const errors: Error[] = [];
   c.Error.subscribe((e: Error) => errors.push(e));
-  return { c, reportCalls, detailLoads, exports, errors };
+  return { c, formLists, reportCalls, detailLoads, exports, errors };
 }
 
 describe('FormsReportingDashboardComponent — only the latest selection applies its report (#252)', () => {
@@ -273,5 +280,30 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
 
     expect(c.errorMessage).toContain('disk full');
     expect(errors).toHaveLength(1);
+  });
+
+  it('ends the forms-loading state once the list is known, not when the first report settles', async () => {
+    // The rail is clickable as soon as it renders, so the reader can pick another form while the
+    // first form's report is still loading. The page-wide "Loading forms…" state must not wait on
+    // that superseded first load and sit over the report the reader picked.
+    const { c, formLists, reportCalls } = construct();
+    c.retryLoadForms();
+    formLists[0].resolve([FORM_A, FORM_B]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(1));
+    const first = reportCalls[0].form;
+    const picked = first === FORM_A ? FORM_B : FORM_A;
+
+    const pick = c.selectForm(picked);
+    const pickedReport = reportWithTotal(333, picked);
+    reportCalls[1].load.resolve(pickedReport);
+    await pick;
+
+    expect(c.report).toBe(pickedReport);
+    expect(c.loadingForms).toBe(false);
+    expect(c.railState).toBe('ready');
+
+    reportCalls[0].load.resolve(reportWithTotal(999, first));
+    await vi.waitFor(() => expect(c.loadingForms).toBe(false));
+    expect(c.report).toBe(pickedReport);
   });
 });
