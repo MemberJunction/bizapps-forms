@@ -17,7 +17,7 @@ import {
   type PublishedFormDefinition,
   type PublishedFormPage,
   type PublishedFormQuestion,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/forms-entities/contracts';
 
 import { toAnswerInputs } from './answer-value';
 import { computeProgress } from './progress';

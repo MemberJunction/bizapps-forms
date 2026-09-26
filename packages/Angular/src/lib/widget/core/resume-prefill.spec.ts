@@ -5,7 +5,7 @@ import type {
   PublishedFormQuestion,
   ResumeSnapshot,
   StoredAnswerRow,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/forms-entities/contracts';
 
 import { prefillFromResume, type PrefillTarget } from './resume-prefill';
 

@@ -20,7 +20,7 @@ import {
   type JSONValue,
   type PublishedFormQuestion,
   type QuestionAnswerColumn,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/forms-entities/contracts';
 
 /** The live answer map: questionId -> current value. */
 export type AnswerMap = Map<string, AnswerValue>;

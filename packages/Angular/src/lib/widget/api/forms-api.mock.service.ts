@@ -12,7 +12,7 @@ import type {
   PublishedFormDefinition,
   FormSubmissionInput,
   FormSubmissionResult,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/forms-entities/contracts';
 
 import type { IFormsApiService, PublishedFormLoad } from './forms-api.interface';
 import { generateClientResponseId } from '../core/client-id';

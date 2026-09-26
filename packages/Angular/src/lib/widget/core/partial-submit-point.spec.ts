@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { passedSubmitPoints } from './partial-submit-point';
-import type { PublishedFormPage, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
+import type { PublishedFormPage, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
 function question(id: string): PublishedFormQuestion {
   return { id, type: 'ShortText', prompt: id, isRequired: false, displayOrder: 0, options: [] };

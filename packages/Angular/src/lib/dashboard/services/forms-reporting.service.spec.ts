@@ -1,23 +1,110 @@
 /**
- * `FormsReportingService.loadReport` exercised as a class (#246).
+ * `FormsReportingService` exercised as a class.
  *
- * The dashboard used to read a form's answers twice per selection: once inside `loadReport`
- * (through `loadResponsesForForm`) and again through a separate answers-only query, only so the
- * export had the raw rows. These specs pin the fix: the report carries the rows it was built
- * from, the answers are read exactly once, and the definition and responses reads run together.
+ * `loadReportableForms` (#247): the rail's counts used to be tallied from downloaded response
+ * rows, which the 1000-row view cap truncated. They now come from the shared server-side
+ * counter, for the forms the rail actually lists. Exercised over a fake RunView.
  *
- * `ResponsesDataService` is replaced by a fake whose reads are deferred promises, so a test can
- * hold both open and observe that both STARTED before either resolved.
+ * `loadReport` (#246): the dashboard used to read a form's answers twice per selection: once
+ * inside `loadReport` (through `loadResponsesForForm`) and again through a separate answers-only
+ * query, only so the export had the raw rows. These specs pin the fix: the report carries the
+ * rows it was built from, the answers are read exactly once, and the definition and responses
+ * reads run together. `ResponsesDataService` is replaced by a fake whose reads are deferred
+ * promises, so a test can hold both open and observe that both STARTED before either resolved.
  */
 import '@angular/compiler';
 import { Injector, runInInjectionContext } from '@angular/core';
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RunViewParams, RunViewResult } from '@memberjunction/core';
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
-import { FormsReportingService } from './forms-reporting.service';
+import { FORMS_ENTITY } from '../../shared/entity-names';
 import { ResponsesDataService, type FormResponseRows } from '../../responses/responses-data.service';
 import { mockDefinition } from './forms-reporting-mock';
 import type { ReportableForm } from '../models/reporting.model';
-import { response, answer } from '../../shared/testing/entity-row-fixtures';
+import { response, answer as answerRow } from '../../shared/testing/entity-row-fixtures';
+
+const batches: RunViewParams[][] = [];
+let countsSucceed = true;
+
+function ok(results: object[], aggregates?: RunViewResult['AggregateResults']): RunViewResult {
+  return {
+    Success: true,
+    Results: results,
+    RowCount: results.length,
+    TotalRowCount: results.length,
+    ExecutionTime: 0,
+    ErrorMessage: '',
+    AggregateResults: aggregates,
+  };
+}
+
+function answer(params: RunViewParams): RunViewResult {
+  if (params.EntityName === FORMS_ENTITY.Form) {
+    return ok([
+      { ID: 'f1', Name: 'Application' },
+      { ID: 'draft-only', Name: 'Never published' },
+    ]);
+  }
+  if (params.EntityName === FORMS_ENTITY.FormVersion) {
+    return ok([
+      { ID: 'v2', FormID: 'f1', VersionNumber: 2 },
+      { ID: 'v1', FormID: 'f1', VersionNumber: 1 },
+    ]);
+  }
+  if (!countsSucceed) {
+    return { ...ok([]), Success: false, ErrorMessage: 'count query refused' };
+  }
+  return ok(
+    [],
+    (params.Aggregates ?? []).map((a) => ({ expression: a.expression, alias: a.alias ?? '', value: '712' })),
+  );
+}
+
+vi.mock('@memberjunction/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memberjunction/core')>();
+  class RunView {
+    public async RunViews(params: RunViewParams[]): Promise<RunViewResult[]> {
+      batches.push(params);
+      return params.map(answer);
+    }
+  }
+  return { ...actual, RunView };
+});
+
+const { FormsReportingService } = await import('./forms-reporting.service');
+
+function service(): InstanceType<typeof FormsReportingService> {
+  const injector = Injector.create({
+    providers: [{ provide: ResponsesDataService, useValue: {} }],
+  });
+  return runInInjectionContext(injector, () => new FormsReportingService());
+}
+
+beforeEach(() => {
+  batches.length = 0;
+  countsSucceed = true;
+});
+
+describe('FormsReportingService.loadReportableForms', () => {
+  it('lists published forms with their server-computed Complete count', async () => {
+    const forms = await service().loadReportableForms();
+    expect(forms).toEqual([
+      { formId: 'f1', formVersionId: 'v2', name: 'Application', responseCount: 712 },
+    ]);
+  });
+
+  it('counts only the reportable forms, without downloading response rows', async () => {
+    await service().loadReportableForms();
+    const responseQueries = batches.flat().filter((p) => p.EntityName === FORMS_ENTITY.FormResponse);
+    expect(responseQueries.every((p) => p.ResultType === 'count_only')).toBe(true);
+    expect(responseQueries.flatMap((p) => (p.Aggregates ?? []).map((a) => a.alias))).toEqual(['f1']);
+  });
+
+  it('fails the load when counting fails, rather than showing zeros', async () => {
+    countsSucceed = false;
+    await expect(service().loadReportableForms()).rejects.toThrow(/count query refused/);
+  });
+});
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -69,14 +156,14 @@ function rowsWithAPartial(): FormResponseRows {
       response('r-partial', 'Partial', started, null),
     ],
     answers: [
-      answer('r-complete', 'q-channel', { TextValue: 'search' }),
-      answer('r-complete', 'q-rating', { NumericValue: 4 }),
-      answer('r-partial', 'q-channel', { TextValue: 'social' }),
+      answerRow('r-complete', 'q-channel', { TextValue: 'search' }),
+      answerRow('r-complete', 'q-rating', { NumericValue: 4 }),
+      answerRow('r-partial', 'q-channel', { TextValue: 'social' }),
     ],
   };
 }
 
-function make(): { fake: FakeResponses; svc: FormsReportingService } {
+function make(): { fake: FakeResponses; svc: InstanceType<typeof FormsReportingService> } {
   const fake = new FakeResponses();
   const injector = Injector.create({
     providers: [{ provide: ResponsesDataService, useValue: fake }],

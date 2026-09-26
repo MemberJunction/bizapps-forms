@@ -23,8 +23,10 @@ import {
   filterForms,
   percent,
   plural,
-  portfolioSummary,
+  portfolioLine,
+  railState,
   relativeTime,
+  type RailState,
   sortFormsForRail,
 } from './reporting-view-model';
 
@@ -112,6 +114,12 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   public loadingReport = false;
   public busy = false;
   public errorMessage: string | null = null;
+  /**
+   * Why the form list itself failed to load, kept apart from `errorMessage` (which any later
+   * action overwrites or dismisses). With no list on screen it means the list is unknown, not
+   * empty; with one (a failed reload) the list stays usable. `railState` decides which.
+   */
+  public formsLoadError: string | null = null;
 
   public forms: ReportableForm[] = [];
   /** `forms` narrowed by `railQuery`; maintained by `applyRailFilter`, not by the template. */
@@ -157,6 +165,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   private async loadForms(): Promise<void> {
     this.loadingForms = true;
     this.errorMessage = null;
+    this.formsLoadError = null;
     this.cdr.markForCheck();
     try {
       const loaded = this.useMock ? mockReportableForms() : await this.data.loadReportableForms();
@@ -167,6 +176,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
       }
     } catch (err) {
       this.fail(err, 'Failed to load forms.');
+      this.formsLoadError = this.errorMessage;
     } finally {
       this.loadingForms = false;
       this.cdr.markForCheck();
@@ -182,8 +192,17 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
 
   /** "12 forms · 1,204 responses" — what this dashboard covers, before you pick one. */
   public get portfolioLine(): string {
-    const { formCount, responseCount } = portfolioSummary(this.forms);
-    return `${plural(formCount, 'form')} · ${plural(responseCount, 'response')}`;
+    return portfolioLine(this.forms, this.formsLoadError);
+  }
+
+  /** Which of loading / failed / empty / ready the report pane shows. */
+  public get railState(): RailState {
+    return railState(this.loadingForms, this.formsLoadError, this.forms.length);
+  }
+
+  /** The failed state's retry. */
+  public retryLoadForms(): void {
+    void this.loadForms();
   }
 
   /** Shown beside the rail's search; only interesting while a search is narrowing it. */

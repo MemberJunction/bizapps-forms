@@ -11,12 +11,12 @@ import {
   matchesValidationPattern,
   validateAnswerFormat,
   validateCompositeParts,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/forms-entities/contracts';
 import type {
   AnswerValue,
   PublishedFormQuestion,
   ValidationRule,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/forms-entities/contracts';
 
 /** A per-question validation outcome. `null` message means "valid". */
 export interface FieldValidationResult {

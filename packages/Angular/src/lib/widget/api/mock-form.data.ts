@@ -6,7 +6,7 @@
  * until it reaches a real respondent. That is why the third page below exists purely to hold one
  * of each newer type rather than to make narrative sense as a sign-up form.
  */
-import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
 /** Build the demo form definition for a given (ignored) distribution slug. */
 export function buildMockForm(_distributionSlug: string): PublishedFormDefinition {
