@@ -10,12 +10,20 @@
  * action can load the response and do its work (upsert Person, send email, create
  * a follow-up Task). `FormResponseID` is the S3 input-param contract every WP-E
  * on-submit action reads — keep producer and consumers on the same name.
+ *
+ * The whole chain runs on one isolated provider instance (`withIsolatedProvider`),
+ * not the process-global one: bizapps-forms#260, where a durable action's detached
+ * transaction on the global provider made a later hook's reads race its COMMIT. When
+ * no isolated instance can be created, every hook is reported `failed` with the
+ * reason instead of silently running on the global provider.
  */
 import { ActionEngineServer } from '@memberjunction/actions';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
-import type { UserInfo } from '@memberjunction/core';
+import { LogError } from '@memberjunction/core';
+import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 import { LEGACY_ON_SUBMIT_ACTION_NAMES, type LegacyOnSubmitActionName } from '@mj-biz-apps/forms-entities';
 import { resolveAutomationPrincipal } from '../automation/service-principal';
+import { withIsolatedProvider, type IsolatedProviderRunner } from '../automation/isolated-provider';
 
 /**
  * The S3 action names — the frozen contract WP-E implements.
@@ -61,12 +69,13 @@ function buildHookParams(ctx: OnSubmitContext): ActionParam[] {
   ];
 }
 
-/** Resolve + run one action by name; never throws. */
+/** Resolve + run one action by name on the given provider; never throws. */
 async function fireOne(
   engine: ActionEngineServer,
   name: OnSubmitActionName,
   ctx: OnSubmitContext,
   contextUser: UserInfo,
+  provider: DatabaseProviderBase,
 ): Promise<HookFireResult> {
   const action = engine.GetActionByName(name);
   if (!action) {
@@ -79,6 +88,7 @@ async function fireOne(
       ContextUser: contextUser,
       Filters: [],
       Params: buildHookParams(ctx),
+      Provider: provider,
     });
     const result = await engine.RunAction(params);
     if (result.Success) {
@@ -94,15 +104,17 @@ async function fireOne(
 }
 
 /**
- * Fire all three on-submit hooks (in order). Configures the engine once with the
- * context user. Hooks run only for COMPLETE submissions — partial saves do not
- * trigger side effects. Returns per-hook results; the caller ignores them for the
- * client response (best-effort) but tests assert on them.
+ * Fire all four on-submit hooks (in order), on one isolated provider instance.
+ * Configures the engine once with the context user. Hooks run only for COMPLETE
+ * submissions — partial saves do not trigger side effects. Returns per-hook
+ * results; the caller ignores them for the client response (best-effort) but
+ * tests assert on them.
  */
 export async function fireOnSubmitHooks(
   ctx: OnSubmitContext,
   engine: ActionEngineServer = ActionEngineServer.Instance,
   runAsUser: UserInfo | null = resolveAutomationPrincipal(),
+  isolate: IsolatedProviderRunner = withIsolatedProvider,
 ): Promise<HookFireResult[]> {
   // On-submit hooks run under the SCOPED automation principal ("Forms Automation Service"), NOT
   // the anonymous respondent and NOT the full system user. The respondent scope is
@@ -120,9 +132,20 @@ export async function fireOnSubmitHooks(
     return ON_SUBMIT_ACTION_NAMES.map((name) => ({ name, status: 'skipped-no-principal' as const }));
   }
   await engine.Config(false, runAsUser);
-  const results: HookFireResult[] = [];
-  for (const name of ON_SUBMIT_ACTION_NAMES) {
-    results.push(await fireOne(engine, name, ctx, runAsUser));
+  try {
+    return await isolate(`on-submit hooks for response ${ctx.responseId}`, async (provider) => {
+      const results: HookFireResult[] = [];
+      for (const name of ON_SUBMIT_ACTION_NAMES) {
+        results.push(await fireOne(engine, name, ctx, runAsUser, provider));
+      }
+      return results;
+    });
+  } catch (err) {
+    // Isolation itself failed (no instance could be created) — every hook is unrun, not merely
+    // one of them. Fail-closed like the no-principal path above: report it, never fall back to
+    // the global provider, which is the exact collision #260 exists to close off.
+    const message = err instanceof Error ? err.message : String(err);
+    LogError(`[forms] legacy on-submit hooks did not run for response ${ctx.responseId}: ${message}`);
+    return ON_SUBMIT_ACTION_NAMES.map((name) => ({ name, status: 'failed' as const, message }));
   }
-  return results;
 }
