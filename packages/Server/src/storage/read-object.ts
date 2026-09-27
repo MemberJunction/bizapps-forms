@@ -6,10 +6,10 @@
  * Two copies of that sequence would be two places to get the account-resolution rule wrong, and
  * that rule is the subtle part: `MJ: Files` records a PROVIDER, not an account.
  *
- * The extraction itself changed no behaviour. The guards that decide WHETHER a caller may read a given object stay with
- * their callers, where they belong — the asset route's guard is the storage prefix, the download
- * route's is the caller's permissions. This module only knows how to fetch bytes once someone
- * else has decided it is allowed.
+ * The extraction itself changed no behaviour. The guards that decide WHETHER a caller may read a
+ * given object stay with their callers, where they belong — the asset route's guard is the storage
+ * prefix, the download route's is the caller's permissions. This module only knows how to fetch
+ * bytes once someone else has decided it is allowed.
  */
 import type { UserInfo } from '@memberjunction/core';
 
