@@ -78,13 +78,14 @@ import {
   provenanceIsStrict,
   type UploadLedgerRow,
 } from '../upload/upload-provenance.service';
-import { loadFormResponseContext, resolveActionProvider } from '@mj-biz-apps/forms-actions';
+import { loadFormResponseContext } from '@mj-biz-apps/forms-actions';
 import { planAutomations } from './automation-plan';
 import { runAutomations } from '../automation/automation-runner';
 import { dispatchAutomation } from '../automation/dispatch-automation';
 import { buildConditionAnswers } from '../automation/condition-answers';
 import { allowedBindingEntities } from '../automation/allowed-entities';
 import { resolveAutomationPrincipal } from '../automation/service-principal';
+import { withIsolatedProvider } from '../automation/isolated-provider';
 
 /** Normalized submission input the pipeline consumes (resolver maps GraphQL -> this). */
 export interface PipelineSubmission {
@@ -1286,6 +1287,12 @@ async function checkFileProvenance(
  * and a clear log line; quietly running privileged work as the system user instead would restore
  * exactly the broad grants the dedicated principal exists to avoid, at the moment nobody is
  * looking. Wrapped whole, because a submission that is already saved must never fail here.
+ *
+ * Everything after the principal check runs on one isolated provider instance
+ * (`withIsolatedProvider`), not the process-global one: bizapps-forms#260, where a durable
+ * action's detached transaction on the global provider made a later read race its COMMIT. When no
+ * isolated instance can be created, nothing here runs — the failure is logged, never run on the
+ * global provider as a fallback.
  */
 async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId: string): Promise<void> {
   try {
@@ -1293,42 +1300,47 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
     if (!principal) {
       return;
     }
-    const loaded = await loadFormResponseContext(responseId, principal, resolveActionProvider({}));
-    if (loaded.status === 'absent') {
-      console.warn(`[forms] automations skipped: response ${responseId} does not exist.`);
-      return;
-    }
-    if (loaded.status === 'failed') {
-      // Usually a missing grant on the automation principal (#239) — name it, don't just skip.
-      LogError(`[forms] automations skipped: response ${responseId} could not be loaded as the automation principal: ${loaded.error}`);
-      return;
-    }
-    const context = loaded.context;
+    await withIsolatedProvider(`on-submit automations for response ${responseId}`, async (provider) => {
+      const loaded = await loadFormResponseContext(responseId, principal, provider);
+      if (loaded.status === 'absent') {
+        console.warn(`[forms] automations skipped: response ${responseId} does not exist.`);
+        return;
+      }
+      if (loaded.status === 'failed') {
+        // Usually a missing grant on the automation principal (#239) — name it, don't just skip.
+        LogError(`[forms] automations skipped: response ${responseId} could not be loaded as the automation principal: ${loaded.error}`);
+        return;
+      }
+      const context = loaded.context;
 
-    const answers = buildConditionAnswers(resolved.definition, context.canonicalAnswers);
-    const plan = planAutomations(resolved.definition.automations, {
-      complete: true,
-      answers,
-      score: scoreFor(resolved, answers),
-    });
+      const answers = buildConditionAnswers(resolved.definition, context.canonicalAnswers);
+      const plan = planAutomations(resolved.definition.automations, {
+        complete: true,
+        answers,
+        score: scoreFor(resolved, answers),
+      });
 
-    await runAutomations({
-      plan,
-      dispatch: (automation) =>
-        dispatchAutomation(automation, {
-          responseId,
-          formId: resolved.definition.formId,
-          formVersionId: resolved.version.ID,
-          distributionId: resolved.distribution.ID,
-          answers: context.canonicalAnswers,
-          questionTypes: questionTypesOf(resolved.definition),
-          principal,
-          allowedEntities: allowedBindingEntities(),
-        }),
+      await runAutomations({
+        plan,
+        dispatch: (automation) =>
+          dispatchAutomation(automation, {
+            responseId,
+            formId: resolved.definition.formId,
+            formVersionId: resolved.version.ID,
+            distributionId: resolved.distribution.ID,
+            answers: context.canonicalAnswers,
+            questionTypes: questionTypesOf(resolved.definition),
+            principal,
+            provider,
+            allowedEntities: allowedBindingEntities(),
+          }),
+      });
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[forms] automations failed for response ${responseId}: ${message}`);
+    // Same failure class as the `loaded.status === 'failed'` branch above (this submission's side
+    // effects did not run and an operator needs to know why) — LogError, for the same reason.
+    LogError(`[forms] automations failed for response ${responseId}: ${message}`);
   }
 }
 /**

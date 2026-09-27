@@ -9,8 +9,8 @@
  * Every dispatch runs under the automation service principal. The anonymous respondent never
  * reaches here.
  */
-import { LogError, Metadata } from '@memberjunction/core';
-import type { UserInfo } from '@memberjunction/core';
+import { LogError } from '@memberjunction/core';
+import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 import { ActionEngineServer } from '@memberjunction/actions';
 import { ActionParam } from '@memberjunction/actions-base';
 import { AgentRunner } from '@memberjunction/ai-agents';
@@ -35,12 +35,11 @@ import {
   parseBindingConfig,
   readPriorBindingOutcome,
   recordBindingLedgerRow,
-  resolveActionProvider,
   MJBindingGateway,
   type BindingOutcome,
 } from '@mj-biz-apps/forms-actions';
 import { syncFileLinks, type FileLinkTarget } from '../file-links/file-links.service';
-import { globalFileLinkProvider, MJFileLinkGateway } from '../file-links/mj-file-link-gateway';
+import { fileLinkProviderFor, MJFileLinkGateway } from '../file-links/mj-file-link-gateway';
 
 const ENTITY = {
   AutomationRun: 'MJ_BizApps_Forms: Form Automation Runs',
@@ -64,6 +63,8 @@ export interface DispatchContext {
   principal: UserInfo;
   /** Entities this deployment permits bindings to write; null disables the check. */
   allowedEntities: ReadonlySet<string> | null;
+  /** The on-submit chain's isolated provider instance (bizapps-forms#260) — every read and write here runs on it, never the global provider. */
+  provider: DatabaseProviderBase;
 }
 
 /**
@@ -160,7 +161,13 @@ async function runActionTarget(
     { Name: 'DistributionID', Value: ctx.distributionId },
   ].map((p) => Object.assign(new ActionParam(), { ...p, Type: 'Input' as const }));
 
-  const result = await engine.RunAction({ Action: action, ContextUser: ctx.principal, Params: params, Filters: [] });
+  const result = await engine.RunAction({
+    Action: action,
+    ContextUser: ctx.principal,
+    Params: params,
+    Filters: [],
+    Provider: ctx.provider,
+  });
   // `LogEntry` is the `MJ: Action Execution Logs` row the engine wrote for this execution. It is
   // absent when the action is configured to skip logging, and it was absent on every host until
   // V202608242110 granted the runner permission to write one at all.
@@ -189,7 +196,7 @@ async function runAgentTarget(
   if (!automation.agentId) {
     throw new Error(`Automation "${automation.name}" is an Agent target with no agent.`);
   }
-  const agent = await new Metadata().GetEntityObject<MJAIAgentEntityExtended>('MJ: AI Agents', ctx.principal);
+  const agent = await ctx.provider.GetEntityObject<MJAIAgentEntityExtended>('MJ: AI Agents', ctx.principal);
   if (!agent || !(await agent.Load(automation.agentId))) {
     throw new Error(`Agent ${automation.agentId} for "${automation.name}" could not be loaded.`);
   }
@@ -197,6 +204,7 @@ async function runAgentTarget(
   const result = await new AgentRunner().RunAgent({
     agent,
     contextUser: ctx.principal,
+    provider: ctx.provider,
     conversationMessages: [
       {
         role: 'user',
@@ -227,8 +235,7 @@ async function runBindingTarget(
   if (!automation.bindingId) {
     throw new Error(`Automation "${automation.name}" is an EntityBinding target with no binding.`);
   }
-  const md = new Metadata();
-  const binding = await md.GetEntityObject<mjBizAppsFormsFormEntityBindingEntity>(ENTITY.Binding, ctx.principal);
+  const binding = await ctx.provider.GetEntityObject<mjBizAppsFormsFormEntityBindingEntity>(ENTITY.Binding, ctx.principal);
   if (!binding || !(await binding.Load(automation.bindingId))) {
     throw new Error(`Binding ${automation.bindingId} for "${automation.name}" could not be loaded.`);
   }
@@ -247,14 +254,13 @@ async function runBindingTarget(
   // answers disagree about the same response.
   const filesVerified = await filesAreVerified(ctx);
 
-  const provider = resolveActionProvider({});
   const result = await executeBinding({
     config,
     answers: ctx.answers,
     questionTypes: ctx.questionTypes,
-    gateway: Object.assign(new MJBindingGateway(ctx.principal, provider), {
+    gateway: Object.assign(new MJBindingGateway(ctx.principal, ctx.provider), {
       findPriorOutcome: (responseId: string) =>
-        readPriorBindingOutcome(automation.bindingId as string, responseId, ctx.principal, provider),
+        readPriorBindingOutcome(automation.bindingId as string, responseId, ctx.principal, ctx.provider),
     }),
     responseId: ctx.responseId,
     allowedEntities: ctx.allowedEntities,
@@ -274,7 +280,7 @@ async function runBindingTarget(
     ctx.responseId,
     result.outcome,
     ctx.principal,
-    provider,
+    ctx.provider,
   );
   await attachBoundRecordFiles(ctx, binding.TargetEntityID, result.outcome, filesVerified);
   return {
@@ -334,7 +340,7 @@ async function attachBoundRecordFiles(
   if (!target) {
     return;
   }
-  const result = await syncFileLinks(new MJFileLinkGateway(globalFileLinkProvider(), ctx.principal), {
+  const result = await syncFileLinks(new MJFileLinkGateway(fileLinkProviderFor(ctx.provider), ctx.principal), {
     target,
     fileIds: fileAnswerIds(ctx.answers),
     responseId: ctx.responseId,
@@ -374,7 +380,7 @@ async function filesAreVerified(ctx: DispatchContext): Promise<boolean> {
     return true;
   }
   try {
-    const ledger = await loadUploadLedger(fileIds, ctx.principal);
+    const ledger = await loadUploadLedger(fileIds, ctx.principal, ctx.provider);
     return everyFileIsAttributable(
       fileIds,
       ledger,
@@ -395,7 +401,7 @@ async function startRun(
   automation: PublishedFormAutomation,
   ctx: DispatchContext,
 ): Promise<mjBizAppsFormsFormAutomationRunEntity | null> {
-  const row = await new Metadata().GetEntityObject<mjBizAppsFormsFormAutomationRunEntity>(
+  const row = await ctx.provider.GetEntityObject<mjBizAppsFormsFormAutomationRunEntity>(
     ENTITY.AutomationRun,
     ctx.principal,
   );
