@@ -62,6 +62,7 @@ import {
 } from './response-status';
 import {
   abuseIdentity,
+  autosaveRateLimitKey,
   buildSourceMetadata,
   completionCeilingKey,
   knockoutCeilingKey,
@@ -865,7 +866,12 @@ function disqualificationFields(
  *       wants a fresh bucket simply sends a new value. Useful for shaping a real widget's
  *       behaviour, worthless as a ceiling — and treating it as one was the defect. Charged only
  *       when the caller actually named a session: blank is not one caller, it is every
- *       header-less caller at once (see `sessionIdentity`).
+ *       header-less caller at once (see `sessionIdentity`). SPLIT into two counters by request
+ *       kind (#271), for the same reason (c) is split from (b): a FINAL submit
+ *       (`rateLimitKey`/`rateLimitMax`) and an autosave (`autosaveRateLimitKey`/
+ *       `autosaveRateLimitMax`) cost unrelated amounts to the respondent's own budget — one
+ *       counter over both meant a session's own autosaves could spend the budget its eventual
+ *       Submit press needed, refusing the one request the respondent actually came to make.
  *   (b) per (caller, distribution) — keyed on the resolved peer IP, which the caller cannot
  *       rotate. This is the ceiling. It does not make abuse impossible; it makes it cost
  *       ADDRESSES, which is the only currency a public endpoint can charge.
@@ -892,9 +898,25 @@ function rateLimitGatesFor(
   // the shared kill switch `abuseIdentity` refuses to build for the ceilings. The exception is
   // the case where nothing else can be keyed either: with no address, this coarse
   // per-distribution circuit breaker is the only bound there is, and one is better than none.
-  // `warnOnceIfAbuseKeyingDegraded` has already announced that mode.
+  // `warnOnceIfAbuseKeyingDegraded` has already announced that mode. All of that reasoning is
+  // about whether (a) is charged at all, and it applies equally to both buckets below. That
+  // circuit breaker's total budget grew with the split below — from one 5/window bucket to
+  // 10 final + 60 autosave — which is acceptable: in no-IP mode a caller could already rotate
+  // `x-session-id` to escape (a) altogether, so this breaker was never the ceiling that mattered,
+  // and the autosave share of it stays durably bounded elsewhere by `FORMS_MAX_PARTIALS_PER_VERSION`.
+  //
+  // WHICH bucket is charged is a second, independent question (#271): a FINAL submit (a real
+  // completion or a knockout — `complete || knockout` here, i.e. `terminalCompletion` or a
+  // disqualifying final submit) spends the Submit budget, and everything else — an autosave —
+  // spends its own. Before this split the two shared one counter, so a respondent's own typing
+  // could exhaust the budget their eventual Submit press needed.
   if (sessionIdentity(ctx.sessionId) || !identity) {
-    gates.push({ key: rateLimitKey({ sessionId: ctx.sessionId, distributionId }), max: config.rateLimitMax });
+    const session = { sessionId: ctx.sessionId, distributionId };
+    gates.push(
+      complete || knockout
+        ? { key: rateLimitKey(session), max: config.rateLimitMax }
+        : { key: autosaveRateLimitKey(session), max: config.autosaveRateLimitMax },
+    );
   }
   if (!identity) {
     // No resolved IP, so (b), (c) and (d) have nothing to key on. They are omitted rather than

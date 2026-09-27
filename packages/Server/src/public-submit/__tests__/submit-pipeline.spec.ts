@@ -88,6 +88,7 @@ function makeContext(
 const TUNABLES = [
   'FORMS_TURNSTILE_SECRET',
   'FORMS_RATELIMIT_MAX',
+  'FORMS_AUTOSAVE_RATELIMIT_MAX',
   'FORMS_RATELIMIT_IP_MAX',
   'FORMS_COMPLETION_MAX',
   'FORMS_RATELIMIT_MAX_KEYS',
@@ -388,7 +389,6 @@ describe('runSubmitPipeline', () => {
   // counter covering both can only ever be wrong in one direction: tight enough to throttle a
   // respondent who is still typing, or loose enough to be no limit at all on the expensive path.
   it('caps completions on their own budget, without throttling autosaves', async () => {
-    process.env.FORMS_RATELIMIT_MAX = '50';
     process.env.FORMS_RATELIMIT_IP_MAX = '50';
     process.env.FORMS_COMPLETION_MAX = '1';
     resetPublicSubmitConfigForTests();
@@ -406,9 +406,87 @@ describe('runSubmitPipeline', () => {
     expect(completion.success).toBe(true);
     expect(secondCompletion.success).toBe(false);
     expect(secondCompletion.errors?.[0].message).toMatch(/too many/i);
-    delete process.env.FORMS_RATELIMIT_MAX;
     delete process.env.FORMS_RATELIMIT_IP_MAX;
     delete process.env.FORMS_COMPLETION_MAX;
+  });
+
+  // #271. Autosave and the respondent's own Submit press used to share ONE per-(session,
+  // distribution) bucket (gate (a)), so enough autosaves emptied the budget the eventual Submit
+  // needed — a respondent who had been typing for a while saw their own final submit refused
+  // "Too many submissions", by traffic that was entirely theirs. AT DEFAULTS (rateLimitMax=10),
+  // twenty partial saves is already twice that ceiling, so this is red before the fix: the final
+  // submit shares the bucket the autosaves just spent and is refused by it.
+  it('#271 regression: twenty autosaves at defaults never cost the final Submit its own budget', async () => {
+    const { ctx } = makeContext(respondentPermissions(), { clientIpHash: 'ip-respondent' });
+
+    for (let i = 0; i < 20; i++) {
+      const autosave = await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] }));
+      expect(autosave.errors?.[0]?.message ?? '', `autosave ${i + 1}`).not.toMatch(/too many/i);
+    }
+    const final = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(final.success).toBe(true);
+    expect(final.errors?.[0]?.message ?? '').not.toMatch(/too many/i);
+  });
+
+  // The retry-tap half of #271: whatever refuses a repeated final submit after a run of
+  // autosaves, it must never be THIS limiter — a final submit that reaches validation, dedupe, or
+  // any other real gate is a different failure from one that never got past the rate limiter that
+  // the autosaves in front of it should not have been able to touch.
+  it('#271: repeated final submits after a run of autosaves are never refused by the limiter', async () => {
+    const { ctx } = makeContext(respondentPermissions(), { clientIpHash: 'ip-respondent' });
+
+    for (let i = 0; i < 20; i++) {
+      await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] }));
+    }
+    const attempts = [
+      await runSubmitPipeline(ctx, validSubmission()),
+      await runSubmitPipeline(ctx, validSubmission()),
+      await runSubmitPipeline(ctx, validSubmission()),
+    ];
+
+    for (const [i, attempt] of attempts.entries()) {
+      expect(attempt.errors?.[0]?.message ?? '', `final submit ${i + 1}`).not.toMatch(/too many/i);
+    }
+  });
+
+  // FORMS_AUTOSAVE_RATELIMIT_MAX is autosave's OWN ceiling (#271) — tight here so the third
+  // autosave trips it, while a final submit right after still succeeds because it charges a
+  // completely different bucket (FORMS_RATELIMIT_MAX, untouched by any of this).
+  it('FORMS_AUTOSAVE_RATELIMIT_MAX bounds autosaves without touching the Submit budget', async () => {
+    process.env.FORMS_AUTOSAVE_RATELIMIT_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const { ctx } = makeContext(respondentPermissions(), { clientIpHash: 'ip-respondent' });
+
+    const first = await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] }));
+    const second = await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] }));
+    const third = await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] }));
+    const final = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(third.success).toBe(false);
+    expect(third.errors?.[0].message).toMatch(/too many/i);
+    expect(final.success).toBe(true);
+  });
+
+  // Gates (b)/(c)/(d) drop out entirely with no resolved IP (see `abuseIdentity`), leaving gate
+  // (a) — split by request kind — as the only bound left for a caller who still names a session.
+  // Autosave's own bucket must keep working in that degraded mode, not just in the common one.
+  it('bounds autosaves by their own budget even with no resolved IP, given a named session', async () => {
+    process.env.FORMS_AUTOSAVE_RATELIMIT_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const { ctx } = makeContext(respondentPermissions());
+    ctx.clientIpHash = undefined;
+
+    const first = await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] }));
+    const second = await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] }));
+    const third = await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] }));
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(third.success).toBe(false);
+    expect(third.errors?.[0].message).toMatch(/too many/i);
   });
 
   // When no IP could be resolved (middleware not mounted, or a socket already gone) the ceilings
@@ -443,8 +521,9 @@ describe('runSubmitPipeline', () => {
   // missed. MJ hands the pipeline a BLANK `sessionId` for any client that omits `x-session-id`
   // (curl, a bespoke integration, and this repo's own smoke scripts until `smoke/lib/session.mjs`
   // was written), so every one of those callers hashes to the same key. The per-session gate is
-  // the tightest of the four at 5/min, so they do not merely share a bucket, they share the
-  // TIGHTEST one: a single script pushes it over and the next unrelated caller is refused with
+  // the tightest of the four at 10/min by default (this is the FINAL-submit half of it — see
+  // #271), so they do not merely share a bucket, they share the TIGHTEST one: a single script
+  // pushes it over and the next unrelated caller is refused with
   // "Too many submissions" — a message about someone else's traffic. That is exactly the shared
   // kill switch the ceiling above is keyed per-caller to avoid, and a gate that cannot tell two
   // callers apart has no business refusing either of them.

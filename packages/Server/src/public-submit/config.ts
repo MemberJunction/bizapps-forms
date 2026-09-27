@@ -11,8 +11,16 @@
  *                                     rejected (fail-closed).
  *  - `FORMS_TURNSTILE_VERIFY_URL`     Override the Turnstile siteverify endpoint
  *                                     (default Cloudflare production URL).
- *  - `FORMS_RATELIMIT_MAX`            Max submissions per window per (session,distribution)
- *                                     key. Default 5.
+ *  - `FORMS_RATELIMIT_MAX`            Max FINAL submits (completions and knockouts) per window
+ *                                     per (session, distribution) key. Default 10. An autosave
+ *                                     never charges this bucket — see `FORMS_AUTOSAVE_RATELIMIT_MAX`.
+ *  - `FORMS_AUTOSAVE_RATELIMIT_MAX`   Max AUTOSAVES (partial saves) per window per
+ *                                     (session, distribution) key. Default 60. Its own bucket,
+ *                                     separate from `FORMS_RATELIMIT_MAX`, so a respondent's
+ *                                     typing can never spend the budget their own Submit press
+ *                                     needs (#271) — sharing one counter meant a session that
+ *                                     autosaved a handful of times had nothing left when it
+ *                                     actually pressed Submit.
  *  - `FORMS_RATELIMIT_IP_MAX`         Max submissions per window per (client IP, distribution).
  *                                     Default 120. This is the cap that actually bounds abuse:
  *                                     the key above is derived from a header the caller sets,
@@ -79,7 +87,31 @@ export interface PublicSubmitConfig {
    * automation turns out to matter for the confirmation needs a way back without a deploy.
    */
   hooksBlocking: boolean;
+  /**
+   * Per-(session, distribution) ceiling on FINAL submits — completions and knockouts, i.e. every
+   * request `rateLimitGatesFor` (submit-pipeline.ts) sees with `complete || knockout` true.
+   *
+   * An autosave never charges this bucket; it has its own, {@link autosaveRateLimitMax}, right
+   * beside it. Before that split the two shared one counter, and #271 is what that produced: a
+   * respondent's own typing (partial saves) could spend the budget their eventual Submit press
+   * needed, so the final submit was refused "Too many submissions" by traffic that was entirely
+   * theirs.
+   */
   rateLimitMax: number;
+  /**
+   * Per-(session, distribution) ceiling on AUTOSAVES (partial saves) — {@link rateLimitMax}'s
+   * counterpart for everything that is not a final submit, so a respondent's typing can never
+   * spend the budget their Submit needs (#271).
+   *
+   * The widget debounces autosaves 1.5s apart and never overlaps two in flight, so in practice a
+   * session lands around 40/minute — not a hard ceiling: a submit-point checkpoint (`flushNow()`)
+   * fires undebounced, and a failed save now retries itself on a capped backoff, so a session
+   * working through a rough patch can exceed that naive arithmetic. 60 sits comfortably above the
+   * in-practice rate (headroom for checkpoints/retries/jitter) and below {@link ipRateLimitMax}
+   * (120 — the per-IP save ceiling that bounds a whole address, many respondents, not one
+   * session's typing).
+   */
+  autosaveRateLimitMax: number;
   /**
    * Per-(client IP, distribution) ceiling on saves.
    *
@@ -147,7 +179,8 @@ export function getPublicSubmitConfig(): PublicSubmitConfig {
     turnstileSecret: process.env.FORMS_TURNSTILE_SECRET?.trim() || undefined,
     turnstileVerifyUrl: process.env.FORMS_TURNSTILE_VERIFY_URL?.trim() || DEFAULT_TURNSTILE_VERIFY_URL,
     hooksBlocking: (process.env.FORMS_HOOKS_BLOCKING ?? '').trim().toLowerCase() === 'true',
-    rateLimitMax: numberFromEnv('FORMS_RATELIMIT_MAX', 5),
+    rateLimitMax: numberFromEnv('FORMS_RATELIMIT_MAX', 10),
+    autosaveRateLimitMax: numberFromEnv('FORMS_AUTOSAVE_RATELIMIT_MAX', 60),
     ipRateLimitMax: numberFromEnv('FORMS_RATELIMIT_IP_MAX', 120),
     completionMax: numberFromEnv('FORMS_COMPLETION_MAX', 20),
     rateLimitMaxKeys: numberFromEnv('FORMS_RATELIMIT_MAX_KEYS', 50_000),

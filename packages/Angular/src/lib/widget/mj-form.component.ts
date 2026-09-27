@@ -963,8 +963,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /**
    * Save the current answers as a Partial response (server upserts, runs no hooks/quota).
    * Reuses the returned {@link responseId} so subsequent autosaves update the same record.
-   * Throws on failure so the {@link AutosaveController} can mark the status — it swallows
-   * the error, keeping autosave strictly non-blocking for the respondent.
+   * Throws on failure — a transport error, OR a server REFUSAL (`res.success === false`, e.g. the
+   * autosave rate-limit bucket) — so the {@link AutosaveController} records `'error'` (never
+   * `'saved'` for a save the server threw away) and retries it on its own capped backoff.
    */
   private async savePartial(): Promise<string | undefined> {
     const def = this.definition();
@@ -985,12 +986,22 @@ export class MjFormComponent implements OnInit, OnDestroy {
     } catch (err) {
       // The autosave is the request most likely to DISCOVER an expiry: it fires on every edit,
       // long before the respondent reaches Submit. Left to the controller alone the failure is
-      // swallowed by design, and the respondent goes on typing into a form that is saving nothing
-      // and will refuse the final send. Still rethrown, so the controller records the failure.
+      // logged and retried on a capped backoff — never diagnosed as a session expiry — so the
+      // respondent would go on typing into a form that is quietly retrying against an expired
+      // session and will refuse the final send regardless. Still rethrown, so the controller
+      // records the failure AND this component gets a chance to check for expiry.
       this.endSessionIfExpired(err);
       throw err;
     }
-    if (res.success && res.responseId) {
+    if (!res.success) {
+      // A logical refusal — the rate-limit bucket, most commonly — is NOT the same as "saved".
+      // Left to return normally here, the controller had no way to tell it apart from a real
+      // save and reported 'saved' for progress the server had just thrown away.
+      throw new Error(`Autosave refused: ${res.errors?.[0]?.message ?? 'no reason given'}`);
+    }
+    // `res.success` is already guaranteed true here — the `!res.success` branch above throws
+    // before this line, so a refusal never reaches it.
+    if (res.responseId) {
       this.responseId = res.responseId;
       this.announceFirstPartial(res.responseId);
     }

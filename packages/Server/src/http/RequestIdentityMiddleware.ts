@@ -18,7 +18,7 @@
 import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware } from '@memberjunction/server';
-import { LogStatus } from '@memberjunction/core';
+import { LogError, LogStatus } from '@memberjunction/core';
 
 import { hashClientIp, resolveClientIp, runWithRequestIdentity } from './request-identity.js';
 
@@ -52,6 +52,43 @@ export function trustedProxyHops(): number {
     );
   }
   return hops;
+}
+
+let warnedForwardedWithoutHops = false;
+
+/**
+ * Say ONCE, loudly, when a request carries `X-Forwarded-For` while this deployment trusts no
+ * proxy hops (`FORMS_TRUSTED_PROXY_HOPS=0`, the default).
+ *
+ * Worded conditionally on purpose — "if a load balancer fronts this API" — because the header
+ * alone is not proof of one: an ordinary client can send it with nothing in front to have written
+ * it. At zero hops `resolveClientIp` already ignores the header and keys on the socket peer, so
+ * this warning changes no behaviour; it exists because the failure mode it describes is otherwise
+ * invisible. If there really is a balancer, every respondent behind it resolves to the balancer's
+ * own peer address, so every per-IP ceiling (`FORMS_RATELIMIT_IP_MAX`, `FORMS_COMPLETION_MAX`)
+ * becomes one shared bucket for the whole deployment instead of one per respondent. That is the
+ * same misconfiguration {@link trustedProxyHops}'s boot-time throw guards against for a malformed
+ * value; there is nothing to throw on for an unset one, since zero is also the legitimate,
+ * directly-addressed default, so a request-time warning is the only way to surface it.
+ *
+ * Once per process, not per request, because a line on every request is a line nobody reads.
+ */
+function warnOnceIfForwardedWithoutTrustedHops(req: Request): void {
+  if (warnedForwardedWithoutHops || req.headers['x-forwarded-for'] === undefined) {
+    return;
+  }
+  warnedForwardedWithoutHops = true;
+  LogError(
+    '[Forms] Request arrived with X-Forwarded-For while FORMS_TRUSTED_PROXY_HOPS=0. If a load ' +
+      'balancer fronts this API, every respondent is keyed on its address and the per-IP ceilings ' +
+      '(FORMS_RATELIMIT_IP_MAX, FORMS_COMPLETION_MAX) apply to the whole deployment. Set ' +
+      'FORMS_TRUSTED_PROXY_HOPS to the number of proxies you operate.',
+  );
+}
+
+/** Test-only: forget that the X-Forwarded-For-without-trusted-hops warning has been emitted. */
+export function resetForwardedWithoutHopsWarningForTests(): void {
+  warnedForwardedWithoutHops = false;
 }
 
 /**
@@ -88,6 +125,9 @@ export function trustedProxyHops(): number {
  */
 export function requestIdentityHandler(hops: number = trustedProxyHops()): RequestHandler {
   return (req: Request, _res: Response, next: NextFunction): void => {
+    if (hops === 0) {
+      warnOnceIfForwardedWithoutTrustedHops(req);
+    }
     const ip = resolveClientIp(req, hops);
     const rawOrigin = req.headers['origin'];
     const origin = typeof rawOrigin === 'string' && rawOrigin.trim().length > 0 ? rawOrigin.trim() : undefined;

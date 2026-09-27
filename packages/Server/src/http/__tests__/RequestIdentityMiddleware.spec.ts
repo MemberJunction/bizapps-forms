@@ -8,7 +8,7 @@
  * `@memberjunction/server` is mocked because importing it for real runs `loadConfig()` at module
  * load and throws without a live MJ config (same reason `WidgetBundleMiddleware.spec.ts` does it).
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@memberjunction/server', () => ({
   BaseServerMiddleware: class {},
@@ -19,7 +19,12 @@ import type { Request, Response } from 'express';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 
-import { RequestIdentityMiddleware, requestIdentityHandler, trustedProxyHops } from '../RequestIdentityMiddleware';
+import {
+  RequestIdentityMiddleware,
+  requestIdentityHandler,
+  resetForwardedWithoutHopsWarningForTests,
+  trustedProxyHops,
+} from '../RequestIdentityMiddleware';
 import { currentRequestIdentity, hashClientIp } from '../request-identity';
 import type { RequestIdentity } from '../request-identity';
 
@@ -153,6 +158,59 @@ describe('RequestIdentityMiddleware', () => {
     let seen: RequestIdentity | undefined;
     handler(requestWith({}, '203.0.113.7'), {} as Response, () => { seen = currentRequestIdentity(); });
     expect(seen?.origin).toBeUndefined();
+  });
+});
+
+describe('the X-Forwarded-For-without-trusted-hops warning', () => {
+  let logged: string[];
+
+  beforeEach(() => {
+    logged = [];
+    // `LogError` always reaches console.error, in production too — unlike `LogStatus`, which MJ
+    // silences under NODE_ENV=production. That is the property the assertions below depend on.
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    });
+    resetForwardedWithoutHopsWarningForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetForwardedWithoutHopsWarningForTests();
+  });
+
+  /** Only this warning; other console.error traffic must not make a count pass. */
+  function forwardedWarnings(): string[] {
+    return logged.filter((line) => line.includes('X-Forwarded-For') && line.includes('FORMS_TRUSTED_PROXY_HOPS=0'));
+  }
+
+  function requestWithForwardedFor(value: string): Request {
+    return requestWith({ 'x-forwarded-for': value }, '203.0.113.7');
+  }
+
+  it('warns once across two requests that carry X-Forwarded-For at zero trusted hops', () => {
+    const handler = requestIdentityHandler(0);
+
+    handler(requestWithForwardedFor('9.9.9.9'), {} as Response, () => {});
+    handler(requestWithForwardedFor('9.9.9.9'), {} as Response, () => {});
+
+    expect(forwardedWarnings()).toHaveLength(1);
+  });
+
+  it('does not warn once at least one proxy hop is trusted', () => {
+    const handler = requestIdentityHandler(1);
+
+    handler(requestWithForwardedFor('9.9.9.9'), {} as Response, () => {});
+
+    expect(forwardedWarnings()).toHaveLength(0);
+  });
+
+  it('does not warn when the request carries no X-Forwarded-For header', () => {
+    const handler = requestIdentityHandler(0);
+
+    handler(requestWith({}, '203.0.113.7'), {} as Response, () => {});
+
+    expect(forwardedWarnings()).toHaveLength(0);
   });
 });
 

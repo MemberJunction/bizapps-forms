@@ -516,10 +516,9 @@ describe('knockouts get their own throttle, not a free pass', () => {
   it('and spends none of the completion budget doing it', async () => {
     process.env.FORMS_KNOCKOUT_MAX = '50';
     process.env.FORMS_COMPLETION_MAX = '2';
-    // Gate (a) is 5 per (session, distribution) by default, and this sends six requests from one
-    // session — without raising it, the sixth is refused by THAT ceiling and the test would be
-    // reporting the wrong gate. Isolating one bucket means pinning the ones you are not testing.
-    process.env.FORMS_RATELIMIT_MAX = '50';
+    // Gate (a) — the FINAL-submit bucket (#271 split it from the autosave one) — defaults to 10
+    // per (session, distribution), well above the six final submits (five knockouts + one
+    // completion) this test sends from one session, so nothing needs raising here.
     resetPublicSubmitConfigForTests();
     const { ctx } = contextFor(knockoutDefinition(), { maxResponses: null, responseCount: 0 });
 
