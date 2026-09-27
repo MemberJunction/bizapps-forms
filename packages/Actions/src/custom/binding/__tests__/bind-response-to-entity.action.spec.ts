@@ -49,48 +49,25 @@ class FakeBinding {
   }
 }
 
+// The global Metadata/RunView (what `new Metadata()` / `new RunView()` with no args resolve to)
+// THROW on any use. If the action or anything it calls ever fell back to them instead of
+// `params.Provider`, every test below would fail with 'global provider used' instead of the
+// assertion it's actually making (bizapps-forms#260).
 vi.mock('@memberjunction/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class Metadata {
-    public EntityByName(name: string) {
-      if (name !== 'Known: Entity') {
-        return undefined;
-      }
-      return {
-        Name: 'Known: Entity',
-        FieldByName: (f: string) => (f.toLowerCase() === 'email' ? { Name: 'Email' } : undefined),
-        PrimaryKeys: [{ Name: 'ID' }],
-        IncludeInAPI: true,
-        VirtualEntity: false,
-        AllowCreateAPI: true,
-        AllowUpdateAPI: true,
-        Fields: [{ Name: 'Email', ReadOnly: false }],
-      };
+    public EntityByName(): never {
+      throw new Error('global provider used');
     }
-    public async GetEntityObject(entityName: string) {
-      if (entityName === 'MJ_BizApps_Forms: Form Entity Bindings') {
-        return new FakeBinding();
-      }
-      if (entityName === 'MJ_BizApps_Forms: Form Entity Binding Records') {
-        return new FakeLedgerRow();
-      }
-      // The binding's target record.
-      targetWrites.push(entityName);
-      return {
-        NewRecord: () => {},
-        Set: () => {},
-        Save: async () => true,
-        PrimaryKey: { KeyValuePairs: [{ FieldName: 'ID', Value: 'written-1' }] },
-        LatestResult: { CompleteMessage: '' },
-      };
+    public async GetEntityObject(): Promise<never> {
+      throw new Error('global provider used');
     }
   }
   class RunView {
-    public async RunView(params: { EntityName: string }) {
-      if (params.EntityName === 'MJ_BizApps_Forms: Form Entity Binding Records') {
-        return { Success: true, Results: [...ledgerRows] };
-      }
-      return { Success: true, Results: [] };
+    constructor(private readonly provider?: { RunView(p: unknown, u?: unknown): Promise<unknown> } | null) {}
+    public async RunView(params: unknown, user?: unknown): Promise<unknown> {
+      if (!this.provider) throw new Error('global provider used');
+      return this.provider.RunView(params, user);
     }
   }
   return { ...actual, Metadata, RunView, LogError: () => {} };
@@ -134,16 +111,55 @@ vi.mock('../../shared/form-response-context', () => ({
 const { BindResponseToEntityAction } = await import('../bind-response-to-entity.action');
 
 /**
- * `resolveActionProvider` (bizapps-forms#260) requires a real `ActionDataProvider` shape on
- * `params.Provider` — never called here, since `loadFormResponseContext` is itself mocked above
- * and ignores the argument, but it has to structurally satisfy `isActionDataProvider` or the
- * action fails before reaching any of the mocked behaviour this file actually exercises.
+ * `params.Provider` (bizapps-forms#260) — everything the action, the gateway and the ledger used
+ * to route through `new Metadata()` / `new RunView()` for, now routed through here instead.
+ * `loadFormResponseContext` is mocked above and ignores it, but the binding load, the
+ * gateway's target-entity resolution/write, and both ledger calls all reach this object for real.
  */
-function dummyProvider(): unknown {
-  const neverCalled = async (): Promise<never> => {
-    throw new Error('dummyProvider should never be called — loadFormResponseContext is mocked');
+function fakeProvider(): unknown {
+  return {
+    EntityByName: (name: string) => {
+      if (name !== 'Known: Entity') {
+        return undefined;
+      }
+      return {
+        Name: 'Known: Entity',
+        FieldByName: (f: string) => (f.toLowerCase() === 'email' ? { Name: 'Email' } : undefined),
+        PrimaryKeys: [{ Name: 'ID' }],
+        IncludeInAPI: true,
+        VirtualEntity: false,
+        AllowCreateAPI: true,
+        AllowUpdateAPI: true,
+        Fields: [{ Name: 'Email', ReadOnly: false }],
+      };
+    },
+    GetEntityObject: async (entityName: string) => {
+      if (entityName === 'MJ_BizApps_Forms: Form Entity Bindings') {
+        return new FakeBinding();
+      }
+      if (entityName === 'MJ_BizApps_Forms: Form Entity Binding Records') {
+        return new FakeLedgerRow();
+      }
+      // The binding's target record.
+      targetWrites.push(entityName);
+      return {
+        NewRecord: () => {},
+        Set: () => {},
+        Save: async () => true,
+        PrimaryKey: { KeyValuePairs: [{ FieldName: 'ID', Value: 'written-1' }] },
+        LatestResult: { CompleteMessage: '' },
+      };
+    },
+    RunView: async (params: { EntityName: string }) => {
+      if (params.EntityName === 'MJ_BizApps_Forms: Form Entity Binding Records') {
+        return { Success: true, Results: [...ledgerRows] };
+      }
+      return { Success: true, Results: [] };
+    },
+    RunViews: async () => {
+      throw new Error('RunViews is not exercised by this action');
+    },
   };
-  return { GetEntityObject: neverCalled, EntityByName: neverCalled, RunView: neverCalled, RunViews: neverCalled };
 }
 
 function params(): { Params: { Name: string; Value: string }[]; ContextUser: unknown; Provider: unknown } {
@@ -153,7 +169,7 @@ function params(): { Params: { Name: string; Value: string }[]; ContextUser: unk
       { Name: 'FormResponseID', Value: 'response-1' },
     ],
     ContextUser: { Name: 'tester' },
-    Provider: dummyProvider(),
+    Provider: fakeProvider(),
   };
 }
 

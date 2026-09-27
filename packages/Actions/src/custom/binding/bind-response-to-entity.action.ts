@@ -12,7 +12,7 @@
  */
 import { BaseAction } from '@memberjunction/actions';
 import { RegisterClass } from '@memberjunction/global';
-import { LogError, Metadata } from '@memberjunction/core';
+import { LogError } from '@memberjunction/core';
 import type { ActionResultSimple, RunActionParams } from '@memberjunction/actions-base';
 import {
   parseFieldMappings,
@@ -39,8 +39,8 @@ export class BindResponseToEntityAction extends BaseAction {
     }
 
     const contextUser = params.ContextUser;
-    const md = new Metadata();
-    const binding = await md.GetEntityObject<mjBizAppsFormsFormEntityBindingEntity>(BINDING_ENTITY, contextUser);
+    const provider = resolveActionProvider(params);
+    const binding = await provider.GetEntityObject<mjBizAppsFormsFormEntityBindingEntity>(BINDING_ENTITY, contextUser);
     if (!binding || !(await binding.Load(bindingId))) {
       return { Success: false, ResultCode: 'BINDING_NOT_FOUND', Message: `Binding ${bindingId} could not be loaded.` };
     }
@@ -50,10 +50,6 @@ export class BindResponseToEntityAction extends BaseAction {
       return { Success: true, ResultCode: 'SKIPPED', Message: 'Binding is disabled.' };
     }
 
-    // Only the response/form/answers read is moved onto the caller's provider here; the binding
-    // load above and the gateway/ledger calls below still use the global provider — routing THOSE
-    // through `provider` too is bizapps-forms#260's follow-up task for this action.
-    const provider = resolveActionProvider(params);
     const loaded = await loadFormResponseContext(responseId, contextUser, provider);
     if (loaded.status === 'absent') {
       return { Success: false, ResultCode: 'RESPONSE_NOT_FOUND', Message: `Response ${responseId} does not exist.` };
@@ -85,8 +81,8 @@ export class BindResponseToEntityAction extends BaseAction {
         // The same identity ledger the submit path uses. This entry point is the re-drivable one
         // — an approval hook, an admin re-run — so without it a second invocation would create a
         // second record under an AlwaysCreate rule and leave no trace that either had happened.
-        gateway: Object.assign(new MJBindingGateway(contextUser), {
-          findPriorOutcome: (id: string) => readPriorBindingOutcome(bindingId, id, contextUser),
+        gateway: Object.assign(new MJBindingGateway(contextUser, provider), {
+          findPriorOutcome: (id: string) => readPriorBindingOutcome(bindingId, id, contextUser, provider),
         }),
         responseId,
         // The caller decides the ceiling. Invoked from the submit path the deployment allow-list
@@ -103,7 +99,7 @@ export class BindResponseToEntityAction extends BaseAction {
         };
       }
 
-      await recordBindingLedgerRow(bindingId, binding.TargetEntityID, responseId, result.outcome, contextUser);
+      await recordBindingLedgerRow(bindingId, binding.TargetEntityID, responseId, result.outcome, contextUser, provider);
 
       setOutputParam(params, 'TargetRecordID', result.outcome.targetRecordId);
       setOutputParam(params, 'Outcome', result.outcome.kind);

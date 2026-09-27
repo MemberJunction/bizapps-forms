@@ -35,6 +35,7 @@ import {
   parseBindingConfig,
   readPriorBindingOutcome,
   recordBindingLedgerRow,
+  resolveActionProvider,
   MJBindingGateway,
   type BindingOutcome,
 } from '@mj-biz-apps/forms-actions';
@@ -246,13 +247,14 @@ async function runBindingTarget(
   // answers disagree about the same response.
   const filesVerified = await filesAreVerified(ctx);
 
+  const provider = resolveActionProvider({});
   const result = await executeBinding({
     config,
     answers: ctx.answers,
     questionTypes: ctx.questionTypes,
-    gateway: Object.assign(new MJBindingGateway(ctx.principal), {
+    gateway: Object.assign(new MJBindingGateway(ctx.principal, provider), {
       findPriorOutcome: (responseId: string) =>
-        readPriorBindingOutcome(automation.bindingId as string, responseId, ctx.principal),
+        readPriorBindingOutcome(automation.bindingId as string, responseId, ctx.principal, provider),
     }),
     responseId: ctx.responseId,
     allowedEntities: ctx.allowedEntities,
@@ -272,6 +274,7 @@ async function runBindingTarget(
     ctx.responseId,
     result.outcome,
     ctx.principal,
+    provider,
   );
   await attachBoundRecordFiles(ctx, binding.TargetEntityID, result.outcome, filesVerified);
   return {

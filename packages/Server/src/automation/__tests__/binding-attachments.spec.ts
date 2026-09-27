@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CanonicalAnswers } from '@mj-biz-apps/forms-entities';
 import type { PublishedFormAutomation } from '@mj-biz-apps/forms-entities';
 import type { UserInfo } from '@memberjunction/core';
-import type { BindingOutcome } from '@mj-biz-apps/forms-actions';
+import type { ActionDataProvider, BindingOutcome } from '@mj-biz-apps/forms-actions';
 import type { SyncFileLinksInput } from '../../file-links/file-links.service';
 import type { UploadLedgerRow } from '../../upload/upload-provenance.service';
 
@@ -83,6 +83,11 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   };
 });
 
+// A stand-in for what `resolveActionProvider({})` hands back in production — a placeholder,
+// since `executeBinding` is mocked below and never calls a gateway method that would need it to
+// behave like a real provider.
+const fakeProvider = { name: 'fake-provider' } as unknown as ActionDataProvider;
+
 vi.mock('@mj-biz-apps/forms-actions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@mj-biz-apps/forms-actions')>();
   return {
@@ -93,6 +98,7 @@ vi.mock('@mj-biz-apps/forms-actions', async (importOriginal) => {
       return { ok: true, outcome: state.outcome };
     },
     recordBindingLedgerRow: async () => undefined,
+    resolveActionProvider: () => fakeProvider,
   };
 });
 
