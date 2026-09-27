@@ -172,12 +172,13 @@ export async function revokeInviteById(
 /**
  * `provider` is the instance every read AND write in this pass runs through — absent, `new
  * RunView()` and the minter's own `new Metadata()` fallback both reach the process-global provider
- * instead. That matters whenever the caller is inside a scope of its own (bizapps-forms#260): the
- * global provider can have another unit of work's transaction open on it, and a query issued
- * through that instance races its COMMIT rather than running independently. The sealed-response
- * revoke path always supplies one (see `revokeSealedResponseInvites`); the start-over/`/forget`
- * path does not — it is a standalone request with no scope of its own, so the global provider is
- * exactly right for it.
+ * instead. That provider can have another unit of work's transaction open on it (bizapps-forms#260:
+ * Common.LogActivity), and any query issued through that instance — by any caller, scoped or not —
+ * joins it and races its COMMIT. The sealed-response revoke supplies an isolated instance (see
+ * `revokeSealedResponseInvites`). The start-over/`/forget` path does not, and is exposed the same
+ * way: it is left on the global provider only because every other respondent-host resume dependency
+ * (mint, redeem, lookup, revoke-by-id) is too, and moving that request onto its own instance is a
+ * change of its own, not part of the on-submit fix.
  */
 export async function revokeResponseInvites(
   responseId: string,

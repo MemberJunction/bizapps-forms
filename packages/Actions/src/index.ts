@@ -5,5 +5,5 @@ export * from './custom/register';
 // rows, free to drift from this one.
 export * from './custom/shared/form-response-context';
 // `action-provider` (resolveActionProvider, ActionDataProvider, …) is exported via
-// `./custom/register` below — see the comment there for why Server needs it.
+// `./custom/register` above — see the comment there for why Server needs it.
 export * from './custom/binding';
