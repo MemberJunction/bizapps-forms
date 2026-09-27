@@ -18,7 +18,7 @@
  *   set -a && . ./.env && set +a && node smoke/binding-path.mjs
  */
 import { sessionIdFor } from './lib/session.mjs';
-import { buildAnswers, resolveFormId, resolveSeededSlug } from './lib/fixture.mjs';
+import { buildAnswers, publishedSnapshotAutomations, resolveFormId, resolveSeededSlug } from './lib/fixture.mjs';
 import { sql } from './lib/sqlcmd.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
@@ -152,8 +152,11 @@ async function main() {
   const published = await gql(token,
     'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }', { slug: SLUG });
   const definition = JSON.parse(published?.PublishedForm?.definitionJSON ?? '{}');
-  check((definition.automations ?? []).length > 0,
-    'the published snapshot carries the automation',
+  // Automations are read from the STORED snapshot, never from `definition` above: the anonymous
+  // PublishedForm projection deliberately empties `automations` before a respondent can see it
+  // (public-form-payload.ts), so asserting on `definition.automations` always reports 0.
+  check(publishedSnapshotAutomations(SLUG).length > 0,
+    'the stored snapshot carries the automation',
     'run smoke/seed-binding-smoke.mjs first — without it nothing under test actually runs');
 
   // A unique address per run, so the first submission is genuinely a first sighting rather than

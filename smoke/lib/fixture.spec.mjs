@@ -23,7 +23,7 @@
  * runs this after `pnpm install` and `build:packages`, so the dependency is always satisfied there;
  * locally, build the packages first.
  */
-import { describeSeedWiringMismatch, answerFor } from './fixture.mjs';
+import { describeSeedWiringMismatch, answerFor, parseSnapshotAutomations } from './fixture.mjs';
 import { validateAnswerFormat, FORM_QUESTION_TYPES, isAnswerableQuestionType } from '@mj-biz-apps/forms-entities';
 
 let failures = 0;
@@ -81,6 +81,42 @@ check(
     return typeof m === 'string' && m.includes('a-form') && !m.includes('b-form');
   })(),
   'two runs on one database must name the same alternative',
+);
+
+// --- parseSnapshotAutomations reads the STORED snapshot's automations, not the anonymous, -----------
+// --- always-empty projection (smoke-s1-brief.md) -----------------------------------------------------
+
+console.log('\nparseSnapshotAutomations');
+
+check(
+  'returns the automations in the order the snapshot carries them',
+  (() => {
+    const snapshot = JSON.stringify({ automations: [{ id: 'first' }, { id: 'second' }] });
+    const result = parseSnapshotAutomations(snapshot, 'some-slug');
+    return Array.isArray(result) && result.length === 2 && result[0].id === 'first' && result[1].id === 'second';
+  })(),
+  'a snapshot with two automations must come back as two, in order — this is what publish actually ran',
+);
+
+check(
+  'returns an empty array when the snapshot has no automations key',
+  (() => {
+    const result = parseSnapshotAutomations(JSON.stringify({ pages: [] }), 'some-slug');
+    return Array.isArray(result) && result.length === 0;
+  })(),
+);
+
+check(
+  'throws naming the slug when the snapshot text is not valid JSON',
+  (() => {
+    try {
+      parseSnapshotAutomations('{not valid json', 'broken-form');
+      return false;
+    } catch (err) {
+      return err.message.includes('broken-form');
+    }
+  })(),
+  'a parse failure with no form name sends the operator looking at the wrong form',
 );
 
 // --- the fixture speaks the contract's answer format, for every type the taxonomy knows -------------
