@@ -24,6 +24,7 @@ import {
   resolveQuestions,
   resolveSlug,
 } from './lib/fixture.mjs';
+import { AUTOMATION_RUNNER_GRANTS, principalGrantMergeSql } from './lib/grants.mjs';
 
 requireDbEnv('seed-binding-smoke.mjs');
 
@@ -114,47 +115,17 @@ console.log('  ok    service principal + role');
 // The principal needs real grants on what it touches. Granting on the target entity here is the
 // deployment decision the executor's allow-list keeps honest; for the smoke run we grant exactly
 // the entities this binding uses and nothing else.
-sql(`
-DECLARE @RoleID UNIQUEIDENTIFIER = (SELECT ID FROM __mj.Role WHERE Name='Forms Automation Runner');
-DECLARE @Entities TABLE (Name NVARCHAR(255), C BIT, R BIT, U BIT);
-INSERT INTO @Entities VALUES
-  ('MJ_BizApps_Common: People', 1, 1, 1),
-  ('MJ_BizApps_Forms: Form Responses', 0, 1, 1),
-  ('MJ_BizApps_Forms: Form Response Answers', 0, 1, 0),
-  ('MJ_BizApps_Forms: Form Questions', 0, 1, 0),
-  ('MJ_BizApps_Forms: Forms', 0, 1, 0),
-  ('MJ_BizApps_Forms: Form Automations', 0, 1, 0),
-  ('MJ_BizApps_Forms: Form Entity Bindings', 0, 1, 0),
-  ('MJ_BizApps_Forms: Form Automation Runs', 1, 1, 1),
-  ('MJ_BizApps_Forms: Form Entity Binding Records', 1, 1, 1),
-  -- Read-only: bind-time provenance verification (filesAreVerified → loadUploadLedger) runs a
-  -- RunView over the upload ledger under this principal. Without it the lookup throws, the check
-  -- fails closed, and every file-answer binding reports "provenance cannot be verified" (#49).
-  -- Never grant create here: a runner that can mint ledger rows can vouch for arbitrary files.
-  --
-  -- ⚠️ THIS ROW MASKS THE MIGRATION THAT SHIPS IT (V202608181030). Because the MERGE below
-  -- upserts it, no smoke run can detect the shipped grant being absent or regressed — the fixture
-  -- supplies what is under test. It stays because this file's stated job is to establish its own
-  -- preconditions rather than hope they hold (see the note further down), and a fixture that
-  -- depends on migration order fails for the wrong reason on a dev database. The consequence is
-  -- worth naming: the evidence that the SHIPPED grant works is the migration's own postconditions,
-  -- not this smoke.
-  ('MJ_BizApps_Forms: Form Uploads', 0, 1, 0);
-
--- UPSERT, not insert-if-missing. Most of these grants now SHIP in the metadata seed, so a
--- plain "insert what is absent" silently no-ops against the shipped row and leaves whatever
--- flags it carries -- which is how this fixture passed while the run it set up failed on
--- 'Does NOT have permission to Read MJ_BizApps_Forms: Forms'. A fixture must establish its
--- preconditions, not hope they already hold.
-MERGE __mj.EntityPermission AS tgt
-USING (SELECT e.ID AS EntityID, x.C, x.R, x.U FROM @Entities x JOIN __mj.Entity e ON e.Name = x.Name) AS src
-   ON tgt.EntityID = src.EntityID AND tgt.RoleID = @RoleID
-WHEN MATCHED AND (tgt.CanCreate <> src.C OR tgt.CanRead <> src.R OR tgt.CanUpdate <> src.U)
-  THEN UPDATE SET CanCreate = src.C, CanRead = src.R, CanUpdate = src.U
-WHEN NOT MATCHED BY TARGET
-  THEN INSERT (ID, EntityID, RoleID, CanCreate, CanRead, CanUpdate, CanDelete)
-       VALUES (NEWID(), src.EntityID, @RoleID, src.C, src.R, src.U, 0);
-`);
+//
+// UPSERT, not insert-if-missing, and RAISE-ONLY, not overwrite. Most of these grants now SHIP in
+// the metadata seed, so a plain "insert what is absent" silently no-ops against the shipped row
+// and leaves whatever flags it carries -- which is how this fixture passed while the run it set
+// up failed on 'Does NOT have permission to Read MJ_BizApps_Forms: Forms'. But an unconditional
+// overwrite is just as wrong in the other direction: it silently REVOKED V202608201200's shipped
+// CanUpdate on Form Response Answers, breaking `Forms: Analyze Written Responses` on every
+// database this seed ran on (#260 smoke finding S2). `principalGrantMergeSql` (smoke/lib/
+// grants.mjs) only raises a flag that is currently 0 where the fixture wants 1 -- it establishes
+// this fixture's minimum preconditions without ever lowering a wider grant a migration put there.
+sql(principalGrantMergeSql('Forms Automation Runner', AUTOMATION_RUNNER_GRANTS));
 console.log('  ok    entity permissions for the principal');
 
 // 2. The binding + the automation that runs it.
