@@ -3,8 +3,12 @@
  * response, its answers, the questions (so we know each answer's type/prompt), and the
  * owning form — everything the Upsert-Person / Email / Task hooks need, loaded once.
  *
- * All reads go through RunView with `.Success` checks (RunView never throws);
- * `contextUser` is always passed (CLAUDE.md MJ patterns).
+ * All reads go through the caller's `provider` — via `RunView`, with `.Success` checks
+ * (RunView never throws) — never the process-global default; `contextUser` is always passed
+ * (CLAUDE.md MJ patterns). Routing through the caller's provider, rather than `new Metadata()` /
+ * `new RunView()`, is what lets a caller run this loader inside its own transaction-isolated
+ * provider instance without its reads colliding with a transaction something else opened on the
+ * global one (bizapps-forms#260).
  *
  * The outcome distinguishes a response that does not exist (`absent` — a hook skips) from one
  * that could not be READ (`failed` — a hook fails, with the reason). They used to share `null`,
@@ -12,7 +16,7 @@
  * principal lacked a grant (#239) both presented as "nothing to do", which is the one reading an
  * operator can never trace back to a permission.
  */
-import { Metadata, RunView } from '@memberjunction/core';
+import { RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import {
   CanonicalAnswers,
@@ -24,6 +28,7 @@ import {
   quoteSqlString,
   type FormQuestionType,
 } from '@mj-biz-apps/forms-entities';
+import type { ActionDataProvider } from './action-provider';
 
 const ENTITY = {
   FormResponse: 'MJ_BizApps_Forms: Form Responses',
@@ -99,13 +104,13 @@ export type FormResponseContextResult =
 /** A read that did not produce its rows: the message for a `failed` outcome. */
 type ReadOutcome<T> = { ok: true; value: T } | { ok: false; error: string };
 
-/** Load the response + answers + questions + form for a response id. */
+/** Load the response + answers + questions + form for a response id, reading through `provider`. */
 export async function loadFormResponseContext(
   responseId: string,
   contextUser: UserInfo,
+  provider: ActionDataProvider,
 ): Promise<FormResponseContextResult> {
-  const md = new Metadata();
-  const response = await md.GetEntityObject<mjBizAppsFormsFormResponseEntity>(ENTITY.FormResponse, contextUser);
+  const response = await provider.GetEntityObject<mjBizAppsFormsFormResponseEntity>(ENTITY.FormResponse, contextUser);
   // `Load` returns false only when no row came back; a refused read (no Read grant) THROWS.
   const responseLoad = await loadRecord(response, responseId, ENTITY.FormResponse);
   if (!responseLoad.ok) {
@@ -115,7 +120,7 @@ export async function loadFormResponseContext(
     return { status: 'absent' };
   }
 
-  const form = await md.GetEntityObject<mjBizAppsFormsFormEntity>(ENTITY.Form, contextUser);
+  const form = await provider.GetEntityObject<mjBizAppsFormsFormEntity>(ENTITY.Form, contextUser);
   const formLoad = await loadRecord(form, response.FormID, ENTITY.Form);
   if (!formLoad.ok || !formLoad.value) {
     // The response exists, so a missing form is not "nothing to do" — it is a read that failed.
@@ -123,7 +128,7 @@ export async function loadFormResponseContext(
     return { status: 'failed', error: `form ${response.FormID} of response ${responseId} could not be loaded: ${why}` };
   }
 
-  const answerRows = await loadAnswerRows(responseId, contextUser);
+  const answerRows = await loadAnswerRows(responseId, contextUser, provider);
   if (!answerRows.ok) {
     return { status: 'failed', error: answerRows.error };
   }
@@ -131,6 +136,7 @@ export async function loadFormResponseContext(
     answerRows.value.map((a) => a.QuestionID),
     responseId,
     contextUser,
+    provider,
   );
   if (!questionsById.ok) {
     return { status: 'failed', error: questionsById.error };
@@ -166,8 +172,9 @@ async function loadRecord(
 async function loadAnswerRows(
   responseId: string,
   contextUser: UserInfo,
+  provider: ActionDataProvider,
 ): Promise<ReadOutcome<mjBizAppsFormsFormResponseAnswerEntity[]>> {
-  const rv = new RunView();
+  const rv = new RunView(provider);
   const answerResult = await rv.RunView<mjBizAppsFormsFormResponseAnswerEntity>(
     {
       EntityName: ENTITY.FormResponseAnswer,
@@ -212,6 +219,7 @@ async function loadQuestionsById(
   questionIds: string[],
   responseId: string,
   contextUser: UserInfo,
+  provider: ActionDataProvider,
 ): Promise<ReadOutcome<Map<string, mjBizAppsFormsFormQuestionEntity>>> {
   const map = new Map<string, mjBizAppsFormsFormQuestionEntity>();
   const unique = Array.from(new Set(questionIds));
@@ -219,7 +227,7 @@ async function loadQuestionsById(
     return { ok: true, value: map };
   }
   const inList = unique.map((id) => quoteSqlString(id)).join(',');
-  const rv = new RunView();
+  const rv = new RunView(provider);
   const result = await rv.RunView<mjBizAppsFormsFormQuestionEntity>(
     {
       EntityName: ENTITY.FormQuestion,

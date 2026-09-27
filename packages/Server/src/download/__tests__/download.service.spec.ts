@@ -100,6 +100,16 @@ describe('loadResponseFile — the authorization', () => {
     expect(result.payload?.content.toString()).toBe('PDF BYTES');
   });
 
+  it('reads the object by its storage path, never as a provider-native id (#261)', async () => {
+    const getObject = vi.fn(async () => Buffer.from('PDF BYTES'));
+    const result = await loadResponseFile(
+      context({ storage: { GetDriver: async () => ({ GetObject: getObject }) } }),
+      FILE_ID,
+    );
+    expect(result.ok).toBe(true);
+    expect(getObject).toHaveBeenCalledWith({ fullPath: 'forms-uploads/2026-08-19/abc/resume.pdf' });
+  });
+
   it('checks the provenance row AS THE CALLER, which is what makes it an authorization', async () => {
     await loadResponseFile(context(), FILE_ID);
     expect(readAs.upload).toBe(CALLER);

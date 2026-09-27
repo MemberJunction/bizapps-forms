@@ -1,5 +1,11 @@
 # @mj-biz-apps/forms-core-entities-server
 
+## 0.13.1
+
+### Patch Changes
+
+- @mj-biz-apps/forms-entities@0.13.1
+
 ## 0.13.0
 
 ### Patch Changes

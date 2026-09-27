@@ -280,6 +280,13 @@ describe('loadAssetBytes — the anonymous read guard', () => {
     expect(ctx.storage.GetDriver).toHaveBeenCalledWith('account-1', SYSTEM);
   });
 
+  it('reads the object by its storage path, never as a provider-native id (#261)', async () => {
+    const getObject = vi.fn(async () => Buffer.from('PNGDATA'));
+    const ctx = readContext(fileRecord(), { GetDriver: vi.fn(async () => ({ GetObject: getObject })) });
+    await loadAssetBytes(ctx, FILE_ID);
+    expect(getObject).toHaveBeenCalledWith({ fullPath: `forms-assets/${FORM_ID}/logo.png` });
+  });
+
   it('falls back to the configured account when the provider has none', async () => {
     const ctx = readContext(fileRecord(), { GetAccountsByProviderID: () => [] });
     await loadAssetBytes(ctx, FILE_ID);

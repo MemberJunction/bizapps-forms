@@ -13,6 +13,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
+import type { ActionDataProvider } from '../shared/action-provider';
 // PRECONDITION, not decoration. The action refuses to run when no generated class is registered
 // for the entities it writes, because MJ's fallback would silently discard every field it sets
 // (#60). In production `custom/register.ts` imports this package for exactly that reason, and
@@ -81,7 +82,11 @@ const state: {
 };
 
 /**
- * PARTIAL mock: the real module first, then the two classes this test fakes.
+ * PARTIAL mock: the real module first, then the two classes this test fakes. The global
+ * Metadata/RunView both throw — production now reads/writes exclusively through
+ * `params.Provider` (a `fakeProvider()` below), so a fall-back to `new Metadata()` /
+ * `new RunView()` (no args) fails loudly instead of silently drifting onto the wrong provider
+ * (bizapps-forms#260). `RunView` constructed WITH a provider (the correct shape) delegates to it.
  *
  * The whole-module form this replaced failed to load with
  * `No "BaseEngine" export is defined on the mock` — a symbol nothing here mentions, coming from
@@ -91,6 +96,26 @@ const state: {
 vi.mock('@memberjunction/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class Metadata {
+    async GetEntityObject(): Promise<never> {
+      throw new Error('global provider used');
+    }
+    EntityByName(): never {
+      throw new Error('global provider used');
+    }
+  }
+  class RunView {
+    constructor(private readonly provider?: { RunView(p: unknown, u?: unknown): Promise<unknown> } | null) {}
+    async RunView(params: unknown, user?: unknown): Promise<unknown> {
+      if (!this.provider) throw new Error('global provider used');
+      return this.provider.RunView(params, user);
+    }
+  }
+  return { ...actual, Metadata, RunView };
+});
+
+/** The provider `RunActionParams.Provider` supplies — everything below reads/writes through it. */
+function fakeProvider(): ActionDataProvider {
+  return {
     async GetEntityObject<T>(entityName: string): Promise<T> {
       state.getEntityCalls.push(entityName);
       if (entityName === 'MJ_BizApps_Tasks: Tasks') {
@@ -100,15 +125,13 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
         return state.taskLink as unknown as T;
       }
       throw new Error(`Unexpected GetEntityObject('${entityName}')`);
-    }
+    },
     EntityByName(entityName: string): { ID: string } | undefined {
       if (entityName === 'MJ_BizApps_Forms: Form Responses' && state.responseEntityId) {
         return { ID: state.responseEntityId };
       }
       return undefined;
-    }
-  }
-  class RunView {
+    },
     async RunView<T>(opts: { EntityName: string }): Promise<{ Success: boolean; Results: T[]; ErrorMessage?: string }> {
       if (opts.EntityName === 'MJ_BizApps_Tasks: Task Types' && state.taskTypeReadError) {
         return { Success: false, Results: [], ErrorMessage: state.taskTypeReadError };
@@ -118,10 +141,13 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
       else if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') results = state.answers;
       else if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') results = state.questions;
       return { Success: true, Results: results as T[] };
-    }
-  }
-  return { ...actual, Metadata, RunView };
-});
+    },
+    // Present only so `isActionDataProvider` accepts this fake — the action never calls it.
+    async RunViews(): Promise<never> {
+      throw new Error('RunViews was not expected to be called');
+    },
+  } as unknown as ActionDataProvider;
+}
 
 // The action loads the response via a shared helper; stub it to return our fake context.
 vi.mock('../shared/form-response-context', () => ({
@@ -150,6 +176,7 @@ function makeParams(extra: { Name: string; Value: unknown }[] = []): RunActionPa
   return Object.assign(new RunActionParams(), {
     ContextUser: fakeUser,
     Filters: [],
+    Provider: fakeProvider(),
     Params: base.map((p) => Object.assign(new ActionParam(), { ...p, Type: 'Input' })),
   });
 }
@@ -176,6 +203,18 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('Forms: Create Followup Task', () => {
+  it('runs all data access on RunActionParams.Provider, never the global Metadata/RunView (#260)', async () => {
+    // The mocked global Metadata/RunView both throw 'global provider used'. Reaching SUCCESS here
+    // proves the TaskType lookup, the Task/TaskLink creates, and the response-entity lookup all
+    // ran on `params.Provider` — a fall-back to the global would have thrown instead.
+    const params = makeParams();
+
+    const result = await new CreateFollowupTaskAction().Run(params);
+
+    expect(result.Success).toBe(true);
+    expect(state.getEntityCalls).toEqual(['MJ_BizApps_Tasks: Tasks', 'MJ_BizApps_Tasks: Task Links']);
+  });
+
   it('creates a Task and a TaskLink to the response, returning both ids', async () => {
     const params = makeParams();
 

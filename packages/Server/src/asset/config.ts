@@ -162,7 +162,7 @@ export function formatBytes(bytes: number): string {
 }
 
 /** True when a stored object's provider key sits under the public asset prefix. */
-export function isPublicAssetKey(providerKey: string | null | undefined): boolean {
+export function isPublicAssetKey(providerKey: string | null | undefined): providerKey is string {
   return typeof providerKey === 'string' && providerKey.startsWith(`${ASSET_STORAGE_PREFIX}/`);
 }
 

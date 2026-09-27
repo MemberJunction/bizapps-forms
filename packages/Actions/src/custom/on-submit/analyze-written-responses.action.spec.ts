@@ -15,6 +15,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
+import type { ActionDataProvider } from '../shared/action-provider';
 import type {
   AnalyzedAnswer,
   AnalyzerInputAnswer,
@@ -87,11 +88,30 @@ const state: {
   answerSaveResult: () => true,
 };
 
-// Partial mock — see the note in upsert-respondent-person.action.spec.ts: the real module must
-// be spread back in so the generated entity classes can reach `BaseEntity` at runtime.
+// The global Metadata/RunView both throw — production reads exclusively through
+// `params.Provider` (`fakeProvider()` below) now, so a fall-back to `new Metadata()` /
+// `new RunView()` (no args) fails loudly instead of silently drifting onto the wrong provider
+// (bizapps-forms#260). `RunView` constructed WITH a provider (the correct shape) delegates to it.
 vi.mock('@memberjunction/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class Metadata {
+    async GetEntityObject(): Promise<never> {
+      throw new Error('global provider used');
+    }
+  }
+  class RunView {
+    constructor(private readonly provider?: { RunView(p: unknown, u?: unknown): Promise<unknown> } | null) {}
+    async RunView(params: unknown, user?: unknown): Promise<unknown> {
+      if (!this.provider) throw new Error('global provider used');
+      return this.provider.RunView(params, user);
+    }
+  }
+  return { ...actual, Metadata, RunView };
+});
+
+/** The provider `RunActionParams.Provider` supplies — everything below reads/writes through it. */
+function fakeProvider(): ActionDataProvider {
+  return {
     async GetEntityObject<T>(entityName: string): Promise<T> {
       if (entityName === 'MJ_BizApps_Forms: Form Responses' || entityName === 'MJ_BizApps_Forms: Forms') {
         return new FakeEntity() as unknown as T;
@@ -102,18 +122,19 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
         return entity as unknown as T;
       }
       throw new Error(`Unexpected GetEntityObject('${entityName}')`);
-    }
-  }
-  class RunView {
+    },
     async RunView<T>(opts: { EntityName: string }): Promise<{ Success: boolean; Results: T[] }> {
       let results: unknown[] = [];
       if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') results = state.answerRows;
       else if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') results = state.questionRows;
       return { Success: true, Results: results as T[] };
-    }
-  }
-  return { ...actual, Metadata, RunView };
-});
+    },
+    // Present only so `isActionDataProvider` accepts this fake — the action never calls it.
+    async RunViews(): Promise<never> {
+      throw new Error('RunViews was not expected to be called');
+    },
+  } as unknown as ActionDataProvider;
+}
 
 /** An answer entity that records its saved state into shared `state.savedAnswers`. */
 class CapturingAnswerEntity extends FakeAnswerEntity {
@@ -146,6 +167,7 @@ function makeParams(): RunActionParams {
   return Object.assign(new RunActionParams(), {
     ContextUser: fakeUser,
     Filters: [],
+    Provider: fakeProvider(),
     Params: [Object.assign(new ActionParam(), { Name: 'FormResponseID', Value: 'resp-1', Type: 'Input' })],
   });
 }
@@ -171,6 +193,31 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('Forms: Analyze Written Responses', () => {
+  it('runs all data access on RunActionParams.Provider, never the global Metadata/RunView (#260)', async () => {
+    // The mocked global Metadata/RunView both throw 'global provider used'. Reaching SUCCESS here
+    // proves the response/answers/questions load AND the per-answer score save ran on
+    // `params.Provider` — a fall-back to the global would have thrown instead. The analyzer model
+    // seam also receives the provider, forwarded as its 4th argument.
+    state.answerRows = [
+      { ID: 'a1', QuestionID: 'q1', TextValue: 'first', NumericValue: null, BooleanValue: null, JSONValue: null },
+    ];
+    state.questionRows = [{ ID: 'q1', QuestionType: 'ShortText', Prompt: 'Q1' }];
+    const model = stubModel([{ score: 70, rationale: 'ok' }]);
+    setResponseAnalyzerModel(model);
+    const params = makeParams();
+
+    const result = await new AnalyzeWrittenResponsesAction().Run(params);
+
+    expect(result.Success).toBe(true);
+    expect(model.analyze).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      params.Provider,
+    );
+    expect(state.savedAnswers.get('a1')?.Score).toBe(70);
+  });
+
   it('analyzes only free-text answers in ONE call and maps scores back by index', async () => {
     state.answerRows = [
       { ID: 'a-short', QuestionID: 'q1', TextValue: 'Great venue', NumericValue: null, BooleanValue: null, JSONValue: null },

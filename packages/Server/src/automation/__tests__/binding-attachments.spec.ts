@@ -12,7 +12,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CanonicalAnswers } from '@mj-biz-apps/forms-entities';
 import type { PublishedFormAutomation } from '@mj-biz-apps/forms-entities';
-import type { UserInfo } from '@memberjunction/core';
+import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 import type { BindingOutcome } from '@mj-biz-apps/forms-actions';
 import type { SyncFileLinksInput } from '../../file-links/file-links.service';
 import type { UploadLedgerRow } from '../../upload/upload-provenance.service';
@@ -67,11 +67,14 @@ const state: {
   logged: [],
 };
 
+// The global provider must never be reached by this dispatcher — every read/write is supposed to
+// run on `ctx.provider` (bizapps-forms#260). Throwing here makes a stray `new Metadata()` call
+// fail LOUDLY instead of happening to still work because the fake behind it was too permissive.
 vi.mock('@memberjunction/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class Metadata {
-    async GetEntityObject<T>(entityName: string): Promise<T> {
-      return (entityName === BINDING_ENTITY ? state.binding : new FakeRunRow()) as unknown as T;
+    async GetEntityObject<T>(): Promise<T> {
+      throw new Error('global provider used');
     }
   }
   return {
@@ -82,6 +85,14 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
     },
   };
 });
+
+/** Stands in for the isolated provider `withIsolatedProvider` hands the dispatcher in production. */
+function fakeProvider(): DatabaseProviderBase {
+  return {
+    GetEntityObject: async <T,>(entityName: string): Promise<T> =>
+      (entityName === BINDING_ENTITY ? state.binding : new FakeRunRow()) as unknown as T,
+  } as unknown as DatabaseProviderBase;
+}
 
 vi.mock('@mj-biz-apps/forms-actions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@mj-biz-apps/forms-actions')>();
@@ -139,6 +150,7 @@ function context(withFile = true) {
     // Empty rather than absent: these fixtures assert attachment behaviour, not answer shaping,
     // and an empty map is the "caller cannot say" case the executor is explicitly safe for.
     questionTypes: new Map(),
+    provider: fakeProvider(),
   };
 }
 

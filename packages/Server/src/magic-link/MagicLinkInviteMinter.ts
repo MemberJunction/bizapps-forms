@@ -29,7 +29,7 @@
  * WHOSE rights those writes carry is a separate question with its own answer: not the caller's.
  * See {@link MagicLinkInviteMinter.resolveWriter} — bizapps-forms#114.
  */
-import { Metadata, LogError, RunView, type UserInfo } from '@memberjunction/core';
+import { Metadata, LogError, RunView, type IRunViewProvider, type UserInfo } from '@memberjunction/core';
 import { UUIDsEqual } from '@memberjunction/global';
 import { configInfo } from '@memberjunction/server';
 import { UserCache } from '@memberjunction/generic-database-provider';
@@ -336,7 +336,7 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
       const writer = this.resolveWriter(contextUser);
       const invite = await (host ?? new Metadata()).GetEntityObject<MJMagicLinkInviteEntity>(INVITE_ENTITY, writer);
       if (!(await invite.Load(id))) {
-        return await this.reportUnloadableInvite(id, writer, verb);
+        return await this.reportUnloadableInvite(id, writer, verb, host);
       }
 
       // OWNERSHIP, before any write. The id arrives from `FormDistribution.MagicLinkInviteID`,
@@ -382,13 +382,20 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
    * Decide what a failed `Load` meant: a row that is genuinely gone (success — there is
    * no credential left to act on) or a read that did not work (failure — retry later).
    * Only a successful count of zero is confident enough to call it gone.
+   *
+   * The probe runs on `host` when the host can read — it is part of the same pass as the `Load` it
+   * explains, and a caller that handed over a provider of its own (the sealed-response revoke, on an
+   * isolated instance; bizapps-forms#260) must not have this one query escape to the process-global
+   * provider, where another unit of work may hold a transaction open. `InviteWriteHost` promises only
+   * `GetEntityObject`, so a host without the read half keeps the process-wide provider.
    */
   private async reportUnloadableInvite(
     id: string,
     contextUser: UserInfo,
     verb: string,
+    host: InviteWriteHost | undefined,
   ): Promise<InviteWriteResult> {
-    const rv = new RunView();
+    const rv = new RunView(canRunViews(host) ? host : null);
     const found = await rv.RunView<MJMagicLinkInviteEntity>(
       {
         EntityName: INVITE_ENTITY,
@@ -534,4 +541,9 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     // with it. The VALUE is what is fixed, not the object.
     return new Date(NO_EXPIRY_SENTINEL.getTime());
   }
+}
+
+/** Whether a write host also carries the read half — every server provider does; `InviteWriteHost` does not promise it. */
+function canRunViews(host: InviteWriteHost | undefined): host is InviteWriteHost & IRunViewProvider {
+  return !!host && typeof (host as Partial<IRunViewProvider>).RunView === 'function';
 }

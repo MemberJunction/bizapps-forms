@@ -8,11 +8,12 @@
  * path writes as the automation service principal. Neither is ever the respondent.
  *
  * The provider is injected rather than reached for globally so the submit path uses the SAME
- * per-request provider as the rest of the submission — {@link globalFileLinkProvider} exists for
- * the automation path, which has no per-request handle and already reaches MJ this way.
+ * per-request provider as the rest of the submission, and the automation dispatcher uses its own
+ * isolated instance ({@link fileLinkProviderFor}) — never `new Metadata()` / `new RunView()`,
+ * which a transaction something else opens on the global provider could capture (bizapps-forms#260).
  */
-import { Metadata, RunView } from '@memberjunction/core';
-import type { BaseEntity, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
+import { RunView } from '@memberjunction/core';
+import type { BaseEntity, IMetadataProvider, IRunViewProvider, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import type { MJFileEntityRecordLinkEntity } from '@memberjunction/core-entities';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 
@@ -41,13 +42,13 @@ interface FileLinkQueryRow {
   FileID: string;
 }
 
-/** MJ reached through its global provider, for call sites that hold no per-request one. */
-export function globalFileLinkProvider(): FileLinkDataProvider {
+/** A FileLinkDataProvider over a specific provider instance, rather than the process-global one. */
+export function fileLinkProviderFor(provider: IMetadataProvider & IRunViewProvider): FileLinkDataProvider {
   return {
     RunViews: <T,>(params: RunViewParams[], contextUser?: UserInfo): Promise<RunViewResult<T>[]> =>
-      new RunView().RunViews<T>(params, contextUser),
+      new RunView(provider).RunViews<T>(params, contextUser),
     GetEntityObject: <T extends BaseEntity>(entityName: string, contextUser?: UserInfo): Promise<T> =>
-      new Metadata().GetEntityObject<T>(entityName, contextUser),
+      provider.GetEntityObject<T>(entityName, contextUser),
   };
 }
 

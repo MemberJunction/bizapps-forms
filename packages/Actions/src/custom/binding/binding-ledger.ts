@@ -11,10 +11,11 @@
  * The unique index on (BindingID, FormResponseID) is the real guard against a double execution;
  * this read-then-write is the cooperative half.
  */
-import { LogError, Metadata, RunView } from '@memberjunction/core';
+import { LogError, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import { sqlLiteral } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormEntityBindingRecordEntity } from '@mj-biz-apps/forms-entities';
+import type { ActionDataProvider } from '../shared/action-provider';
 import type { BindingOutcome, BindingOutcomeKind, PriorBindingOutcome } from './binding-executor';
 
 const BINDING_RECORD_ENTITY = 'MJ_BizApps_Forms: Form Entity Binding Records';
@@ -33,13 +34,17 @@ interface LedgerRow {
  * and confusing them turns a transient database error into a duplicate business record. The
  * executor catches this and proceeds, which is the correct call there: the write path converges
  * on the same record without the ledger, it just costs a lookup.
+ *
+ * Reads through the caller's `provider` — never `new RunView()` — so a transaction something else
+ * opens on the process-global provider cannot capture this read (bizapps-forms#260).
  */
 export async function readPriorBindingOutcome(
   bindingId: string,
   responseId: string,
   contextUser: UserInfo,
+  provider: ActionDataProvider,
 ): Promise<PriorBindingOutcome | null> {
-  const result = await new RunView().RunView<LedgerRow>(
+  const result = await new RunView(provider).RunView<LedgerRow>(
     {
       EntityName: BINDING_RECORD_ENTITY,
       // Both are GUIDs minted by this system, but escaped anyway, so the safety of this query does
@@ -72,6 +77,9 @@ export async function readPriorBindingOutcome(
  * nothing" is a recorded fact rather than an absence indistinguishable from "never ran". A failure
  * here is logged, never thrown: the business record is already written, and reporting a write that
  * actually succeeded as a failure invites a retry that duplicates it.
+ *
+ * Reads and writes through the caller's `provider` — never `new RunView()` / `new Metadata()` —
+ * for the same reason (bizapps-forms#260).
  */
 export async function recordBindingLedgerRow(
   bindingId: string,
@@ -79,8 +87,9 @@ export async function recordBindingLedgerRow(
   responseId: string,
   outcome: BindingOutcome,
   contextUser: UserInfo,
+  provider: ActionDataProvider,
 ): Promise<void> {
-  const existing = await new RunView().RunView<{ ID: string }>(
+  const existing = await new RunView(provider).RunView<{ ID: string }>(
     {
       EntityName: BINDING_RECORD_ENTITY,
       ExtraFilter: `BindingID=${sqlLiteral(bindingId)} AND FormResponseID=${sqlLiteral(responseId)}`,
@@ -91,7 +100,7 @@ export async function recordBindingLedgerRow(
     contextUser,
   );
 
-  const row = await new Metadata().GetEntityObject<mjBizAppsFormsFormEntityBindingRecordEntity>(
+  const row = await provider.GetEntityObject<mjBizAppsFormsFormEntityBindingRecordEntity>(
     BINDING_RECORD_ENTITY,
     contextUser,
   );
