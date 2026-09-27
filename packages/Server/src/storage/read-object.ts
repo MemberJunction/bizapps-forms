@@ -6,14 +6,20 @@
  * Two copies of that sequence would be two places to get the account-resolution rule wrong, and
  * that rule is the subtle part: `MJ: Files` records a PROVIDER, not an account.
  *
- * No behaviour change. The guards that decide WHETHER a caller may read a given object stay with
+ * The extraction itself changed no behaviour. The guards that decide WHETHER a caller may read a given object stay with
  * their callers, where they belong — the asset route's guard is the storage prefix, the download
  * route's is the caller's permissions. This module only knows how to fetch bytes once someone
  * else has decided it is allowed.
  */
 import type { UserInfo } from '@memberjunction/core';
 
-/** The slice of `FileStorageEngine` a read depends on. */
+/**
+ * The slice of `FileStorageEngine` a read depends on.
+ *
+ * `GetObject` is narrowed to `{ fullPath }` on purpose: MJ's driver contract also accepts
+ * `objectId`, but that means the provider-native id, which Forms never has. Leaving it out of the
+ * slice makes a read by `objectId` a compile error here, not a convention (#261).
+ */
 export interface StorageReadEngine {
   Config(forceRefresh?: boolean, contextUser?: UserInfo): Promise<void>;
   GetAccountsByProviderID(providerId: string): ReadonlyArray<{ ID: string }>;
@@ -21,13 +27,17 @@ export interface StorageReadEngine {
   GetDriver(
     accountId: string,
     contextUser: UserInfo,
-  ): Promise<{ GetObject(params: { objectId?: string }): Promise<Buffer> }>;
+  ): Promise<{ GetObject(params: { fullPath: string }): Promise<Buffer> }>;
 }
 
 /** Where an object lives, as `MJ: Files` records it. */
 export interface StoredObjectRef {
   providerId: string;
-  providerKey: string | null;
+  /**
+   * `MJ: Files.ProviderKey`: the storage PATH `FileStorageEngine.UploadFile` wrote, not a
+   * provider-native id. Non-null because callers 404 a file without one before reading.
+   */
+  providerKey: string;
 }
 
 /** Raised when no storage account can be resolved to read through. */
@@ -75,5 +85,8 @@ export async function readStoredObject(
     throw new NoStorageAccountError(ref.providerId);
   }
   const driver = await storage.GetDriver(accountId, systemUser);
-  return driver.GetObject({ objectId: ref.providerKey ?? undefined });
+  // By path, never as `objectId`. MJ's `objectId` is the provider-native id (Box / Google Drive /
+  // Dropbox / SharePoint); it only coincides with the path on Azure / S3 / GCS, so reading the
+  // stored path as an id 404s on ID-keyed providers (#261). Every MJ driver resolves `fullPath`.
+  return driver.GetObject({ fullPath: ref.providerKey });
 }
