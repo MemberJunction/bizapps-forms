@@ -1326,7 +1326,7 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
         // own, because `runAutomations` fires them without awaiting and one can still be running
         // after this function's `withIsolatedProvider` call above releases `provider` — see
         // `isolatedDispatcher`'s doc comment (bizapps-forms#260, relocated).
-        dispatch: isolatedDispatcher(provider, (_automation, dispatchProvider) => ({
+        dispatch: isolatedDispatcher(provider, responseId, (_automation, dispatchProvider) => ({
           responseId,
           formId: resolved.definition.formId,
           formVersionId: resolved.version.ID,
