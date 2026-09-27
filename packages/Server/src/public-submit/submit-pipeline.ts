@@ -1367,6 +1367,12 @@ function questionTypesOf(definition: PublishedFormDefinition): ReadonlyMap<strin
  * Wrapped whole and never awaited by the caller: a submission that is already persisted must not
  * fail, or slow down, because a credential could not be retired. The failure goes to the log with
  * the response id — never with a token.
+ *
+ * The default (non-injected) branch runs on its OWN isolated provider instance
+ * (`withIsolatedProvider`), not the process-global one: bizapps-forms#260, where a durable action's
+ * detached transaction on the global provider made a concurrent read/write race its COMMIT. A test
+ * injecting `ctx.revokeInvites` bypasses this entirely (and owns its own provider story), which is
+ * why isolation is scoped to the branch that actually reaches the global provider.
  */
 async function revokeSealedResponseInvites(ctx: PipelineContext, responseId: string): Promise<void> {
   try {
@@ -1374,7 +1380,9 @@ async function revokeSealedResponseInvites(ctx: PipelineContext, responseId: str
       await ctx.revokeInvites({ responseId, deviceOnly: false });
       return;
     }
-    await revokeResponseInvites(responseId, { deviceOnly: false }, ctx.elevatedUser);
+    await withIsolatedProvider(`revoke resume links of sealed response ${responseId}`, (provider) =>
+      revokeResponseInvites(responseId, { deviceOnly: false }, ctx.elevatedUser, provider),
+    );
   } catch (err) {
     LogError(`[Forms] could not retire the resume links of sealed response ${responseId}: ${String(err)}`);
   }
