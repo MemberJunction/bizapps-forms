@@ -177,8 +177,9 @@ export async function revokeInviteById(
  * joins it and races its COMMIT. The sealed-response revoke supplies an isolated instance (see
  * `revokeSealedResponseInvites`). The start-over/`/forget` path does not, and is exposed the same
  * way: it is left on the global provider only because every other respondent-host resume dependency
- * (mint, redeem, lookup, revoke-by-id) is too, and moving that request onto its own instance is a
- * change of its own, not part of the on-submit fix.
+ * that touches the database (the distribution and response loads, mint, lookup, revoke-by-id) is
+ * too, and moving that request onto its own instance is a change of its own, not part of the
+ * on-submit fix. (Redeem is an HTTP call to core, not a query through this process's provider.)
  */
 export async function revokeResponseInvites(
   responseId: string,
