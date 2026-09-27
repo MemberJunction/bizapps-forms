@@ -1,5 +1,17 @@
 # @mj-biz-apps/forms-server
 
+## 0.13.1
+
+### Patch Changes
+
+- 614da00: On-submit hooks and configured automations now run on a provider instance of their own instead of the process-global one. On a host where creating the respondent's Person fires bizapps-common's `Common.LogActivity` entity action, that action's transaction on the global provider captured the later hooks' queries, so `Forms: Create Followup Task` and `Forms: Analyze Written Responses` failed on every submit with "Requests can only be made in the LoggedIn state, not the SentClientRequest state" (#260). Forms actions also honour `RunActionParams.Provider` when a caller supplies one. Async configured automations each get their own isolated provider, and so does the detached revoke of a sealed response's resume links.
+- d83a1df: Stored files now read back on Box, Google Drive, Dropbox and SharePoint. Welcome-screen images (`GET /forms/asset/:id`) and respondent file-upload downloads (`GET /forms/files/:fileId`) returned HTTP 500 on any host whose Forms storage account is one of those providers, because the read passed the stored path to the driver as a provider-native object id. It is now passed as a path, which every MJ storage driver resolves; Azure Blob, AWS S3 and Google Cloud Storage behave as before. Hosts using the `FORMS_*_STORAGE_ACCOUNT` workaround can drop it. (#261)
+- Updated dependencies [614da00]
+  - @mj-biz-apps/forms-actions@0.13.1
+  - @mj-biz-apps/forms-ng@0.13.1
+  - @mj-biz-apps/forms-core-entities-server@0.13.1
+  - @mj-biz-apps/forms-entities@0.13.1
+
 ## 0.13.0
 
 ### Minor Changes
