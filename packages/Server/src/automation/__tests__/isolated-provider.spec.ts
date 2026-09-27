@@ -93,7 +93,10 @@ describe('withIsolatedProvider', () => {
 
     await withIsolatedProvider('purpose-4', async () => undefined, source);
 
-    expect(logged.some((m) => m.includes('purpose-4') && m.includes('2'))).toBe(true);
+    // A bare `includes('2')` also passes for a depth of 12, 20, or 21 — the digit is present, just
+    // not as the depth. Anchoring "2 open transaction" together is what actually pins the number
+    // this witness reports, not merely that SOME message got logged.
+    expect(logged.some((m) => m.includes('purpose-4') && /2 open transaction/.test(m))).toBe(true);
     expect(instance.ReleaseIndependentInstance).toHaveBeenCalledOnce();
   });
 
@@ -122,14 +125,26 @@ describe('withIsolatedProvider', () => {
     expect(work).not.toHaveBeenCalled();
   });
 
-  it('rejects (postcondition) when CreateIndependentInstance resolves to the source itself, and never calls work', async () => {
-    const source: IMetadataProvider & { CreateIndependentInstance?: () => Promise<unknown> } = {} as IMetadataProvider;
+  it('rejects (postcondition) when CreateIndependentInstance resolves to the source itself, and never calls work OR releases the shared instance', async () => {
+    // The one way this helper can do harm: releasing the SHARED provider rolls back whatever
+    // transaction some other unit of work has open on it. A source that fails the "not the shared
+    // provider" postcondition must never reach `ReleaseIndependentInstance` — that spy, on the
+    // fake SOURCE itself, is what a weaker test (asserting only the purpose-string, not the actual
+    // safety property) would miss entirely.
+    const releaseIndependentInstance = vi.fn(async () => undefined);
+    const source: IMetadataProvider & {
+      CreateIndependentInstance?: () => Promise<unknown>;
+      ReleaseIndependentInstance?: () => Promise<unknown>;
+    } = { ReleaseIndependentInstance: releaseIndependentInstance } as unknown as IMetadataProvider;
     (source as unknown as { CreateIndependentInstance: () => Promise<unknown> }).CreateIndependentInstance = vi.fn(
       async () => source,
     );
     const work = vi.fn(async () => 'unused');
 
-    await expect(withIsolatedProvider('purpose-7', work, source)).rejects.toThrow(/purpose-7/);
+    await expect(withIsolatedProvider('purpose-7', work, source)).rejects.toThrow(
+      /purpose-7.*CreateIndependentInstance returned the shared provider itself, which isolates nothing/s,
+    );
     expect(work).not.toHaveBeenCalled();
+    expect(releaseIndependentInstance).not.toHaveBeenCalled();
   });
 });
