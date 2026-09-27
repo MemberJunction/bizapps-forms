@@ -13,16 +13,24 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
-import type { FormResponseContextResult } from '@mj-biz-apps/forms-actions';
+import type { ActionDataProvider, FormResponseContextResult } from '@mj-biz-apps/forms-actions';
 import type { PublishedFormAutomation } from '@mj-biz-apps/forms-entities';
 
-const loadFormResponseContext = vi.fn<(responseId: string, user: UserInfo) => Promise<FormResponseContextResult>>();
+const loadFormResponseContext =
+  vi.fn<(responseId: string, user: UserInfo, provider: ActionDataProvider) => Promise<FormResponseContextResult>>();
+// What `resolveActionProvider({})` hands back in production — a fake, so the assertion below can
+// pin that it's THIS provider (bizapps-forms#260's whole point) reaching the loader, not a second
+// one built some other way.
+const fakeProvider = { name: 'fake-provider' } as unknown as ActionDataProvider;
+const resolveActionProvider = vi.fn(() => fakeProvider);
 const dispatchAutomation = vi.fn(async () => ({ success: true }));
 const logError = vi.fn();
 
 vi.mock('@mj-biz-apps/forms-actions', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@mj-biz-apps/forms-actions')>()),
-  loadFormResponseContext: (responseId: string, user: UserInfo) => loadFormResponseContext(responseId, user),
+  loadFormResponseContext: (responseId: string, user: UserInfo, provider: ActionDataProvider) =>
+    loadFormResponseContext(responseId, user, provider),
+  resolveActionProvider: (...args: unknown[]) => resolveActionProvider(...(args as [])),
 }));
 vi.mock('../../automation/service-principal', () => ({
   resolveAutomationPrincipal: () => ({ ID: 'principal-1', Name: 'Forms Automation Service', IsActive: true }),
@@ -109,6 +117,11 @@ describe('configured automations when the response cannot be loaded as the princ
     // The respondent's submission is unaffected: automations are best-effort after the save.
     expect(result.success).toBe(true);
     expect(loadFormResponseContext).toHaveBeenCalledOnce();
+    // Pin that the loader ran on the provider `resolveActionProvider` resolved, not a fresh one —
+    // id/principal are read back from the actual call rather than re-asserted, since only the
+    // provider is this test's concern (bizapps-forms#260).
+    const [id, principal] = loadFormResponseContext.mock.calls[0];
+    expect(loadFormResponseContext).toHaveBeenCalledWith(id, principal, fakeProvider);
     expect(dispatchAutomation).not.toHaveBeenCalled();
     const logged = logError.mock.calls.map((c) => String(c[0]));
     expect(logged.some((m) => m.includes('could not be loaded as the automation principal') && m.includes(reason))).toBe(true);
