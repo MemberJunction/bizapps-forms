@@ -1,7 +1,7 @@
 /**
  * Fire the on-submit Actions by NAME (seam S3) after a response is saved.
  *
- * The three Phase-1 hooks are implemented by WP-E and may not be registered yet,
+ * The four Phase-1 hooks are implemented by WP-E and may not be registered yet,
  * so each is resolved defensively via `ActionEngineServer.GetActionByName` and
  * SKIPPED-with-log when absent. A hook failure never fails the submit — the
  * response is already persisted; hooks are best-effort side effects.
@@ -69,7 +69,15 @@ function buildHookParams(ctx: OnSubmitContext): ActionParam[] {
   ];
 }
 
-/** Resolve + run one action by name on the given provider; never throws. */
+/**
+ * Resolve + run one action by name on the given provider; never throws.
+ *
+ * The lookup runs INSIDE the try, not just the RunAction call. `GetActionByName` used to sit
+ * outside it, so a throwing lookup escaped this function entirely, propagated through the caller's
+ * for-loop, and was caught only by `fireOnSubmitHooks`'s chain-level catch — which reports ALL FOUR
+ * hooks `failed`, overwriting the real `fired` result of any hook that had already run before this
+ * one's lookup blew up (bizapps-forms#260 final review, F2).
+ */
 async function fireOne(
   engine: ActionEngineServer,
   name: OnSubmitActionName,
@@ -77,12 +85,12 @@ async function fireOne(
   contextUser: UserInfo,
   provider: DatabaseProviderBase,
 ): Promise<HookFireResult> {
-  const action = engine.GetActionByName(name);
-  if (!action) {
-    console.warn(`[forms] On-submit action "${name}" is not registered; skipping.`);
-    return { name, status: 'skipped-not-registered' };
-  }
   try {
+    const action = engine.GetActionByName(name);
+    if (!action) {
+      console.warn(`[forms] On-submit action "${name}" is not registered; skipping.`);
+      return { name, status: 'skipped-not-registered' };
+    }
     const params = Object.assign(new RunActionParams(), {
       Action: action,
       ContextUser: contextUser,

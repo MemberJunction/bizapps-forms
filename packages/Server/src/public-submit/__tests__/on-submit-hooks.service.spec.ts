@@ -135,6 +135,29 @@ describe('fireOnSubmitHooks', () => {
     );
   });
 
+  it('does not let one hook\'s lookup failure cancel the hooks after it (F2)', async () => {
+    // `fireOne`'s doc promises "never throws"; before F2, `GetActionByName` ran OUTSIDE its try, so
+    // a throwing lookup escaped `fireOne` entirely, propagated through the for-loop and the isolate
+    // callback, and was caught only by `fireOnSubmitHooks`'s CHAIN-level catch — which reports every
+    // hook `failed`, overwriting hook 1's real `fired` result even though it already ran.
+    const runAction = vi.fn(async () => ({ Success: true }));
+    const configFn = vi.fn(async () => undefined);
+    const getByName = vi.fn((name: string) => {
+      if (name === ON_SUBMIT_ACTION_NAMES[1]) {
+        throw new Error('metadata engine not configured');
+      }
+      return { Name: name };
+    });
+    const engine = { Config: configFn, RunAction: runAction, GetActionByName: getByName } as unknown as ActionEngineServer;
+
+    const results = await fireOnSubmitHooks(hookContext, engine, makeContextUser(), passthroughIsolate);
+
+    expect(results.map((r) => r.status)).toEqual(['fired', 'failed', 'fired', 'fired']);
+    expect(results[1].message).toContain('metadata engine not configured');
+    // Hook 2's lookup threw before RunAction was ever invoked for it — only hooks 1, 3 and 4 call it.
+    expect(runAction).toHaveBeenCalledTimes(3);
+  });
+
   it('purpose names the response, so a failure in the log can be traced', async () => {
     const purposes: string[] = [];
     const isolate: IsolatedProviderRunner = async (purpose, work) => {
