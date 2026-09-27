@@ -1,14 +1,47 @@
 /**
- * Unit tests for {@link coerceAnalyzedAnswers} — the tolerant JSON boundary of the
- * response-analyzer model seam.
+ * Unit tests for the response-analyzer model seam:
+ *  - {@link coerceAnalyzedAnswers} — the tolerant JSON boundary.
+ *  - {@link AIPromptResponseAnalyzerModel} — the default `analyze()` that runs the named MJ AI
+ *    Prompt, with `AIEngine`/`AIPromptRunner` mocked out so it runs offline.
  *
- * The real-world failure this guards against: the Gemini model's JSON output is
+ * The real-world failure `coerceAnalyzedAnswers` guards against: the Gemini model's JSON output is
  * truncated mid-array by a low output-token cap on the shared (core-owned) AI Model
  * Vendor row, so `attemptJSONRepair` can't fix it and a strict parse throws — dropping
  * ALL scores. The salvage path recovers the complete leading answers instead.
  */
-import { describe, it, expect } from 'vitest';
-import { coerceAnalyzedAnswers, type AnalyzedAnswer } from './response-analyzer-model';
+import { describe, it, expect, vi } from 'vitest';
+import type { UserInfo } from '@memberjunction/core';
+import type { AIPromptParams } from '@memberjunction/ai-core-plus';
+import type { ActionDataProvider } from '../shared/action-provider';
+import type { AnalyzedAnswer } from './response-analyzer-model';
+
+/** What `AIPromptRunner.ExecutePrompt` returns — captured so the test can inspect its `params`. */
+const executePrompt = vi.fn<
+  (params: AIPromptParams) => Promise<{ success: boolean; result?: unknown; rawResult?: string }>
+>(async () => ({ success: true, result: { answers: [{ score: 80, rationale: 'Clear.' }] } }));
+
+vi.mock('@memberjunction/ai-prompts', () => ({
+  AIPromptRunner: vi.fn().mockImplementation(() => ({ ExecutePrompt: executePrompt })),
+}));
+
+// `AIEngine.Instance.Prompts` is filled in AFTER the dynamic import below resolves the real
+// RESPONSE_ANALYZER_PROMPT_NAME, so this mock never hand-copies a second literal of that constant —
+// the getter reads it lazily, by which time the import has completed.
+const engineState: { prompts: { Name: string }[] } = { prompts: [] };
+vi.mock('@memberjunction/aiengine', () => ({
+  AIEngine: {
+    Instance: {
+      Config: vi.fn(async () => undefined),
+      get Prompts() {
+        return engineState.prompts;
+      },
+    },
+  },
+}));
+
+const { coerceAnalyzedAnswers, AIPromptResponseAnalyzerModel, RESPONSE_ANALYZER_PROMPT_NAME } =
+  await import('./response-analyzer-model');
+engineState.prompts = [{ Name: RESPONSE_ANALYZER_PROMPT_NAME }];
 
 describe('coerceAnalyzedAnswers', () => {
   it('returns a fully valid parsed object unchanged (happy path)', () => {
@@ -61,5 +94,28 @@ describe('coerceAnalyzedAnswers', () => {
 
   it('throws when neither parsed nor raw is available', () => {
     expect(() => coerceAnalyzedAnswers(undefined, undefined)).toThrow(/valid "answers" array/);
+  });
+});
+
+describe('AIPromptResponseAnalyzerModel.analyze', () => {
+  it('hands the resolved provider to the prompt run (#260)', async () => {
+    const fakeUser = { Name: 'tester' } as unknown as UserInfo;
+    const fakeProvider = { name: 'fake-provider' } as unknown as ActionDataProvider;
+
+    const analyzed = await new AIPromptResponseAnalyzerModel().analyze(
+      [{ questionPrompt: 'What worked?', text: 'Great venue' }],
+      'Feedback Form',
+      fakeUser,
+      fakeProvider,
+    );
+
+    expect(analyzed).toEqual([{ score: 80, rationale: 'Clear.' }]);
+    expect(executePrompt).toHaveBeenCalledOnce();
+    // The one thing this test exists to pin: the provider `analyze()` was called with reaches the
+    // prompt run's AIPromptParams — identity, not just a structurally-equal copy — so an isolated
+    // provider (a later task's #260 fix) actually participates in the prompt call rather than the
+    // run silently falling back to whatever provider AIPromptRunner defaults to.
+    const capturedParams = executePrompt.mock.calls[0][0];
+    expect(capturedParams.provider).toBe(fakeProvider);
   });
 });

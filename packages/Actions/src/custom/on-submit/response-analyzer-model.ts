@@ -72,6 +72,8 @@ export class AIPromptResponseAnalyzerModel implements ResponseAnalyzerModel {
     provider: ActionDataProvider,
   ): Promise<AnalyzedAnswer[]> {
     const engine = AIEngine.Instance;
+    // AIEngine is process-wide, so it deliberately does NOT get the per-chain `provider` (released
+    // when the chain ends) — only the prompt run below does.
     await engine.Config(false, contextUser);
 
     const prompt = engine.Prompts.find((p) => p.Name === RESPONSE_ANALYZER_PROMPT_NAME);
