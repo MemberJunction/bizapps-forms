@@ -81,7 +81,7 @@ import {
 import { loadFormResponseContext } from '@mj-biz-apps/forms-actions';
 import { planAutomations } from './automation-plan';
 import { runAutomations } from '../automation/automation-runner';
-import { dispatchAutomation } from '../automation/dispatch-automation';
+import { isolatedDispatcher } from '../automation/isolated-dispatcher';
 import { buildConditionAnswers } from '../automation/condition-answers';
 import { allowedBindingEntities } from '../automation/allowed-entities';
 import { resolveAutomationPrincipal } from '../automation/service-principal';
@@ -1322,18 +1322,21 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
 
       await runAutomations({
         plan,
-        dispatch: (automation) =>
-          dispatchAutomation(automation, {
-            responseId,
-            formId: resolved.definition.formId,
-            formVersionId: resolved.version.ID,
-            distributionId: resolved.distribution.ID,
-            answers: context.canonicalAnswers,
-            questionTypes: questionTypesOf(resolved.definition),
-            principal,
-            provider,
-            allowedEntities: allowedBindingEntities(),
-          }),
+        // Sync automations dispatch on THIS scope's `provider`; Async ones get a scope of their
+        // own, because `runAutomations` fires them without awaiting and one can still be running
+        // after this function's `withIsolatedProvider` call above releases `provider` — see
+        // `isolatedDispatcher`'s doc comment (bizapps-forms#260, relocated).
+        dispatch: isolatedDispatcher(provider, (_automation, dispatchProvider) => ({
+          responseId,
+          formId: resolved.definition.formId,
+          formVersionId: resolved.version.ID,
+          distributionId: resolved.distribution.ID,
+          answers: context.canonicalAnswers,
+          questionTypes: questionTypesOf(resolved.definition),
+          principal,
+          provider: dispatchProvider,
+          allowedEntities: allowedBindingEntities(),
+        })),
       });
     });
   } catch (err) {
