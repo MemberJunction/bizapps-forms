@@ -50,6 +50,11 @@ export {
 } from './on-submit/response-analyzer-model';
 export * from './shared/action-params';
 export * from './shared/form-response-context';
+// Server needs this seam too — not to build the isolated-provider instance itself (that is
+// `withIsolatedProvider` in `@mj-biz-apps/forms-server`, which knows nothing about this package),
+// but because `ActionDataProvider` appears in `loadFormResponseContext`'s own public signature:
+// Server calls that function directly (`submit-pipeline-configured-load-failure.spec.ts` types a
+// variable against it), so the type has to be importable from here for that call site to typecheck.
 export * from './shared/action-provider';
 export * from './authoring/form-blueprint';
 export * from './authoring/form-blueprint-builder';

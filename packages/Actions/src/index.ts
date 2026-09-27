@@ -4,7 +4,6 @@ export * from './custom/register';
 // answers the on-submit actions see — re-deriving it there would be a second reading of the same
 // rows, free to drift from this one.
 export * from './custom/shared/form-response-context';
-// The provider seam `loadFormResponseContext` (and every on-submit action) now requires — Server
-// needs it too, to build the isolated-provider instance it hands down via RunActionParams.Provider.
-export * from './custom/shared/action-provider';
+// `action-provider` (resolveActionProvider, ActionDataProvider, …) is exported via
+// `./custom/register` below — see the comment there for why Server needs it.
 export * from './custom/binding';

@@ -109,8 +109,11 @@ export class SendConfirmationEmailAction extends BaseAction {
   }
 
   private async deliver(email: ConfirmationEmail, params: RunActionParams): Promise<ActionResultSimple> {
-    // CommunicationEngine takes no provider parameter at MJ 6.1 — its own metadata bookkeeping
-    // still runs on the process-global provider, unlike the response/form/answers read above.
+    // The `ConfirmationEmailSender` seam takes no provider parameter, unlike the response/form/
+    // answers read above. That is moot for the default `LoggingConfirmationEmailSender` — it does
+    // no DB work at all — but a real, CommunicationEngine-backed sender (none ships by default; see
+    // the header) WOULD run its own metadata bookkeeping on the process-global provider, since
+    // CommunicationEngine itself takes no provider parameter at MJ 6.1.
     const result = await activeSender.send(email);
     setOutputParam(params, 'Sent', result.delivered);
     setOutputParam(params, 'RecipientEmail', email.to);
