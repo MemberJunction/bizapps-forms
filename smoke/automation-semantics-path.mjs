@@ -18,7 +18,7 @@
  *   set -a && . ./.env && set +a && node smoke/automation-semantics-path.mjs
  */
 import { AUTHORED_AUTOMATION_FIELDS, buildPublishedAutomations } from '@mj-biz-apps/forms-entities';
-import { buildAnswers, resolveFormId, resolveSeededSlug } from './lib/fixture.mjs';
+import { buildAnswers, publishedSnapshotAutomations, resolveFormId, resolveSeededSlug } from './lib/fixture.mjs';
 import { sql, sqlWide } from './lib/sqlcmd.mjs';
 import { sessionIdFor } from './lib/session.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
@@ -210,8 +210,11 @@ async function main() {
   {
     const token = await newSession();
     const def = await definitionFor(token);
-    check((def.automations ?? []).some((a) => a.isActive === false),
-      'the snapshot carries the disabled automation rather than dropping it',
+    // Read from the STORED snapshot, not `def.automations` — the anonymous PublishedForm
+    // projection this suite otherwise reads from deliberately empties `automations` before a
+    // respondent can see it (public-form-payload.ts), so `def.automations` is always [].
+    check(publishedSnapshotAutomations(SLUG).some((a) => a.isActive === false),
+      'the stored snapshot carries the disabled automation rather than dropping it',
       'dropping it makes "disabled" indistinguishable from "never configured"');
     const res = await submit(token, def, { email: emailFor('inactive'), name: 'Inactive' });
     const inactiveRuns = await afterHooksSettle(() => runsFor(res.responseId));
@@ -308,11 +311,14 @@ ELSE
   {
     const token = await newSession();
     const def = await definitionFor(token);
-    check((def.automations ?? []).length === 2, `the snapshot carries both automations (got ${(def.automations ?? []).length})`);
+    // Read from the STORED snapshot, not `def.automations` — see the note in the isActive
+    // scenario above.
+    const snapshotAutomations = publishedSnapshotAutomations(SLUG);
+    check(snapshotAutomations.length === 2, `the stored snapshot carries both automations (got ${snapshotAutomations.length})`);
     check(
-      (def.automations ?? []).map((a) => a.displayOrder).join(',') === '1,2',
+      snapshotAutomations.map((a) => a.displayOrder).join(',') === '1,2',
       'the mapper published them in DisplayOrder',
-      `got ${(def.automations ?? []).map((a) => a.displayOrder).join(',')}`,
+      `got ${snapshotAutomations.map((a) => a.displayOrder).join(',')}`,
     );
 
     const res = await submit(token, def, { email: emailFor('order'), name: 'Ordered' });
@@ -338,8 +344,9 @@ ELSE
   sql(`UPDATE __mj_BizAppsForms.FormAutomation SET IsActive=0 WHERE ID='${SECOND_ID}';`);
   configure(`[Trigger]='OnComplete', IsActive=1, ConditionalRule=NULL, DisplayOrder=1`);
   {
-    const def = await definitionFor(await newSession());
-    const active = (def.automations ?? []).filter((a) => a.isActive);
+    // No session/definition fetch needed here — the anonymous PublishedForm projection never
+    // carried `automations` to begin with, so this reads the STORED snapshot directly.
+    const active = publishedSnapshotAutomations(SLUG).filter((a) => a.isActive);
     check(active.length === 1, `restored to a single active automation (got ${active.length})`);
   }
 

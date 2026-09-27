@@ -156,7 +156,14 @@ vi.mock('@memberjunction/core', async () => {
     }
   }
   class FakeRunView {
+    // Core's RunView delegates to the provider it was constructed with, and only falls back to the
+    // process-wide one when handed none — so a read routed through a host must never reach this fake's
+    // global branch (and its `readUsers` record).
+    constructor(private readonly provider: { RunView: (p: unknown, u?: UserInfo) => Promise<unknown> } | null = null) {}
     async RunView(params: { EntityName: string }, user?: UserInfo) {
+      if (this.provider) {
+        return this.provider.RunView(params, user);
+      }
       mockState.readUsers.push(user);
       // Two different reads share this fake: the resource-type lookup on the mint path,
       // and the "does this invite row still exist?" probe behind a failed Load.
@@ -331,6 +338,23 @@ describe('MagicLinkInviteMinter.RevokeAnonymousInvite', () => {
     expect(viaHost).toHaveBeenCalledTimes(1);
     expect(viaHost.mock.calls[0][0]).toBe('MJ: Magic Link Invites');
     expect(mockState.lastSavedInvite!.Status).toBe('Revoked');
+  });
+
+  it('asks whether an unloadable invite still exists through the host too, when the host can read (#260)', async () => {
+    // The sealed-response revoke hands over an isolated provider so no query of that pass reaches
+    // the process-global one, where another unit of work may hold a transaction open. The
+    // existence probe behind a failed Load is part of the same pass.
+    mockState.loadSucceeds = false;
+    const md = new Metadata();
+    const hostRunView = vi.fn(async (_params: { EntityName: string; ResultType?: string }, _user?: UserInfo) => ({ Success: true, TotalRowCount: 0 }));
+    const host = { GetEntityObject: md.GetEntityObject.bind(md), RunView: hostRunView, RunViews: vi.fn() };
+
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser, host);
+
+    expect(result).toMatchObject({ success: true, changed: false });
+    expect(hostRunView).toHaveBeenCalledTimes(1);
+    expect(hostRunView.mock.calls[0][0]).toMatchObject({ EntityName: 'MJ: Magic Link Invites', ResultType: 'count_only' });
+    expect(mockState.readUsers).toEqual([]);
   });
 
   it('revokes even when the host has magic links switched off', async () => {

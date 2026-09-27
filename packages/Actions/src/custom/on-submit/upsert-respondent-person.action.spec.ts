@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
+import type { ActionDataProvider } from '../shared/action-provider';
 // PRECONDITION, not decoration. The action refuses to run when no generated class is registered
 // for `MJ_BizApps_Common: People`, because MJ's fallback would silently discard every field it
 // sets (#60). In production `custom/register.ts` imports this package for exactly that reason,
@@ -126,13 +127,34 @@ const state: {
   getEntityCalls: [],
 };
 
-// Partial mock: the real module is spread back in, and only the two data-access classes are
-// replaced. A from-scratch `{ Metadata, RunView }` module worked only while nothing on this
-// import graph used @memberjunction/core at RUNTIME — the generated entity classes reach for
-// `BaseEntity` the moment the forms-entities barrel is actually loaded, which it now is.
+// The global Metadata always throws — `new Metadata()` (no args) is never legitimate once the
+// action resolves a provider. `RunView`, though, is legitimately constructed as `new RunView(p)`
+// with the resolved provider (that's the whole point of #260), so only a NO-ARG construction — the
+// old global-fallback shape — throws; passed a provider, it delegates to it.
 vi.mock('@memberjunction/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class Metadata {
+    async GetEntityObject(): Promise<never> {
+      throw new Error('global provider used');
+    }
+  }
+  class RunView {
+    constructor(private readonly provider?: { RunView(p: unknown, u?: unknown): Promise<unknown> } | null) {}
+    async RunView(params: unknown, user?: unknown): Promise<unknown> {
+      if (!this.provider) throw new Error('global provider used');
+      return this.provider.RunView(params, user);
+    }
+  }
+  return { ...actual, Metadata, RunView };
+});
+
+/**
+ * The provider `RunActionParams.Provider` supplies. Everything this spec used to read/write
+ * through `new Metadata()` / `new RunView()` now reads/writes through this instead — same `state`,
+ * reached only via the provider the action is handed.
+ */
+function fakeProvider(): ActionDataProvider {
+  return {
     async GetEntityObject<T>(entityName: string): Promise<T> {
       state.getEntityCalls.push(entityName);
       if (entityName === 'MJ_BizApps_Forms: Form Responses') {
@@ -145,9 +167,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
         return state.personOnCreate as unknown as T;
       }
       throw new Error(`Unexpected GetEntityObject('${entityName}')`);
-    }
-  }
-  class RunView {
+    },
     async RunView<T>(opts: { EntityName: string }): Promise<RunViewResult & { Results: T[] }> {
       if (opts.EntityName === 'MJ_BizApps_Common: People' && state.peopleReadError) {
         return { Success: false, Results: [], ErrorMessage: state.peopleReadError };
@@ -160,10 +180,14 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
       else if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') results = state.questions;
       else if (opts.EntityName === 'MJ_BizApps_Common: People') results = state.existingPeople;
       return { Success: true, Results: results as T[] };
-    }
-  }
-  return { ...actual, Metadata, RunView };
-});
+    },
+    // Present only so `isActionDataProvider` accepts this fake as a real ActionDataProvider — the
+    // action never calls RunViews (plural).
+    async RunViews(): Promise<never> {
+      throw new Error('RunViews was not expected to be called');
+    },
+  } as unknown as ActionDataProvider;
+}
 
 // Import the action AFTER the mock is declared so it binds to the mocked core.
 const { UpsertRespondentPersonAction } = await import('./upsert-respondent-person.action');
@@ -178,6 +202,7 @@ function makeParams(): RunActionParams {
   return Object.assign(new RunActionParams(), {
     ContextUser: fakeUser,
     Filters: [],
+    Provider: fakeProvider(),
     Params: [Object.assign(new ActionParam(), { Name: 'FormResponseID', Value: 'resp-1', Type: 'Input' })],
   });
 }
@@ -226,6 +251,21 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('Forms: Upsert Respondent Person', () => {
+  it('runs all data access on RunActionParams.Provider, never the global Metadata/RunView (#260)', async () => {
+    // The mocked global Metadata/RunView both throw 'global provider used'. Reaching SUCCESS here
+    // proves every read (response, form, answers, questions, People match, Person create) ran on
+    // `params.Provider` — a fall-back to the global would have thrown instead.
+    emailAnswerFixture('viaprovider@example.com');
+    const params = makeParams();
+
+    const result = await new UpsertRespondentPersonAction().Run(params);
+
+    expect(result.Success).toBe(true);
+    expect(state.getEntityCalls).toEqual(
+      expect.arrayContaining(['MJ_BizApps_Forms: Form Responses', 'MJ_BizApps_Forms: Forms', 'MJ_BizApps_Common: People']),
+    );
+  });
+
   it('new email → creates a Person and stamps RespondentPersonID on the response', async () => {
     emailAnswerFixture('newperson@example.com');
     const params = makeParams();

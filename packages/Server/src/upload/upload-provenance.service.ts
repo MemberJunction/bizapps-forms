@@ -13,7 +13,7 @@
  * mint its own row through the generated GraphQL mutation.
  */
 import { RunView } from '@memberjunction/core';
-import type { UserInfo } from '@memberjunction/core';
+import type { IRunViewProvider, UserInfo } from '@memberjunction/core';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 
 import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names.js';
@@ -121,10 +121,19 @@ function equalsFolded(left: string | null | undefined, right: string | null | un
   return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
-/** Read the ledger rows for a set of file ids, keyed by folded file id. */
+/**
+ * Read the ledger rows for a set of file ids, keyed by folded file id.
+ *
+ * `provider` is optional-with-global-fallback (`data-access.md` rule 3): the submit path's own
+ * provenance check has no isolated instance to hand in and keeps using the global provider
+ * unchanged, while the automation dispatcher's bind-time re-check runs on its isolated instance so
+ * this read cannot be captured by a transaction something else opened on the global one
+ * (bizapps-forms#260).
+ */
 export async function loadUploadLedger(
   fileIds: readonly string[],
   contextUser: UserInfo,
+  provider?: IRunViewProvider,
 ): Promise<Map<string, UploadLedgerRow>> {
   const unique = [...new Set(fileIds.filter(Boolean))];
   const byFileId = new Map<string, UploadLedgerRow>();
@@ -133,7 +142,7 @@ export async function loadUploadLedger(
   }
 
   const inList = unique.map((id) => quoteSqlString(id)).join(',');
-  const result = await new RunView().RunView<UploadLedgerRow>(
+  const result = await new RunView(provider ?? null).RunView<UploadLedgerRow>(
     {
       EntityName: FORM_UPLOAD_ENTITY,
       ExtraFilter: `FileID IN (${inList})`,

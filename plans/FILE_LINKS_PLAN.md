@@ -31,13 +31,15 @@ convention). No CodeGen run (no schema change), no widget change, no Angular cha
 ### Where the build departed from this plan, and why
 
 1. **The gateway holds the principal; `SyncFileLinksInput` does not carry a `contextUser`.** Matches
-   `MJBindingGateway(ctx.principal)`, the established shape here, and leaves the decision module
+   the binding gateway's shape (then `MJBindingGateway(ctx.principal)`; since bizapps-forms#260 it
+   also takes the provider it runs on, `MJBindingGateway(ctx.principal, ctx.provider)`), and leaves the decision module
    free of every MJ type — so its tests need no MJ import at all, not merely no database.
 2. **The gateway takes an injected provider** (`FileLinkDataProvider`) rather than reaching for
    `new Metadata()` / `new RunView()`. The submit path passes the per-request provider it already
    holds, which is more correct than the global and is also what makes the persistence tests drive
-   the real code through the existing fake. `globalFileLinkProvider()` serves the automation path,
-   which has no per-request handle.
+   the real code through the existing fake. The automation path originally used a
+   `globalFileLinkProvider()`; since bizapps-forms#260 it passes its own isolated provider instance
+   through `fileLinkProviderFor(ctx.provider)`, and the global helper is gone.
 3. **Guard clauses are narrower than "valid GUIDs".** Only `target.entityId` is shape-checked,
    because passing an entity NAME where the link table wants the `MJ: Entities` row id is the
    mistake worth catching (every other MJ API accepts either). A record id may legitimately not be

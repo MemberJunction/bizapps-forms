@@ -18,7 +18,7 @@
  * `RevokeAnonymousInvite` retires all of them — with no core change, and with the ownership check
  * the minter already performs on each one.
  */
-import { LogError, RunView, type UserInfo } from '@memberjunction/core';
+import { LogError, RunView, type DatabaseProviderBase, type UserInfo } from '@memberjunction/core';
 import type { MJMagicLinkInviteEntity } from '@memberjunction/core-entities';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import {
@@ -169,10 +169,23 @@ export async function revokeInviteById(
   }
 }
 
+/**
+ * `provider` is the instance every read AND write in this pass runs through — absent, `new
+ * RunView()` and the minter's own `new Metadata()` fallback both reach the process-global provider
+ * instead. That provider can have another unit of work's transaction open on it (bizapps-forms#260:
+ * Common.LogActivity), and any query issued through that instance — by any caller, scoped or not —
+ * joins it and races its COMMIT. The sealed-response revoke supplies an isolated instance (see
+ * `revokeSealedResponseInvites`). The start-over/`/forget` path does not, and is exposed the same
+ * way: it is left on the global provider only because every other respondent-host resume dependency
+ * that touches the database (the distribution and response loads, mint, lookup, revoke-by-id) is
+ * too, and moving that request onto its own instance is a change of its own, not part of the
+ * on-submit fix. (Redeem is an HTTP call to core, not a query through this process's provider.)
+ */
 export async function revokeResponseInvites(
   responseId: string,
   options: { deviceOnly: boolean },
   contextUser: UserInfo,
+  provider?: DatabaseProviderBase,
 ): Promise<RevokeSummary> {
   const minter = MagicLinkMinterRegistry.Instance.Minter;
   if (!minter || !responseId) {
@@ -181,7 +194,7 @@ export async function revokeResponseInvites(
   const filter =
     `ResourceID=${quoteSqlString(responseId)} AND Status='Active'` +
     (options.deviceOnly ? ' AND Email IS NULL' : '');
-  const found = await new RunView().RunView<MJMagicLinkInviteEntity>(
+  const found = await new RunView(provider).RunView<MJMagicLinkInviteEntity>(
     { EntityName: INVITE_ENTITY, ExtraFilter: filter, Fields: ['ID'], ResultType: 'simple' },
     contextUser,
   );
@@ -191,7 +204,11 @@ export async function revokeResponseInvites(
   }
   const summary: RevokeSummary = { revoked: 0, failed: 0 };
   for (const invite of found.Results) {
-    const outcome = await minter.RevokeAnonymousInvite({ inviteId: invite.ID, resourceId: responseId }, contextUser);
+    const outcome = await minter.RevokeAnonymousInvite(
+      { inviteId: invite.ID, resourceId: responseId },
+      contextUser,
+      provider,
+    );
     if (outcome.success) {
       summary.revoked += 1;
     } else {

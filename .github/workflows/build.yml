@@ -311,3 +311,11 @@ jobs:
       # branch's. Also covers the in-process smokes' claim on their own port and public URL.
       - name: Smoke target resolution tests
         run: node smoke/lib/target.spec.mjs
+
+      # Stdlib-only and databaseless. Guards the binding seed's grant MERGE: it must only ever
+      # RAISE an EntityPermission flag, never lower one. An unconditional overwrite here once
+      # silently revoked V202608201200's shipped CanUpdate on Form Response Answers, breaking
+      # `Forms: Analyze Written Responses` on every database the seed ran on (#260 smoke finding
+      # S2) -- a failure whose whole character is that the seed run still looked like it passed.
+      - name: Smoke grant merge builder tests
+        run: node smoke/lib/grants.spec.mjs

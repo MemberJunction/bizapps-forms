@@ -20,7 +20,7 @@
  * say which form it looked at and what it wanted from it, because the alternative — as the two
  * failures above show — is a message that sends people to the wrong bug.
  */
-import { requireDbEnv, sql } from './sqlcmd.mjs';
+import { requireDbEnv, sql, sqlWide } from './sqlcmd.mjs';
 
 /** A form's question, as the smoke fixtures need to see it. */
 /**
@@ -163,6 +163,50 @@ export function resolveFormId(slug) {
     );
   }
   return formId;
+}
+
+/**
+ * The `automations` array out of a `FormVersion.DefinitionSnapshot` document, or `[]` when the
+ * snapshot carries none.
+ *
+ * Pure — snapshot JSON text in, array out — so this is testable without a database; see
+ * `fixture.spec.mjs`. `slug` names the form in the thrown message: a parse failure with nothing to
+ * blame sends an operator looking at the wrong form, exactly the class of failure this module's
+ * header describes.
+ */
+export function parseSnapshotAutomations(snapshotText, slug) {
+  let snapshot;
+  try {
+    snapshot = JSON.parse(snapshotText);
+  } catch (err) {
+    throw new Error(`The published snapshot for "${slug}" is not valid JSON: ${err.message}`);
+  }
+  return snapshot.automations ?? [];
+}
+
+const defaultDeps = { sqlWide };
+
+/**
+ * The automations the SERVER will actually run for `slug`: the `automations` array from the
+ * latest `Status='Published'` `FormVersion.DefinitionSnapshot`.
+ *
+ * NOT the anonymous `PublishedForm` GraphQL query — `public-form-payload.ts` deliberately returns
+ * `{ ...definition, automations: [] }` there, because automations are server configuration
+ * (action/agent ids, entity bindings) that must never reach a respondent. A suite asserting on
+ * automations has to read the same snapshot the server itself dispatches from.
+ *
+ * Throws, naming `slug`, when no published version exists or its snapshot does not parse.
+ */
+export function publishedSnapshotAutomations(slug, { sqlWide: sqlWideFn } = defaultDeps) {
+  const snapshotText = sqlWideFn(`SET NOCOUNT ON; SELECT TOP 1 v.DefinitionSnapshot AS JSON_Snapshot
+     FROM __mj_BizAppsForms.FormVersion v
+     JOIN __mj_BizAppsForms.FormDistribution d ON d.FormID = v.FormID
+     WHERE d.Slug = '${escape(slug)}' AND v.Status = 'Published'
+     ORDER BY v.VersionNumber DESC;`);
+  if (!snapshotText) {
+    throw new Error(`No published FormVersion exists for "${slug}"; publish one before reading its automations.`);
+  }
+  return parseSnapshotAutomations(snapshotText, slug);
 }
 
 /**

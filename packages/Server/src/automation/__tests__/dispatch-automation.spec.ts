@@ -16,7 +16,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { PublishedFormAutomation } from '@mj-biz-apps/forms-entities';
 import { CanonicalAnswers } from '@mj-biz-apps/forms-entities';
-import type { UserInfo } from '@memberjunction/core';
+import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 
 /** The `FormAutomationRun` row the dispatcher opens and closes. */
 class FakeRunRow {
@@ -48,11 +48,18 @@ const state: {
   actionResult: { Success: true },
 };
 
+/** Every `RunAction` call this file's mock has captured, so a test can assert on `Provider`. */
+const runActionCalls: Array<{ Provider?: unknown }> = [];
+
+// The global provider must never be reached by this dispatcher — every read/write is supposed to
+// run on `ctx.provider` (bizapps-forms#260). Throwing here, rather than quietly returning
+// `state.runRow` as before, is what makes a stray `new Metadata()` call fail LOUDLY instead of
+// happening to still work because the fake behind it was too permissive.
 vi.mock('@memberjunction/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class Metadata {
     async GetEntityObject<T>(): Promise<T> {
-      return state.runRow as unknown as T;
+      throw new Error('global provider used');
     }
   }
   return { ...actual, Metadata };
@@ -66,7 +73,10 @@ vi.mock('@memberjunction/actions', async (importOriginal) => {
       Instance: {
         Config: async () => undefined,
         Actions: [{ ID: 'act-1', Name: 'Forms: Upsert Respondent Person' }],
-        RunAction: async () => state.actionResult,
+        RunAction: async (params: { Provider?: unknown }) => {
+          runActionCalls.push(params);
+          return state.actionResult;
+        },
       },
     },
   };
@@ -86,6 +96,13 @@ const automation: PublishedFormAutomation = {
   isActive: true,
 };
 
+/** Stands in for the isolated provider `withIsolatedProvider` hands the dispatcher in production. */
+function fakeProvider(): DatabaseProviderBase {
+  return {
+    GetEntityObject: async <T,>(): Promise<T> => state.runRow as unknown as T,
+  } as unknown as DatabaseProviderBase;
+}
+
 function context() {
   return {
     responseId: 'resp-1',
@@ -96,12 +113,14 @@ function context() {
     principal: { Name: 'Forms Automation Service' } as unknown as UserInfo,
     allowedEntities: null,
     questionTypes: new Map(),
+    provider: fakeProvider(),
   };
 }
 
 beforeEach(() => {
   state.runRow = new FakeRunRow();
   state.actionResult = { Success: true };
+  runActionCalls.length = 0;
 });
 
 describe('dispatchAutomation provenance', () => {
@@ -143,5 +162,14 @@ describe('dispatchAutomation provenance', () => {
     await dispatchAutomation(automation, context());
 
     expect(state.runRow.OutputSummary).toBe(JSON.stringify({ summary: 'Created Person abc.' }));
+  });
+
+  it('the Action target runs on ctx.provider, never the global provider', async () => {
+    const ctx = context();
+
+    await dispatchAutomation(automation, ctx);
+
+    expect(runActionCalls).toHaveLength(1);
+    expect(runActionCalls[0].Provider).toBe(ctx.provider);
   });
 });

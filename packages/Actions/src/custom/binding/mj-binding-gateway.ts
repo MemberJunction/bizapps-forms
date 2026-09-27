@@ -6,15 +6,23 @@
  * service principal and never the anonymous respondent. That separation is the whole security
  * story of binding: the respondent's grants let them create a response, and the elevated write to
  * a business entity happens downstream, from configuration the client never supplied.
+ *
+ * Every read and write goes through the caller's `provider`, never `new Metadata()` / `new
+ * RunView()` — a transaction something else opens on the process-global provider must not capture
+ * this gateway's queries (bizapps-forms#260).
  */
-import { CompositeKey, EntityFieldTSType, LogError, Metadata, RunView } from '@memberjunction/core';
+import { CompositeKey, EntityFieldTSType, LogError, RunView } from '@memberjunction/core';
 import type { BaseEntity, EntityInfo, UserInfo } from '@memberjunction/core';
 import { sqlLiteral } from '@mj-biz-apps/forms-entities';
 import type { CanonicalAnswerValue, IdentityNormalization } from '@mj-biz-apps/forms-entities';
+import type { ActionDataProvider } from '../shared/action-provider';
 import type { BindingTargetGateway, EntityCapability, MatchedRecord, MatchQuery, TargetFields } from './binding-executor';
 
 export class MJBindingGateway implements BindingTargetGateway {
-  constructor(private readonly contextUser: UserInfo) {}
+  constructor(
+    private readonly contextUser: UserInfo,
+    private readonly provider: ActionDataProvider,
+  ) {}
 
   /**
    * Writable field names for the entity, or null when it cannot be written at all.
@@ -26,7 +34,7 @@ export class MJBindingGateway implements BindingTargetGateway {
    * authoring time is much cheaper.
    */
   public async describeEntity(entityName: string, needs: EntityCapability): Promise<TargetFields | null> {
-    const entity = new Metadata().EntityByName(entityName);
+    const entity = this.provider.EntityByName(entityName);
     if (!entity || !entity.IncludeInAPI || entity.VirtualEntity) {
       return null;
     }
@@ -62,12 +70,12 @@ export class MJBindingGateway implements BindingTargetGateway {
    * such record" from "we could not find out", because the two lead to opposite actions.
    */
   public async findMatch(query: MatchQuery): Promise<MatchedRecord | null> {
-    const entityInfo = new Metadata().EntityByName(query.entityName);
+    const entityInfo = this.provider.EntityByName(query.entityName);
     if (!entityInfo) {
       throw new Error(`Entity "${query.entityName}" could not be resolved for an identity lookup.`);
     }
     const filter = query.criteria.map((c) => criterionToSql(c, entityInfo)).join(' AND ');
-    const result = await new RunView().RunView<Record<string, unknown>>(
+    const result = await new RunView(this.provider).RunView<Record<string, unknown>>(
       {
         EntityName: query.entityName,
         ExtraFilter: filter,
@@ -85,7 +93,7 @@ export class MJBindingGateway implements BindingTargetGateway {
     }
 
     const [oldest] = result.Results;
-    const entity = new Metadata().EntityByName(query.entityName);
+    const entity = this.provider.EntityByName(query.entityName);
     const recordId = primaryKeyOf(oldest, entity);
     if (!recordId) {
       throw new Error(`Matched a record of "${query.entityName}" with no readable primary key.`);
@@ -106,8 +114,7 @@ export class MJBindingGateway implements BindingTargetGateway {
     recordId: string | null,
     values: ReadonlyMap<string, CanonicalAnswerValue>,
   ): Promise<string> {
-    const md = new Metadata();
-    const record = await md.GetEntityObject<BaseEntity>(entityName, this.contextUser);
+    const record = await this.provider.GetEntityObject<BaseEntity>(entityName, this.contextUser);
     if (!record) {
       // GetEntityObject logs and returns null rather than throwing, so an unchecked call here would
       // fail later with a message about a property of null.
@@ -116,7 +123,7 @@ export class MJBindingGateway implements BindingTargetGateway {
 
     if (recordId === null) {
       record.NewRecord();
-    } else if (!(await record.InnerLoad(compositeKeyFor(entityName, recordId)))) {
+    } else if (!(await record.InnerLoad(compositeKeyFor(entityName, recordId, this.provider)))) {
       throw new Error(`Could not load "${entityName}" record ${recordId}.`);
     }
 
@@ -194,8 +201,8 @@ function primaryKeyOf(row: Record<string, unknown>, entity: EntityInfo | undefin
  * record map uses it), so a value written here stays readable by anything else that understands
  * the convention.
  */
-function compositeKeyFor(entityName: string, recordId: string): CompositeKey {
-  const keyFields = new Metadata().EntityByName(entityName)?.PrimaryKeys ?? [];
+function compositeKeyFor(entityName: string, recordId: string, provider: ActionDataProvider): CompositeKey {
+  const keyFields = provider.EntityByName(entityName)?.PrimaryKeys ?? [];
   const values = recordId.split('|');
   if (keyFields.length <= 1) {
     return CompositeKey.FromKeyValuePair(keyFields[0]?.Name ?? 'ID', recordId);

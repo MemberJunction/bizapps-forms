@@ -22,6 +22,7 @@ import { AIEngine } from '@memberjunction/aiengine';
 import { AIPromptParams } from '@memberjunction/ai-core-plus';
 import { AIPromptRunner } from '@memberjunction/ai-prompts';
 import type { UserInfo } from '@memberjunction/core';
+import type { ActionDataProvider } from '../shared/action-provider';
 
 /** Name of the MJ AI Prompt that scores free-text answers (resolved from metadata). */
 export const RESPONSE_ANALYZER_PROMPT_NAME = 'Forms: Response Analyzer';
@@ -52,6 +53,7 @@ export interface ResponseAnalyzerModel {
     answers: AnalyzerInputAnswer[],
     formContext: string,
     contextUser: UserInfo,
+    provider: ActionDataProvider,
   ): Promise<AnalyzedAnswer[]>;
 }
 
@@ -67,8 +69,11 @@ export class AIPromptResponseAnalyzerModel implements ResponseAnalyzerModel {
     answers: AnalyzerInputAnswer[],
     formContext: string,
     contextUser: UserInfo,
+    provider: ActionDataProvider,
   ): Promise<AnalyzedAnswer[]> {
     const engine = AIEngine.Instance;
+    // AIEngine is process-wide, so it deliberately does NOT get the per-chain `provider` (released
+    // when the chain ends) — only the prompt run below does.
     await engine.Config(false, contextUser);
 
     const prompt = engine.Prompts.find((p) => p.Name === RESPONSE_ANALYZER_PROMPT_NAME);
@@ -82,6 +87,7 @@ export class AIPromptResponseAnalyzerModel implements ResponseAnalyzerModel {
     const params = new AIPromptParams();
     params.prompt = prompt;
     params.contextUser = contextUser;
+    params.provider = provider;
     params.data = { Answers: answers, FormContext: formContext };
     params.attemptJSONRepair = true;
 
