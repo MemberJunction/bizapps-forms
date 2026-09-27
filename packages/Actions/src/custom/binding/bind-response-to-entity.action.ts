@@ -21,6 +21,7 @@ import {
   type mjBizAppsFormsFormEntityBindingEntity,
 } from '@mj-biz-apps/forms-entities';
 import { loadFormResponseContext } from '../shared/form-response-context';
+import { resolveActionProvider } from '../shared/action-provider';
 import { getStringParam, setOutputParam } from '../shared/action-params';
 import { bindingFailed, executeBinding, parseBindingConfig } from './binding-executor';
 import { readPriorBindingOutcome, recordBindingLedgerRow } from './binding-ledger';
@@ -49,7 +50,11 @@ export class BindResponseToEntityAction extends BaseAction {
       return { Success: true, ResultCode: 'SKIPPED', Message: 'Binding is disabled.' };
     }
 
-    const loaded = await loadFormResponseContext(responseId, contextUser);
+    // Only the response/form/answers read is moved onto the caller's provider here; the binding
+    // load above and the gateway/ledger calls below still use the global provider — routing THOSE
+    // through `provider` too is bizapps-forms#260's follow-up task for this action.
+    const provider = resolveActionProvider(params);
+    const loaded = await loadFormResponseContext(responseId, contextUser, provider);
     if (loaded.status === 'absent') {
       return { Success: false, ResultCode: 'RESPONSE_NOT_FOUND', Message: `Response ${responseId} does not exist.` };
     }

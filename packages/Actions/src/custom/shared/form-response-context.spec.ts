@@ -28,43 +28,22 @@ const state: MockState = {
   filters: {},
 };
 
-// Partial mock — see the note in upsert-respondent-person.action.spec.ts: the real module must be
-// spread back in so the generated entity classes can reach `BaseEntity` at runtime.
+// The global Metadata/RunView (what `new Metadata()` / `new RunView()` with no args resolve to)
+// THROW on any use. `loadFormResponseContext` must never fall back to them — every read has to
+// go through the `provider` argument the test passes explicitly, exactly as a caller-supplied
+// RunActionParams.Provider does in production (bizapps-forms#260).
 vi.mock('@memberjunction/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class Metadata {
-    async GetEntityObject<T>(entityName: string): Promise<T> {
-      if (entityName === 'MJ_BizApps_Forms: Form Responses') {
-        return {
-          ID: 'resp-1',
-          FormID: 'form-1',
-          Load: async () => {
-            if (state.responseLoadThrows) throw new Error(state.responseLoadThrows);
-            return state.responseLoads;
-          },
-        } as unknown as T;
-      }
-      if (entityName === 'MJ_BizApps_Forms: Forms') {
-        return { ID: 'form-1', Load: async () => true } as unknown as T;
-      }
-      throw new Error(`Unexpected GetEntityObject('${entityName}')`);
+    async GetEntityObject(): Promise<never> {
+      throw new Error('global provider used');
     }
   }
   class RunView {
-    async RunView<T>(opts: { EntityName: string; ExtraFilter?: string }): Promise<{ Success: boolean; ErrorMessage?: string; Results: T[] }> {
-      if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') {
-        state.filters.answers = opts.ExtraFilter;
-        return state.answersReadSucceeds
-          ? { Success: true, Results: state.answers as T[] }
-          : { Success: false, ErrorMessage: 'connection reset', Results: [] };
-      }
-      if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') {
-        state.filters.questions = opts.ExtraFilter;
-        return state.questionsReadSucceeds
-          ? { Success: true, Results: state.questions as T[] }
-          : { Success: false, ErrorMessage: 'deadlock victim', Results: [] };
-      }
-      throw new Error(`Unexpected RunView('${opts.EntityName}')`);
+    constructor(private readonly provider?: { RunView(p: unknown, u?: unknown): Promise<unknown> } | null) {}
+    async RunView(params: unknown, user?: unknown): Promise<unknown> {
+      if (!this.provider) throw new Error('global provider used');
+      return this.provider.RunView(params, user);
     }
   }
   return { ...actual, Metadata, RunView };
@@ -73,17 +52,9 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 // Import AFTER the mock is declared so the loader binds to the mocked core.
 const { loadFormResponseContext } = await import('./form-response-context');
 type FormResponseContext = import('./form-response-context').FormResponseContext;
+type ActionDataProvider = import('./action-provider').ActionDataProvider;
 
 const fakeUser = { Name: 'tester' } as unknown as UserInfo;
-
-/** Load and insist on the `loaded` outcome — the shape every projection test below reads. */
-async function loadedContext(): Promise<FormResponseContext> {
-  const result = await loadFormResponseContext('resp-1', fakeUser);
-  if (result.status !== 'loaded') {
-    throw new Error(`expected a loaded context, got ${JSON.stringify(result)}`);
-  }
-  return result.context;
-}
 
 /** A fully-populated answer row, one typed column at a time. */
 function answerRow(overrides: Record<string, unknown>): Record<string, unknown> {
@@ -102,6 +73,56 @@ function answerRow(overrides: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+/**
+ * The fake provider passed explicitly to every call below — everything the real
+ * `MJ_BizApps_Forms:` reads used to route through `new Metadata()` / `new RunView()` for, now
+ * routed through here instead, reading the same `state`.
+ */
+function fakeProvider(): ActionDataProvider {
+  return {
+    async GetEntityObject<T>(entityName: string): Promise<T> {
+      if (entityName === 'MJ_BizApps_Forms: Form Responses') {
+        return {
+          ID: 'resp-1',
+          FormID: 'form-1',
+          Load: async () => {
+            if (state.responseLoadThrows) throw new Error(state.responseLoadThrows);
+            return state.responseLoads;
+          },
+        } as unknown as T;
+      }
+      if (entityName === 'MJ_BizApps_Forms: Forms') {
+        return { ID: 'form-1', Load: async () => true } as unknown as T;
+      }
+      throw new Error(`Unexpected GetEntityObject('${entityName}')`);
+    },
+    async RunView<T>(opts: { EntityName: string; ExtraFilter?: string }): Promise<{ Success: boolean; ErrorMessage?: string; Results: T[] }> {
+      if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') {
+        state.filters.answers = opts.ExtraFilter;
+        return state.answersReadSucceeds
+          ? { Success: true, Results: state.answers as T[] }
+          : { Success: false, ErrorMessage: 'connection reset', Results: [] };
+      }
+      if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') {
+        state.filters.questions = opts.ExtraFilter;
+        return state.questionsReadSucceeds
+          ? { Success: true, Results: state.questions as T[] }
+          : { Success: false, ErrorMessage: 'deadlock victim', Results: [] };
+      }
+      throw new Error(`Unexpected RunView('${opts.EntityName}')`);
+    },
+  } as unknown as ActionDataProvider;
+}
+
+/** Load and insist on the `loaded` outcome — the shape every projection test below reads. */
+async function loadedContext(): Promise<FormResponseContext> {
+  const result = await loadFormResponseContext('resp-1', fakeUser, fakeProvider());
+  if (result.status !== 'loaded') {
+    throw new Error(`expected a loaded context, got ${JSON.stringify(result)}`);
+  }
+  return result.context;
+}
+
 beforeEach(() => {
   state.answers = [];
   state.questions = [];
@@ -115,7 +136,7 @@ beforeEach(() => {
 describe('loadFormResponseContext', () => {
   it("reports 'absent' when the response genuinely does not exist, so hooks can skip", async () => {
     state.responseLoads = false;
-    expect(await loadFormResponseContext('resp-1', fakeUser)).toEqual({ status: 'absent' });
+    expect(await loadFormResponseContext('resp-1', fakeUser, fakeProvider())).toEqual({ status: 'absent' });
   });
 
   it("reports 'failed' — not 'absent' — when the response cannot be READ (#239)", async () => {
@@ -123,11 +144,23 @@ describe('loadFormResponseContext', () => {
     // caller's only other answer was "not found", which would tell a hook to skip quietly.
     state.responseLoadThrows = 'User does not have read permissions on MJ_BizApps_Forms: Form Responses';
 
-    const result = await loadFormResponseContext('resp-1', fakeUser);
+    const result = await loadFormResponseContext('resp-1', fakeUser, fakeProvider());
 
     expect(result.status).toBe('failed');
     expect(result.status === 'failed' && result.error).toContain('resp-1');
     expect(result.status === 'failed' && result.error).toContain(state.responseLoadThrows);
+  });
+
+  it('runs every read on the supplied provider, never on the global Metadata/RunView (#260)', async () => {
+    // The mocked global Metadata/RunView both throw 'global provider used'. If the loader ever
+    // fell back to `new Metadata()` / `new RunView()` (no args), this test fails with that message
+    // instead of asserting on the (correct) loaded context.
+    state.answers = [answerRow({ QuestionID: 'q1' })];
+    state.questions = [{ ID: 'q1', QuestionType: 'ShortText', Prompt: 'Name' }];
+
+    const result = await loadFormResponseContext('resp-1', fakeUser, fakeProvider());
+
+    expect(result.status).toBe('loaded');
   });
 
   describe('typed-column projection (the columns hooks used to be blind to)', () => {
@@ -230,7 +263,7 @@ describe('loadFormResponseContext', () => {
     // assertion that can tell the two apart: the rows come back identical either way.
 
     it('escapes a quote in the response id rather than letting it close the literal', async () => {
-      await loadFormResponseContext("resp-1' OR '1'='1", fakeUser);
+      await loadFormResponseContext("resp-1' OR '1'='1", fakeUser, fakeProvider());
 
       expect(state.filters.answers).toBe("ResponseID='resp-1'' OR ''1''=''1'");
     });
@@ -238,7 +271,7 @@ describe('loadFormResponseContext', () => {
     it('escapes a quote in every question id of the IN list', async () => {
       state.answers = [answerRow({ QuestionID: "q1' OR '1'='1" })];
 
-      await loadFormResponseContext('resp-1', fakeUser);
+      await loadFormResponseContext('resp-1', fakeUser, fakeProvider());
 
       expect(state.filters.questions).toBe("ID IN ('q1'' OR ''1''=''1')");
     });
@@ -246,7 +279,7 @@ describe('loadFormResponseContext', () => {
     it('quotes each id separately when several questions are read', async () => {
       state.answers = [answerRow({ ID: 'a1', QuestionID: 'q1' }), answerRow({ ID: 'a2', QuestionID: "q2'" })];
 
-      await loadFormResponseContext('resp-1', fakeUser);
+      await loadFormResponseContext('resp-1', fakeUser, fakeProvider());
 
       expect(state.filters.questions).toBe("ID IN ('q1','q2''')");
     });
@@ -260,7 +293,7 @@ describe('loadFormResponseContext', () => {
     it('fails when the answers cannot be read, instead of presenting an unanswered response', async () => {
       state.answersReadSucceeds = false;
 
-      const result = await loadFormResponseContext('resp-1', fakeUser);
+      const result = await loadFormResponseContext('resp-1', fakeUser, fakeProvider());
 
       expect(result.status).toBe('failed');
       expect(result.status === 'failed' && result.error).toContain('MJ_BizApps_Forms: Form Response Answers');
@@ -272,7 +305,7 @@ describe('loadFormResponseContext', () => {
       state.answers = [answerRow({ QuestionID: 'q-email', TextValue: 'a@b.com' })];
       state.questionsReadSucceeds = false;
 
-      const result = await loadFormResponseContext('resp-1', fakeUser);
+      const result = await loadFormResponseContext('resp-1', fakeUser, fakeProvider());
 
       expect(result.status).toBe('failed');
       expect(result.status === 'failed' && result.error).toContain('MJ_BizApps_Forms: Form Questions');

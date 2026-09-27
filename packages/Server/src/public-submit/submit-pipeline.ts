@@ -78,7 +78,7 @@ import {
   provenanceIsStrict,
   type UploadLedgerRow,
 } from '../upload/upload-provenance.service';
-import { loadFormResponseContext } from '@mj-biz-apps/forms-actions';
+import { loadFormResponseContext, resolveActionProvider } from '@mj-biz-apps/forms-actions';
 import { planAutomations } from './automation-plan';
 import { runAutomations } from '../automation/automation-runner';
 import { dispatchAutomation } from '../automation/dispatch-automation';
@@ -1293,7 +1293,7 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
     if (!principal) {
       return;
     }
-    const loaded = await loadFormResponseContext(responseId, principal);
+    const loaded = await loadFormResponseContext(responseId, principal, resolveActionProvider({}));
     if (loaded.status === 'absent') {
       console.warn(`[forms] automations skipped: response ${responseId} does not exist.`);
       return;

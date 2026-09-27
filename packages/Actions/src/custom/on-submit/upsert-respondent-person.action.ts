@@ -21,7 +21,7 @@
 import { BaseAction } from '@memberjunction/actions';
 import type { ActionResultSimple, RunActionParams } from '@memberjunction/actions-base';
 import { RegisterClass } from '@memberjunction/global';
-import { Metadata, RunView } from '@memberjunction/core';
+import { RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import { escapeSqlString } from '@mj-biz-apps/forms-entities';
 import type { FormQuestionType } from '@mj-biz-apps/forms-entities';
@@ -32,6 +32,7 @@ import { getStringParam, setOutputParam } from '../shared/action-params';
 import { saveOrExplain } from '../shared/save-entity';
 import { explainMissingEntityClasses } from '../shared/generated-entity';
 import { loadFormResponseContext, type AnswerWithType, type FormResponseContext } from '../shared/form-response-context';
+import { resolveActionProvider, type ActionDataProvider } from '../shared/action-provider';
 
 const PERSON_ENTITY = 'MJ_BizApps_Common: People';
 
@@ -60,8 +61,9 @@ export class UpsertRespondentPersonAction extends BaseAction {
     if (missingClasses) {
       return fail(missingClasses, 'ENTITY_CLASS_UNREGISTERED');
     }
+    const provider = resolveActionProvider(params);
 
-    const loaded = await loadFormResponseContext(responseId, params.ContextUser);
+    const loaded = await loadFormResponseContext(responseId, params.ContextUser, provider);
     if (loaded.status === 'absent') {
       return skip(`FormResponse '${responseId}' not found; nothing to upsert.`);
     }
@@ -81,7 +83,7 @@ export class UpsertRespondentPersonAction extends BaseAction {
       return skip('No email answer found; cannot match or create a Person.');
     }
 
-    return this.upsertAndLink(ctx, identity, email, params);
+    return this.upsertAndLink(ctx, identity, email, params, provider);
   }
 
   private async upsertAndLink(
@@ -89,9 +91,10 @@ export class UpsertRespondentPersonAction extends BaseAction {
     identity: RespondentIdentity,
     email: string,
     params: RunActionParams,
+    provider: ActionDataProvider,
   ): Promise<ActionResultSimple> {
     const contextUser = params.ContextUser;
-    const lookup = await findPersonByEmail(email, contextUser);
+    const lookup = await findPersonByEmail(email, contextUser, provider);
     if ('error' in lookup) {
       // Never fall through to create: a read that FAILED (a missing Read grant, #239) says nothing
       // about whether this respondent already has a Person, and creating one here would mint a
@@ -102,7 +105,7 @@ export class UpsertRespondentPersonAction extends BaseAction {
     const created = !existing;
     let person = existing;
     if (!person) {
-      const outcome = await createPerson(identity, email, contextUser);
+      const outcome = await createPerson(identity, email, contextUser, provider);
       if ('error' in outcome) {
         return fail(`Failed to create Person record: ${outcome.error}`, 'PERSON_SAVE_FAILED');
       }
@@ -177,8 +180,9 @@ function assignName(identity: RespondentIdentity, prompt: string, value: string)
 async function findPersonByEmail(
   email: string,
   contextUser: UserInfo,
+  provider: ActionDataProvider,
 ): Promise<{ person: mjBizAppsCommonPersonEntity | null } | { error: string }> {
-  const rv = new RunView();
+  const rv = new RunView(provider);
   const escaped = escapeSqlString(email);
   const result = await rv.RunView<mjBizAppsCommonPersonEntity>(
     {
@@ -199,9 +203,9 @@ async function createPerson(
   identity: RespondentIdentity,
   email: string,
   contextUser: UserInfo,
+  provider: ActionDataProvider,
 ): Promise<{ person: mjBizAppsCommonPersonEntity } | { error: string }> {
-  const md = new Metadata();
-  const person = await md.GetEntityObject<mjBizAppsCommonPersonEntity>(PERSON_ENTITY, contextUser);
+  const person = await provider.GetEntityObject<mjBizAppsCommonPersonEntity>(PERSON_ENTITY, contextUser);
   person.NewRecord();
   // FirstName / LastName are required on People; derive sensible fallbacks from email.
   const fallback = email.split('@')[0];

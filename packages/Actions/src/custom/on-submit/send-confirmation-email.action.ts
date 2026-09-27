@@ -28,6 +28,7 @@ import { LogError, LogStatus } from '@memberjunction/core';
 import { parseFormSettings } from '@mj-biz-apps/forms-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
 import { loadFormResponseContext, type AnswerWithType } from '../shared/form-response-context';
+import { resolveActionProvider } from '../shared/action-provider';
 
 /** A single confirmation email to deliver. */
 export interface ConfirmationEmail {
@@ -81,7 +82,8 @@ export class SendConfirmationEmailAction extends BaseAction {
       return fail('FormResponseID parameter is required', 'MISSING_PARAMETERS');
     }
 
-    const loaded = await loadFormResponseContext(responseId, params.ContextUser);
+    const provider = resolveActionProvider(params);
+    const loaded = await loadFormResponseContext(responseId, params.ContextUser, provider);
     if (loaded.status === 'absent') {
       return skip(`FormResponse '${responseId}' not found; nothing to email.`);
     }
@@ -107,6 +109,8 @@ export class SendConfirmationEmailAction extends BaseAction {
   }
 
   private async deliver(email: ConfirmationEmail, params: RunActionParams): Promise<ActionResultSimple> {
+    // CommunicationEngine takes no provider parameter at MJ 6.1 — its own metadata bookkeeping
+    // still runs on the process-global provider, unlike the response/form/answers read above.
     const result = await activeSender.send(email);
     setOutputParam(params, 'Sent', result.delivered);
     setOutputParam(params, 'RecipientEmail', email.to);

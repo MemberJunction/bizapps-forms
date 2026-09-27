@@ -18,7 +18,7 @@
 import { BaseAction } from '@memberjunction/actions';
 import type { ActionResultSimple, RunActionParams } from '@memberjunction/actions-base';
 import { RegisterClass } from '@memberjunction/global';
-import { Metadata, RunView } from '@memberjunction/core';
+import { RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 // Task types come from the package that owns __mj_BizAppsTasks — Forms deliberately
@@ -32,6 +32,7 @@ import { getStringParam, setOutputParam } from '../shared/action-params';
 import { saveOrExplain } from '../shared/save-entity';
 import { explainMissingEntityClasses } from '../shared/generated-entity';
 import { loadFormResponseContext, type FormResponseContext } from '../shared/form-response-context';
+import { resolveActionProvider, type ActionDataProvider } from '../shared/action-provider';
 
 const ENTITY = {
   Task: 'MJ_BizApps_Tasks: Tasks',
@@ -66,8 +67,9 @@ export class CreateFollowupTaskAction extends BaseAction {
     if (missingClasses) {
       return fail(missingClasses, 'ENTITY_CLASS_UNREGISTERED');
     }
+    const provider = resolveActionProvider(params);
 
-    const loaded = await loadFormResponseContext(responseId, params.ContextUser);
+    const loaded = await loadFormResponseContext(responseId, params.ContextUser, provider);
     if (loaded.status === 'absent') {
       return skip(`FormResponse '${responseId}' not found; no task created.`);
     }
@@ -76,7 +78,7 @@ export class CreateFollowupTaskAction extends BaseAction {
     }
     const ctx = loaded.context;
 
-    const typeOutcome = await resolveTaskTypeId(getStringParam(params, 'TaskTypeName'), params.ContextUser);
+    const typeOutcome = await resolveTaskTypeId(getStringParam(params, 'TaskTypeName'), params.ContextUser, provider);
     if ('error' in typeOutcome) {
       // Distinct from NO_TASK_TYPE: the read itself failed (a missing Read grant, #239), which
       // says nothing about whether any TaskType exists. Reporting it as "none available" sent the
@@ -90,22 +92,23 @@ export class CreateFollowupTaskAction extends BaseAction {
       return fail('No TaskType available to assign to the task.', 'NO_TASK_TYPE');
     }
 
-    return this.createTaskAndLink(ctx, typeOutcome.id, params);
+    return this.createTaskAndLink(ctx, typeOutcome.id, params, provider);
   }
 
   private async createTaskAndLink(
     ctx: FormResponseContext,
     typeId: string,
     params: RunActionParams,
+    provider: ActionDataProvider,
   ): Promise<ActionResultSimple> {
     const contextUser = params.ContextUser;
-    const taskOutcome = await createTask(ctx, typeId, params, contextUser);
+    const taskOutcome = await createTask(ctx, typeId, params, contextUser, provider);
     if ('error' in taskOutcome) {
       return fail(`Failed to create followup Task: ${taskOutcome.error}`, 'TASK_SAVE_FAILED');
     }
     const task = taskOutcome.task;
 
-    const linkOutcome = await createTaskLink(task.ID, ctx.response.ID, contextUser);
+    const linkOutcome = await createTaskLink(task.ID, ctx.response.ID, contextUser, provider);
     if ('error' in linkOutcome) {
       return fail(
         `Task ${task.ID} created but failed to link it to the response: ${linkOutcome.error}`,
@@ -129,9 +132,9 @@ async function createTask(
   typeId: string,
   params: RunActionParams,
   contextUser: UserInfo,
+  provider: ActionDataProvider,
 ): Promise<{ task: mjBizAppsTasksTaskEntity } | { error: string }> {
-  const md = new Metadata();
-  const task = await md.GetEntityObject<mjBizAppsTasksTaskEntity>(ENTITY.Task, contextUser);
+  const task = await provider.GetEntityObject<mjBizAppsTasksTaskEntity>(ENTITY.Task, contextUser);
   task.NewRecord();
   task.Name = getStringParam(params, 'TaskName') ?? `Follow up: ${ctx.form.Name}`;
   task.Description = `Auto-created from form response ${ctx.response.ID} (form "${ctx.form.Name}").`;
@@ -146,16 +149,16 @@ async function createTaskLink(
   taskId: string,
   responseId: string,
   contextUser: UserInfo,
+  provider: ActionDataProvider,
 ): Promise<{ link: mjBizAppsTasksTaskLinkEntity } | { error: string }> {
-  const md = new Metadata();
-  const responseEntityId = md.EntityByName(ENTITY.FormResponse)?.ID;
+  const responseEntityId = provider.EntityByName(ENTITY.FormResponse)?.ID;
   if (!responseEntityId) {
     // A distinct failure from a rejected save: the metadata this host loaded has no
     // such entity, which usually means Forms' metadata was never pushed to this
     // database. Reporting it as a save failure sends the reader hunting the wrong bug.
     return { error: `entity '${ENTITY.FormResponse}' is not present in this host's metadata` };
   }
-  const link = await md.GetEntityObject<mjBizAppsTasksTaskLinkEntity>(ENTITY.TaskLink, contextUser);
+  const link = await provider.GetEntityObject<mjBizAppsTasksTaskLinkEntity>(ENTITY.TaskLink, contextUser);
   link.NewRecord();
   link.TaskID = taskId;
   link.EntityID = responseEntityId;
@@ -173,8 +176,9 @@ async function createTaskLink(
 async function resolveTaskTypeId(
   typeName: string | undefined,
   contextUser: UserInfo,
+  provider: ActionDataProvider,
 ): Promise<{ id: string | null } | { error: string }> {
-  const rv = new RunView();
+  const rv = new RunView(provider);
   const filter = typeName ? `Name=${quoteSqlString(typeName)}` : 'IsActive=1';
   const result = await rv.RunView<mjBizAppsTasksTaskTypeEntity>(
     {

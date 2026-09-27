@@ -50,6 +50,7 @@ export {
 } from './on-submit/response-analyzer-model';
 export * from './shared/action-params';
 export * from './shared/form-response-context';
+export * from './shared/action-provider';
 export * from './authoring/form-blueprint';
 export * from './authoring/form-blueprint-builder';
 export * from './authoring/llm-form-designer';

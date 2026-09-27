@@ -133,13 +133,27 @@ vi.mock('../../shared/form-response-context', () => ({
 
 const { BindResponseToEntityAction } = await import('../bind-response-to-entity.action');
 
-function params(): { Params: { Name: string; Value: string }[]; ContextUser: unknown } {
+/**
+ * `resolveActionProvider` (bizapps-forms#260) requires a real `ActionDataProvider` shape on
+ * `params.Provider` — never called here, since `loadFormResponseContext` is itself mocked above
+ * and ignores the argument, but it has to structurally satisfy `isActionDataProvider` or the
+ * action fails before reaching any of the mocked behaviour this file actually exercises.
+ */
+function dummyProvider(): unknown {
+  const neverCalled = async (): Promise<never> => {
+    throw new Error('dummyProvider should never be called — loadFormResponseContext is mocked');
+  };
+  return { GetEntityObject: neverCalled, EntityByName: neverCalled, RunView: neverCalled, RunViews: neverCalled };
+}
+
+function params(): { Params: { Name: string; Value: string }[]; ContextUser: unknown; Provider: unknown } {
   return {
     Params: [
       { Name: 'BindingID', Value: 'binding-1' },
       { Name: 'FormResponseID', Value: 'response-1' },
     ],
     ContextUser: { Name: 'tester' },
+    Provider: dummyProvider(),
   };
 }
 

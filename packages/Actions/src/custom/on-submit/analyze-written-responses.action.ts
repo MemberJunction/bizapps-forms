@@ -27,11 +27,11 @@
 import { BaseAction } from '@memberjunction/actions';
 import type { ActionResultSimple, RunActionParams } from '@memberjunction/actions-base';
 import { RegisterClass } from '@memberjunction/global';
-import { Metadata } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import { mjBizAppsFormsFormResponseAnswerEntity, type FormQuestionType } from '@mj-biz-apps/forms-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
 import { loadFormResponseContext, type AnswerWithType } from '../shared/form-response-context';
+import { resolveActionProvider, type ActionDataProvider } from '../shared/action-provider';
 import {
   AIPromptResponseAnalyzerModel,
   type ResponseAnalyzerModel,
@@ -68,7 +68,8 @@ export class AnalyzeWrittenResponsesAction extends BaseAction {
       return fail('FormResponseID parameter is required', 'MISSING_PARAMETERS');
     }
 
-    const loaded = await loadFormResponseContext(responseId, params.ContextUser);
+    const provider = resolveActionProvider(params);
+    const loaded = await loadFormResponseContext(responseId, params.ContextUser, provider);
     if (loaded.status === 'absent') {
       return skip(`FormResponse '${responseId}' not found; nothing to analyze.`);
     }
@@ -85,7 +86,7 @@ export class AnalyzeWrittenResponsesAction extends BaseAction {
       return skip('No ShortText/LongText answers with content; nothing to analyze.');
     }
 
-    return this.analyzeAndPersist(selected, ctx.answers.length, ctx.form.Name, params);
+    return this.analyzeAndPersist(selected, ctx.answers.length, ctx.form.Name, params, provider);
   }
 
   /** Run the single prompt call, then map results back and persist per answer. */
@@ -94,14 +95,16 @@ export class AnalyzeWrittenResponsesAction extends BaseAction {
     totalAnswers: number,
     formName: string,
     params: RunActionParams,
+    provider: ActionDataProvider,
   ): Promise<ActionResultSimple> {
     const analyzed = await analyzerModel.analyze(
       selected.map((s) => s.input),
       formName,
       params.ContextUser,
+      provider,
     );
 
-    const persisted = await persistAnalysis(selected, analyzed, params.ContextUser);
+    const persisted = await persistAnalysis(selected, analyzed, params.ContextUser, provider);
     const skipped = totalAnswers - persisted;
     setOutputParam(params, 'AnalyzedCount', persisted);
     setOutputParam(params, 'SkippedCount', skipped);
@@ -148,6 +151,7 @@ async function persistAnalysis(
   selected: SelectedAnswer[],
   analyzed: AnalyzedAnswer[],
   contextUser: UserInfo,
+  provider: ActionDataProvider,
 ): Promise<number> {
   let saved = 0;
   for (let i = 0; i < selected.length; i++) {
@@ -156,7 +160,7 @@ async function persistAnalysis(
       console.warn(`[forms] Analyzer returned no entry for answer index ${i}; skipping.`);
       continue;
     }
-    if (await saveAnswerScore(selected[i].source.answerId, analysis, contextUser)) {
+    if (await saveAnswerScore(selected[i].source.answerId, analysis, contextUser, provider)) {
       saved++;
     }
   }
@@ -168,9 +172,9 @@ async function saveAnswerScore(
   answerId: string,
   analysis: AnalyzedAnswer,
   contextUser: UserInfo,
+  provider: ActionDataProvider,
 ): Promise<boolean> {
-  const md = new Metadata();
-  const answer = await md.GetEntityObject<mjBizAppsFormsFormResponseAnswerEntity>(
+  const answer = await provider.GetEntityObject<mjBizAppsFormsFormResponseAnswerEntity>(
     ENTITY.FormResponseAnswer,
     contextUser,
   );
