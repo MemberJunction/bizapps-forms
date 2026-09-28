@@ -53,6 +53,7 @@ import {
   inputModeFor,
   inputTypeFor,
 } from './input-mode';
+import { compositeAnswer, sameAnswer, scalarAnswer } from './control-answer';
 import { DoodlePadComponent, type DoodleCapture } from './doodle-pad.component';
 import { IconComponent } from '../icon.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
@@ -394,27 +395,15 @@ export class FormQuestionComponent {
   /**
    * Emit a whole composite, unless it equals the one already held.
    *
-   * Blank parts are DROPPED rather than kept as empty strings, so a respondent who tabs through
-   * an optional address without typing leaves no answer at all. Keeping them would emit
-   * `{line1:'', city:''}` — an object `isAnswerSupplied` correctly calls unanswered, but which
-   * every reader downstream still has to receive, store and skip.
-   *
    * The equality check exists for the same reason as {@link emitIfChanged}: composite inputs also
    * bind both `(input)` and `(change)` (#268), so re-emitting the unchanged value on blur must not
-   * look like an edit.
+   * look like an edit. `compositeAnswer`/`sameAnswer` carry the actual decisions (blank-part
+   * dropping, key-order-independent equality) — see `control-answer.ts` for why they are tested
+   * there rather than here.
    */
   private emitComposite(parts: Record<string, string>): void {
-    const next: Record<string, string> = {};
-    for (const [key, part] of Object.entries(parts)) {
-      if (part.trim() !== '') {
-        next[key] = part;
-      }
-    }
-    const current = this.compositeValue();
-    const same =
-      Object.keys(next).length === Object.keys(current).length &&
-      Object.entries(next).every(([key, part]) => current[key] === part);
-    if (same) {
+    const next = compositeAnswer(parts) ?? {};
+    if (sameAnswer(next, this.compositeValue())) {
       return;
     }
     this.valueChange.emit(Object.keys(next).length > 0 ? next : null);
@@ -705,16 +694,11 @@ export class FormQuestionComponent {
   }
 
   protected onText(raw: string): void {
-    this.emitIfChanged(raw === '' ? null : raw);
+    this.emitIfChanged(scalarAnswer(raw, 'text'));
   }
 
   protected onNumber(raw: string): void {
-    if (raw.trim() === '') {
-      this.emitIfChanged(null);
-      return;
-    }
-    const n = Number(raw);
-    this.emitIfChanged(Number.isFinite(n) ? n : raw);
+    this.emitIfChanged(scalarAnswer(raw, 'number'));
   }
 
   /**
@@ -724,10 +708,16 @@ export class FormQuestionComponent {
    * per keystroke and again on blur. The second is not an edit and must not look like one.
    */
   private emitIfChanged(next: string | number | null): void {
-    if (next === (this.value() ?? null)) {
+    if (sameAnswer(next, this.scalarValue())) {
       return;
     }
     this.valueChange.emit(next);
+  }
+
+  /** The model's current value, narrowed to what a scalar text-style control could hold. */
+  private scalarValue(): string | number | null {
+    const v = this.value();
+    return typeof v === 'string' || typeof v === 'number' ? v : null;
   }
 
   protected onSingleChoice(value: string): void {
