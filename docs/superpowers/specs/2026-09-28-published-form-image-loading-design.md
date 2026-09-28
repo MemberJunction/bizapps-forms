@@ -116,6 +116,9 @@ pickOutputType(sourceType, encodedType): 'image/webp' | 'image/jpeg' | 'image/pn
 
 1. **Skip, returning `file` unchanged:**
    - `image/gif` (resizing would drop the animation);
+   - an animated WebP or APNG, found by sniffing the first 64 KB of the file (WebP: `VP8X` animation
+     flag or an `ANIM` chunk; PNG: an `acTL` chunk before the first `IDAT`). Resizing would keep only
+     frame 0;
    - any file whose longer side is ≤ `MAX_IMAGE_EDGE_PX` **and** whose size is ≤ `SKIP_BELOW_BYTES`.
 2. **Decode** with EXIF orientation applied, so phone photos stay upright. Re-encoding drops all
    metadata, including GPS location.
@@ -140,6 +143,13 @@ If `decode` or `encode` throws, or `createImageBitmap` does not exist, the funct
 The upload then proceeds exactly as today. The server's size and type checks remain the authority; a
 5 MB original still gets the server's existing 413 message.
 
+**Server refuses the shrunk type.** `FORMS_ASSET_ALLOWED_TYPES` is operator-configurable and may omit
+`image/webp`. If the upload of a changed file fails with HTTP 415, `upload()` retries **once** with the
+original file (`shouldRetryWithOriginal`), logging a `console.warn` with the file name and rejected
+type. Any other failure, or a 415 on the original itself, is reported as before. To carry the status,
+`send()` rejects with `AssetUploadError` (a subclass of `Error`, so callers reading `.message` are
+unaffected).
+
 ### Progress UI
 
 Unchanged. Decoding and re-encoding a 5 MB photo takes on the order of 100–300 ms, before the existing
@@ -163,8 +173,14 @@ upload progress starts.
   - `decode` throws → original returned plus exactly one warning naming the file;
   - `encode` throws → the same;
   - missing `createImageBitmap` → the same.
-- **Wiring (`builder/form-asset.wiring.spec.ts`, the source-reading pattern of `asset-ref-wiring.spec.ts`):**
-  `upload()` awaits `optimizeImageForUpload` before `buildAssetFormData`.
+- **`isAnimatedImage`** with hand-built headers: animated WebP (VP8X flag; ANIM chunk alone), still WebP,
+  APNG, still PNG (an `acTL` after `IDAT` does not count), truncated input, other types; and an animated
+  WebP `File` is returned as the same object without decoding.
+- **`shouldRetryWithOriginal`:** 415 with a changed file → true; 415 for the original itself, 413, and a
+  non-upload error → false.
+- **Wiring (`builder/image-optimize.wiring.spec.ts`, the source-reading pattern of `asset-ref-wiring.spec.ts`):**
+  `upload()` awaits `optimizeImageForUpload` before `buildAssetFormData`, sends the optimized file first,
+  and sends the original only in the one retry branch.
 
 ---
 
@@ -186,10 +202,11 @@ every image field:
 export function collectLaterImageUrls(def: PublishedFormDefinition): string[];
 ```
 
-- It returns every question option's `imageURL`, page by page, question by question and option by option,
-  each level sorted by `displayOrder` as the renderer sorts them (`form-runtime.ts:381`,
-  `section-content.ts:76`), then every ending screen's `mediaURL` sorted by `displayOrder`
-  (`shown-screen.ts:52`). It includes **all** endings, because which one shows depends on
+- It returns every question option's `imageURL`, page by page, question by question and option by option.
+  Pages and questions are sorted by `displayOrder` as the renderer sorts them (`form-runtime.ts:381`,
+  `section-content.ts:76`); options are taken in published array order, because the renderer does not
+  sort them (`form-question.component.html` iterates `q.options`). Then every ending screen's
+  `mediaURL` sorted by `displayOrder` (`shown-screen.ts:52`). It includes **all** endings, because which one shows depends on
   the answers.
 - It deduplicates, keeping the first occurrence.
 - It leaves out the welcome `mediaURL`, `styleTokens.logoURL`, and CSS asset URLs, which the first screen
@@ -253,8 +270,8 @@ export function prefetchImages(urls: readonly string[], env?: PrefetchEnv): Pref
 ### Tests
 
 - **`widget/core/asset-ref.spec.ts`**, `collectLaterImageUrls`:
-  - order follows `displayOrder` (pages, questions, options, then endings), even when the arrays are
-    stored out of order;
+  - order follows `displayOrder` for pages, questions and endings, even when those arrays are stored out
+    of order, while options stay in array order;
   - duplicates are removed, keeping the first;
   - welcome media, logo and CSS URLs are excluded;
   - options without `imageURL` are skipped;
@@ -292,7 +309,9 @@ the builder components. Each PR must also pass the package's typecheck and its `
    a PictureChoice option and an ending screen. Do it once in Chrome and once in WebKit
    (playwright-core's `webkit` channel, which exercises the Safari fallback). For each upload, record the
    stored `MJ: Files.ContentType` and the served byte size. Also upload a transparent PNG and an animated
-   GIF: transparency must survive, and the GIF must come back byte-identical.
+   GIF: transparency must survive, and the GIF must come back byte-identical. Also upload a portrait
+   phone JPEG stored landscape with EXIF Orientation=6, over 300 KB (it must upload upright), and an
+   animated WebP (it must come back byte-identical).
 3. **PR 2 — timing.** Re-run the three mj-perf journeys (`bizapps-forms/forms-images-{welcome,question,ending}`)
    at `none` and `slow4g-cpu4`, then run `compare.mjs` against the 2026-09-28 baselines. Also re-run the
    text-vs-image probe (Chrome, 390×844 @3x). Space the runs out, or seed several distributions:
@@ -309,6 +328,8 @@ the builder components. Each PR must also pass the package's typecheck and its `
 | Ending image painted after the ending text, with ≥ 3 s on the question page | 6.0 s | ≤ 100 ms |
 | Transparent PNG after upload | — | alpha preserved |
 | Animated GIF after upload | — | byte-identical |
+| EXIF Orientation=6 JPEG over 300 KB after upload | — | displays upright |
+| Animated WebP after upload | — | byte-identical |
 
 ## Shipping
 

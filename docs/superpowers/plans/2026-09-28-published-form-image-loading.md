@@ -683,7 +683,9 @@ describe('collectLaterImageUrls', () => {
 
   it('lists option images, then ending images, in the order the respondent meets them', () => {
     const def = base({
-      // Stored out of order on purpose: the renderer sorts by displayOrder, so the prefetch must too.
+      // Pages, questions and endings are stored out of order on purpose: the renderer sorts those by
+      // displayOrder, so the prefetch must too. Options are NOT sorted by the renderer
+      // (`form-question.component.html` iterates `q.options`), so they stay in array order: b, then a.
       pages: [
         { id: 'p2', displayOrder: 1, questions: [question('q3', 0, [opt('e', 0, '/img/e')])] },
         {
@@ -697,7 +699,7 @@ describe('collectLaterImageUrls', () => {
       ],
       endScreens: [screen('end2', 'Ending', 1, '/img/end2'), screen('end1', 'Ending', 0, '/img/end1')],
     });
-    expect(collectLaterImageUrls(def)).toEqual(['/img/a', '/img/b', '/img/d', '/img/e', '/img/end1', '/img/end2']);
+    expect(collectLaterImageUrls(def)).toEqual(['/img/b', '/img/a', '/img/d', '/img/e', '/img/end1', '/img/end2']);
   });
 
   it('leaves out the welcome image, the logo and CSS assets: the first screen loads those itself', () => {
@@ -738,15 +740,16 @@ Expected: FAIL — `collectLaterImageUrls` is not exported.
 Append to `packages/Angular/src/lib/widget/core/asset-ref.ts`:
 
 ```ts
-/** Ascending by `displayOrder`, without mutating the input (the renderer sorts the same way). */
+/** Ascending by `displayOrder`, without mutating the input (the renderer sorts pages, questions and endings the same way). */
 function byDisplayOrder<T extends { displayOrder: number }>(items: readonly T[]): T[] {
   return [...items].sort((a, b) => a.displayOrder - b.displayOrder);
 }
 
 /**
  * The images a respondent sees AFTER the first screen, in the order they will see them: every
- * question option's image (page, question, option, each by `displayOrder`, matching
- * `form-runtime.ts` and `section-content.ts`), then every ending screen's image. All endings are
+ * question option's image (pages and questions by `displayOrder`, matching `form-runtime.ts` and
+ * `section-content.ts`; options in published array order, because the renderer does not sort them),
+ * then every ending screen's image by `displayOrder`. All endings are
  * included because which one shows depends on the answers.
  *
  * Deliberately excludes the welcome image, the logo and CSS assets: the first screen requests
@@ -760,7 +763,7 @@ export function collectLaterImageUrls(def: PublishedFormDefinition): string[] {
   const urls: string[] = [];
   for (const page of byDisplayOrder(def.pages)) {
     for (const question of byDisplayOrder(page.questions)) {
-      for (const option of byDisplayOrder(question.options)) {
+      for (const option of question.options) {
         if (option.imageURL) {
           urls.push(option.imageURL);
         }
@@ -1422,6 +1425,7 @@ Not delegated. It needs the shared hosts, the database, and one browser, which i
 
 - [ ] **Step 1: Unblock Explorer.** Rebuild bizapps-caliber's Angular package (`pnpm --filter <caliber angular package> run build` from `~/Projects/mj-dev`), then confirm `/tmp/mj-explorer.log` shows a fresh `Application bundle generation complete`. If caliber fails to build against MJ `next`, stop and report it; it is out of scope.
 - [ ] **Step 2: PR 1 upload check.** Serve the PR 1 branch's builder in Explorer; the workspace links forms-ng from the main checkout, so switch the main checkout to the branch or link the worktree, with Soham's OK because it is shared. In the builder, upload the fixture's 927 KB JPEG (`C15F7D76-…`) to a welcome screen, a PictureChoice option and an ending screen, plus a transparent PNG and an animated GIF.
+  - Also upload a portrait phone JPEG stored landscape with EXIF Orientation=6 and over 300 KB (it must upload upright), and an animated WebP (it must come back byte-identical).
   - Do it in Chrome and in WebKit (playwright-core webkit, iPhone profile).
   - For each upload, record `MJ: Files.ContentType` and the served byte size.
   - Pass: JPEG ≤ 250 KB; PNG alpha preserved; GIF byte-identical.
