@@ -236,8 +236,10 @@ export interface InviteByToken {
  * and this is deliberately the same one-way comparison the redeem path performs. The raw token
  * never appears in the filter, so it cannot reach a query log.
  *
- * The one caller is the `/remember` guard, which has to answer "does the pointer this browser
- * already holds name a different draft?" without spending the pointer's single use.
+ * Two callers, both via `resume-deps.ts`'s `inviteFor`: the `/remember` guard, which has to answer
+ * "does the pointer this browser already holds name a different draft?" without spending the
+ * pointer's single use; and `/forget` (`runForget`), which uses it to learn which response's
+ * invite to revoke before clearing the cookie.
  */
 export async function findInviteByRawToken(
   rawToken: string,
