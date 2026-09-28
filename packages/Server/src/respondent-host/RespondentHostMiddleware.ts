@@ -56,7 +56,7 @@ import { frameAncestorsDirective, parseAllowedOrigins } from '@mj-biz-apps/forms
 
 import { matchesExactRoute, matchSingleSegmentRoute } from '../http/route-match.js';
 import { getRequestOrigin } from '../http/request-origin.js';
-import { getGraphqlUrlForRequest, getRespondentHostConfig } from './config.js';
+import { getGraphqlUrlForRequest, getRespondentHostConfig, graphqlRootPathWarning } from './config.js';
 import { getPublicSubmitConfig } from '../public-submit/config.js';
 import { renderRespondentHostPage } from './host-page.js';
 import { redeemSlugToToken, type RedeemRunViewProvider } from './redeem.service.js';
@@ -174,6 +174,12 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
           "it the embed-origin gate cannot recognise this API's own origin either. Set " +
           'MJAPI_PUBLIC_URL to the URL this API is reached at.',
       );
+    }
+    // Read from the environment here rather than from `cfg.graphqlPath`: the operator's own
+    // spelling belongs in the message, and `graphqlPath` is already normalised for joining.
+    const rootPathWarning = graphqlRootPathWarning(process.env.GRAPHQL_ROOT_PATH);
+    if (rootPathWarning) {
+      LogError(rootPathWarning);
     }
     LogStatus(
       `[Forms] Same-device resume routes registered at POST ${RESPONDENT_RESUME_ROUTE}, ` +

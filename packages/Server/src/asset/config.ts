@@ -33,7 +33,12 @@
 
 import { randomUUID } from 'node:crypto';
 
-/** Base path both asset routes hang off. */
+/**
+ * Base path both asset routes hang off. Mirrored by `ASSET_ROUTE` in forms-ng's
+ * `widget/core/asset-ref.ts`, which recognises and resolves the stored `/forms/asset/<id>`.
+ * Duplicated on purpose: sharing one constant would need a dependency between the two packages.
+ * Change both together.
+ */
 export const ASSET_ROUTE = '/forms/asset';
 
 /**

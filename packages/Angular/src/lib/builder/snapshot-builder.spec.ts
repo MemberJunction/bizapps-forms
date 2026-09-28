@@ -161,7 +161,7 @@ describe('buildPublishedDefinition', () => {
     expect(def.styleTokens.logoURL).toBe('https://logo');
   });
 
-  it('uses the styleTokensOverride verbatim when supplied (WYSIWYG preview of unsaved edits)', () => {
+  it('uses the non-asset values of a styleTokensOverride as given when supplied (WYSIWYG preview of unsaved edits)', () => {
     const style = {
       CSSVariables: '{"--mjf-accent":"#000000"}',
       CustomCSS: null,
@@ -304,7 +304,7 @@ describe('buildPublishedDefinition asset references (#270)', () => {
     expect(def.styleTokens.cssVariables['--mjf-bg-image']).toBe(`url('${REF}')`);
   });
 
-  it('relativises a styleTokensOverride too, since that is what publish supplies', () => {
+  it('relativises an uploaded-image URL inside a styleTokensOverride, like every other asset reference', () => {
     const def = buildPublishedDefinition(
       { form: form({}), pages: [], screens: [] },
       undefined,

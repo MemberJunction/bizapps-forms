@@ -34,7 +34,9 @@ import { mapDefinitionAssets, toAssetRef } from '../widget/core/asset-ref';
  * in the stored DisplayOrder values.
  *
  * `styleTokensOverride` lets the builder's live Preview reflect UNSAVED theme edits: when
- * supplied it is used verbatim instead of deriving tokens from `style`.
+ * supplied it replaces the tokens derived from `style`, and — like every other asset reference in
+ * the snapshot — its uploaded-image URLs are relativised to `/forms/asset/<id>` (#270). Every
+ * non-asset value in it is kept as given.
  *
  * `settingsOverride` is the mirror image and exists for the opposite reason: publish must NOT
  * trust the tree, because the Automate tab writes `Form.Settings` through its own entity and the

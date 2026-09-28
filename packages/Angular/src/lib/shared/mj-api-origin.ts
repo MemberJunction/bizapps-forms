@@ -2,14 +2,21 @@
  * Where MJAPI lives, and the token to talk to it with, as seen from the builder.
  *
  * The builder runs inside Explorer, which is a DIFFERENT origin from MJAPI. Anything the builder
- * hands to a respondent — a `/f/:slug` link, an uploaded image URL — must be built against the
- * API origin, never `window.location.origin`. Using the latter is what once produced
- * `http://localhost:4321/f/:slug`, an Explorer login page where a form should have been.
+ * addresses on MJAPI — a `/f/:slug` respondent link, an asset upload, an image preview, a
+ * response-file download — must be built from the configured API, never `window.location.origin`.
+ * Using the latter is what once produced `http://localhost:4321/f/:slug`, an Explorer login page
+ * where a form should have been.
  *
- * Extracted from `DistributionManagerComponent` when the asset uploader needed the same answer;
- * one resolution rule beats two that can disagree about where the API is. Moved out of `builder/`
- * when the Responses tab needed it too — a `responses/` module reaching into `builder/` would
- * have made a sibling look like a dependency.
+ * Two answers live here, and they differ on purpose: {@link resolveApiOrigin} (the bare origin,
+ * used only for the respondent link) and {@link resolveApiBase} (origin plus any path prefix, used
+ * for every request to a `/forms/*` route). What a form STORES for an uploaded image is neither —
+ * it is the host-independent `/forms/asset/<id>`, resolved against `resolveApiBase()` only when the
+ * builder renders it (#270; see `widget/core/asset-ref.ts`).
+ *
+ * Extracted from `DistributionManagerComponent` so there is one resolution rule rather than two that
+ * can disagree about where the API is. Moved out of `builder/` when the Responses tab needed it
+ * too — a `responses/` module reaching into `builder/` would have made a sibling look like a
+ * dependency.
  */
 import { GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
 import { apiBaseOf } from '../widget/core/asset-ref';
@@ -41,6 +48,8 @@ export function resolveApiOrigin(): string {
  * function rather than a change to that one because the respondent link is built by
  * `DistributionManagerComponent` against the origin, and #270 does not touch that link.
  * `apiBaseOf` already maps an empty or malformed URL to `''`, so no try/catch is needed here.
+ * Which path prefixes that supports (a reverse-proxy prefix yes, a bare `GRAPHQL_ROOT_PATH` no) is
+ * documented on `apiBaseOf`.
  */
 export function resolveApiBase(): string {
   return apiBaseOf(GraphQLDataProvider.Instance?.ConfigData?.URL ?? '');

@@ -1,4 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+const logged: string[] = [];
+vi.mock('@memberjunction/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memberjunction/core')>();
+  return { ...actual, LogError: (message: string) => logged.push(message) };
+});
+
 import {
   canonicalJson,
   definitionFingerprint,
@@ -153,6 +160,14 @@ describe('storedSnapshotFingerprint', () => {
     // No baseline means the builder offers Publish — republishing something already live
     // is recoverable; hiding real changes from respondents is not.
     expect(storedSnapshotFingerprint('{not json')).toBeNull();
+  });
+
+  it('logs an unparseable stored snapshot with the form it belongs to, rather than swallowing it', () => {
+    logged.length = 0;
+    expect(storedSnapshotFingerprint('{not json', 'form-123')).toBeNull();
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain('form-123');
+    expect(logged[0]).toMatch(/snapshot/i);
   });
 });
 

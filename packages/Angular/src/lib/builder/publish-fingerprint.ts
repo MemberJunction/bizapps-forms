@@ -31,6 +31,7 @@
  * naive comparison reports "unpublished changes" forever. Sorting keys recursively (the
  * same idea as RFC 8785 JSON Canonicalization) removes that whole class of false positive.
  */
+import { LogError } from '@memberjunction/core';
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
 import { mapDefinitionAssets, toAssetRef } from '../widget/core/asset-ref';
 
@@ -118,6 +119,10 @@ export function definitionFingerprint(definition: PublishedFormDefinition | unkn
  * a collection the mapper expects (`endScreens`, say). Such a snapshot is fingerprinted as it
  * stands — its current behaviour — rather than crashing the comparison: it differs from any
  * current draft anyway, because the draft always emits those collections.
+ *
+ * Only the COLLECTIONS are checked here. The leaf values the mapper reads (`mediaURL`, `imageURL`,
+ * `logoURL`, each `cssVariables` value, `customCSS`) need no check: the mappers in `asset-ref.ts`
+ * leave a non-string leaf untouched rather than throwing, so a corrupt leaf is compared as found.
  */
 function hasAssetBearingShape(value: object): value is PublishedFormDefinition {
   const def = value as Partial<Record<keyof PublishedFormDefinition, unknown>>;
@@ -148,18 +153,28 @@ function isRecordArray(value: unknown): value is JsonRecord[] {
  * The fingerprint of a stored snapshot, or `null` when there is nothing to compare against.
  *
  * `null` means "never published" — a distinct state from "published and identical", and the
- * caller needs the difference: one offers Publish, the other says Published.
+ * caller needs the difference: one offers Publish, the other says Published. `formId` is only
+ * context for the log line written when the snapshot cannot be parsed.
  */
-export function storedSnapshotFingerprint(snapshotJson: string | null | undefined): string | null {
+export function storedSnapshotFingerprint(
+  snapshotJson: string | null | undefined,
+  formId?: string,
+): string | null {
   if (!snapshotJson) {
     return null;
   }
   try {
     return definitionFingerprint(JSON.parse(snapshotJson));
-  } catch {
+  } catch (error) {
     // A snapshot we cannot parse cannot be compared against. Reporting "no baseline" makes
     // the builder offer Publish, which is the safe direction: the worst case is republishing
-    // something already live, versus hiding changes that never reach a respondent.
+    // something already live, versus hiding changes that never reach a respondent. Logged,
+    // because a live snapshot that no longer parses is corrupt data someone needs to hear about.
+    LogError(
+      `Could not read the published snapshot of form ${formId ?? '<unknown>'} ` +
+        `(${snapshotJson.length} chars) for the unpublished-changes check; treating it as never ` +
+        `published: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return null;
   }
 }

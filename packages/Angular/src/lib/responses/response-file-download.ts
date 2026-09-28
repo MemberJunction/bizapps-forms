@@ -7,9 +7,10 @@
  * feature disappoints someone, and neither needs a browser to check.
  */
 
-/** Base path of MJAPI's response-file download route. Mirrors `Server/src/download/config.ts`. */
+import { serverErrorText } from '../shared/server-error-text';
 
-import { serverErrorText } from '../shared/server-error-text';export const DOWNLOAD_PATH = '/forms/files';
+/** Base path of MJAPI's response-file download route. Mirrors `Server/src/download/config.ts`. */
+export const DOWNLOAD_PATH = '/forms/files';
 
 /**
  * The URL to fetch one response file from.
@@ -17,8 +18,8 @@ import { serverErrorText } from '../shared/server-error-text';export const DOWNL
  * Built against the API BASE (origin plus any path prefix MJAPI is deployed under), never
  * `window.location.origin`: the builder runs inside Explorer, which is a different origin from
  * MJAPI, and using the browser's own origin is what once produced an Explorer login page where a
- * form should have been. Returns '' when the base cannot be resolved, so the caller reports a configuration problem rather than fetching from a
- * URL that means something else.
+ * form should have been. Returns '' when the base cannot be resolved, so the caller reports a
+ * configuration problem rather than fetching from a URL that means something else.
  */
 export function downloadUrl(apiBase: string, fileId: string): string {
   const base = apiBase.replace(/\/+$/, '');

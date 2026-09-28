@@ -19,11 +19,26 @@
  * DIFFERENT Forms install would be re-pointed here and 404. That is judged acceptable — the route
  * is ours, the id is a GUID, and the alternative is leaving every localhost-authored form broken.
  *
+ * WHICH PREFIX IS SUPPORTED. MJServer mounts every Forms route (`/forms/*`, and core's
+ * `/magic-link/redeem`) at its app ROOT; only GraphQL moves under `GRAPHQL_ROOT_PATH`. So the rule
+ * here — the same one `deriveUploadUrl` in `../api/forms-api.config.ts` already uses for respondent
+ * uploads — is "Forms routes live at the api-url minus a trailing `/graphql`". That holds for a
+ * reverse-proxy path prefix carried in `MJAPI_PUBLIC_URL` (the proxy strips it before MJAPI sees the
+ * request, so everything lives under it), and for a `GRAPHQL_ROOT_PATH` of `/` or one ending in
+ * `/graphql`. It does NOT hold for any other `GRAPHQL_ROOT_PATH` (e.g. `/api`): that moves GraphQL
+ * alone, so `/api/forms/asset/<id>` 404s. That configuration is unsupported, and forms-server warns
+ * about it at boot (`graphqlRootPathWarning` in `respondent-host/config.ts`).
+ *
  * Pure and dependency-free on purpose: the respondent widget uses it, and the widget must not reach
  * the Explorer shell.
  */
 import type { FormStyleTokens, PublishedFormDefinition, PublishedFormScreen } from '@mj-biz-apps/forms-entities/contracts';
 
+/**
+ * Mirrors `ASSET_ROUTE` in forms-server's `src/asset/config.ts`, which mounts the route. Duplicated
+ * on purpose: sharing one constant would need a dependency between the two packages, and the
+ * widget must stay free of server code. Change both together.
+ */
 export const ASSET_ROUTE = '/forms/asset';
 
 // No leading `^`: the route is recognised as a PATH SUFFIX so a prefix MJAPI is deployed behind
@@ -34,6 +49,11 @@ const PLACEHOLDER_BASE = 'http://placeholder.invalid';
 
 /** The file id when `value` is one of our asset references (any host, any prefix, any case), else undefined. */
 function assetIdOf(value: string): string | undefined {
+  // Typed `string`, but a stored snapshot is whatever `JSON.parse` returned: a non-string here is
+  // corrupt data, which is not ours to recognise — and must not throw out of a render or a diff.
+  if (typeof value !== 'string') {
+    return undefined;
+  }
   const trimmed = value.trim();
   if (!trimmed.startsWith('/') && !/^https?:\/\//i.test(trimmed)) {
     return undefined;
@@ -75,6 +95,11 @@ export function resolveAssetUrl(value: string, apiBase: string): string {
  * deriving the upload endpoint from `graphqlUrl` — the origin alone is wrong for the same reason
  * there: an MJAPI reverse-proxied at `/api` serves assets at `/api/forms/asset/<id>`, not at the
  * bare origin.
+ *
+ * The constraint that buys (see the module header): a path prefix is assumed to be where ALL of
+ * MJAPI lives, which is true of a reverse-proxy prefix in `MJAPI_PUBLIC_URL` and false of a
+ * `GRAPHQL_ROOT_PATH` other than `/` or one ending in `/graphql` — MJServer moves only GraphQL
+ * there, leaving `/forms/*` at the root. That second configuration is unsupported, not handled.
  */
 export function apiBaseOf(graphqlUrl: string): string {
   const trimmed = graphqlUrl.trim();
@@ -95,6 +120,11 @@ const CSS_URL = /url\(\s*(["']?)([^"')]*)\1\s*\)/gi;
 
 /** Rewrite every `url(...)` reference in a CSS string through `map`, preserving its quoting style. */
 export function mapCssUrls(css: string, map: (url: string) => string): string {
+  // Same runtime guard as `assetIdOf`: stored token JSON is untyped, and a non-string CSS value is
+  // left exactly as found rather than throwing out of `replace`.
+  if (typeof css !== 'string') {
+    return css;
+  }
   return css.replace(CSS_URL, (whole, quote: string, inner: string) => {
     const mapped = map(inner);
     return mapped === inner ? whole : `url(${quote}${mapped}${quote})`;

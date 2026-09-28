@@ -20,7 +20,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { getGraphqlUrlForRequest, getRespondentHostConfig, resetRespondentHostConfigForTests } from '../config';
+import {
+  getGraphqlUrlForRequest,
+  getRespondentHostConfig,
+  graphqlRootPathWarning,
+  resetRespondentHostConfigForTests,
+} from '../config';
 
 const SAVED = { ...process.env };
 
@@ -130,5 +135,29 @@ describe('getGraphqlUrlForRequest — the page addresses the server that served 
     expect(() => getGraphqlUrlForRequest(getRespondentHostConfig(), undefined)).toThrow(
       /FORMS_GRAPHQL_URL.*MJAPI_PUBLIC_URL/,
     );
+  });
+});
+
+describe('graphqlRootPathWarning — Forms routes live at the api-url minus /graphql (#270)', () => {
+  // MJServer mounts every Forms route at its app ROOT and moves only GraphQL under
+  // GRAPHQL_ROOT_PATH. The widget and builder derive `/forms/*` by stripping a trailing `/graphql`
+  // from the API URL, so a root path that does not end in `/graphql` sends images and uploads to a
+  // path nothing serves.
+  it.each([undefined, '', '/', '//', '/graphql', '/GraphQL/', '/v1/graphql', 'graphql'])(
+    'is silent for a supported root path (%s)',
+    (rootPath) => {
+      expect(graphqlRootPathWarning(rootPath)).toBeUndefined();
+    },
+  );
+
+  it('warns, naming the setting and the consequence, for a root path that moves only GraphQL (/api)', () => {
+    const warning = graphqlRootPathWarning('/api');
+    expect(warning).toContain('GRAPHQL_ROOT_PATH');
+    expect(warning).toContain('/api');
+    expect(warning).toMatch(/404/);
+  });
+
+  it('warns for a root path that merely CONTAINS graphql without ending in it', () => {
+    expect(graphqlRootPathWarning('/graphql/v1')).toBeDefined();
   });
 });

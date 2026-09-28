@@ -67,6 +67,12 @@ describe('toAssetRef', () => {
   it('leaves a rootless relative path unchanged (no leading slash)', () => {
     expect(toAssetRef(`forms/asset/${ID}`)).toBe(`forms/asset/${ID}`);
   });
+
+  it('does not recognise a route that merely ENDS in "forms/asset" (/xforms/asset/<id>)', () => {
+    // The suffix match is anchored on the `/` before `forms`, so a lookalike segment is not ours.
+    expect(toAssetRef(`/xforms/asset/${ID}`)).toBe(`/xforms/asset/${ID}`);
+    expect(toAssetRef(`https://h/xforms/asset/${ID}`)).toBe(`https://h/xforms/asset/${ID}`);
+  });
 });
 
 describe('resolveAssetUrl', () => {
@@ -128,6 +134,13 @@ describe('apiBaseOf', () => {
 
   it('keeps a path prefix with no /graphql suffix, dropping its trailing slash', () => {
     expect(apiBaseOf('https://h/api/')).toBe('https://h/api');
+  });
+
+  it('keeps a bare /api path DELIBERATELY: Forms routes live at the api-url minus /graphql, no more', () => {
+    // Pins the reverse-proxy model shared with `deriveUploadUrl`: a prefix in MJAPI_PUBLIC_URL is
+    // where MJAPI (and so every /forms/* route) lives. A GRAPHQL_ROOT_PATH of `/api` would NOT be —
+    // MJServer moves only GraphQL there — and is unsupported; the server warns about it at boot.
+    expect(apiBaseOf('https://h/api')).toBe('https://h/api');
   });
 
   it('returns empty for an empty string', () => {
@@ -244,6 +257,27 @@ describe('mapStyleTokenAssets', () => {
 });
 
 describe('mapDefinitionAssets', () => {
+  it('leaves a non-string asset field untouched rather than throwing (stored JSON is untyped)', () => {
+    // The one legitimate cast: fabricating the corrupt stored JSON a typed caller cannot produce.
+    const def = definition();
+    const corrupt = {
+      ...def,
+      welcomeScreen: { ...def.welcomeScreen!, mediaURL: 42 as unknown as string },
+      styleTokens: {
+        cssVariables: { '--mjf-x': 7 as unknown as string },
+        customCSS: 9 as unknown as string,
+        logoURL: 5 as unknown as string,
+      },
+    };
+    const mapped = mapDefinitionAssets(corrupt, toAssetRef);
+
+    expect(mapped.welcomeScreen?.mediaURL).toBe(42);
+    expect(mapped.styleTokens.cssVariables['--mjf-x']).toBe(7);
+    expect(mapped.styleTokens.customCSS).toBe(9);
+    expect(mapped.styleTokens.logoURL).toBe(5);
+    expect(resolveDefinitionForRender(corrupt, 'https://h/graphql').welcomeScreen?.mediaURL).toBe(42);
+  });
+
   it('maps every asset field across welcome/end screens, style tokens and picture-choice options', () => {
     const def = definition();
     const before = structuredClone(def);
