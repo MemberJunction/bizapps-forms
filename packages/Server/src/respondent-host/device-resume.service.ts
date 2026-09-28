@@ -427,7 +427,7 @@ export async function runForget(deps: DeviceResumeDeps, args: ForgetArgs): Promi
     const message = e instanceof Error ? e.message : String(e);
     const forResponse = responseId ? ` for response ${responseId}` : '';
     LogError(
-      `[Forms] /forget on form '${args.slug}' could not retire this device's resume invite${forResponse}; the pointer is cleared but the invite may still be live: ${message}`,
+      `[Forms] /forget on form ${JSON.stringify(args.slug)} could not retire this device's resume invite${forResponse}; the pointer is cleared but the invite may still be live: ${message}`,
     );
   }
   return cleared;

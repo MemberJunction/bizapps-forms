@@ -530,7 +530,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     // early exit into a 500. `runResume` itself has no catch around `deps.loadDistribution` etc.,
     // so an outage AFTER that point propagates to `handleResumeRoute`'s own caller (#265) — the
     // route's existing 500 handler, which leaves the browser's cookie untouched.
-    const outcome = await withLazyIsolatedProvider(`resume route /resume for form '${slug}'`, (acquire) =>
+    const outcome = await withLazyIsolatedProvider(`resume route /resume for form ${JSON.stringify(slug)}`, (acquire) =>
       runResume(this.resumeDeps(slug, acquire), {
         slug,
         cookieToken: readResumeCookie(req.headers.cookie),
@@ -564,7 +564,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     const cookieToken = readResumeCookie(req.headers.cookie);
     // Same lazy lease as `/resume` (see there): one isolated provider per request, created only if
     // a dependency actually touches the database, shared by whichever one action below runs.
-    const outcome = await withLazyIsolatedProvider(`resume route /${action} for form '${slug}'`, (acquire) => {
+    const outcome = await withLazyIsolatedProvider(`resume route /${action} for form ${JSON.stringify(slug)}`, (acquire) => {
       const deps = this.resumeDeps(slug, acquire);
       return action === 'forget'
         ? runForget(deps, { slug, cookieToken })
