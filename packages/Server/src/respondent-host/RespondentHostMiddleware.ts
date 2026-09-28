@@ -68,6 +68,7 @@ import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.
 import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
 import { runForget, runRemember, runResume, type ResumeRouteOutcome } from './device-resume.service.js';
 import { makeDeviceResumeDeps } from './resume-deps.js';
+import { withLazyIsolatedProvider, type AcquireIsolatedProvider } from '../automation/isolated-provider.js';
 import { readResumeCookie } from './resume-cookie.js';
 import { matchResumeRoute } from './resume-routes.js';
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
@@ -503,13 +504,20 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     if (body === undefined) {
       return;
     }
-    const outcome = await runResume(this.resumeDeps(slug), {
-      slug,
-      cookieToken: readResumeCookie(req.headers.cookie),
-      // The emailed link's interstitial hands its token over here rather than through a route of
-      // its own, so both channels share one redeem — and one rotation.
-      bodyToken: typeof body.token === 'string' ? body.token : undefined,
-    });
+    // Lazy: `acquire()` opens the request's isolated provider on first use, so a no-pointer or
+    // rate-limited exit below never creates one, and a provider outage there never turns a cheap
+    // early exit into a 500. `runResume` itself has no catch around `deps.loadDistribution` etc.,
+    // so an outage AFTER that point propagates to `handleResumeRoute`'s own caller (#265) — the
+    // route's existing 500 handler, which leaves the browser's cookie untouched.
+    const outcome = await withLazyIsolatedProvider(`resume route /resume for form '${slug}'`, (acquire) =>
+      runResume(this.resumeDeps(slug, acquire), {
+        slug,
+        cookieToken: readResumeCookie(req.headers.cookie),
+        // The emailed link's interstitial hands its token over here rather than through a route of
+        // its own, so both channels share one redeem — and one rotation.
+        bodyToken: typeof body.token === 'string' ? body.token : undefined,
+      }),
+    );
     this.sendResumeOutcome(res, outcome);
   }
 
@@ -532,12 +540,14 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     if (body === undefined) {
       return;
     }
-    const deps = this.resumeDeps(slug);
     const cookieToken = readResumeCookie(req.headers.cookie);
-    const outcome =
-      action === 'forget'
-        ? await runForget(deps, { slug, cookieToken })
-        : await runRemember(deps, {
+    // Same lazy lease as `/resume` (see there): one isolated provider per request, created only if
+    // a dependency actually touches the database, shared by whichever one action below runs.
+    const outcome = await withLazyIsolatedProvider(`resume route /${action} for form '${slug}'`, (acquire) => {
+      const deps = this.resumeDeps(slug, acquire);
+      return action === 'forget'
+        ? runForget(deps, { slug, cookieToken })
+        : runRemember(deps, {
             slug,
             responseId: typeof body.responseId === 'string' ? body.responseId : '',
             // The widget's own header, forwarded by the page. It is the ONLY ownership proof a
@@ -546,6 +556,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
             scopeId: contextUser.MagicLinkScope?.ResourceID ?? '',
             cookieToken,
           });
+    });
     this.sendResumeOutcome(res, outcome);
   }
 
@@ -585,8 +596,8 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     res.json({ ...(outcome.body ?? {}), ...(outcome.reason ? { reason: outcome.reason } : {}) });
   }
 
-  /** The dependency set one resume request runs on. */
-  private resumeDeps(slug: string) {
+  /** The dependency set one resume request runs on, threaded onto this request's isolated provider. */
+  private resumeDeps(slug: string, acquireProvider: AcquireIsolatedProvider) {
     return makeDeviceResumeDeps({
       systemUser: this.systemUser(),
       slug,
@@ -601,6 +612,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       // the header is omitted (`postRedeem`'s `forwardedHeaders`) and core falls back to its own
       // peer for that one request — a degradation, never an invented value.
       callerIp: currentRequestIdentity()?.ip,
+      acquireProvider,
     });
   }
 
