@@ -186,10 +186,17 @@ export interface IAnonymousMagicLinkMinter {
    *
    * @param params       what to scope/grant the invite to
    * @param creatingUser the internal staff user saving the distribution (becomes the invite's issuer)
+   * @param host         where to create the invite row — see {@link InviteWriteHost}. A caller on
+   *                     an isolated instance (e.g. the device-resume routes, bizapps-forms#265)
+   *                     passes it so the write stays OFF the process-global provider, not to join a
+   *                     transaction the caller itself has open. Absent, the write goes through the
+   *                     process-global provider, which can already be inside a transaction some
+   *                     other unit of work opened there.
    */
   MintAnonymousInvite(
     params: MintAnonymousInviteParams,
     creatingUser: UserInfo,
+    host?: InviteWriteHost,
   ): Promise<MintAnonymousInviteResult>;
 
   /**
