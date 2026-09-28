@@ -14,7 +14,9 @@ instance for the request, created only the first time the request actually touch
 (a request that never gets that far — no cookie, a rate-limited call — opens nothing) and always
 released afterward. `/forget` keeps its existing guarantee that the browser's pointer is always
 cleared, including when the isolated provider cannot be created or a dependency call fails; that
-failure is now logged rather than left to crash the request.
+failure is now logged rather than left to crash the request. The `GET /f/:slug` page's own reads —
+the slug lookup and the description read that resolve before the resume routes ever run — moved
+onto the same kind of per-request isolated lease, for the same reason.
 
 `MagicLinkInviteMinter.MintAnonymousInvite` gained an optional `host` provider parameter so callers
 running on an isolated instance can mint through it instead of the global one. No migration.

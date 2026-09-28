@@ -59,7 +59,7 @@ import { getRequestOrigin } from '../http/request-origin.js';
 import { getGraphqlUrlForRequest, getRespondentHostConfig } from './config.js';
 import { getPublicSubmitConfig } from '../public-submit/config.js';
 import { renderRespondentHostPage } from './host-page.js';
-import { redeemSlugToToken, type RedeemRunViewProvider } from './redeem.service.js';
+import { redeemSlugToToken } from './redeem.service.js';
 import { loadFormIdentity } from './form-identity.js';
 import { assessRespondentReadiness } from './host-readiness.js';
 import { assessAutomationReadiness } from '../automation/automation-readiness.js';
@@ -386,6 +386,19 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
    *
    * The GraphQL URL is settled FIRST: when it cannot be (no configured URL, no Host header) it throws,
    * and doing that before the redeem means no session is minted for a page that is never served.
+   *
+   * The slug lookup and the description read both run on ONE per-request isolated provider (#265),
+   * never on the global `Metadata.Provider` — the same defect class `/resume`, `/remember` and
+   * `/forget` were fixed for: a transaction some other unit of work holds open on the global
+   * provider (`Common.LogActivity`, bizapps-forms#260) can capture a query issued through it.
+   * `acquire()` is awaited once, immediately inside the lease, rather than left fully lazy the way
+   * the resume routes' own dependencies are: by the time this method runs a read is GUARANTEED
+   * (`redeemSlugToToken` never returns without one), so there is no "no read happens" branch here
+   * for laziness to protect. That branch is `handleMetered`'s job — its in-flight cap and per-IP
+   * rate limit both run BEFORE this method, so a request refused there creates no isolated instance
+   * at all. An isolation failure propagates like any other unexpected error on this route: up to
+   * `hostPageHandler`'s own `.catch`, which logs it and renders the ordinary 500 page — no new
+   * error handling needed here.
    */
   private async handleRequest(
     slug: string,
@@ -395,81 +408,85 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
   ): Promise<void> {
     const cfg = getRespondentHostConfig();
     const graphqlUrl = getGraphqlUrlForRequest(cfg, requestOrigin);
-    const outcome = await redeemSlugToToken(
-      {
-        provider: this.systemProvider(),
-        contextUser: this.systemUser(),
-        redeemUrl: cfg.magicLinkRedeemUrl,
-        fetchImpl: fetch,
-        // The same resolved peer the meter above was charged against — never a header the caller
-        // chose. Core keys its own redeem cap on this; without it every respondent in the
-        // deployment shares one bucket (register row 29).
-        clientIp: currentRequestIdentity()?.ip,
-      },
-      slug,
-    );
+    await withLazyIsolatedProvider(`respondent page for form '${slug}'`, async (acquire) => {
+      const provider = new RunView(await acquire());
+      const outcome = await redeemSlugToToken(
+        {
+          provider,
+          contextUser: this.systemUser(),
+          redeemUrl: cfg.magicLinkRedeemUrl,
+          fetchImpl: fetch,
+          // The same resolved peer the meter above was charged against — never a header the caller
+          // chose. Core keys its own redeem cap on this; without it every respondent in the
+          // deployment shares one bucket (register row 29).
+          clientIp: currentRequestIdentity()?.ip,
+        },
+        slug,
+      );
 
-    // Names BOTH things an identified page needs, because `RedeemOutcome` is a flat optional-field
-    // shape rather than a discriminated union: `ok` is a plain boolean, so it narrows nothing, and
-    // the row would otherwise arrive here as possibly-undefined. `redeemSlugToToken` sets the two
-    // together or neither, so the second clause is unreachable through that door today — it is the
-    // guard that keeps `loadFormIdentity` taking a row it can rely on, and without it a success
-    // carrying no row is a TypeError on `source.FormID`: a 500 with a stack, on the anonymous path.
-    if (!outcome.ok || !outcome.distribution) {
-      // The whole outcome, not a field picked out of it: `RedeemOutcome` satisfies
-      // `RedeemFailureDetails` structurally, so which facts a refusal may name is the view's
-      // decision rather than a second one made here and kept in step by hand.
-      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed', outcome));
-      return;
-    }
+      // Names BOTH things an identified page needs, because `RedeemOutcome` is a flat optional-field
+      // shape rather than a discriminated union: `ok` is a plain boolean, so it narrows nothing, and
+      // the row would otherwise arrive here as possibly-undefined. `redeemSlugToToken` sets the two
+      // together or neither, so the second clause is unreachable through that door today — it is the
+      // guard that keeps `loadFormIdentity` taking a row it can rely on, and without it a success
+      // carrying no row is a TypeError on `source.FormID`: a 500 with a stack, on the anonymous path.
+      if (!outcome.ok || !outcome.distribution) {
+        // The whole outcome, not a field picked out of it: `RedeemOutcome` satisfies
+        // `RedeemFailureDetails` structurally, so which facts a refusal may name is the view's
+        // decision rather than a second one made here and kept in step by hand.
+        this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed', outcome));
+        return;
+      }
 
-    // The page's identity — what the tab and an unfurl card show — comes from the row the door just
-    // resolved (never re-read) plus one primary-key read for the description. Best-effort by design:
-    // `loadFormIdentity` logs and degrades rather than costing the respondent the form.
-    const identity = await loadFormIdentity(this.systemProvider(), this.systemUser(), outcome.distribution);
-    const html = renderRespondentHostPage({
-      graphqlUrl,
-      widgetBundleUrl: cfg.widgetBundleUrl,
-      pageTitle: identity.name,
-      pageDescription: identity.description,
-      defaultSlug: slug,
-      token: outcome.token,
-      turnstileSiteKey: cfg.turnstileSiteKey,
-      hasDraft,
+      // The page's identity — what the tab and an unfurl card show — comes from the row the door
+      // just resolved (never re-read) plus one primary-key read for the description, on the SAME
+      // lease. Best-effort by design: `loadFormIdentity` logs and degrades rather than costing the
+      // respondent the form.
+      const identity = await loadFormIdentity(provider, this.systemUser(), outcome.distribution);
+      const html = renderRespondentHostPage({
+        graphqlUrl,
+        widgetBundleUrl: cfg.widgetBundleUrl,
+        pageTitle: identity.name,
+        pageDescription: identity.description,
+        defaultSlug: slug,
+        token: outcome.token,
+        turnstileSiteKey: cfg.turnstileSiteKey,
+        hasDraft,
+      });
+      // The embed control that can actually SEE the customer's origin, and therefore the real one
+      // (#203). This product's embed snippet is an `<iframe>` (`distribution.service.ts`
+      // `embedSnippet`), so the framed document's origin is OURS — nothing on the API side can tell a
+      // legitimate embed on the customer's site from one on anybody else's page, because both report
+      // us. `frame-ancestors` is the exception: the BROWSER evaluates it against the framing
+      // ancestor, which is exactly the fact the author authorised.
+      //
+      // Judged on the author's list alone, via the pure contract rather than `checkEmbedOrigin`.
+      // Same-origin framing is covered by CSP `'self'`, which the browser resolves against this
+      // page's own origin: a page served from our origin is already us, and an allowlist naming
+      // other people's sites was never meant to say anything about that. Because `'self'` is
+      // resolved by the browser rather than composed by us, the directive needs no knowledge of the
+      // deployment's own URL — routing this through the API-side verdict would instead have made a
+      // framing decision depend on `MJAPI_PUBLIC_URL`, an environment variable it has no need of.
+      //
+      // Deliberately no `X-Frame-Options` beside it: it cannot express a list (`ALLOW-FROM` is
+      // unsupported in every current browser), and `SAMEORIGIN` would refuse the very embeds this
+      // feature exists to permit. A browser too old for `frame-ancestors` therefore gets no framing
+      // control at all — which is today's behaviour for every link, stated here rather than papered
+      // over with a header that would break the working case to look like protection.
+      const frameAncestors = frameAncestorsDirective(parseAllowedOrigins(outcome.distribution.AllowedOrigins));
+      res
+        .status(200)
+        .type('html')
+        // The page carries a per-respondent session JWT now — must NOT be shared-cached.
+        .set('Cache-Control', 'no-store');
+      if (frameAncestors) {
+        // Absent, not permissive, when the link authored nothing: a distribution with no allowlist
+        // must be framable exactly as it is today, and an empty or catch-all directive would be a
+        // behaviour change for every live embed.
+        res.set('Content-Security-Policy', frameAncestors);
+      }
+      res.send(html);
     });
-    // The embed control that can actually SEE the customer's origin, and therefore the real one
-    // (#203). This product's embed snippet is an `<iframe>` (`distribution.service.ts`
-    // `embedSnippet`), so the framed document's origin is OURS — nothing on the API side can tell a
-    // legitimate embed on the customer's site from one on anybody else's page, because both report
-    // us. `frame-ancestors` is the exception: the BROWSER evaluates it against the framing
-    // ancestor, which is exactly the fact the author authorised.
-    //
-    // Judged on the author's list alone, via the pure contract rather than `checkEmbedOrigin`.
-    // Same-origin framing is covered by CSP `'self'`, which the browser resolves against this
-    // page's own origin: a page served from our origin is already us, and an allowlist naming
-    // other people's sites was never meant to say anything about that. Because `'self'` is
-    // resolved by the browser rather than composed by us, the directive needs no knowledge of the
-    // deployment's own URL — routing this through the API-side verdict would instead have made a
-    // framing decision depend on `MJAPI_PUBLIC_URL`, an environment variable it has no need of.
-    //
-    // Deliberately no `X-Frame-Options` beside it: it cannot express a list (`ALLOW-FROM` is
-    // unsupported in every current browser), and `SAMEORIGIN` would refuse the very embeds this
-    // feature exists to permit. A browser too old for `frame-ancestors` therefore gets no framing
-    // control at all — which is today's behaviour for every link, stated here rather than papered
-    // over with a header that would break the working case to look like protection.
-    const frameAncestors = frameAncestorsDirective(parseAllowedOrigins(outcome.distribution.AllowedOrigins));
-    res
-      .status(200)
-      .type('html')
-      // The page carries a per-respondent session JWT now — must NOT be shared-cached.
-      .set('Cache-Control', 'no-store');
-    if (frameAncestors) {
-      // Absent, not permissive, when the link authored nothing: a distribution with no allowlist
-      // must be framable exactly as it is today, and an empty or catch-all directive would be a
-      // behaviour change for every live embed.
-      res.set('Content-Security-Policy', frameAncestors);
-    }
-    res.send(html);
   }
 
   /**
@@ -633,12 +650,15 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
   }
 
   /**
-   * A provider for the pre-auth reads (the slug lookup, and the boot-time captcha-demand probe).
-   * The `RunView` class routes to the global data provider and implements `IRunViewProvider`, so
-   * it is the cast-free way to read outside a request — the same `new RunView()` pattern the
-   * magic-link minter and definition-loader use.
+   * A provider for the one pre-auth read still on the global provider: the boot-time
+   * captcha-demand probe (`reportReadiness`, called once from `ConfigureExpressApp` before any
+   * request is served). It no longer serves the slug lookup or the description read — those moved
+   * onto a per-request isolated lease (#265; see `handleRequest`) — so nothing else calls this
+   * today. The `RunView` class routes to the global data provider and implements
+   * `IRunViewProvider`, so it is the cast-free way to read outside a request — the same
+   * `new RunView()` pattern the magic-link minter and definition-loader use.
    */
-  private systemProvider(): RedeemRunViewProvider & CaptchaDemandProvider {
+  private systemProvider(): CaptchaDemandProvider {
     return new RunView();
   }
 }
