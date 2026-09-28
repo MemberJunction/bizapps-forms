@@ -272,6 +272,30 @@ describe('optimizeImageForUpload', () => {
   });
 });
 
+describe('optimizeImageForUpload — real environment edges', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('uploads the original and warns once when the browser has no createImageBitmap (default codec)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const original = jpeg(927 * KB, 'old-browser.jpg');
+    expect(typeof createImageBitmap).not.toBe('function'); // node: this really is the missing-API path
+    expect(await optimizeImageForUpload(original)).toBe(original);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('"old-browser.jpg"');
+  });
+
+  it('still returns the original, with a warning, when releasing the bitmap throws', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const original = jpeg(400 * KB, 'close-fails.jpg');
+    const codec = fakeCodec({ width: 1408, height: 768, encoded: [{ type: 'image/webp', bytes: 500 * KB }] });
+    const decode = codec.decode.bind(codec);
+    codec.decode = async () => ({ ...(await decode()), close: () => { throw new Error('bitmap already detached'); } });
+    expect(await optimizeImageForUpload(original, codec)).toBe(original);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('"close-fails.jpg"');
+  });
+});
+
 describe('browserCodec — source smoke (no canvas in the node test environment)', () => {
   const src = readFileSync(join(__dirname, 'image-optimize.ts'), 'utf8');
 
@@ -279,7 +303,4 @@ describe('browserCodec — source smoke (no canvas in the node test environment)
     expect(src).toContain("imageOrientation: 'from-image'");
   });
 
-  it('fails loudly, not silently, when the browser lacks createImageBitmap', () => {
-    expect(src).toContain("typeof createImageBitmap !== 'function'");
-  });
 });

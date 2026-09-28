@@ -229,6 +229,12 @@ export async function optimizeImageForUpload(file: File, codec: ImageCodec = bro
     console.warn(`[Forms] Image optimization skipped for "${file.name}" (${file.type || 'unknown type'}, ${file.size} B): ${reason}`);
     return file;
   } finally {
-    decoded?.close();
+    // A throw from a `finally` would replace the return value and make this function reject.
+    try {
+      decoded?.close();
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(`[Forms] Releasing the decoded image for "${file.name}" failed: ${reason}`);
+    }
   }
 }
