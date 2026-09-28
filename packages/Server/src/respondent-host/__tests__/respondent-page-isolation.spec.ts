@@ -1,13 +1,15 @@
 /**
  * Route-level proof that `GET /f/:slug` — the respondent PAGE, not the `/resume` routes — runs its
- * two reads (the slug lookup, the description read) on ONE lazily-leased isolated provider, never
- * on the process-global provider (bizapps-forms#265 smoke finding).
+ * reads (the slug lookup, the published-version check, and the description read) on ONE isolated
+ * provider, never on the process-global provider (bizapps-forms#265 smoke finding).
  *
  * `withLazyIsolatedProvider` was already fixed for `/resume`, `/remember` and `/forget`
  * (`resume-routes-isolation.spec.ts`), but the PAGE route that starts the whole flow still ran
  * `redeemSlugToToken` and `loadFormIdentity` on `this.systemProvider()` — `new RunView()`, the
  * global provider — so a held `Common.LogActivity` transaction on that provider (#260) still
- * captured this route's reads too.
+ * captured this route's reads too. The page route leases its instance EAGERLY, via
+ * `withIsolatedProvider`, rather than the lazy form `/resume`, `/remember` and `/forget` use — see
+ * `RespondentHostMiddleware.handleRequest`'s #265 paragraph for why.
  *
  * `redeemSlugToToken` and `loadFormIdentity` run for REAL here (only the network redeem and the
  * `RunView` class are faked), unlike `resume-routes-isolation.spec.ts`, which fully replaces
@@ -66,9 +68,9 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   return { ...actual, RunView, LogStatus: () => undefined, LogError: (message: string) => loggedErrors.push(message) };
 });
 
-/** Every purpose string `withLazyIsolatedProvider` was called with, in order. */
+/** Every purpose string the isolated-provider mock was called with, in order. */
 const leasePurposes = vi.hoisted((): string[] => []);
-/** What `acquire()` does on the NEXT lease — configured per test, reset in `beforeEach`. */
+/** What the lease resolves to (or throws) on the NEXT call — configured per test, reset in `beforeEach`. */
 let acquireBehavior: () => Promise<DatabaseProviderBase> = async () => ({}) as DatabaseProviderBase;
 
 vi.mock('../../automation/isolated-provider', () => ({
@@ -76,6 +78,14 @@ vi.mock('../../automation/isolated-provider', () => ({
     async <T>(purpose: string, work: (acquire: () => Promise<DatabaseProviderBase>) => Promise<T>): Promise<T> => {
       leasePurposes.push(purpose);
       return work(() => acquireBehavior());
+    },
+  ),
+  // The page route now leases eagerly (see the file header) — same instrumentation, resolved before
+  // `work` runs instead of behind an `acquire()` the caller invokes itself.
+  withIsolatedProvider: vi.fn(
+    async <T>(purpose: string, work: (provider: DatabaseProviderBase) => Promise<T>): Promise<T> => {
+      leasePurposes.push(purpose);
+      return work(await acquireBehavior());
     },
   ),
 }));
@@ -246,7 +256,7 @@ describe("GET /f/:slug — the page's reads run on one leased isolated provider 
 
   it('a request refused before any read (too many redeems in flight) never creates an isolated instance', async () => {
     // `handleMetered`'s in-flight cap and per-IP rate limit both refuse BEFORE `handleRequest` — and
-    // therefore before `withLazyIsolatedProvider` — ever runs, so a request shed there must cost no
+    // therefore before `withIsolatedProvider` — ever runs, so a request shed there must cost no
     // isolated instance. The in-flight cap is the deterministic one to force: hold its one slot
     // ourselves before the route ever gets a chance to take it.
     process.env.FORMS_REDEEM_MAX_IN_FLIGHT = '1';

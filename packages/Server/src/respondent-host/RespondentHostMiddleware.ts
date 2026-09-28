@@ -68,7 +68,11 @@ import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.
 import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
 import { runForget, runRemember, runResume, type ResumeRouteOutcome } from './device-resume.service.js';
 import { makeDeviceResumeDeps } from './resume-deps.js';
-import { withLazyIsolatedProvider, type AcquireIsolatedProvider } from '../automation/isolated-provider.js';
+import {
+  withIsolatedProvider,
+  withLazyIsolatedProvider,
+  type AcquireIsolatedProvider,
+} from '../automation/isolated-provider.js';
 import { readResumeCookie } from './resume-cookie.js';
 import { matchResumeRoute } from './resume-routes.js';
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
@@ -387,18 +391,18 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
    * The GraphQL URL is settled FIRST: when it cannot be (no configured URL, no Host header) it throws,
    * and doing that before the redeem means no session is minted for a page that is never served.
    *
-   * The slug lookup and the description read both run on ONE per-request isolated provider (#265),
-   * never on the global `Metadata.Provider` — the same defect class `/resume`, `/remember` and
-   * `/forget` were fixed for: a transaction some other unit of work holds open on the global
-   * provider (`Common.LogActivity`, bizapps-forms#260) can capture a query issued through it.
-   * `acquire()` is awaited once, immediately inside the lease, rather than left fully lazy the way
-   * the resume routes' own dependencies are: by the time this method runs a read is GUARANTEED
+   * The page's reads — the slug lookup, the published-version check, and the description read —
+   * all run on ONE per-request isolated provider (#265), never on the global `Metadata.Provider` —
+   * the same defect class `/resume`, `/remember` and `/forget` were fixed for: a transaction some
+   * other unit of work holds open on the global provider (`Common.LogActivity`, bizapps-forms#260)
+   * can capture a query issued through it. Leased EAGERLY via `withIsolatedProvider`, not the lazy
+   * form the resume routes use: by the time this method runs a read is GUARANTEED
    * (`redeemSlugToToken` never returns without one), so there is no "no read happens" branch here
-   * for laziness to protect. That branch is `handleMetered`'s job — its in-flight cap and per-IP
-   * rate limit both run BEFORE this method, so a request refused there creates no isolated instance
-   * at all. An isolation failure propagates like any other unexpected error on this route: up to
-   * `hostPageHandler`'s own `.catch`, which logs it and renders the ordinary 500 page — no new
-   * error handling needed here.
+   * for laziness to protect — that branch is `handleMetered`'s job, which runs BEFORE this method.
+   * The same lease also spans core's redeem HTTP call (`redeemSlugToToken`'s `postRedeem`); harmless,
+   * because an isolated instance holds no connection of its own — it shares the process pool. An
+   * isolation failure propagates like any other unexpected error on this route, up to
+   * `hostPageHandler`'s own `.catch`.
    */
   private async handleRequest(
     slug: string,
@@ -408,8 +412,8 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
   ): Promise<void> {
     const cfg = getRespondentHostConfig();
     const graphqlUrl = getGraphqlUrlForRequest(cfg, requestOrigin);
-    await withLazyIsolatedProvider(`respondent page for form '${slug}'`, async (acquire) => {
-      const provider = new RunView(await acquire());
+    await withIsolatedProvider(`respondent page for form ${JSON.stringify(slug)}`, async (instance) => {
+      const provider = new RunView(instance);
       const outcome = await redeemSlugToToken(
         {
           provider,

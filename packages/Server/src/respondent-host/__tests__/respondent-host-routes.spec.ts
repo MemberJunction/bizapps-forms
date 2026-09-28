@@ -50,17 +50,21 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 });
 
 /**
- * The page route leases an isolated provider for its two reads (#265) via `withLazyIsolatedProvider`.
+ * The page route leases an isolated provider for its reads (#265) via `withIsolatedProvider`.
  * Faked to hand out a bare object — this file's `RunView` fake above ignores whatever it is
  * constructed with — because left unmocked the route falls through to the REAL implementation,
  * which asks the real (unset, in a unit test) `Metadata.Provider` for an independent instance and
- * turns every request in this file into a 500.
+ * turns every request in this file into a 500. `withLazyIsolatedProvider` is faked alongside it
+ * (unused by any test here, since this file never drives `/resume`, `/remember` or `/forget`) so the
+ * module mock matches the real one's shape.
  */
 vi.mock('../../automation/isolated-provider', () => ({
   withLazyIsolatedProvider: async <T>(
     _purpose: string,
     work: (acquire: () => Promise<Record<string, never>>) => Promise<T>,
   ): Promise<T> => work(async () => ({})),
+  withIsolatedProvider: async <T>(_purpose: string, work: (provider: Record<string, never>) => Promise<T>): Promise<T> =>
+    work({}),
 }));
 
 /** The slug the faked redeem was asked for, so the parity cases can assert what the route read. */
