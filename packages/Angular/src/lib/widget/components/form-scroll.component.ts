@@ -23,6 +23,7 @@ import {
   output,
   signal,
   untracked,
+  viewChildren,
 } from '@angular/core';
 import type { AnswerValue, PublishedFormPage, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
@@ -73,6 +74,19 @@ export class FormScrollComponent {
   public readonly commitChange = output<void>();
 
   private readonly hostRef: ElementRef<HTMLElement> = inject(ElementRef);
+
+  /** Every question currently rendered in the visible section. */
+  private readonly questionViews = viewChildren(FormQuestionComponent);
+
+  /**
+   * Commit every rendered question's visible text before anything judges it (#268) — an autofill
+   * that fired no event the controls listen for is otherwise "required" while plainly filled in.
+   */
+  private commitVisibleValues(): void {
+    for (const view of this.questionViews()) {
+      view.syncFromDom();
+    }
+  }
 
   /**
    * Raw cursor over {@link sections}. Always written through {@link setIndex} so it stays in
@@ -225,6 +239,7 @@ export class FormScrollComponent {
     if (!page) {
       return;
     }
+    this.commitVisibleValues();
     if (this.isLast()) {
       this.submit.emit();
       return;
@@ -277,6 +292,7 @@ export class FormScrollComponent {
   protected onSubmit(event?: Event): void {
     event?.preventDefault();
     event?.stopPropagation();
+    this.commitVisibleValues();
     if (!this.isLast()) {
       this.onNext();
       return;

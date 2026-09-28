@@ -49,7 +49,7 @@
 import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware, configInfo } from '@memberjunction/server';
-import { LogStatus, LogError, Metadata, RunView, type UserInfo } from '@memberjunction/core';
+import { LogStatus, LogError, LogErrorEx, Metadata, RunView, type UserInfo } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import { getMagicLinkProvisioningConfig } from '@mj-biz-apps/forms-core-entities-server';
 import { frameAncestorsDirective, parseAllowedOrigins } from '@mj-biz-apps/forms-entities';
@@ -62,7 +62,7 @@ import { renderRespondentHostPage } from './host-page.js';
 import { redeemSlugToToken } from './redeem.service.js';
 import { loadFormIdentity } from './form-identity.js';
 import { assessRespondentReadiness } from './host-readiness.js';
-import { assessAutomationReadiness } from '../automation/automation-readiness.js';
+import { assessAutomationReadiness, describeDurableDispatch, type PermissionLookup } from '../automation/automation-readiness.js';
 import { resolveAutomationPrincipal } from '../automation/service-principal.js';
 import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.js';
 import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
@@ -315,7 +315,8 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
   }
 
   /**
-   * Log every entity grant the automation principal lacks, under one grep-able prefix.
+   * Log every entity grant the automation principal lacks, under one grep-able prefix, then say
+   * once how durable entity actions behave for it (#269).
    *
    * The lookup is core's own `EntityInfo.GetUserPermisions` — the aggregation (Allow rows OR-ed
    * across roles, Deny rows subtracted) MJ's permission checks apply — so the report cannot
@@ -323,18 +324,28 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
    * skipped: `resolveAutomationPrincipal` has just logged that automations are disabled, and saying
    * so twice adds nothing. Must never throw out of boot (it would take down all of MJAPI, which
    * also serves other apps), so a failure is logged with what was being checked and boot goes on.
+   *
+   * The second line — {@link describeDurableDispatch} — reuses the SAME lookup closure the grant
+   * check just used, so both verdicts agree on what the principal actually holds. It is logged via
+   * `LogErrorEx` at `severity: 'warning'`, not `LogError`, because it is not a failure: withholding
+   * the task-graph grants is Forms' deliberate choice (see the file header on `automation-readiness.ts`),
+   * so "durable actions run in-process" is expected, correct behaviour that still deserves one line at
+   * boot rather than living only in a per-submit log.
    */
   private reportAutomationReadiness(): void {
     try {
       const principal = resolveAutomationPrincipal();
       if (!principal) return;
       const md = new Metadata();
-      const reasons = assessAutomationReadiness(principal.Name, (entityName) =>
-        md.EntityByName(entityName)?.GetUserPermisions(principal),
-      );
+      const lookup: PermissionLookup = (entityName) => md.EntityByName(entityName)?.GetUserPermisions(principal);
+      const reasons = assessAutomationReadiness(principal.Name, lookup);
       for (const reason of reasons) {
         LogError(`[Forms] On-submit automations are NOT ready: ${reason}`);
       }
+      LogErrorEx({
+        severity: 'warning',
+        message: `[Forms] On-submit automations: ${describeDurableDispatch(principal.Name, lookup)}`,
+      });
     } catch (e) {
       LogError(
         `[Forms] Could not check the on-submit automation principal's grants at boot: ` +
