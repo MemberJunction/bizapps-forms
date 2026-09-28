@@ -393,8 +393,16 @@ export interface ForgetArgs {
 /**
  * Forget this device's pointer.
  *
- * ALWAYS clears the cookie, whatever else fails: the respondent asked to be forgotten, and a
- * failure to revoke server-side must not leave the browser still holding a live pointer.
+ * ALWAYS clears the cookie — this is the contract the route wiring relies on: whatever else fails,
+ * a `/forget` clears the browser's pointer. The respondent asked to be forgotten, and a failure to
+ * retire the invite server-side must not leave the browser still holding a live one.
+ *
+ * FAILURE-TOLERANT: `inviteFor` and `revoke` run inside a try/catch, not just a `{ ok: false }`
+ * check. Since #265 the resume routes open an isolated provider per request, so either call can now
+ * REJECT — an isolation failure or a DB error surfaces as a rejected promise, where before this
+ * dependency only ever resolved. A rejection here is logged (with the slug, and with the response
+ * id once `inviteFor` has named one) and otherwise treated exactly like `{ ok: false }`: the cookie
+ * still clears, and the invite may still be Active server-side.
  *
  * Revokes DEVICE invites only. The person pressing "Not you? Start over" is, by definition, not the
  * owner — that is the entire situation the control exists for — so killing the owner's emailed link
@@ -405,11 +413,23 @@ export async function runForget(deps: DeviceResumeDeps, args: ForgetArgs): Promi
   if (!args.cookieToken) {
     return cleared;
   }
-  const invite = await deps.inviteFor(args.cookieToken);
-  if (!invite.ok || !invite.resourceId) {
-    return cleared;
+  let responseId: string | undefined;
+  try {
+    const invite = await deps.inviteFor(args.cookieToken);
+    if (!invite.ok || !invite.resourceId) {
+      return cleared;
+    }
+    responseId = invite.resourceId;
+    await deps.revoke({ responseId: invite.resourceId, deviceOnly: true });
+  } catch (e) {
+    // Why: clearing the browser's pointer is the part the person pressing "start over" can see, and
+    // it must happen whatever the database did. The invite itself may still be Active — say so.
+    const message = e instanceof Error ? e.message : String(e);
+    const forResponse = responseId ? ` for response ${responseId}` : '';
+    LogError(
+      `[Forms] /forget on form '${args.slug}' could not retire this device's resume invite${forResponse}; the pointer is cleared but the invite may still be live: ${message}`,
+    );
   }
-  await deps.revoke({ responseId: invite.resourceId, deviceOnly: true });
   return cleared;
 }
 
