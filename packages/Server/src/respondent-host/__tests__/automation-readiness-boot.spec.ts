@@ -12,8 +12,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 
-const { logError, entityByName, PRINCIPAL } = vi.hoisted(() => ({
+const { logError, logErrorEx, entityByName, PRINCIPAL } = vi.hoisted(() => ({
   logError: vi.fn(),
+  logErrorEx: vi.fn(),
   entityByName: vi.fn(),
   PRINCIPAL: { ID: 'automation-user-id', Name: 'Forms Automation Service', IsActive: true },
 }));
@@ -37,7 +38,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
       return entityByName(name);
     }
   }
-  return { ...actual, Metadata, LogStatus: () => undefined, LogError: logError };
+  return { ...actual, Metadata, LogStatus: () => undefined, LogError: logError, LogErrorEx: logErrorEx };
 });
 
 vi.mock('../captcha-demand', () => ({ readCaptchaDemand: async () => ({ ok: true, demand: undefined }) }));
@@ -65,8 +66,15 @@ function automationReadinessLogs(): string[] {
     .filter((line) => line.includes('automation'));
 }
 
+function durableDispatchWarnings(): Array<{ severity?: string; message: string }> {
+  return logErrorEx.mock.calls
+    .map((call) => call[0] as { severity?: string; message: string })
+    .filter((arg) => arg.message.includes('task graph'));
+}
+
 beforeEach(() => {
   logError.mockReset();
+  logErrorEx.mockReset();
   entityByName.mockReset();
 });
 
@@ -93,5 +101,19 @@ describe('RespondentHostMiddleware boot — automation readiness', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("Could not check the on-submit automation principal's grants at boot");
     expect(lines[0]).toContain('metadata not loaded');
+    // The throw happens before the durable-dispatch line is reached — nothing half-logged.
+    expect(durableDispatchWarnings()).toHaveLength(0);
+  });
+
+  it('warns ONCE at boot, as a warning, how durable entity actions behave for the principal', async () => {
+    hostMissingTaskTypeRead(); // every entity present and creatable → the "can submit" branch
+
+    await new RespondentHostMiddleware().ConfigureExpressApp(express());
+
+    const warnings = durableDispatchWarnings();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].severity).toBe('warning');
+    expect(warnings[0].message).toContain('[Forms]');
+    expect(warnings[0].message).toContain('can submit MJ task graphs');
   });
 });

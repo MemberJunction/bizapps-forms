@@ -2,7 +2,7 @@
  * The boot-time report on whether the automation principal holds the grants the shipped on-submit
  * automations need (#239).
  *
- * A missing runner grant has shipped five times (#60 three times, AI Prompt Runs, #239), and each
+ * A missing runner grant has shipped six times (#60 three times, AI Prompt Runs, #239, #269), and each
  * time the only symptom was a best-effort, per-submit log line nobody connected to an install-time
  * permission. These pin the report's behaviour, and — the drift pin at the bottom — that the grant
  * table it checks is exactly the one the app ships in `metadata/`.
@@ -13,6 +13,8 @@ import { describe, expect, it } from 'vitest';
 import {
   AUTOMATION_RUNNER_GRANTS,
   assessAutomationReadiness,
+  describeDurableDispatch,
+  TASK_GRAPH_ENTITIES,
   type EffectivePermissions,
 } from '../automation-readiness.js';
 
@@ -70,6 +72,143 @@ describe('assessAutomationReadiness', () => {
     const none: EffectivePermissions = { CanRead: false, CanCreate: false, CanUpdate: false };
     const reasons = assessAutomationReadiness(PRINCIPAL, () => none);
     expect(reasons).toHaveLength(AUTOMATION_RUNNER_GRANTS.length);
+  });
+
+  it("names Read on bizapps-tasks' Task Type Status — Create Followup Task silently loses the default status without it (#269)", () => {
+    const perms = grantedLookup();
+    perms.set('MJ_BizApps_Tasks: Task Type Status', { CanRead: false, CanCreate: false, CanUpdate: false });
+
+    const reasons = assessAutomationReadiness(PRINCIPAL, (name) => perms.get(name));
+
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain("lacks Read on 'MJ_BizApps_Tasks: Task Type Status'");
+  });
+
+  it("names Create on bizapps-tasks' Task Activities — the followup task's 'Created' audit row is lost silently without it (#269)", () => {
+    const perms = grantedLookup();
+    perms.set('MJ_BizApps_Tasks: Task Activities', { CanRead: false, CanCreate: false, CanUpdate: false });
+
+    const reasons = assessAutomationReadiness(PRINCIPAL, (name) => perms.get(name));
+
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain("lacks Create on 'MJ_BizApps_Tasks: Task Activities'");
+  });
+
+  it("gives the Record Geo Codes grant the Activity's geocode as its reason — a Person save never geocodes (#269)", () => {
+    // People's Geo* fields are all virtual, and core geocodes only an entity with a writable geo
+    // field. The row the runner writes is for the Activity Common.LogActivity saves.
+    const grant = AUTOMATION_RUNNER_GRANTS.find((g) => g.entityName === 'MJ: Record Geo Codes');
+    expect(grant?.reason).toContain('Common.LogActivity');
+    expect(grant?.reason).toContain('Activity');
+    expect(grant?.reason).not.toMatch(/People is one|creates or updates/);
+  });
+
+  it('names Update on Record Geo Codes — geocoding re-saves the row it just created (#269)', () => {
+    const perms = grantedLookup();
+    perms.set('MJ: Record Geo Codes', { CanRead: true, CanCreate: true, CanUpdate: false });
+
+    const reasons = assessAutomationReadiness(PRINCIPAL, (name) => perms.get(name));
+
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain("lacks Update on 'MJ: Record Geo Codes'");
+  });
+});
+
+describe('describeDurableDispatch', () => {
+  const none: EffectivePermissions = { CanRead: false, CanCreate: false, CanUpdate: false };
+  const create: EffectivePermissions = { CanRead: true, CanCreate: true, CanUpdate: true };
+
+  const readOnly: EffectivePermissions = { CanRead: true, CanCreate: false, CanUpdate: false };
+  const createOnly: EffectivePermissions = { CanRead: false, CanCreate: true, CanUpdate: false };
+
+  /** A lookup that returns `grants[entity]`, and `none` for any entity not named. */
+  function lookupOf(grants: Record<string, EffectivePermissions>): (name: string) => EffectivePermissions {
+    return (name) => grants[name] ?? none;
+  }
+
+  it('says durable actions run in-process, by design, when the principal cannot write the task graph', () => {
+    const line = describeDurableDispatch(PRINCIPAL, () => none);
+    expect(line).toContain(`'${PRINCIPAL}'`);
+    expect(line).toContain('cannot submit MJ task graphs');
+    expect(line).toContain('run in-process');
+    expect(line).toContain('deliberate');
+    expect(line).toContain('queued tasks execute as the system user');
+    expect(line).toContain('bizapps-common#195');
+  });
+
+  it('names every per-submit line core logs on the in-process path, so operators do not chase them', () => {
+    const line = describeDurableDispatch(PRINCIPAL, () => none);
+    expect(line).toContain('MJ: Task Types');
+    expect(line).toContain('[TaskGraphService] Submit failed');
+    expect(line).toContain('asked for durable dispatch but ran inline instead');
+  });
+
+  it('does not promise one refusal: a principal with Read on MJ: Task Types is refused a create instead', () => {
+    // Measured on MJ 6.1.4: Read on MJ: Task Types without Create on MJ: Tasks still reads "cannot",
+    // and core then logs "Does NOT have permission to Create MJ: Task Types records", not a refused read.
+    const line = describeDurableDispatch(
+      PRINCIPAL,
+      lookupOf({ 'MJ: Task Types': readOnly }),
+    );
+    expect(line).toContain('run in-process');
+    expect(line).toContain('a refused read or create on MJ: Task Types or MJ: Tasks');
+  });
+
+  it('does not claim the in-process run is always inside the submission: no submitter means after the save commits', () => {
+    const line = describeDurableDispatch(PRINCIPAL, () => none);
+    expect(line).toContain('after its save commits');
+  });
+
+  it('tells the operator to remove a hand-added task-graph grant, because queued tasks run as system', () => {
+    const line = describeDurableDispatch(PRINCIPAL, () => create);
+    expect(line).toContain('can submit MJ task graphs');
+    expect(line).toContain("MJ's dispatcher executes queued tasks as the system user");
+    for (const entity of TASK_GRAPH_ENTITIES) expect(line).toContain(entity);
+  });
+
+  it('names the issue unambiguously, since the line is read outside this repo', () => {
+    const line = describeDurableDispatch(PRINCIPAL, () => create);
+    expect(line).toContain('MemberJunction/bizapps-forms#269');
+    expect(line).not.toMatch(/\(#269\)/);
+  });
+
+  it('can submit with only Create on MJ: Tasks and Read on MJ: Task Types: a one-node graph writes no dependency', () => {
+    const line = describeDurableDispatch(
+      PRINCIPAL,
+      lookupOf({ 'MJ: Tasks': createOnly, 'MJ: Task Types': readOnly }),
+    );
+    expect(line).toContain('can submit MJ task graphs');
+  });
+
+  it('can submit with Create on MJ: Task Types instead of Read: the first submit creates the AI Workflow type', () => {
+    const line = describeDurableDispatch(
+      PRINCIPAL,
+      lookupOf({ 'MJ: Tasks': createOnly, 'MJ: Task Types': createOnly }),
+    );
+    expect(line).toContain('can submit MJ task graphs');
+  });
+
+  it('cannot submit with Create on MJ: Tasks alone: the task type can be neither found nor created', () => {
+    const line = describeDurableDispatch(PRINCIPAL, lookupOf({ 'MJ: Tasks': createOnly }));
+    expect(line).toContain('run in-process');
+  });
+
+  it('cannot submit with Read and Create on MJ: Task Types but nothing on MJ: Tasks', () => {
+    const line = describeDurableDispatch(
+      PRINCIPAL,
+      lookupOf({ 'MJ: Task Types': { CanRead: true, CanCreate: true, CanUpdate: false } }),
+    );
+    expect(line).toContain('run in-process');
+  });
+
+  it('treats a core without the task-graph entities as unable to submit, without throwing', () => {
+    expect(describeDurableDispatch(PRINCIPAL, () => undefined)).toContain('run in-process');
+  });
+
+  it('is not part of the grant floor: the readiness report never asks for task-graph writes', () => {
+    for (const entity of TASK_GRAPH_ENTITIES) {
+      expect(AUTOMATION_RUNNER_GRANTS.some((g) => g.entityName === entity)).toBe(false);
+    }
   });
 });
 
