@@ -19,6 +19,13 @@
  * `metadata/entity-permissions/.entity-permissions.json`. That duplication is deliberate — the
  * report has to know what to ask for at runtime, and the metadata is not shipped with the package —
  * and it is pinned: `automation-readiness.spec.ts` fails if the two differ in either direction.
+ *
+ * {@link describeDurableDispatch} answers a related but separate question (#269): not "does the
+ * principal hold its floor of grants", but "what happens to a durable entity action fired by one of
+ * its writes". Forms deliberately withholds the core task-graph grants (`MJ: Task Types` /
+ * `MJ: Tasks` / `MJ: Task Dependencies`) that would let the principal submit one, so this is a
+ * boot-time WARNING, not a readiness failure — inline dispatch is the correct, intended behaviour
+ * for this principal, not a gap in its grants.
  */
 
 /** One entity grant the automation principal needs. Delete is never a need, so it is not modelled. */
@@ -204,4 +211,52 @@ export function assessAutomationReadiness(
     );
   }
   return reasons;
+}
+
+/**
+ * Core's task-graph entities: creating a task graph (MJ's durable queue) writes all three — a
+ * `Task Type`, its `Tasks`, and their `Task Dependencies`. Deliberately the CORE-schema entities
+ * (`MJ: …`), not `MJ_BizApps_Tasks: Task Types` / `MJ_BizApps_Tasks: Tasks`, which are a different,
+ * sibling-app pair the runner IS granted (see `AUTOMATION_RUNNER_GRANTS` above) and which do not
+ * enqueue anything durable.
+ */
+export const TASK_GRAPH_ENTITIES: readonly string[] = ['MJ: Task Types', 'MJ: Tasks', 'MJ: Task Dependencies'];
+
+/**
+ * The one boot line describing how durable entity actions behave for this principal (#269). Always
+ * returns a message; which one depends on whether the principal can submit task graphs.
+ *
+ * `canSubmit` is an honest approximation of what `TaskGraphService` actually does when it submits a
+ * durable dispatch: it creates a Task Type, the Tasks, and their Dependencies, so Create on all
+ * three is the floor. An entity absent from this host's metadata (pre-6.1 core has no `MJ: Task
+ * Types`) means it cannot submit either — there is nothing to create a row in.
+ *
+ * WHY THIS IS A WARNING, NOT A READINESS FAILURE. `assessAutomationReadiness` above reports a gap
+ * against the floor Forms' own hooks need; this reports the CONSEQUENCE of a decision Forms made on
+ * purpose (see the file header and #269's decision log): withholding the task-graph grants so that
+ * queued tasks — which MJ's dispatcher runs as the SYSTEM user
+ * (`UserCache.GetSystemUser()`, `MJServer/src/index.ts`) — can never be minted by an
+ * anonymous-submission-driven principal. Inline dispatch is therefore the correct, intended
+ * behaviour, not a gap to close; the "can" branch below exists because a host may have hand-added
+ * the grants anyway, and that host needs to be told what it bought.
+ */
+export function describeDurableDispatch(principalName: string, lookup: PermissionLookup): string {
+  const canSubmit = TASK_GRAPH_ENTITIES.every((entityName) => lookup(entityName)?.CanCreate === true);
+  if (canSubmit) {
+    return (
+      `automation principal '${principalName}' can submit MJ task graphs, and MJ's dispatcher executes ` +
+      `queued tasks as the system user. Forms does not grant this: remove Create on MJ: Task Types, ` +
+      `MJ: Tasks and MJ: Task Dependencies from the roles '${principalName}' holds (#269). On MJ 6.1.4 ` +
+      `durable dispatch also drops every action parameter (MemberJunction/MJ#4794), so ` +
+      `Common.LogActivity fails instead of logging the activity.`
+    );
+  }
+  return (
+    `automation principal '${principalName}' cannot submit MJ task graphs, so durable entity actions ` +
+    `fired by its writes run inline, inside the submission — for example bizapps-common's ` +
+    `Common.LogActivity when Upsert Respondent Person creates a Person. This is deliberate (queued ` +
+    `tasks execute as the system user) and the per-submit "asked for durable dispatch but ran inline ` +
+    `instead" line is expected. Inline runs share this process's database provider; see ` +
+    `MemberJunction/bizapps-common#195.`
+  );
 }

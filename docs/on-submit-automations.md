@@ -45,6 +45,32 @@ exactly the grants these hooks need (see `metadata/users/README.md`). If one of 
 missing on a host, the server says so at startup — `[Forms] On-submit automations are NOT ready:` —
 naming the entity, the missing permission and the hook that needs it.
 
+### Durable entity actions run inline for the runner
+
+Every hook above runs as a plain synchronous write, inside the submission request. Some of those
+writes carry their own durable entity action — bizapps-common's `Common.LogActivity`, fired when
+`Upsert Respondent Person` creates a `Person` — and MJ can run a durable entity action two ways: an
+async task-graph submission (queued, dispatched later) or inline (run immediately, in the caller's
+process). Which one happens depends on whether the calling principal can write MJ's core task-graph
+entities (`MJ: Task Types`, `MJ: Tasks`, `MJ: Task Dependencies`).
+
+`Forms Automation Runner` deliberately does **not** get those three grants (#269). MJ's dispatcher
+executes a queued task graph as the **system user**, and granting an anonymous-submission-driven
+principal the right to create one would let it mint work that later runs with system privileges — a
+form author can already bind answers into any entity `FORMS_BINDING_ALLOWED_ENTITIES` allows, so
+that grant would be a real escalation, not a formality. Inline is therefore the correct, intended
+behaviour for this principal, and the once-per-submit "asked for durable dispatch but ran inline
+instead" log line is expected, not a symptom. The one caveat: an inline run shares this process's
+own database provider rather than a dispatcher's isolated one, which is the concurrency cost tracked
+by MemberJunction/bizapps-common#195 — not a Forms grant to fix.
+
+At startup, right after the grant report above, the server logs one more `[Forms]`-prefixed line —
+at `severity: 'warning'` via `LogErrorEx`, not as a readiness failure — stating which of the two
+behaviours this host is in. If it names the "can submit" branch, a host has hand-added the withheld
+grants; remove them, because on MJ 6.1.4 durable dispatch also drops every action parameter
+(MemberJunction/MJ#4794), so `Common.LogActivity` fails outright instead of logging the activity —
+inline is strictly better on this MJ version.
+
 ## Configuring a form programmatically
 
 Both authoring actions accept two optional input params:

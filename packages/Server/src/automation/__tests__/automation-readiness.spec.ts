@@ -13,6 +13,8 @@ import { describe, expect, it } from 'vitest';
 import {
   AUTOMATION_RUNNER_GRANTS,
   assessAutomationReadiness,
+  describeDurableDispatch,
+  TASK_GRAPH_ENTITIES,
   type EffectivePermissions,
 } from '../automation-readiness.js';
 
@@ -90,6 +92,43 @@ describe('assessAutomationReadiness', () => {
 
     expect(reasons).toHaveLength(1);
     expect(reasons[0]).toContain("lacks Update on 'MJ: Record Geo Codes'");
+  });
+});
+
+describe('describeDurableDispatch', () => {
+  const none: EffectivePermissions = { CanRead: false, CanCreate: false, CanUpdate: false };
+  const create: EffectivePermissions = { CanRead: true, CanCreate: true, CanUpdate: true };
+
+  it('says durable actions run inline, by design, when the principal cannot write the task graph', () => {
+    const line = describeDurableDispatch(PRINCIPAL, () => none);
+    expect(line).toContain(`'${PRINCIPAL}'`);
+    expect(line).toContain('durable entity actions fired by its writes run inline');
+    expect(line).toContain('queued tasks execute as the system user');
+    expect(line).toContain('bizapps-common#195');
+  });
+
+  it('tells the operator to remove a hand-added task-graph grant, because queued tasks run as system', () => {
+    const line = describeDurableDispatch(PRINCIPAL, () => create);
+    expect(line).toContain('can submit MJ task graphs');
+    expect(line).toContain("MJ's dispatcher executes queued tasks as the system user");
+    for (const entity of TASK_GRAPH_ENTITIES) expect(line).toContain(entity);
+  });
+
+  it('needs Create on ALL three: one missing means the submission fails and the action runs inline', () => {
+    for (const missing of TASK_GRAPH_ENTITIES) {
+      const line = describeDurableDispatch(PRINCIPAL, (name) => (name === missing ? none : create));
+      expect(line).toContain('run inline');
+    }
+  });
+
+  it('treats a core without the task-graph entities as unable to submit, without throwing', () => {
+    expect(describeDurableDispatch(PRINCIPAL, () => undefined)).toContain('run inline');
+  });
+
+  it('is not part of the grant floor: the readiness report never asks for task-graph writes', () => {
+    for (const entity of TASK_GRAPH_ENTITIES) {
+      expect(AUTOMATION_RUNNER_GRANTS.some((g) => g.entityName === entity)).toBe(false);
+    }
   });
 });
 
