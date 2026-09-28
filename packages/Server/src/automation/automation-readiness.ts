@@ -2,10 +2,11 @@
  * Boot-time readiness of the on-submit automation principal: does it hold the entity grants the
  * automations Forms ships actually need?
  *
- * WHY THIS EXISTS (#239). A missing `Forms Automation Runner` grant has shipped five times — three
- * under #60, AI Prompt Runs, and the Task / Activity grants of #239 — and every time the ONLY
- * symptom was a best-effort, per-submit log line: the response saves, the hook fails quietly, and
- * nobody connects "No TaskType available" on a Tuesday to a permission an install never applied.
+ * WHY THIS EXISTS (#239). A missing `Forms Automation Runner` grant has shipped six times — three
+ * under #60, AI Prompt Runs, the Task / Activity grants of #239, and #269 (the indirect writes:
+ * task status, geocoding) — and every time the ONLY symptom was a best-effort, per-submit log line:
+ * the response saves, the hook fails quietly, and nobody connects "No TaskType available" on a
+ * Tuesday to a permission an install never applied.
  * `host-readiness.ts` solved the same shape for the respondent path by asking at boot; this does
  * the same for the automation path, so a missing grant is named at every start, where an operator
  * can act on it.
@@ -115,6 +116,13 @@ export const AUTOMATION_RUNNER_GRANTS: readonly RunnerGrant[] = [
     read: true, create: false, update: false,
     reason: "MJ resolves bizapps-common's People AfterCreate action Common.LogActivity by name (Upsert Respondent Person)",
   },
+  {
+    entityName: 'MJ: Record Geo Codes',
+    read: true, create: true, update: true,
+    reason:
+      "MJ's geocode sync runs after every save of a geo-enabled record, and People is one: it finds, creates, then re-saves the " +
+      'RecordGeoCode row for the Person Upsert Respondent Person creates or updates',
+  },
   // Sibling apps: the built-in hooks' targets.
   {
     entityName: 'MJ_BizApps_Common: People',
@@ -150,6 +158,13 @@ export const AUTOMATION_RUNNER_GRANTS: readonly RunnerGrant[] = [
     entityName: 'MJ_BizApps_Tasks: Task Links',
     read: false, create: true, update: false,
     reason: 'Create Followup Task links the task to the response',
+  },
+  {
+    entityName: 'MJ_BizApps_Tasks: Task Type Status',
+    read: true, create: false, update: false,
+    reason:
+      "bizapps-tasks' task server resolves the new followup task's default status (Create Followup Task); a failed read " +
+      'saves the task with no status and says so only in a log line',
   },
 ];
 

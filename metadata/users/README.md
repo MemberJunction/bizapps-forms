@@ -44,17 +44,28 @@ reserved by RFC 2606 precisely so an address can be unroutable on purpose.
   binding ledgers.
 - **MJ engines every action run goes through:** `MJ: Action Execution Logs` and `MJ: AI Prompt
   Runs` (read + create + update), `MJ: File Entity Record Links` (read + create + delete, for
-  binding attachments), and read on `MJ: Actions` (MJ resolves an entity action by name before
-  running it).
+  binding attachments), read on `MJ: Actions` (MJ resolves an entity action by name before running
+  it), and read + create + update on `MJ: Record Geo Codes` (core's geocode sync runs after every
+  save of a geo-enabled Person: it finds, creates, then re-saves the row `Upsert Respondent Person`
+  triggers — #269).
 - **The built-in hooks' targets in the two sibling apps:** `People` (read + create + update);
-  Task Types (read), Tasks and Task Links (create only) for `Create Followup Task`; Activity Types
-  (read), Activities (read + create) and Activity Links (create) for the `Common.LogActivity`
-  action that creating a Person fires.
+  Task Types (read), Tasks and Task Links (create only) and Task Type Status (read only, so
+  `Create Followup Task` resolves the task's default status — #269) for `Create Followup Task`;
+  Activity Types (read), Activities (read + create) and Activity Links (create) for the
+  `Common.LogActivity` action that creating a Person fires.
 
-No Delete anywhere except the attachment links. Write on core's task-graph entities is withheld on
-purpose, so `Common.LogActivity`'s durable dispatch falls back to running inline, exactly as it does
-for every interactive user. It has **no grant on any binding target entity**, so out of the box a
-binding that tries to write a business record fails with a permission error naming that entity.
+No Delete anywhere except the attachment links. Write on core's task-graph entities
+(`MJ: Task Types` / `MJ: Tasks` / `MJ: Task Dependencies`) is withheld on purpose, for two measured
+reasons (#269): tasks MJ dispatches through the durable task graph execute their actions as the
+SYSTEM user, so granting an anonymous-submission-driven principal the right to create task graphs
+would let it mint work that runs with system-level privilege; and on MJ 6.1.4 durable dispatch
+drops every action parameter's name (open upstream MemberJunction/MJ#4794), which would make the
+inline `Common.LogActivity` call that succeeds today fail outright once durable dispatch became
+available to it. So `Common.LogActivity`'s durable dispatch falls back to running inline, exactly
+as it does for every interactive user — this is by design, not a gap. A host that hand-added those
+three core grants anyway should remove them. It has **no grant on any binding target entity**, so
+out of the box a binding that tries to write a business record fails with a permission error naming
+that entity.
 
 At every server start, Forms checks this principal's effective permissions against that list and
 logs each gap as `[Forms] On-submit automations are NOT ready: …`, so a grant that never reached a

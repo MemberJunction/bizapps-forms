@@ -520,5 +520,39 @@
       "Create ONLY -- links the activity to the Person (#239).",
       "CONDITIONAL: Activities arrived in bizapps-common 5.35 while Forms accepts >=5.31.0, so this entity may be absent; the migration then SKIPS this grant with a PRINT, and the boot readiness report names it if common is upgraded later."
     ]
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Tasks: Task Type Status",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": { "ID": "F039DBBD-F6CA-40C2-B747-94D4F22EC87C" },
+    "_comments": [
+      "Shipped by V202609280149__v0.14.x__Automation_Runner_Indirect_Write_Grants.sql under this SAME id, so a regenerated seed reproduces this row rather than minting a duplicate.",
+      "",
+      "Read ONLY -- bizapps-tasks' TaskEntityServer resolves a new task's default TaskTypeStatus when Create Followup Task saves it. A failed read returns null and the task is saved with no status (#269, measured).",
+      "CONDITIONAL: a database without bizapps-tasks has no such entity; the migration then SKIPS this grant with a PRINT."
+    ]
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ: Record Geo Codes",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": true,
+      "CanUpdate": true,
+      "CanDelete": false
+    },
+    "primaryKey": { "ID": "F6FE151E-BEE5-42A2-BF2A-A788887046C5" },
+    "_comments": [
+      "Shipped by V202609280149__v0.14.x__Automation_Runner_Indirect_Write_Grants.sql under this SAME id, so a regenerated seed reproduces this row rather than minting a duplicate.",
+      "",
+      "Read + Create + Update -- core's GeoCodeSyncService runs after the runner saves a geo-enabled Person: it reads for an existing row, creates one, then RE-SAVES it with the result. With Create and no Update the row is stranded at 'pending' (#269, measured). No Delete.",
+      "CONDITIONAL: MJ cores without geocoding have no such entity; the migration then SKIPS this grant with a PRINT."
+    ]
   }
 ]

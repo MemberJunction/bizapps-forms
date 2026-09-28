@@ -71,6 +71,26 @@ describe('assessAutomationReadiness', () => {
     const reasons = assessAutomationReadiness(PRINCIPAL, () => none);
     expect(reasons).toHaveLength(AUTOMATION_RUNNER_GRANTS.length);
   });
+
+  it("names Read on bizapps-tasks' Task Type Status — Create Followup Task silently loses the default status without it (#269)", () => {
+    const perms = grantedLookup();
+    perms.set('MJ_BizApps_Tasks: Task Type Status', { CanRead: false, CanCreate: false, CanUpdate: false });
+
+    const reasons = assessAutomationReadiness(PRINCIPAL, (name) => perms.get(name));
+
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain("lacks Read on 'MJ_BizApps_Tasks: Task Type Status'");
+  });
+
+  it('names Update on Record Geo Codes — geocoding re-saves the row it just created (#269)', () => {
+    const perms = grantedLookup();
+    perms.set('MJ: Record Geo Codes', { CanRead: true, CanCreate: true, CanUpdate: false });
+
+    const reasons = assessAutomationReadiness(PRINCIPAL, (name) => perms.get(name));
+
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain("lacks Update on 'MJ: Record Geo Codes'");
+  });
 });
 
 /**
