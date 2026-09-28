@@ -27,7 +27,8 @@
  *                                  GIF and WebP. See the SVG note below before adding it.
  *  - `FORMS_ASSET_STORAGE_ACCOUNT` Optional FileStorageAccount ID; unset uses the first account.
  *  - `MJAPI_PUBLIC_URL`            Origin the returned absolute asset URL is built against
- *                                  (shared with the respondent host page).
+ *                                  (shared with the respondent host page). That URL is a
+ *                                  convenience; forms store `/forms/asset/<id>` (#270).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -167,15 +168,23 @@ export function isPublicAssetKey(providerKey: string | null | undefined): provid
 }
 
 /**
- * Absolute, stable URL for one stored asset.
+ * Absolute URL for one stored asset — returned in the upload response as a CONVENIENCE (it is
+ * clickable and loads on its own), not as what the form stores.
  *
- * Absolute rather than relative because `<mj-form>` is an embeddable custom element: on a
- * customer's own page a relative `/forms/asset/…` resolves against THEIR origin and 404s.
+ * The builder stores the host-independent `/forms/asset/<id>` (`toAssetRef` in forms-ng's
+ * `widget/core/asset-ref.ts`), and every renderer resolves that against the API it is actually
+ * talking to — the `<mj-form>` widget against its own `api-url`, the builder against its
+ * configured MJAPI (#270). Storing this absolute URL instead is what broke every form authored on
+ * one host and served from another: it names whichever MJAPI took the upload, and a published
+ * snapshot is immutable. The response keeps the absolute form because it is the upload route's
+ * existing contract: a caller that opens or displays it directly runs on some other origin (the
+ * builder on Explorer's), where a bare `/forms/asset/…` would resolve to the wrong host and 404.
+ *
  * `MJAPI_PUBLIC_URL` is the same setting the respondent host page builds its links from;
  * `requestOrigin` is the fallback for a host that has not set it — the upload request reached this
  * process, so its origin reaches the asset route too. With neither this throws rather than naming
- * a dev port: the URL is stored in the form, and a `localhost:4121` there is a broken image on every
- * other host (#238). The upload route's catch turns the throw into a logged 500.
+ * a dev port (#238) — a convenience URL that points nowhere is worse than none. The upload route's
+ * catch turns the throw into a logged 500.
  */
 export function assetPublicUrl(fileId: string, requestOrigin: string | undefined): string {
   const base = (process.env.MJAPI_PUBLIC_URL?.trim() || requestOrigin)?.replace(/\/+$/, '');
