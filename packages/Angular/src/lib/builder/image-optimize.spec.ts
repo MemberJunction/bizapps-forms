@@ -238,7 +238,7 @@ describe('optimizeImageForUpload', () => {
 
   it('returns an animated WebP untouched without decoding it', async () => {
     const header = webp([['VP8X', [0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0]]]);
-    const animated = new File([header, new Uint8Array(400 * KB)], 'spin.webp', { type: 'image/webp' });
+    const animated = new File([header.slice().buffer, new Uint8Array(400 * KB)], 'spin.webp', { type: 'image/webp' });
     const codec = fakeCodec({ width: 1, height: 1, encoded: [], decodeError: new Error('must not decode') });
     const decode = vi.spyOn(codec, 'decode');
     expect(await optimizeImageForUpload(animated, codec)).toBe(animated);
@@ -289,7 +289,7 @@ describe('optimizeImageForUpload — real environment edges', () => {
     const original = jpeg(400 * KB, 'close-fails.jpg');
     const codec = fakeCodec({ width: 1408, height: 768, encoded: [{ type: 'image/webp', bytes: 500 * KB }] });
     const decode = codec.decode.bind(codec);
-    codec.decode = async () => ({ ...(await decode()), close: () => { throw new Error('bitmap already detached'); } });
+    codec.decode = async () => ({ ...(await decode(new Blob())), close: () => { throw new Error('bitmap already detached'); } });
     expect(await optimizeImageForUpload(original, codec)).toBe(original);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0][0])).toContain('"close-fails.jpg"');
