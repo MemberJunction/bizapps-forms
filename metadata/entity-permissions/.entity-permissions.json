@@ -551,7 +551,7 @@
     "_comments": [
       "Shipped by V202609280149__v0.14.x__Automation_Runner_Indirect_Write_Grants.sql under this SAME id, so a regenerated seed reproduces this row rather than minting a duplicate.",
       "",
-      "Read + Create + Update -- core's GeoCodeSyncService runs after the runner saves a geo-enabled Person: it reads for an existing row, creates one, then RE-SAVES it with the result. With Create and no Update that re-save is refused and logged on every submit (#269, measured), which strands the row at 'pending' until something else settles it. No Delete.",
+      "Read + Create + Update -- core's GeoCodeSyncService runs after the runner saves a geo-enabled Person: it reads for an existing row, creates one, then RE-SAVES it with the result. With Create and no Update that re-save is refused and logged on every submit whose automations create or update a respondent Person (#269, measured), which strands the row at 'pending' until something else settles it. No Delete.",
       "CONDITIONAL, kept defensively: a core whose metadata lacks this entity has the migration SKIP this grant with a PRINT rather than failing, and the boot readiness report names it if the entity later exists."
     ]
   }

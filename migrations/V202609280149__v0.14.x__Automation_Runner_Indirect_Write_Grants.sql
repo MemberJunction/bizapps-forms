@@ -16,7 +16,8 @@
 --      geocode sync (`GeoCodeSyncService`) after the save. It finds no existing `MJ: Record Geo Codes`
 --      row, CREATEs one, then immediately RE-SAVES it with the lookup result — and that second save is
 --      an UPDATE. With Read + Create only (what issue #269's own table asked for), that re-save is
---      refused and logged on every submit: `Does NOT have permission to Update MJ: Record Geo Codes`.
+--      refused and logged on every submit whose automations create or update a respondent Person
+--      (People is geo-enabled): `Does NOT have permission to Update MJ: Record Geo Codes`.
 --      The issue's table under-asked; Update is required, not optional.
 --
 -- WHY EACH FLAG.
@@ -32,6 +33,13 @@
 --                                                         service re-saves the row it just created with
 --                                                         the geocode result. No Delete: nothing on
 --                                                         this path removes a row.
+--                                                         REACH: with FORMS_BINDING_ALLOWED_ENTITIES
+--                                                         unset (unrestricted, the default), this lets
+--                                                         a form author bind answers into the geocode
+--                                                         row of ANY record. Shipped anyway (derived,
+--                                                         low-sensitivity data; the runner already has
+--                                                         CRU on People), but keep `MJ: Record Geo
+--                                                         Codes` out of FORMS_BINDING_ALLOWED_ENTITIES.
 --
 -- WHAT IS STILL DELIBERATELY NOT GRANTED. Write on core `MJ: Task Types` / `MJ: Tasks` /
 -- `MJ: Task Dependencies` — the grants issue #269 actually asked for — for two measured reasons:
@@ -57,8 +65,8 @@
 -- that `MJ: Record Geo Codes` Create was safe to withhold because "the scheduled Geocoding Maintenance
 -- job backfills it." That assumed the scheduled job was the thing that would settle the row. It is
 -- not: the runner's own inline save re-saves the row it just created and that Update is refused and
--- logged on every single submit. Read this file's header as the current word on that entity;
--- V202609251200's text is left as written, per policy.
+-- logged on every submit whose automations create or update a respondent Person. Read this file's
+-- header as the current word on that entity; V202609251200's text is left as written, per policy.
 --
 -- WIDEN-ONLY / ALLOW ROWS ONLY / MATCHED BY NAME / HAND-WRITTEN SQL — same reasons as V202609251200
 -- (read that file's header for the full argument): an existing Allow row for (role, entity) has each

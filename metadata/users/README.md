@@ -47,7 +47,10 @@ reserved by RFC 2606 precisely so an address can be unroutable on purpose.
   binding attachments), read on `MJ: Actions` (MJ resolves an entity action by name before running
   it), and read + create + update on `MJ: Record Geo Codes` (core's geocode sync runs after every
   save of a geo-enabled Person: it finds, creates, then re-saves the row `Upsert Respondent Person`
-  triggers — #269).
+  triggers — #269). That grant widens binding reach: with `FORMS_BINDING_ALLOWED_ENTITIES` unset
+  (unrestricted), a form author can bind answers into the geocode row of any record. It ships
+  anyway, because geocodes are derived, low-sensitivity data and the runner already has read +
+  create + update on People, but keep `MJ: Record Geo Codes` out of `FORMS_BINDING_ALLOWED_ENTITIES`.
 - **The built-in hooks' targets in the two sibling apps:** `People` (read + create + update); for
   `Create Followup Task` — Task Types (read), Tasks and Task Links (create only), and Task Type
   Status (read only, so the task's default status resolves — #269); for the `Common.LogActivity`
