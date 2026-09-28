@@ -65,3 +65,38 @@ describe('Next and Submit judge what the respondent can see (#268)', () => {
     expect(commit).toBeLessThan(body.search(validation));
   });
 });
+
+/**
+ * Fix-round-1 finding #1: `onComposite(field, raw)` used to merge ONE freshly-changed field onto
+ * `compositeValue()` — a snapshot of the `value` INPUT that only refreshes on the next
+ * change-detection pass. This component is zoneless, so nothing schedules one between two DOM
+ * events firing in the same task, and iOS AutoFill fills several ContactInfo/Address parts in
+ * exactly that shape: each fired `change` merged its own field onto the SAME stale snapshot, so
+ * only the last part to fire survived. `readCompositeParts` (control-answer.spec.ts) proves the
+ * read-every-field algorithm is correct; these specs prove the component actually calls it from
+ * both places that used to disagree, through one shared command.
+ */
+describe('a composite part change merges every part from the DOM, not a stale value (#268)', () => {
+  it('the composite part input calls the same DOM-merge command for both events, not a per-field one', () => {
+    const tag = tagsBindingInput().find((t) => t.includes("inputId() + '-' + field"));
+    expect(tag, template()).toBeDefined();
+    expect(tag).toMatch(/\(input\)="syncComposite\(\)"/);
+    expect(tag).toMatch(/\(change\)="syncComposite\(\)"/);
+  });
+
+  it('syncFromDom delegates its composite branch to the same command', () => {
+    const body = methodBody('form-question.component.ts', 'syncFromDom');
+    expect(body).toMatch(/this\.syncComposite\(\)/);
+  });
+
+  it('the shared command reads every field through readCompositeParts, not a value() spread per field', () => {
+    const body = methodBody('form-question.component.ts', 'syncComposite');
+    expect(body).toMatch(/readCompositeParts\(/);
+    // The exact bug shape: one field spread onto the rest of a stale compositeValue().
+    expect(body).not.toMatch(/\.\.\.this\.compositeValue\(\),\s*\[field\]/);
+  });
+
+  it('onComposite no longer exists as a per-field merge handler', () => {
+    expect(source('form-question.component.ts')).not.toMatch(/\n {2}protected onComposite\(/);
+  });
+});

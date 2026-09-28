@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compositeAnswer, sameAnswer, scalarAnswer } from './control-answer';
+import { compositeAnswer, readCompositeParts, sameAnswer, scalarAnswer } from './control-answer';
 
 describe('scalarAnswer', () => {
   it('parses a numeric raw value to a number', () => {
@@ -43,6 +43,24 @@ describe('compositeAnswer', () => {
       lastName: 'Doe',
       email: 'jane@example.com',
     });
+  });
+});
+
+describe('readCompositeParts', () => {
+  it('reads every field independently in one pass, not accumulated from a prior snapshot', () => {
+    // The shape of #268's composite-merge bug: several AutoFill parts land inside ONE task, so
+    // nothing here may depend on a stale value() the component has not re-rendered yet — every
+    // field is read once, from whatever the reader reports right now.
+    const dom: Record<string, string> = { firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' };
+    expect(readCompositeParts(['firstName', 'lastName', 'email'], (field) => dom[field])).toEqual(dom);
+  });
+
+  it('omits a field the reader cannot find, rather than inventing a blank one', () => {
+    expect(readCompositeParts(['a', 'b'], (field) => (field === 'a' ? 'x' : undefined))).toEqual({ a: 'x' });
+  });
+
+  it('reads nothing for an empty field list', () => {
+    expect(readCompositeParts([], () => 'unused')).toEqual({});
   });
 });
 

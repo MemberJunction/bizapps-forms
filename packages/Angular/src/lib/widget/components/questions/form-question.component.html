@@ -481,8 +481,8 @@
           [attr.aria-required]="cq.isRequired"
           [attr.aria-invalid]="compositeInvalid(field)"
           [attr.aria-describedby]="fieldError ? partErrorId(field) : null"
-          (input)="onComposite(field, $any($event.target).value)"
-          (change)="onComposite(field, $any($event.target).value)"
+          (input)="syncComposite()"
+          (change)="syncComposite()"
         />
         @if (fieldError) {
           <p class="mjf-composite__error" [id]="partErrorId(field)">{{ fieldError }}</p>

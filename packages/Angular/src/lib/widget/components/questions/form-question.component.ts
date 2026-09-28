@@ -53,7 +53,7 @@ import {
   inputModeFor,
   inputTypeFor,
 } from './input-mode';
-import { compositeAnswer, sameAnswer, scalarAnswer } from './control-answer';
+import { compositeAnswer, readCompositeParts, sameAnswer, scalarAnswer } from './control-answer';
 import { DoodlePadComponent, type DoodleCapture } from './doodle-pad.component';
 import { IconComponent } from '../icon.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
@@ -387,9 +387,21 @@ export class FormQuestionComponent {
     return this.compositeValue()[field] ?? '';
   }
 
-  /** Update one part of a composite, emitting the whole merged object. */
-  protected onComposite(field: string, raw: string): void {
-    this.emitComposite({ ...this.compositeValue(), [field]: raw });
+  /**
+   * A composite part fired `(input)`/`(change)` — re-read every part of THIS composite from the
+   * DOM and commit the merged result (#268 fix-round-1 finding 1).
+   *
+   * The previous handler merged only the one field that fired onto `compositeValue()`, a
+   * snapshot of the `value` input that only refreshes on the next change-detection pass. This
+   * component is zoneless, so nothing schedules one between two DOM events firing in the same
+   * task — and iOS AutoFill fills several ContactInfo/Address parts in exactly that shape, so each
+   * fired `change` clobbered the parts the earlier ones had just written; only the last survived.
+   * Reading every part straight off the DOM — the same read {@link syncFromDom} needs for the
+   * same reason — has no snapshot to go stale, so both share this one command.
+   */
+  protected syncComposite(): void {
+    const parts = readCompositeParts(this.compositeFields(), (field) => this.textControl(`${this.inputId()}-${field}`)?.value);
+    this.emitComposite({ ...this.compositeValue(), ...parts });
   }
 
   /**
@@ -662,16 +674,8 @@ export class FormQuestionComponent {
    * has no value a browser could fill.
    */
   syncFromDom(): void {
-    const fields = this.compositeFields();
-    if (fields.length > 0) {
-      const parts: Record<string, string> = {};
-      for (const field of fields) {
-        const el = this.textControl(`${this.inputId()}-${field}`);
-        if (el) {
-          parts[field] = el.value;
-        }
-      }
-      this.emitComposite({ ...this.compositeValue(), ...parts });
+    if (this.compositeFields().length > 0) {
+      this.syncComposite();
       return;
     }
     const el = this.textControl(this.inputId());

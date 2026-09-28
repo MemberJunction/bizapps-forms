@@ -32,6 +32,32 @@ export function scalarAnswer(raw: string, kind: 'text' | 'number'): string | num
 }
 
 /**
+ * Read every named field through `read`, keeping only the ones it actually reports.
+ *
+ * Exists so the fix for #268's composite-merge bug is a pure, testable decision, not something
+ * only visible once a real DOM and `value` input are wired up. The bug was merging ONE
+ * freshly-changed field onto a STALE snapshot of the rest: `compositeValue()` comes from the
+ * `value` input, which only refreshes on the next change-detection pass, and this component is
+ * zoneless — nothing schedules one between two DOM events firing in the same task. iOS AutoFill
+ * fills several ContactInfo/Address parts in exactly that shape, so each fired `change` clobbered
+ * the parts the earlier ones had just written. Reading every field in ONE pass, from whatever
+ * `read` reports right now, has no snapshot to go stale.
+ */
+export function readCompositeParts(
+  fields: readonly string[],
+  read: (field: string) => string | undefined,
+): Record<string, string> {
+  const parts: Record<string, string> = {};
+  for (const field of fields) {
+    const value = read(field);
+    if (value !== undefined) {
+      parts[field] = value;
+    }
+  }
+  return parts;
+}
+
+/**
  * A composite (Address/ContactInfo) answer from its parts, or `null` when nothing was filled in.
  *
  * Blank parts are DROPPED rather than kept as empty strings, so a respondent who tabs through an
