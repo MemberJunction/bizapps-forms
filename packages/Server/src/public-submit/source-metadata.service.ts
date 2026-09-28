@@ -185,7 +185,8 @@ export function resetAbuseKeyingWarningForTests(): void {
 }
 
 /**
- * Ceiling on SAVES (partial autosaves included) for one caller on one distribution.
+ * Ceiling on AUTOSAVES for one caller on one distribution. Final submits do not charge it — they
+ * are bounded by {@link completionCeilingKey} / {@link knockoutCeilingKey} (gauntlet #272).
  *
  * Scoped to the distribution as well as the caller so that abusing one form cannot throttle the
  * same person's submission to an unrelated one, and prefixed so it can never collide with the

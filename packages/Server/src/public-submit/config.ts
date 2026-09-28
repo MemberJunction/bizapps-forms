@@ -21,10 +21,13 @@
  *                                     needs (#271) — sharing one counter meant a session that
  *                                     autosaved a handful of times had nothing left when it
  *                                     actually pressed Submit.
- *  - `FORMS_RATELIMIT_IP_MAX`         Max submissions per window per (client IP, distribution).
- *                                     Default 120. This is the cap that actually bounds abuse:
- *                                     the key above is derived from a header the caller sets,
- *                                     this one from the peer address they cannot choose.
+ *  - `FORMS_RATELIMIT_IP_MAX`         Max AUTOSAVES per window per (client IP, distribution).
+ *                                     Default 120. This is the cap that actually bounds autosave
+ *                                     abuse: the keys above are derived from a header the caller
+ *                                     sets, this one from the peer address they cannot choose.
+ *                                     Final submits are bounded per address by
+ *                                     `FORMS_COMPLETION_MAX` / `FORMS_KNOCKOUT_MAX` instead, so
+ *                                     neighbours' typing can never refuse a Submit.
  *  - `FORMS_COMPLETION_MAX`           Max COMPLETED submissions per window per (client IP,
  *                                     distribution). Default 20. Separate from the save caps
  *                                     because a completion fires the on-submit automations.
@@ -113,7 +116,10 @@ export interface PublicSubmitConfig {
    */
   autosaveRateLimitMax: number;
   /**
-   * Per-(client IP, distribution) ceiling on saves.
+   * Per-(client IP, distribution) ceiling on AUTOSAVES. Final submits never charge it: they are
+   * bounded per address by {@link completionMax} and {@link knockoutMax} (gauntlet #272 — charged
+   * by finals too, a few respondents typing behind one NAT could fill it and refuse the next
+   * Submit from that address).
    *
    * Deliberately LOOSER than {@link rateLimitMax} and keyed differently: the per-session cap is
    * the fine-grained limit for a client that identifies itself honestly, and this is the ceiling
@@ -125,10 +131,13 @@ export interface PublicSubmitConfig {
    * would be a bucket every respondent of a form shares, which turns a single abusive caller
    * into an outage for everyone filling that form in — trading a rate-limit bypass for a DoS.
    *
-   * Sized generously (120/min ≈ 24 concurrent respondents behind one egress address) because
-   * generosity is nearly free here: the point of an IP key is not the number, it is that abuse
-   * now costs the attacker ADDRESSES. Going from "unbounded via a header" to "bounded per
-   * address" is the categorical change; picking a tight number only buys a refused office.
+   * Sized generously because generosity is nearly free here. A respondent typing continuously
+   * autosaves about 35-40 times a minute (measured, gauntlet #272), so 120/min is room for about
+   * three respondents typing flat out behind one egress address at the same moment — far more
+   * who are reading or thinking between answers. Past it, the extra autosaves are refused and
+   * retried by the widget; nobody's Submit is. And the point of an IP key is not the number, it is
+   * that abuse now costs the attacker ADDRESSES. Going from "unbounded via a header" to "bounded
+   * per address" is the categorical change; picking a tight number only buys a refused office.
    */
   ipRateLimitMax: number;
   /**

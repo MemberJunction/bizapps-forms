@@ -336,7 +336,9 @@ describe('runSubmitPipeline', () => {
   // caller chose, an LLM run, entity upserts), so the bypass amplifies. The ceiling therefore has
   // to key on something the caller cannot pick: their resolved IP.
   it('throttles a caller who rotates the session id, because the bucket follows their IP', async () => {
-    process.env.FORMS_RATELIMIT_IP_MAX = '2';
+    // Final submits are bounded per address by the COMPLETION ceiling (c); the save ceiling (b)
+    // counts autosaves only, so a respondent's neighbours typing cannot refuse their Submit (#272).
+    process.env.FORMS_COMPLETION_MAX = '2';
     resetPublicSubmitConfigForTests();
     const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
     const { ctx } = makeContext(respondentPermissions(), { fireHooks, clientIpHash: 'ip-attacker' });
@@ -354,7 +356,7 @@ describe('runSubmitPipeline', () => {
     expect(third.errors?.[0].message).toMatch(/too many/i);
     // The amplification is what the cap is really for: the rejected request fires nothing.
     expect(fireHooks).toHaveBeenCalledTimes(2);
-    delete process.env.FORMS_RATELIMIT_IP_MAX;
+    delete process.env.FORMS_COMPLETION_MAX;
   });
 
   // The other half of the fix, and the reason the ceiling is keyed per (caller, distribution)
@@ -362,7 +364,7 @@ describe('runSubmitPipeline', () => {
   // ceiling, it is a shared kill switch. One caller saturating it would take the form offline
   // for everyone filling it in — trading a rate-limit bypass for a cheaper, louder outage.
   it('does not let one saturated caller throttle a different caller on the same form', async () => {
-    process.env.FORMS_RATELIMIT_IP_MAX = '2';
+    process.env.FORMS_COMPLETION_MAX = '2';
     resetPublicSubmitConfigForTests();
     const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
     const { ctx } = makeContext(respondentPermissions(), { fireHooks, clientIpHash: 'ip-attacker' });
@@ -381,7 +383,7 @@ describe('runSubmitPipeline', () => {
 
     expect(saturated.success).toBe(false);
     expect(bystander.success).toBe(true);
-    delete process.env.FORMS_RATELIMIT_IP_MAX;
+    delete process.env.FORMS_COMPLETION_MAX;
   });
 
   // Saves and completions cost wildly different things — an autosave upserts one row, a
@@ -408,6 +410,43 @@ describe('runSubmitPipeline', () => {
     expect(secondCompletion.errors?.[0].message).toMatch(/too many/i);
     delete process.env.FORMS_RATELIMIT_IP_MAX;
     delete process.env.FORMS_COMPLETION_MAX;
+  });
+
+  // Gauntlet #272 (F5). Once autosaves stopped being cut off at 5 per session, three respondents
+  // typing behind one NAT (an office, a campus) could fill the per-address SAVE ceiling on their own,
+  // and it was charged by final submits too — so the next Submit from that address was refused
+  // "Too many submissions": #271's symptom again, moved from one session to one address. The save
+  // ceiling now counts autosaves only; a Submit is bounded by the completion/knockout ceilings.
+  it("never refuses a Submit because co-located respondents' autosaves filled the save ceiling", async () => {
+    process.env.FORMS_RATELIMIT_IP_MAX = '3';
+    resetPublicSubmitConfigForTests();
+    const { ctx } = makeContext(respondentPermissions(), { clientIpHash: 'ip-office-nat' });
+
+    for (const neighbour of ['typist-1', 'typist-2', 'typist-3']) {
+      ctx.sessionId = neighbour;
+      expect((await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] }))).success).toBe(true);
+    }
+    ctx.sessionId = 'submitter';
+    const submit = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(submit.success).toBe(true);
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
+  });
+
+  it('still bounds autosaves by the per-address save ceiling across rotated sessions', async () => {
+    process.env.FORMS_RATELIMIT_IP_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const { ctx } = makeContext(respondentPermissions(), { clientIpHash: 'ip-attacker' });
+
+    const results: FormSubmissionResult[] = [];
+    for (const forged of ['forged-1', 'forged-2', 'forged-3']) {
+      ctx.sessionId = forged;
+      results.push(await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] })));
+    }
+
+    expect(results.map((r) => r.success)).toEqual([true, true, false]);
+    expect(results[2].errors?.[0].message).toMatch(/too many/i);
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
   });
 
   // #271. Autosave and the respondent's own Submit press used to share ONE per-(session,
@@ -529,7 +568,7 @@ describe('runSubmitPipeline', () => {
   // callers apart has no business refusing either of them.
   it('does not let one header-less caller throttle another, and still bounds them by address', async () => {
     process.env.FORMS_RATELIMIT_MAX = '1';
-    process.env.FORMS_RATELIMIT_IP_MAX = '2';
+    process.env.FORMS_COMPLETION_MAX = '2';
     resetPublicSubmitConfigForTests();
     const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
     const { ctx } = makeContext(respondentPermissions(), { fireHooks, clientIpHash: 'ip-script' });

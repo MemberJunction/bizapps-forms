@@ -872,9 +872,10 @@ function disqualificationFields(
  *       `autosaveRateLimitMax`) cost unrelated amounts to the respondent's own budget — one
  *       counter over both meant a session's own autosaves could spend the budget its eventual
  *       Submit press needed, refusing the one request the respondent actually came to make.
- *   (b) per (caller, distribution) — keyed on the resolved peer IP, which the caller cannot
- *       rotate. This is the ceiling. It does not make abuse impossible; it makes it cost
- *       ADDRESSES, which is the only currency a public endpoint can charge.
+ *   (b) per (caller, distribution), AUTOSAVES only — keyed on the resolved peer IP, which the
+ *       caller cannot rotate. This is the ceiling on saves. It does not make abuse impossible; it
+ *       makes it cost ADDRESSES, which is the only currency a public endpoint can charge. Final
+ *       submits are bounded by (c) and (d), keyed the same way, not by (b).
  *   (c) per (caller, distribution), completions only — the same identity against a much tighter
  *       cap, because a completion fires the on-submit automations (a confirmation email to an
  *       address the submission chose, an LLM run, entity upserts) and an autosave does not. One
@@ -923,7 +924,14 @@ function rateLimitGatesFor(
     // keyed on something weaker — see `abuseIdentity`.
     return gates;
   }
-  gates.push({ key: saveCeilingKey(distributionId, identity), max: config.ipRateLimitMax });
+  // (b) counts AUTOSAVES only (gauntlet #272). A final submit is bounded per address by (c) or
+  // (d) below — every final is exactly one of the two. Charging (b) for finals too meant that once
+  // (a) stopped cutting autosaves off at 5 a session, a few respondents typing behind one address
+  // (an office NAT) filled (b) themselves and the next Submit from there was refused: #271 again,
+  // moved from one session to one address.
+  if (!complete && !knockout) {
+    gates.push({ key: saveCeilingKey(distributionId, identity), max: config.ipRateLimitMax });
+  }
   if (complete) {
     gates.push({ key: completionCeilingKey(distributionId, identity), max: config.completionMax });
   }
