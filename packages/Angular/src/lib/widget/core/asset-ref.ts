@@ -6,15 +6,18 @@
  * a second API instance all left published forms pointing respondents at a host they cannot reach
  * — silently, and unrepairably, because a published snapshot is immutable.
  *
- * The stored form is now the path `/forms/asset/<fileId>`, and a renderer resolves it against the
- * API origin IT is talking to. Recognition is by PATH, on any host, which is what repairs every
- * snapshot published before this change without a migration: `http://localhost:4000/forms/asset/<id>`
- * is read as the same reference as `/forms/asset/<id>`.
+ * The stored form is now the path `/forms/asset/<fileId>`, RELATIVE TO THE API BASE — not the bare
+ * origin — because MJAPI can itself be deployed behind a path prefix (e.g. a reverse proxy serving
+ * it at `https://h/api/graphql`). A renderer resolves the stored path against `apiBaseOf(graphqlUrl)`,
+ * which carries that prefix forward. Recognition is by PATH SUFFIX, under any host and any prefix,
+ * which is what repairs every snapshot published before this change without a migration:
+ * `http://localhost:4000/forms/asset/<id>` and `https://h/api/forms/asset/<id>` are both read as the
+ * same reference as `/forms/asset/<id>`.
  *
- * The one assumption that buys: a URL whose path is exactly `/forms/asset/<guid>` names an asset of
- * the MJ Forms install serving the form. A pasted image from a DIFFERENT Forms install would be
- * re-pointed here and 404. That is judged acceptable — the route is ours, the id is a GUID, and the
- * alternative is leaving every localhost-authored form broken.
+ * The one assumption that buys: a URL whose path ENDS in `/forms/asset/<guid>` (whatever comes
+ * before it) names an asset of the MJ Forms install serving the form. A pasted image from a
+ * DIFFERENT Forms install would be re-pointed here and 404. That is judged acceptable — the route
+ * is ours, the id is a GUID, and the alternative is leaving every localhost-authored form broken.
  *
  * Pure and dependency-free on purpose: the respondent widget uses it, and the widget must not reach
  * the Explorer shell.
@@ -23,11 +26,13 @@ import type { FormStyleTokens, PublishedFormDefinition, PublishedFormScreen } fr
 
 export const ASSET_ROUTE = '/forms/asset';
 
-const ASSET_PATH = /^\/forms\/asset\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i;
+// No leading `^`: the route is recognised as a PATH SUFFIX so a prefix MJAPI is deployed behind
+// (e.g. `/api`) doesn't stop it being ours — see the module header.
+const ASSET_PATH = /\/forms\/asset\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i;
 /** Base used only to let `URL` parse a relative reference; never appears in any output. */
 const PLACEHOLDER_BASE = 'http://placeholder.invalid';
 
-/** The file id when `value` is one of our asset references (any host, any case), else undefined. */
+/** The file id when `value` is one of our asset references (any host, any prefix, any case), else undefined. */
 function assetIdOf(value: string): string | undefined {
   const trimmed = value.trim();
   if (!trimmed.startsWith('/') && !/^https?:\/\//i.test(trimmed)) {
@@ -47,30 +52,43 @@ function assetIdOf(value: string): string | undefined {
   return ASSET_PATH.exec(url.pathname)?.[1];
 }
 
-/** Relativise `value` to `/forms/asset/<id>` if it's ours (any host); otherwise return it unchanged. */
+/** Relativise `value` to `/forms/asset/<id>` if it's ours (any host/prefix); otherwise return it unchanged. */
 export function toAssetRef(value: string): string {
   const id = assetIdOf(value);
   return id ? `${ASSET_ROUTE}/${id}` : value;
 }
 
-/** Make `value` absolute on `apiOrigin` if it's ours; unchanged if it's not ours or `apiOrigin` is ''. */
-export function resolveAssetUrl(value: string, apiOrigin: string): string {
+/** Make `value` absolute on `apiBase` if it's ours; unchanged if it's not ours or `apiBase` is ''. */
+export function resolveAssetUrl(value: string, apiBase: string): string {
   const id = assetIdOf(value);
-  const origin = apiOrigin.trim().replace(/\/+$/, '');
-  return id && origin ? `${origin}${ASSET_ROUTE}/${id}` : value;
+  const base = apiBase.trim().replace(/\/+$/, '');
+  return id && base ? `${base}${ASSET_ROUTE}/${id}` : value;
 }
 
-/** The origin of an absolute http(s) URL, or '' when `url` isn't one (relative, empty, unparseable). */
-export function originOf(url: string): string {
-  const trimmed = url.trim();
+/**
+ * The API BASE a renderer should resolve asset references against: the origin of `graphqlUrl`
+ * PLUS whatever path prefix it's deployed under, with a trailing `/graphql` segment (MJAPI's
+ * GraphQL endpoint, case-insensitive, optional trailing slash) and any trailing slash removed.
+ * `''` when `graphqlUrl` isn't an absolute http(s) URL (empty, relative, unparseable).
+ *
+ * This mirrors `deriveUploadUrl` in `../api/forms-api.config.ts`, which keeps the same prefix when
+ * deriving the upload endpoint from `graphqlUrl` — the origin alone is wrong for the same reason
+ * there: an MJAPI reverse-proxied at `/api` serves assets at `/api/forms/asset/<id>`, not at the
+ * bare origin.
+ */
+export function apiBaseOf(graphqlUrl: string): string {
+  const trimmed = graphqlUrl.trim();
   if (!/^https?:\/\//i.test(trimmed)) {
     return '';
   }
+  let url: URL;
   try {
-    return new URL(trimmed).origin;
+    url = new URL(trimmed);
   } catch {
     return '';
   }
+  const path = url.pathname.replace(/\/graphql\/?$/i, '').replace(/\/+$/, '');
+  return `${url.origin}${path}`;
 }
 
 const CSS_URL = /url\(\s*(["']?)([^"')]*)\1\s*\)/gi;
@@ -115,7 +133,10 @@ export function mapDefinitionAssets(
 ): PublishedFormDefinition {
   return {
     ...def,
-    welcomeScreen: def.welcomeScreen ? mapScreen(def.welcomeScreen, map) : def.welcomeScreen,
+    // Conditional spread, not `welcomeScreen: def.welcomeScreen ? ... : def.welcomeScreen`: the
+    // ternary's else-branch still WRITES the key (as `undefined`), which is exactly the leaked
+    // implementation detail the rest of this module goes out of its way to avoid.
+    ...(def.welcomeScreen ? { welcomeScreen: mapScreen(def.welcomeScreen, map) } : {}),
     endScreens: def.endScreens.map((screen) => mapScreen(screen, map)),
     styleTokens: mapStyleTokenAssets(def.styleTokens, map),
     pages: def.pages.map((page) => ({
@@ -140,10 +161,15 @@ export function resolveDefinitionForRender(
   def: PublishedFormDefinition,
   graphqlUrl: string,
 ): PublishedFormDefinition {
-  return mapDefinitionAssets(def, (url) => resolveAssetUrl(url, originOf(graphqlUrl)));
+  // Computed once up front, not inside the per-URL closure: it's the same value for every asset
+  // reference in the definition, and `apiBaseOf` re-parsing `graphqlUrl` on every call would be
+  // repeated, pointless work for a value that never changes across the walk.
+  const apiBase = apiBaseOf(graphqlUrl);
+  return mapDefinitionAssets(def, (url) => resolveAssetUrl(url, apiBase));
 }
 
 /** Same resolution as {@link resolveDefinitionForRender}, for a bare `FormStyleTokens` (preview styling). */
 export function resolveStyleTokensForRender(tokens: FormStyleTokens, graphqlUrl: string): FormStyleTokens {
-  return mapStyleTokenAssets(tokens, (url) => resolveAssetUrl(url, originOf(graphqlUrl)));
+  const apiBase = apiBaseOf(graphqlUrl);
+  return mapStyleTokenAssets(tokens, (url) => resolveAssetUrl(url, apiBase));
 }

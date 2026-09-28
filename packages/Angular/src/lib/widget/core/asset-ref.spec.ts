@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
 import {
+  apiBaseOf,
   mapCssUrls,
   mapDefinitionAssets,
   mapStyleTokenAssets,
-  originOf,
   resolveAssetUrl,
   resolveDefinitionForRender,
   resolveStyleTokensForRender,
@@ -52,6 +52,10 @@ describe('toAssetRef', () => {
     expect(toAssetRef(`https://x.com/forms/asset/${ID}/extra`)).toBe(`https://x.com/forms/asset/${ID}/extra`);
   });
 
+  it('recognises the route under ANY path prefix (MJAPI deployed behind e.g. /api)', () => {
+    expect(toAssetRef(`https://h/api/forms/asset/${ID}`)).toBe(`/forms/asset/${ID}`);
+  });
+
   it('leaves an empty string unchanged', () => {
     expect(toAssetRef('')).toBe('');
   });
@@ -66,50 +70,72 @@ describe('toAssetRef', () => {
 });
 
 describe('resolveAssetUrl', () => {
-  it('makes a relative asset reference absolute on the given origin', () => {
+  it('makes a relative asset reference absolute on the given API base', () => {
     expect(resolveAssetUrl(`/forms/asset/${ID}`, 'https://api.example.com')).toBe(
       `https://api.example.com/forms/asset/${ID}`,
     );
   });
 
-  it('rewrites a legacy absolute asset URL to a different origin', () => {
+  it('rewrites a legacy absolute asset URL to a different API base', () => {
     expect(resolveAssetUrl(`http://localhost:4000/forms/asset/${ID}`, 'https://api.example.com')).toBe(
       `https://api.example.com/forms/asset/${ID}`,
     );
   });
 
-  it('returns the value unchanged when apiOrigin is empty', () => {
+  it('returns the value unchanged when apiBase is empty', () => {
     expect(resolveAssetUrl(`/forms/asset/${ID}`, '')).toBe(`/forms/asset/${ID}`);
   });
 
-  it('tolerates a trailing slash on the origin', () => {
+  it('returns a legacy absolute asset URL unchanged when apiBase is empty', () => {
+    expect(resolveAssetUrl(`http://localhost:4000/forms/asset/${ID}`, '')).toBe(
+      `http://localhost:4000/forms/asset/${ID}`,
+    );
+  });
+
+  it('tolerates a trailing slash on the API base', () => {
     expect(resolveAssetUrl(`/forms/asset/${ID}`, 'https://api.example.com/')).toBe(
       `https://api.example.com/forms/asset/${ID}`,
     );
   });
 
-  it('leaves an external URL unchanged regardless of origin', () => {
+  it('includes a path prefix carried by the API base (MJAPI behind e.g. /api)', () => {
+    expect(resolveAssetUrl(`/forms/asset/${ID}`, 'https://h/api')).toBe(`https://h/api/forms/asset/${ID}`);
+  });
+
+  it('leaves an external URL unchanged regardless of API base', () => {
     expect(resolveAssetUrl('https://cdn.example.com/logo.png', 'https://api.example.com')).toBe(
       'https://cdn.example.com/logo.png',
     );
   });
 });
 
-describe('originOf', () => {
-  it('strips the trailing slash of a bare origin', () => {
-    expect(originOf('http://localhost:4131/')).toBe('http://localhost:4131');
+describe('apiBaseOf', () => {
+  it('is the bare origin for a root-only host, no trailing slash', () => {
+    expect(apiBaseOf('http://localhost:4131')).toBe('http://localhost:4131');
   });
 
-  it('drops the path of a full URL', () => {
-    expect(originOf('https://h/graphql')).toBe('https://h');
+  it('tolerates a trailing slash on a root-only host', () => {
+    expect(apiBaseOf('http://localhost:4131/')).toBe('http://localhost:4131');
+  });
+
+  it('drops a bare /graphql path', () => {
+    expect(apiBaseOf('https://h/graphql')).toBe('https://h');
+  });
+
+  it('keeps a path prefix in front of /graphql', () => {
+    expect(apiBaseOf('https://h/api/graphql')).toBe('https://h/api');
+  });
+
+  it('keeps a path prefix with no /graphql suffix, dropping its trailing slash', () => {
+    expect(apiBaseOf('https://h/api/')).toBe('https://h/api');
   });
 
   it('returns empty for an empty string', () => {
-    expect(originOf('')).toBe('');
+    expect(apiBaseOf('')).toBe('');
   });
 
   it('returns empty for a relative path', () => {
-    expect(originOf('/graphql')).toBe('');
+    expect(apiBaseOf('/graphql')).toBe('');
   });
 });
 
@@ -234,6 +260,13 @@ describe('mapDefinitionAssets', () => {
     // Input must never be mutated.
     expect(def).toEqual(before);
   });
+
+  it('leaves welcomeScreen absent rather than adding an undefined key when the form has none', () => {
+    const def = definition();
+    delete def.welcomeScreen;
+    const mapped = mapDefinitionAssets(def, toAssetRef);
+    expect('welcomeScreen' in mapped).toBe(false);
+  });
 });
 
 describe('resolveDefinitionForRender', () => {
@@ -242,6 +275,12 @@ describe('resolveDefinitionForRender', () => {
     const resolved = resolveDefinitionForRender(def, 'http://localhost:4131');
     expect(resolved.welcomeScreen?.mediaURL).toBe(`http://localhost:4131/forms/asset/${ID}`);
     expect(resolved.pages[0]?.questions[0]?.options[0]?.imageURL).toBe(`http://localhost:4131/forms/asset/${ID}`);
+  });
+
+  it('resolves against the API base, including a path prefix, of a prefixed graphql endpoint URL', () => {
+    const def = definition();
+    const resolved = resolveDefinitionForRender(def, 'https://h/api/graphql');
+    expect(resolved.welcomeScreen?.mediaURL).toBe(`https://h/api/forms/asset/${ID}`);
   });
 
   it('tolerates a graphqlUrl with a trailing slash', () => {
