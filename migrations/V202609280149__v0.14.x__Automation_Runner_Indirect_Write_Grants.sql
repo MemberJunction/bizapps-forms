@@ -12,13 +12,17 @@
 --      runner cannot read it, the RunView fails, and the failure is only logged, never surfaced to
 --      whoever saved the task. Silent degradation, not a thrown error.
 --
---   2. `Forms: Upsert Respondent Person` creating or updating a geo-enabled Person fires MJ core's
---      geocode sync (`GeoCodeSyncService`) after the save. It finds no existing `MJ: Record Geo Codes`
---      row, CREATEs one, then immediately RE-SAVES it with the lookup result — and that second save is
---      an UPDATE. With Read + Create only (what issue #269's own table asked for), that re-save is
---      refused and logged on every submit whose automations create or update a respondent Person
---      (People is geo-enabled): `Does NOT have permission to Update MJ: Record Geo Codes`.
---      The issue's table under-asked; Update is required, not optional.
+--   2. `Forms: Upsert Respondent Person` CREATING a Person fires bizapps-common's `Common.LogActivity`,
+--      which runs inline as the runner and saves an Activity. Activities has a writable geo field
+--      (`Location`), so MJ core's geocode sync (`GeoCodeSyncService`) runs after that save. It finds no
+--      existing `MJ: Record Geo Codes` row, CREATEs one, then immediately RE-SAVES it with the lookup
+--      result — and that second save is an UPDATE. With Read + Create only (what issue #269's own
+--      table asked for), that re-save is refused and logged on every submit whose automations create
+--      a respondent Person: `Does NOT have permission to Update MJ: Record Geo Codes`. The issue's
+--      table under-asked; Update is required, not optional.
+--      NOT the Person itself: every geo field on People is virtual, and core geocodes only an entity
+--      with a writable one (`GenericDatabaseProvider` checks `HasWritableGeoSourceFields`), so a Person
+--      save never geocodes — and matching an existing Person saves no Activity, so it writes nothing here.
 --
 -- WHY EACH FLAG.
 --   MJ_BizApps_Tasks: Task Type Status   Read only     — resolve the task type's default status.
@@ -65,7 +69,7 @@
 -- that `MJ: Record Geo Codes` Create was safe to withhold because "the scheduled Geocoding Maintenance
 -- job backfills it." That assumed the scheduled job was the thing that would settle the row. It is
 -- not: the runner's own inline save re-saves the row it just created and that Update is refused and
--- logged on every submit whose automations create or update a respondent Person. Read this file's
+-- logged on every submit whose automations create a respondent Person. Read this file's
 -- header as the current word on that entity; V202609251200's text is left as written, per policy.
 --
 -- WIDEN-ONLY / ALLOW ROWS ONLY / MATCHED BY NAME / HAND-WRITTEN SQL — same reasons as V202609251200

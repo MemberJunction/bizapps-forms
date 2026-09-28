@@ -127,8 +127,8 @@ export const AUTOMATION_RUNNER_GRANTS: readonly RunnerGrant[] = [
     entityName: 'MJ: Record Geo Codes',
     read: true, create: true, update: true,
     reason:
-      "MJ's geocode sync runs after every save of a geo-enabled record, and People is one: it finds, creates, then re-saves the " +
-      'RecordGeoCode row for the Person Upsert Respondent Person creates or updates',
+      "Common.LogActivity (fired when Upsert Respondent Person creates a Person) saves an Activity, whose writable Location " +
+      "field makes MJ's geocode sync find, create, then re-save that Activity's RecordGeoCode row as this principal",
   },
   // Sibling apps: the built-in hooks' targets.
   {
@@ -265,8 +265,12 @@ function joinAsProse(items: readonly string[]): string {
  *
  * WHY THE "CANNOT" LINE LISTS CORE'S LOG LINES. A live smoke showed that each submit creating a
  * Person logs four lines, and naming only one as expected sent operators chasing the other three.
- * Where a durable submitter is registered, core attempts the submit, is refused a read on
- * `MJ: Task Types`, logs `[TaskGraphService] Submit failed`, and falls back inline. Where none is
+ * Where a durable submitter is registered, core attempts the submit, is refused, logs
+ * `[TaskGraphService] Submit failed`, and falls back inline. WHICH refusal depends on the grants, so
+ * the line names the family rather than one member: with no grants it is a refused read on
+ * `MJ: Task Types` (twice); with Read there but no `AI Workflow` row it is a refused Create on
+ * `MJ: Task Types`; with the row present it is a refused Create on `MJ: Tasks` (all measured or
+ * traced on MJ 6.1.4, `TaskGraphService.ensureTaskType`). Where none is
  * (`MJ_DISABLE_TASK_GRAPH_DISPATCHER=1`, or a core without one), MJ takes its deferred-local path:
  * the action runs in-process after the save commits, and none of those lines appear.
  */
@@ -289,7 +293,7 @@ export function describeDurableDispatch(principalName: string, lookup: Permissio
     `its save commits when this host has no durable submitter — for example bizapps-common's ` +
     `Common.LogActivity when Upsert Respondent Person creates a Person. This is deliberate (queued ` +
     `tasks execute as the system user). Where a durable submitter is registered, core logs on each such ` +
-    `submit a refused read on ${CORE_TASK_TYPES}, a "[TaskGraphService] Submit failed" line and "asked ` +
+    `submit a refused read or create on ${CORE_TASK_TYPES} or ${CORE_TASKS}, a "[TaskGraphService] Submit failed" line and "asked ` +
     `for durable dispatch but ran inline instead"; all of these are expected. In-process runs share ` +
     `this process's database provider; see MemberJunction/bizapps-common#195.`
   );

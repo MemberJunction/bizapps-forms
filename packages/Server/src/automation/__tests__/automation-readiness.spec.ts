@@ -2,7 +2,7 @@
  * The boot-time report on whether the automation principal holds the grants the shipped on-submit
  * automations need (#239).
  *
- * A missing runner grant has shipped five times (#60 three times, AI Prompt Runs, #239), and each
+ * A missing runner grant has shipped six times (#60 three times, AI Prompt Runs, #239, #269), and each
  * time the only symptom was a best-effort, per-submit log line nobody connected to an install-time
  * permission. These pin the report's behaviour, and — the drift pin at the bottom — that the grant
  * table it checks is exactly the one the app ships in `metadata/`.
@@ -84,6 +84,15 @@ describe('assessAutomationReadiness', () => {
     expect(reasons[0]).toContain("lacks Read on 'MJ_BizApps_Tasks: Task Type Status'");
   });
 
+  it("gives the Record Geo Codes grant the Activity's geocode as its reason — a Person save never geocodes (#269)", () => {
+    // People's Geo* fields are all virtual, and core geocodes only an entity with a writable geo
+    // field. The row the runner writes is for the Activity Common.LogActivity saves.
+    const grant = AUTOMATION_RUNNER_GRANTS.find((g) => g.entityName === 'MJ: Record Geo Codes');
+    expect(grant?.reason).toContain('Common.LogActivity');
+    expect(grant?.reason).toContain('Activity');
+    expect(grant?.reason).not.toMatch(/People is one|creates or updates/);
+  });
+
   it('names Update on Record Geo Codes — geocoding re-saves the row it just created (#269)', () => {
     const perms = grantedLookup();
     perms.set('MJ: Record Geo Codes', { CanRead: true, CanCreate: true, CanUpdate: false });
@@ -122,6 +131,17 @@ describe('describeDurableDispatch', () => {
     expect(line).toContain('MJ: Task Types');
     expect(line).toContain('[TaskGraphService] Submit failed');
     expect(line).toContain('asked for durable dispatch but ran inline instead');
+  });
+
+  it('does not promise one refusal: a principal with Read on MJ: Task Types is refused a create instead', () => {
+    // Measured on MJ 6.1.4: Read on MJ: Task Types without Create on MJ: Tasks still reads "cannot",
+    // and core then logs "Does NOT have permission to Create MJ: Task Types records", not a refused read.
+    const line = describeDurableDispatch(
+      PRINCIPAL,
+      lookupOf({ 'MJ: Task Types': readOnly }),
+    );
+    expect(line).toContain('run in-process');
+    expect(line).toContain('a refused read or create on MJ: Task Types or MJ: Tasks');
   });
 
   it('does not claim the in-process run is always inside the submission: no submitter means after the save commits', () => {

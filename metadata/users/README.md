@@ -45,9 +45,10 @@ reserved by RFC 2606 precisely so an address can be unroutable on purpose.
 - **MJ engines every action run goes through:** `MJ: Action Execution Logs` and `MJ: AI Prompt
   Runs` (read + create + update), `MJ: File Entity Record Links` (read + create + delete, for
   binding attachments), read on `MJ: Actions` (MJ resolves an entity action by name before running
-  it), and read + create + update on `MJ: Record Geo Codes` (core's geocode sync runs after every
-  save of a geo-enabled Person: it finds, creates, then re-saves the row `Upsert Respondent Person`
-  triggers — #269). That grant widens binding reach: with `FORMS_BINDING_ALLOWED_ENTITIES` unset
+  it), and read + create + update on `MJ: Record Geo Codes` (when `Upsert Respondent Person`
+  creates a Person, `Common.LogActivity` saves an Activity as the runner, and core's geocode sync
+  finds, creates, then re-saves that Activity's row — Activities has a writable `Location` field;
+  People's geo fields are all virtual, so a Person save itself never geocodes — #269). That grant widens binding reach: with `FORMS_BINDING_ALLOWED_ENTITIES` unset
   (unrestricted), a form author can bind answers into the geocode row of any record. It ships
   anyway, because geocodes are derived, low-sensitivity data and the runner already has read +
   create + update on People, but keep `MJ: Record Geo Codes` out of `FORMS_BINDING_ALLOWED_ENTITIES`.
