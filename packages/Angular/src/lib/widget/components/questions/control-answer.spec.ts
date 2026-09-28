@@ -56,7 +56,9 @@ describe('readCompositeParts', () => {
   });
 
   it('omits a field the reader cannot find, rather than inventing a blank one', () => {
-    expect(readCompositeParts(['a', 'b'], (field) => (field === 'a' ? 'x' : undefined))).toEqual({ a: 'x' });
+    // toStrictEqual, not toEqual: toEqual treats `{ b: undefined }` as `{}`, so it could not tell an
+    // omitted field from one invented as undefined — the exact difference this case is about.
+    expect(readCompositeParts(['a', 'b'], (field) => (field === 'a' ? 'x' : undefined))).toStrictEqual({ a: 'x' });
   });
 
   it('reads nothing for an empty field list', () => {
