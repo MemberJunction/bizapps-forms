@@ -22,6 +22,14 @@ describe('FormAssetService uses the image optimizer — source smoke', () => {
     const buildAt = code.indexOf('buildAssetFormData(optimized, formId)');
     expect(optimizeAt).toBeGreaterThan(-1);
     expect(buildAt).toBeGreaterThan(optimizeAt);
-    expect(code).not.toContain('buildAssetFormData(file, formId)');
+  });
+
+  it('sends the original only inside the one-shot retry after a rejected type', () => {
+    const firstSend = code.indexOf('buildAssetFormData(optimized, formId)');
+    const retryCheck = code.indexOf('!shouldRetryWithOriginal(');
+    const originalSend = code.indexOf('buildAssetFormData(file, formId)');
+    expect(retryCheck).toBeGreaterThan(firstSend);
+    expect(originalSend).toBeGreaterThan(retryCheck);
+    expect(code.split('buildAssetFormData(file, formId)')).toHaveLength(2); // exactly one original send
   });
 });

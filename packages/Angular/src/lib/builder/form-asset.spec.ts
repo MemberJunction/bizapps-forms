@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assetErrorMessage, buildAssetFormData, parseAssetResponse } from './form-asset.service';
+import { AssetUploadError, assetErrorMessage, buildAssetFormData, parseAssetResponse, shouldRetryWithOriginal } from './form-asset.service';
 import { isAcceptedType } from './image-formats';
 
 /** A stand-in File; the browser type is not available under the node test environment. */
@@ -108,5 +108,27 @@ describe('isAcceptedType — the local screen before an upload', () => {
 
   it('rejects a blank type rather than guessing', () => {
     expect(isAcceptedType('')).toBe(false);
+  });
+});
+
+describe('shouldRetryWithOriginal', () => {
+  const original = fileNamed('photo.jpg');
+  const optimized = fileNamed('photo.webp');
+
+  it('retries on a 415 when the optimizer changed the file (the server may not accept WebP)', () => {
+    expect(shouldRetryWithOriginal(new AssetUploadError('nope', 415), optimized, original)).toBe(true);
+  });
+
+  it('does not retry a 415 for the original itself: same answer forever', () => {
+    expect(shouldRetryWithOriginal(new AssetUploadError('nope', 415), original, original)).toBe(false);
+  });
+
+  it('does not retry other statuses', () => {
+    expect(shouldRetryWithOriginal(new AssetUploadError('too big', 413), optimized, original)).toBe(false);
+    expect(shouldRetryWithOriginal(new AssetUploadError('offline', 0), optimized, original)).toBe(false);
+  });
+
+  it('does not retry an error that is not an upload failure', () => {
+    expect(shouldRetryWithOriginal(new Error('boom'), optimized, original)).toBe(false);
   });
 });
