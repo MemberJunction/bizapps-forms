@@ -7,6 +7,7 @@ import {
   MAX_IMAGE_EDGE_PX,
   SKIP_BELOW_BYTES,
   WEBP_QUALITY,
+  isAnimatedImage,
   optimizeImageForUpload,
   pickOutputType,
   planResize,
@@ -16,6 +17,67 @@ import {
 } from './image-optimize';
 
 const KB = 1024;
+
+const ascii = (s: string): number[] => [...s].map((c) => c.charCodeAt(0));
+const le32 = (n: number): number[] => [n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >>> 24) & 255];
+const be32 = (n: number): number[] => [(n >>> 24) & 255, (n >> 16) & 255, (n >> 8) & 255, n & 255];
+
+/** A RIFF/WEBP header whose chunks are `[fourcc, payload]`; payloads are padded to even length. */
+function webp(chunks: Array<[string, number[]]>): Uint8Array {
+  const body = chunks.flatMap(([id, data]) => [...ascii(id), ...le32(data.length), ...data, ...(data.length % 2 ? [0] : [])]);
+  return Uint8Array.from([...ascii('RIFF'), ...le32(body.length + 4), ...ascii('WEBP'), ...body]);
+}
+
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+/** A PNG header whose chunks are `[type, data]`, each with a (dummy) CRC. */
+function png(chunks: Array<[string, number[]]>): Uint8Array {
+  const body = chunks.flatMap(([id, data]) => [...be32(data.length), ...ascii(id), ...data, 0, 0, 0, 0]);
+  return Uint8Array.from([...PNG_SIGNATURE, ...body]);
+}
+
+describe('isAnimatedImage', () => {
+  const vp8xFlags = (flags: number): number[] => [flags, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+  it('detects an animated WebP by the VP8X animation flag', () => {
+    expect(isAnimatedImage(webp([['VP8X', vp8xFlags(0x02)], ['VP8 ', [1, 2, 3, 4]]]), 'image/webp')).toBe(true);
+  });
+
+  it('detects an animated WebP by an ANIM chunk alone', () => {
+    expect(isAnimatedImage(webp([['VP8X', vp8xFlags(0)], ['ANIM', [0, 0, 0, 0, 0, 0]]]), 'image/webp')).toBe(true);
+  });
+
+  it('treats a still WebP as still (VP8X without the flag, and plain VP8)', () => {
+    expect(isAnimatedImage(webp([['VP8X', vp8xFlags(0x10)], ['VP8 ', [1, 2, 3, 4]]]), 'image/webp')).toBe(false);
+    expect(isAnimatedImage(webp([['VP8 ', [1, 2, 3, 4]]]), 'image/webp')).toBe(false);
+  });
+
+  it('detects an APNG by acTL before the first IDAT', () => {
+    const header = png([['IHDR', new Array(13).fill(0)], ['acTL', [0, 0, 0, 2, 0, 0, 0, 0]], ['IDAT', [1, 2]]]);
+    expect(isAnimatedImage(header, 'image/png')).toBe(true);
+  });
+
+  it('treats a still PNG as still, even with an acTL after IDAT', () => {
+    expect(isAnimatedImage(png([['IHDR', new Array(13).fill(0)], ['IDAT', [1, 2]]]), 'image/png')).toBe(false);
+    expect(isAnimatedImage(png([['IHDR', new Array(13).fill(0)], ['IDAT', [1, 2]], ['acTL', [0, 0, 0, 2, 0, 0, 0, 0]]]), 'image/png')).toBe(false);
+  });
+
+  it('returns false for truncated or malformed input rather than throwing', () => {
+    expect(isAnimatedImage(new Uint8Array(0), 'image/webp')).toBe(false);
+    expect(isAnimatedImage(webp([['VP8X', vp8xFlags(0x02)]]).slice(0, 14), 'image/webp')).toBe(false);
+    expect(isAnimatedImage(png([['IHDR', new Array(13).fill(0)]]).slice(0, 10), 'image/png')).toBe(false);
+    expect(isAnimatedImage(Uint8Array.from(PNG_SIGNATURE.slice(0, 5)), 'image/png')).toBe(false);
+    expect(isAnimatedImage(Uint8Array.from([...ascii('RIFF'), ...le32(4), ...ascii('WAVE')]), 'image/webp')).toBe(false);
+  });
+
+  it('stops at a chunk that claims to run past the header', () => {
+    const huge = Uint8Array.from([...ascii('RIFF'), ...le32(0), ...ascii('WEBP'), ...ascii('JUNK'), ...le32(0xffffffff)]);
+    expect(isAnimatedImage(huge, 'image/webp')).toBe(false);
+  });
+
+  it('returns false for any other content type, whatever the bytes', () => {
+    expect(isAnimatedImage(webp([['VP8X', vp8xFlags(0x02)]]), 'image/jpeg')).toBe(false);
+  });
+});
 
 describe('planResize', () => {
   it('skips a GIF whatever its size, so an animation survives', () => {
@@ -172,6 +234,15 @@ describe('optimizeImageForUpload', () => {
     const gif = new File([new Uint8Array(900 * KB)], 'party.gif', { type: 'image/gif' });
     const codec = fakeCodec({ width: 1, height: 1, encoded: [], decodeError: new Error('must not decode') });
     expect(await optimizeImageForUpload(gif, codec)).toBe(gif);
+  });
+
+  it('returns an animated WebP untouched without decoding it', async () => {
+    const header = webp([['VP8X', [0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0]]]);
+    const animated = new File([header, new Uint8Array(400 * KB)], 'spin.webp', { type: 'image/webp' });
+    const codec = fakeCodec({ width: 1, height: 1, encoded: [], decodeError: new Error('must not decode') });
+    const decode = vi.spyOn(codec, 'decode');
+    expect(await optimizeImageForUpload(animated, codec)).toBe(animated);
+    expect(decode).not.toHaveBeenCalled();
   });
 
   it('returns a small image untouched', async () => {

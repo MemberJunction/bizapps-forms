@@ -7,8 +7,8 @@
  * (`sharp`) on every host that installs Forms. The builder already holds the `File`, and every
  * modern browser can decode and re-encode it with a canvas.
  *
- * The contract is "never worse than today": anything this module cannot do (a GIF, a browser
- * without `createImageBitmap`, a file it cannot decode, a result that is not smaller) falls back
+ * The contract is "never worse than today": anything this module cannot do (an animated GIF, WebP
+ * or PNG, a browser without `createImageBitmap`, a file it cannot decode, a result that is not smaller) falls back
  * to the original file, which uploads exactly as before. The server's type and size checks remain
  * the authority.
  *
@@ -21,6 +21,11 @@ export const MAX_IMAGE_EDGE_PX = 1600;
 export const SKIP_BELOW_BYTES = 300 * 1024;
 export const WEBP_QUALITY = 0.82;
 export const JPEG_QUALITY = 0.85;
+
+/** Header bytes read to look for animation markers; both formats put them before the pixel data. */
+export const ANIMATION_SNIFF_BYTES = 64 * 1024;
+/** Cap on chunks visited while sniffing, so a hostile header cannot keep the scan spinning. */
+const MAX_HEADER_CHUNKS = 64;
 
 export type OutputImageType = 'image/webp' | 'image/jpeg' | 'image/png';
 
@@ -50,12 +55,71 @@ function bareType(contentType: string): string {
   return contentType.split(';')[0].trim().toLowerCase();
 }
 
+const readAscii = (b: Uint8Array, at: number, len: number): string => String.fromCharCode(...b.subarray(at, at + len));
+const readLe32 = (b: Uint8Array, at: number): number => (b[at] | (b[at + 1] << 8) | (b[at + 2] << 16) | (b[at + 3] << 24)) >>> 0;
+const readBe32 = (b: Uint8Array, at: number): number => ((b[at] << 24) | (b[at + 1] << 16) | (b[at + 2] << 8) | b[at + 3]) >>> 0;
+
+function isAnimatedWebp(h: Uint8Array): boolean {
+  if (h.length < 12 || readAscii(h, 0, 4) !== 'RIFF' || readAscii(h, 8, 4) !== 'WEBP') {
+    return false;
+  }
+  let at = 12;
+  for (let n = 0; n < MAX_HEADER_CHUNKS && at + 8 <= h.length; n++) {
+    const id = readAscii(h, at, 4);
+    if (id === 'ANIM') {
+      return true;
+    }
+    if (id === 'VP8X' && at + 8 < h.length && (h[at + 8] & 0x02) !== 0) {
+      return true;
+    }
+    const size = readLe32(h, at + 4);
+    at += 8 + size + (size % 2); // payloads are padded to even length
+  }
+  return false;
+}
+
+function isAnimatedPng(h: Uint8Array): boolean {
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (h.length < signature.length || signature.some((byte, i) => h[i] !== byte)) {
+    return false;
+  }
+  let at = signature.length;
+  for (let n = 0; n < MAX_HEADER_CHUNKS && at + 8 <= h.length; n++) {
+    const type = readAscii(h, at + 4, 4);
+    if (type === 'acTL') {
+      return true;
+    }
+    if (type === 'IDAT') {
+      return false; // acTL is only meaningful before the first IDAT
+    }
+    at += 12 + readBe32(h, at); // length + type + data + CRC
+  }
+  return false;
+}
+
+/**
+ * True when `header` (the first bytes of a file) marks an animated WebP or APNG. Pure. Truncated
+ * or malformed headers, and every other type, answer false: the caller then treats the image as
+ * a still one, which is the same as before this check existed.
+ */
+export function isAnimatedImage(header: Uint8Array, contentType: string): boolean {
+  switch (bareType(contentType)) {
+    case 'image/webp':
+      return isAnimatedWebp(header);
+    case 'image/png':
+      return isAnimatedPng(header);
+    default:
+      return false;
+  }
+}
+
 /** Decide whether and how to resize. Pure. Throws on dimensions no real image has. */
 export function planResize(width: number, height: number, bytes: number, contentType: string): ResizePlan {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     throw new Error(`invalid image dimensions ${width}×${height}`);
   }
   // Resizing a GIF keeps only its first frame, so an animated one would silently stop moving.
+  // (Animated WebP/APNG are caught earlier, by their header, in optimizeImageForUpload.)
   if (bareType(contentType) === 'image/gif') {
     return { action: 'skip' };
   }
@@ -140,6 +204,10 @@ export async function optimizeImageForUpload(file: File, codec: ImageCodec = bro
   }
   let decoded: DecodedImage | undefined;
   try {
+    // Animated WebP and APNG decode to frame 0 like a GIF does, so they are left alone too.
+    if ((sourceType === 'image/webp' || sourceType === 'image/png') && isAnimatedImage(new Uint8Array(await file.slice(0, ANIMATION_SNIFF_BYTES).arrayBuffer()), sourceType)) {
+      return file;
+    }
     decoded = await codec.decode(file);
     const plan = planResize(decoded.width, decoded.height, file.size, sourceType);
     if (plan.action === 'skip') {
