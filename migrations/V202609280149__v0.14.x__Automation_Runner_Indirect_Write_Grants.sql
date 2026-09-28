@@ -9,14 +9,14 @@
 --      but with a `TaskTypeStatus` seeded for the task's type, the task is saved with
 --      `TaskTypeStatusID = NULL`. bizapps-tasks' `TaskEntityServer.loadDefaultTaskTypeStatus` runs a
 --      RunView against `MJ_BizApps_Tasks: Task Type Status` to resolve the type's default status; the
---      runner cannot read it, the RunView fails, and the failure is swallowed into "no default status"
---      rather than surfaced. Silent degradation, not a thrown error.
+--      runner cannot read it, the RunView fails, and the failure is only logged, never surfaced to
+--      whoever saved the task. Silent degradation, not a thrown error.
 --
 --   2. `Forms: Upsert Respondent Person` creating or updating a geo-enabled Person fires MJ core's
 --      geocode sync (`GeoCodeSyncService`) after the save. It finds no existing `MJ: Record Geo Codes`
 --      row, CREATEs one, then immediately RE-SAVES it with the lookup result — and that second save is
---      an UPDATE. With Read + Create only (what issue #269's own table asked for) the row is created
---      and then stuck at `pending` forever: `Does NOT have permission to Update MJ: Record Geo Codes`.
+--      an UPDATE. With Read + Create only (what issue #269's own table asked for), that re-save is
+--      refused and logged on every submit: `Does NOT have permission to Update MJ: Record Geo Codes`.
 --      The issue's table under-asked; Update is required, not optional.
 --
 -- WHY EACH FLAG.
@@ -52,34 +52,39 @@
 --      behaviour for this principal, and stays. Its concurrency cost is tracked separately as
 --      bizapps-common#195 / MemberJunction/MJ#4786 — it is not a Forms grant to fix.
 --
--- SUPERSEDES a paragraph of V202609251200, in place, rather than editing that shipped file (history is
+-- SUPERSEDES a paragraph of V202609251200, rather than editing that shipped file (history is
 -- append-only — see migrations/README.md). Its "WHAT IS DELIBERATELY NOT GRANTED" paragraph reasoned
 -- that `MJ: Record Geo Codes` Create was safe to withhold because "the scheduled Geocoding Maintenance
--- job backfills it." That assumed the runner's own save would fail cleanly and a later batch job would
--- catch up. It does not: the runner's OWN inline save re-saves the row it just created and fails that
--- Update on every single submit, logging the same permission error forever — there is no window in
--- which the backfill job is the only thing standing between "pending" and "resolved". Read this file's
--- header as the current word on that entity; V202609251200's text is left as written, per policy.
+-- job backfills it." That assumed the scheduled job was the thing that would settle the row. It is
+-- not: the runner's own inline save re-saves the row it just created and that Update is refused and
+-- logged on every single submit. Read this file's header as the current word on that entity;
+-- V202609251200's text is left as written, per policy.
 --
 -- WIDEN-ONLY / ALLOW ROWS ONLY / MATCHED BY NAME / HAND-WRITTEN SQL — same reasons as V202609251200
 -- (read that file's header for the full argument): an existing Allow row for (role, entity) has each
 -- needed flag raised and nothing lowered, including a hand-added core task-graph grant this migration
--- does not touch or revoke (the boot warning in `automation-readiness.ts` names it instead — a
--- migration that revoked an operator's own grant would be a worse surprise than the boot warning it
--- replaces); only `Type = 'Allow'` rows are read or written, a Deny row is left exactly as an operator
--- wrote it; role and entities are matched by `Name`, not GUID, because `Role.Name` is UNIQUE and a
--- sibling app installed first can mint the role under a different ID; and this ships as hand-written
--- SQL — not a regenerated seed — because `metadata/entity-permissions/.entity-permissions.json` already
--- declares both rows under the SAME ids this file inserts, so a future full regeneration reproduces
--- these exact rows rather than minting duplicates.
+-- does not touch or revoke — a migration that silently revoked an operator's own grant would be a
+-- worse surprise than leaving it in place. Instead, Forms' boot-time automation readiness report
+-- (`automation-readiness.ts`, Task 2 of this same PR) warns when the principal can submit task
+-- graphs, naming the grant to remove. Only `Type = 'Allow'` rows are read or written, a Deny row is
+-- left exactly as an operator wrote it; role and entities are matched by `Name`, not GUID, because
+-- `Role.Name` is UNIQUE and a sibling app installed first can mint the role under a different ID; and
+-- this ships as hand-written SQL — not a regenerated seed — because
+-- `metadata/entity-permissions/.entity-permissions.json` already declares both rows under the SAME
+-- ids this file inserts, so a future full regeneration reproduces these exact rows rather than
+-- minting duplicates.
 --
--- ONLY THE ROLE IS A THROW PRECONDITION. Both target entities are CONDITIONAL: a database can be a
--- hard-dependency host of bizapps-tasks and still run an older version without `Task Type Status`
--- (arrived later than the 0-series this app accepts), and a pre-geocoding MJ core has no
--- `MJ: Record Geo Codes` at all. Either absence means the hook that would use the grant already has
--- nothing to write to, so each is SKIPPED with a PRINT naming its provider — never a THROW — and the
--- boot-time automation readiness report (`packages/Server/src/automation/automation-readiness.ts`)
--- names the still-missing grant at every start once that entity exists.
+-- ONLY THE ROLE IS A THROW PRECONDITION. Both target entities are CONDITIONAL. `Task Type Status`
+-- is younger than the floor Forms accepts: bizapps-tasks created it in
+-- `V202608200800__v1.2.x_TaskType_Code_Statuses_Workflow_Hooks.sql` (1.2.x), while `mj-app.json`
+-- declares `mj-bizapps-tasks >=1.1.0` — a host on 1.1.x is a valid hard-dependency install with no
+-- such entity yet. A database can also lack bizapps-tasks altogether (the shared dev database has
+-- no tasks schema at all). `MJ: Record Geo Codes` is kept conditional defensively: a core whose
+-- metadata lacks the entity skips it with a PRINT rather than failing the whole migration. Either
+-- absence means the hook that would use the grant already has nothing to write to, so each is
+-- SKIPPED with a PRINT naming its provider — never a THROW — and the boot-time automation readiness
+-- report (`packages/Server/src/automation/automation-readiness.ts`) names the still-missing grant
+-- at every start once that entity exists.
 
 DECLARE @RunnerRoleID UNIQUEIDENTIFIER = (
     SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Forms Automation Runner');

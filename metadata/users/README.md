@@ -48,11 +48,11 @@ reserved by RFC 2606 precisely so an address can be unroutable on purpose.
   it), and read + create + update on `MJ: Record Geo Codes` (core's geocode sync runs after every
   save of a geo-enabled Person: it finds, creates, then re-saves the row `Upsert Respondent Person`
   triggers — #269).
-- **The built-in hooks' targets in the two sibling apps:** `People` (read + create + update);
-  Task Types (read), Tasks and Task Links (create only) and Task Type Status (read only, so
-  `Create Followup Task` resolves the task's default status — #269) for `Create Followup Task`;
-  Activity Types (read), Activities (read + create) and Activity Links (create) for the
-  `Common.LogActivity` action that creating a Person fires.
+- **The built-in hooks' targets in the two sibling apps:** `People` (read + create + update); for
+  `Create Followup Task` — Task Types (read), Tasks and Task Links (create only), and Task Type
+  Status (read only, so the task's default status resolves — #269); for the `Common.LogActivity`
+  action that creating a Person fires — Activity Types (read), Activities (read + create) and
+  Activity Links (create).
 
 No Delete anywhere except the attachment links. Write on core's task-graph entities
 (`MJ: Task Types` / `MJ: Tasks` / `MJ: Task Dependencies`) is withheld on purpose, for two measured
