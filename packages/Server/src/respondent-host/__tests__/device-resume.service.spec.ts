@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const logged: string[] = [];
+
+beforeEach(() => {
+  logged.length = 0;
+});
 
 vi.mock('@memberjunction/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memberjunction/core')>();
@@ -550,7 +554,10 @@ describe('runForget', () => {
     expect(out.status).toBe(204);
     expect(out.setCookie).toContain('Max-Age=0');
     expect(rec.revokes).toHaveLength(0);
-    expect(logged.some((message) => message.includes('r1'))).toBe(true);
+    // The precise phrase the implementation logs, not a bare 'r1' — a loose substring match could
+    // pass on text an earlier, unrelated test happened to log, since `logged` is a module-level
+    // array cleared only by this file's own `beforeEach`.
+    expect(logged.some((message) => message.includes('for response r1'))).toBe(true);
   });
 
   it('clears the cookie even when there is no pointer to revoke', async () => {
