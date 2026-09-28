@@ -400,7 +400,9 @@ export class FormQuestionComponent {
    * same reason — has no snapshot to go stale, so both share this one command.
    */
   protected syncComposite(): void {
-    const parts = readCompositeParts(this.compositeFields(), (field) => this.textControl(`${this.inputId()}-${field}`)?.value);
+    const parts = readCompositeParts(this.compositeFields(), (field) =>
+      this.textControl(`${this.inputId()}-${field}`)?.value,
+    );
     this.emitComposite({ ...this.compositeValue(), ...parts });
   }
 
