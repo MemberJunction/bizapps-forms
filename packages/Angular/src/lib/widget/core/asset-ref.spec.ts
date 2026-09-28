@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
-import { mapCssUrls, mapDefinitionAssets, mapStyleTokenAssets, originOf, resolveAssetUrl, toAssetRef } from './asset-ref';
+import {
+  mapCssUrls,
+  mapDefinitionAssets,
+  mapStyleTokenAssets,
+  originOf,
+  resolveAssetUrl,
+  resolveDefinitionForRender,
+  resolveStyleTokensForRender,
+  toAssetRef,
+} from './asset-ref';
 
 const ID = 'a1137587-b23a-4f0d-9049-efc0bdcfc59a';
 const ID_UPPER = 'A1137587-B23A-4F0D-9049-EFC0BDCFC59A';
@@ -224,5 +233,46 @@ describe('mapDefinitionAssets', () => {
 
     // Input must never be mutated.
     expect(def).toEqual(before);
+  });
+});
+
+describe('resolveDefinitionForRender', () => {
+  it('resolves every asset reference against the origin of the given graphqlUrl', () => {
+    const def = definition();
+    const resolved = resolveDefinitionForRender(def, 'http://localhost:4131');
+    expect(resolved.welcomeScreen?.mediaURL).toBe(`http://localhost:4131/forms/asset/${ID}`);
+    expect(resolved.pages[0]?.questions[0]?.options[0]?.imageURL).toBe(`http://localhost:4131/forms/asset/${ID}`);
+  });
+
+  it('tolerates a graphqlUrl with a trailing slash', () => {
+    const def = definition();
+    const resolved = resolveDefinitionForRender(def, 'http://localhost:4131/');
+    expect(resolved.welcomeScreen?.mediaURL).toBe(`http://localhost:4131/forms/asset/${ID}`);
+  });
+
+  it('resolves against the origin of a full graphql endpoint URL', () => {
+    const def = definition();
+    const resolved = resolveDefinitionForRender(def, 'https://h/graphql');
+    expect(resolved.welcomeScreen?.mediaURL).toBe(`https://h/forms/asset/${ID}`);
+  });
+
+  it('leaves asset references unchanged when graphqlUrl is empty', () => {
+    const def = definition();
+    const resolved = resolveDefinitionForRender(def, '');
+    expect(resolved.welcomeScreen?.mediaURL).toBe(`http://old/forms/asset/${ID}`);
+  });
+});
+
+describe('resolveStyleTokensForRender', () => {
+  it('resolves style-token asset references against the origin of the given graphqlUrl', () => {
+    const tokens = definition().styleTokens;
+    const resolved = resolveStyleTokensForRender(tokens, 'http://localhost:4131');
+    expect(resolved.logoURL).toBe(`http://localhost:4131/forms/asset/${ID}`);
+  });
+
+  it('leaves style-token asset references unchanged when graphqlUrl is empty', () => {
+    const tokens = definition().styleTokens;
+    const resolved = resolveStyleTokensForRender(tokens, '');
+    expect(resolved.logoURL).toBe(`http://old/forms/asset/${ID}`);
   });
 });

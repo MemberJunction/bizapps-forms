@@ -129,3 +129,21 @@ export function mapDefinitionAssets(
     })),
   };
 }
+
+/**
+ * Resolve every asset reference in a published form definition against the API origin a renderer
+ * is actually talking to. This is the seam `MjFormComponent.load()` calls at render time: the
+ * GraphQL endpoint a widget instance is configured with is the one host guaranteed to be
+ * reachable from this browser and to serve these bytes, which the upload-time host is not.
+ */
+export function resolveDefinitionForRender(
+  def: PublishedFormDefinition,
+  graphqlUrl: string,
+): PublishedFormDefinition {
+  return mapDefinitionAssets(def, (url) => resolveAssetUrl(url, originOf(graphqlUrl)));
+}
+
+/** Same resolution as {@link resolveDefinitionForRender}, for a bare `FormStyleTokens` (preview styling). */
+export function resolveStyleTokensForRender(tokens: FormStyleTokens, graphqlUrl: string): FormStyleTokens {
+  return mapStyleTokenAssets(tokens, (url) => resolveAssetUrl(url, originOf(graphqlUrl)));
+}
