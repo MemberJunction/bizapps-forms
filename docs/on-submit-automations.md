@@ -45,24 +45,37 @@ exactly the grants these hooks need (see `metadata/users/README.md`). If one of 
 missing on a host, the server says so at startup — `[Forms] On-submit automations are NOT ready:` —
 naming the entity, the missing permission and the hook that needs it.
 
-### Durable entity actions run inline for the runner
+### Durable entity actions run in-process for the runner
 
 Every hook above runs as a plain synchronous write, inside the submission request. Some of those
 writes carry their own durable entity action — bizapps-common's `Common.LogActivity`, fired when
 `Upsert Respondent Person` creates a `Person` — and MJ can run a durable entity action two ways: an
 async task-graph submission (queued, dispatched later) or inline (run immediately, in the caller's
 process). Which one happens depends on whether the calling principal can write MJ's core task-graph
-entities (`MJ: Task Types`, `MJ: Tasks`, `MJ: Task Dependencies`).
+entities (`MJ: Task Types`, `MJ: Tasks`, `MJ: Task Dependencies`). An entity action's graph has one
+node and no dependencies, and reuses an existing task type, so on MJ 6.1.4 Create on `MJ: Tasks`
+plus Read (or Create) on `MJ: Task Types` is already enough to submit one.
 
-`Forms Automation Runner` deliberately does **not** get those three grants (#269). MJ's dispatcher
+`Forms Automation Runner` deliberately gets **none** of those grants (#269). MJ's dispatcher
 executes a queued task graph as the **system user**, and granting an anonymous-submission-driven
 principal the right to create one would let it mint work that later runs with system privileges — a
 form author can already bind answers into any entity `FORMS_BINDING_ALLOWED_ENTITIES` allows, so
-that grant would be a real escalation, not a formality. Inline is therefore the correct, intended
-behaviour for this principal, and the once-per-submit "asked for durable dispatch but ran inline
-instead" log line is expected, not a symptom. The one caveat: an inline run shares this process's
-own database provider rather than a dispatcher's isolated one, which is the concurrency cost tracked
-by MemberJunction/bizapps-common#195 — not a Forms grant to fix.
+that grant would be a real escalation, not a formality. Running those actions in-process, instead
+of on MJ's task queue, is therefore the correct, intended behaviour for this principal. Where it
+runs depends on the host:
+
+- **A durable submitter is registered** (the normal MJ 6.1 host): core tries to submit the task
+  graph, is refused, and runs the action inline, inside the submission. Each submit whose automations
+  create a Person then logs a refused read on `MJ: Task Types` (twice), a
+  `[TaskGraphService] Submit failed … Could not create task type` line, and "asked for durable
+  dispatch but ran inline instead". All of these are expected, not symptoms.
+- **No durable submitter is registered** (`MJ_DISABLE_TASK_GRAPH_DISPATCHER=1`, or a core without
+  one): MJ takes its deferred-local path instead. The action runs in-process after the save commits,
+  and none of those lines are logged.
+
+The one caveat: an in-process run shares this process's own database provider rather than a
+dispatcher's isolated one, which is the concurrency cost tracked by
+MemberJunction/bizapps-common#195. It is not a Forms grant to fix.
 
 At startup, right after the grant report above, the server logs one more `[Forms]`-prefixed line —
 at `severity: 'warning'` via `LogErrorEx`, not as a readiness failure — stating which of the two

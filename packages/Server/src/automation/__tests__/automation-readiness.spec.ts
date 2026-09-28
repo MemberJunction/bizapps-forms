@@ -99,12 +99,34 @@ describe('describeDurableDispatch', () => {
   const none: EffectivePermissions = { CanRead: false, CanCreate: false, CanUpdate: false };
   const create: EffectivePermissions = { CanRead: true, CanCreate: true, CanUpdate: true };
 
-  it('says durable actions run inline, by design, when the principal cannot write the task graph', () => {
+  const readOnly: EffectivePermissions = { CanRead: true, CanCreate: false, CanUpdate: false };
+  const createOnly: EffectivePermissions = { CanRead: false, CanCreate: true, CanUpdate: false };
+
+  /** A lookup that returns `grants[entity]`, and `none` for any entity not named. */
+  function lookupOf(grants: Record<string, EffectivePermissions>): (name: string) => EffectivePermissions {
+    return (name) => grants[name] ?? none;
+  }
+
+  it('says durable actions run in-process, by design, when the principal cannot write the task graph', () => {
     const line = describeDurableDispatch(PRINCIPAL, () => none);
     expect(line).toContain(`'${PRINCIPAL}'`);
-    expect(line).toContain('durable entity actions fired by its writes run inline');
+    expect(line).toContain('cannot submit MJ task graphs');
+    expect(line).toContain('run in-process');
+    expect(line).toContain('deliberate');
     expect(line).toContain('queued tasks execute as the system user');
     expect(line).toContain('bizapps-common#195');
+  });
+
+  it('names every per-submit line core logs on the in-process path, so operators do not chase them', () => {
+    const line = describeDurableDispatch(PRINCIPAL, () => none);
+    expect(line).toContain('MJ: Task Types');
+    expect(line).toContain('[TaskGraphService] Submit failed');
+    expect(line).toContain('asked for durable dispatch but ran inline instead');
+  });
+
+  it('does not claim the in-process run is always inside the submission: no submitter means after the save commits', () => {
+    const line = describeDurableDispatch(PRINCIPAL, () => none);
+    expect(line).toContain('after its save commits');
   });
 
   it('tells the operator to remove a hand-added task-graph grant, because queued tasks run as system', () => {
@@ -114,15 +136,43 @@ describe('describeDurableDispatch', () => {
     for (const entity of TASK_GRAPH_ENTITIES) expect(line).toContain(entity);
   });
 
-  it('needs Create on ALL three: one missing means the submission fails and the action runs inline', () => {
-    for (const missing of TASK_GRAPH_ENTITIES) {
-      const line = describeDurableDispatch(PRINCIPAL, (name) => (name === missing ? none : create));
-      expect(line).toContain('run inline');
-    }
+  it('names the issue unambiguously, since the line is read outside this repo', () => {
+    const line = describeDurableDispatch(PRINCIPAL, () => create);
+    expect(line).toContain('MemberJunction/bizapps-forms#269');
+    expect(line).not.toMatch(/\(#269\)/);
+  });
+
+  it('can submit with only Create on MJ: Tasks and Read on MJ: Task Types: a one-node graph writes no dependency', () => {
+    const line = describeDurableDispatch(
+      PRINCIPAL,
+      lookupOf({ 'MJ: Tasks': createOnly, 'MJ: Task Types': readOnly }),
+    );
+    expect(line).toContain('can submit MJ task graphs');
+  });
+
+  it('can submit with Create on MJ: Task Types instead of Read: the first submit creates the AI Workflow type', () => {
+    const line = describeDurableDispatch(
+      PRINCIPAL,
+      lookupOf({ 'MJ: Tasks': createOnly, 'MJ: Task Types': createOnly }),
+    );
+    expect(line).toContain('can submit MJ task graphs');
+  });
+
+  it('cannot submit with Create on MJ: Tasks alone: the task type can be neither found nor created', () => {
+    const line = describeDurableDispatch(PRINCIPAL, lookupOf({ 'MJ: Tasks': createOnly }));
+    expect(line).toContain('run in-process');
+  });
+
+  it('cannot submit with Read and Create on MJ: Task Types but nothing on MJ: Tasks', () => {
+    const line = describeDurableDispatch(
+      PRINCIPAL,
+      lookupOf({ 'MJ: Task Types': { CanRead: true, CanCreate: true, CanUpdate: false } }),
+    );
+    expect(line).toContain('run in-process');
   });
 
   it('treats a core without the task-graph entities as unable to submit, without throwing', () => {
-    expect(describeDurableDispatch(PRINCIPAL, () => undefined)).toContain('run inline');
+    expect(describeDurableDispatch(PRINCIPAL, () => undefined)).toContain('run in-process');
   });
 
   it('is not part of the grant floor: the readiness report never asks for task-graph writes', () => {

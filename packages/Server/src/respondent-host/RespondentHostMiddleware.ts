@@ -324,7 +324,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
    * check just used, so both verdicts agree on what the principal actually holds. It is logged via
    * `LogErrorEx` at `severity: 'warning'`, not `LogError`, because it is not a failure: withholding
    * the task-graph grants is Forms' deliberate choice (see the file header on `automation-readiness.ts`),
-   * so "durable actions run inline" is expected, correct behaviour that still deserves one line at
+   * so "durable actions run in-process" is expected, correct behaviour that still deserves one line at
    * boot rather than living only in a per-submit log.
    */
   private reportAutomationReadiness(): void {

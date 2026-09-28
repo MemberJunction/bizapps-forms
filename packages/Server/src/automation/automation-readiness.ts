@@ -24,8 +24,8 @@
  * principal hold its floor of grants", but "what happens to a durable entity action fired by one of
  * its writes". Forms deliberately withholds the core task-graph grants (`MJ: Task Types` /
  * `MJ: Tasks` / `MJ: Task Dependencies`) that would let the principal submit one, so this is a
- * boot-time WARNING, not a readiness failure — inline dispatch is the correct, intended behaviour
- * for this principal, not a gap in its grants.
+ * boot-time WARNING, not a readiness failure — running those actions in-process is the correct,
+ * intended behaviour for this principal, not a gap in its grants.
  */
 
 /** One entity grant the automation principal needs. Delete is never a need, so it is not modelled. */
@@ -213,50 +213,84 @@ export function assessAutomationReadiness(
   return reasons;
 }
 
+const CORE_TASK_TYPES = 'MJ: Task Types';
+const CORE_TASKS = 'MJ: Tasks';
+const CORE_TASK_DEPENDENCIES = 'MJ: Task Dependencies';
+
 /**
- * Core's task-graph entities: creating a task graph (MJ's durable queue) writes all three — a
+ * Core's task-graph entities: the three a task graph (MJ's durable queue) CAN write — a
  * `Task Type`, its `Tasks`, and their `Task Dependencies`. Deliberately the CORE-schema entities
  * (`MJ: …`), not `MJ_BizApps_Tasks: Task Types` / `MJ_BizApps_Tasks: Tasks`, which are a different,
  * sibling-app pair the runner IS granted (see `AUTOMATION_RUNNER_GRANTS` above) and which do not
  * enqueue anything durable.
+ *
+ * All three are named in the "remove Create on …" advice, because a host that hand-added #269's
+ * requested grants added all three. They are NOT all needed to submit an entity action's durable
+ * dispatch; see {@link describeDurableDispatch} for the real floor.
  */
-export const TASK_GRAPH_ENTITIES: readonly string[] = ['MJ: Task Types', 'MJ: Tasks', 'MJ: Task Dependencies'];
+export const TASK_GRAPH_ENTITIES: readonly string[] = [CORE_TASK_TYPES, CORE_TASKS, CORE_TASK_DEPENDENCIES];
+
+/** `['a', 'b', 'c']` as `a, b and c`. The advice is built from the list so the two cannot drift. */
+function joinAsProse(items: readonly string[]): string {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
 
 /**
- * The one boot line describing how durable entity actions behave for this principal (#269). Always
- * returns a message; which one depends on whether the principal can submit task graphs.
+ * The one boot line describing how durable entity actions behave for this principal
+ * (MemberJunction/bizapps-forms#269). Always returns a message; which one depends on whether the
+ * principal can submit task graphs.
  *
- * `canSubmit` is an honest approximation of what `TaskGraphService` actually does when it submits a
- * durable dispatch: it creates a Task Type, the Tasks, and their Dependencies, so Create on all
- * three is the floor. An entity absent from this host's metadata (pre-6.1 core has no `MJ: Task
- * Types`) means it cannot submit either — there is nothing to create a row in.
+ * `canSubmit` is the floor of what an entity action's durable dispatch actually writes on MJ 6.1.4,
+ * which is LESS than all three task-graph entities:
+ * - `DurableEntityActionTaskSubmitter.Submit` (`MJServer/src/services/DurableEntityActionTaskSubmitter.ts:41-47`)
+ *   submits a ONE-node graph with `dependsOn: []`, so `TaskGraphService.persistDependencies`
+ *   (`TaskGraph/src/TaskGraphService.ts:1581-1594`) writes no `MJ: Task Dependencies` row;
+ * - `TaskGraphService.ensureTaskType` (`TaskGraph/src/TaskGraphService.ts:1346-1360`) FINDS the
+ *   existing `AI Workflow` task type, and creates one only when none exists yet.
+ * So Create on `MJ: Tasks` plus Read OR Create on `MJ: Task Types` is enough. Requiring Create on
+ * all three would say "cannot" to a host that granted exactly that floor, whose queued tasks then
+ * run as the system user — a false all-clear on the one case this warning exists to catch. An
+ * entity absent from this host's metadata (pre-6.1 core has no `MJ: Task Types`) means it cannot
+ * submit either: there is nothing to read or write a row in.
  *
  * WHY THIS IS A WARNING, NOT A READINESS FAILURE. `assessAutomationReadiness` above reports a gap
  * against the floor Forms' own hooks need; this reports the CONSEQUENCE of a decision Forms made on
  * purpose (see the file header and #269's decision log): withholding the task-graph grants so that
  * queued tasks — which MJ's dispatcher runs as the SYSTEM user
  * (`UserCache.GetSystemUser()`, `MJServer/src/index.ts`) — can never be minted by an
- * anonymous-submission-driven principal. Inline dispatch is therefore the correct, intended
+ * anonymous-submission-driven principal. Running in-process is therefore the correct, intended
  * behaviour, not a gap to close; the "can" branch below exists because a host may have hand-added
  * the grants anyway, and that host needs to be told what it bought.
+ *
+ * WHY THE "CANNOT" LINE LISTS CORE'S LOG LINES. A live smoke showed that each submit creating a
+ * Person logs four lines, and naming only one as expected sent operators chasing the other three.
+ * Where a durable submitter is registered, core attempts the submit, is refused a read on
+ * `MJ: Task Types`, logs `[TaskGraphService] Submit failed`, and falls back inline. Where none is
+ * (`MJ_DISABLE_TASK_GRAPH_DISPATCHER=1`, or a core without one), MJ takes its deferred-local path:
+ * the action runs in-process after the save commits, and none of those lines appear.
  */
 export function describeDurableDispatch(principalName: string, lookup: PermissionLookup): string {
-  const canSubmit = TASK_GRAPH_ENTITIES.every((entityName) => lookup(entityName)?.CanCreate === true);
+  const taskTypes = lookup(CORE_TASK_TYPES);
+  const canSubmit =
+    lookup(CORE_TASKS)?.CanCreate === true && (taskTypes?.CanRead === true || taskTypes?.CanCreate === true);
   if (canSubmit) {
     return (
       `automation principal '${principalName}' can submit MJ task graphs, and MJ's dispatcher executes ` +
-      `queued tasks as the system user. Forms does not grant this: remove Create on MJ: Task Types, ` +
-      `MJ: Tasks and MJ: Task Dependencies from the roles '${principalName}' holds (#269). On MJ 6.1.4 ` +
-      `durable dispatch also drops every action parameter (MemberJunction/MJ#4794), so ` +
-      `Common.LogActivity fails instead of logging the activity.`
+      `queued tasks as the system user. Forms does not grant this: remove Create on ` +
+      `${joinAsProse(TASK_GRAPH_ENTITIES)} from the roles '${principalName}' holds ` +
+      `(MemberJunction/bizapps-forms#269). On MJ 6.1.4 durable dispatch also drops every action ` +
+      `parameter (MemberJunction/MJ#4794), so Common.LogActivity fails instead of logging the activity.`
     );
   }
   return (
     `automation principal '${principalName}' cannot submit MJ task graphs, so durable entity actions ` +
-    `fired by its writes run inline, inside the submission — for example bizapps-common's ` +
+    `fired by its writes run in-process instead of on MJ's task queue — inside the submission, or after ` +
+    `its save commits when this host has no durable submitter — for example bizapps-common's ` +
     `Common.LogActivity when Upsert Respondent Person creates a Person. This is deliberate (queued ` +
-    `tasks execute as the system user) and the per-submit "asked for durable dispatch but ran inline ` +
-    `instead" line is expected. Inline runs share this process's database provider; see ` +
-    `MemberJunction/bizapps-common#195.`
+    `tasks execute as the system user). Where a durable submitter is registered, core logs on each such ` +
+    `submit a refused read on ${CORE_TASK_TYPES}, a "[TaskGraphService] Submit failed" line and "asked ` +
+    `for durable dispatch but ran inline instead"; all of these are expected. In-process runs share ` +
+    `this process's database provider; see MemberJunction/bizapps-common#195.`
   );
 }
