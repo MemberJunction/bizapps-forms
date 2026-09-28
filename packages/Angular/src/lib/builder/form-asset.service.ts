@@ -21,7 +21,7 @@
  */
 import { Injectable } from '@angular/core';
 
-import { resolveApiOrigin, resolveApiToken } from '../shared/mj-api-origin';
+import { resolveApiBase, resolveApiToken } from '../shared/mj-api-origin';
 import { serverErrorText } from '../shared/server-error-text';
 // The upload POST and the anonymous read share one route, so one constant names both.
 import { ASSET_ROUTE } from '../widget/core/asset-ref';
@@ -109,18 +109,20 @@ export function assetErrorMessage(status: number, body: unknown): string {
 
 @Injectable({ providedIn: 'root' })
 export class FormAssetService {
-  /** True when there is an API origin and a session token to upload with. */
+  /** True when there is an API location and a session token to upload with. */
   public get canUpload(): boolean {
-    return !!resolveApiOrigin() && !!resolveApiToken();
+    return !!resolveApiBase() && !!resolveApiToken();
   }
 
   /** Upload one image for a form. Resolves with the stored asset, or rejects with a usable Error. */
   public upload(file: File, formId: string, onProgress?: AssetUploadProgress): Promise<UploadedAsset> {
-    const origin = resolveApiOrigin();
-    if (!origin) {
+    // The API BASE, not its origin: an MJAPI reverse-proxied at `/api` takes the upload at
+    // `/api/forms/asset`, and the bare origin would post past it (#270).
+    const apiBase = resolveApiBase();
+    if (!apiBase) {
       return Promise.reject(new Error('Cannot upload: the MemberJunction API location is not configured.'));
     }
-    return this.send(`${origin}${ASSET_ROUTE}`, buildAssetFormData(file, formId), onProgress);
+    return this.send(`${apiBase}${ASSET_ROUTE}`, buildAssetFormData(file, formId), onProgress);
   }
 
   /** XHR POST with upload-progress and typed JSON parsing. */

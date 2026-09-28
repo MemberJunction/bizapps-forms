@@ -31,4 +31,17 @@ describe('builder asset references (#270) — source smoke', () => {
     expect(stage).toContain('mapDefinitionAssets(this.definition(), resolveForBuilder)');
     expect(stage).toContain('mapStyleTokenAssets(tokens, resolveForBuilder)');
   });
+
+  it('the preview stage resolves against the API BASE, not the bare origin', () => {
+    // An MJAPI behind a path prefix serves `/api/forms/asset/<id>`; the origin alone 404s.
+    const stage = code('form-preview-stage.component.ts');
+    expect(stage).toContain('resolveAssetUrl(url, resolveApiBase())');
+    expect(stage).not.toContain('resolveApiOrigin');
+  });
+
+  it('the asset upload posts to the API BASE, so a prefix-deployed MJAPI receives it', () => {
+    const service = code('form-asset.service.ts');
+    expect(service).toContain('resolveApiBase()');
+    expect(service).not.toContain('resolveApiOrigin');
+  });
 });

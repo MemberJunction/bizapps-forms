@@ -156,6 +156,58 @@ describe('storedSnapshotFingerprint', () => {
   });
 });
 
+describe('fingerprints of asset references (#270)', () => {
+  const ID = '0b5f3c1e-8a2d-4c6f-9e1a-7d3b2c4e5f60';
+  const OTHER_ID = '9e8d7c6b-5a49-4382-9716-05f4e3d2c1b0';
+  const legacy = (id: string): string => `http://localhost:4000/forms/asset/${id}`;
+  const ref = (id: string): string => `/forms/asset/${id}`;
+
+  /** A snapshot shaped like `buildPublishedDefinition` output, with its images at `image(id)`. */
+  function withImages(image: (id: string) => string, optionId = ID): Record<string, unknown> {
+    return snapshot({
+      styleTokens: { cssVariables: { '--mjf-bg-image': `url("${image(ID)}")` }, logoURL: image(ID) },
+      welcomeScreen: { id: 'w1', screenType: 'Welcome', title: 'Hi', displayOrder: 0, mediaURL: image(ID) },
+      endScreens: [],
+      pages: [
+        {
+          id: 'p1',
+          displayOrder: 0,
+          questions: [
+            {
+              id: 'q1',
+              type: 'PictureChoice',
+              prompt: 'Pick',
+              isRequired: false,
+              displayOrder: 0,
+              options: [{ id: 'o1', label: 'A', value: 'A', displayOrder: 0, imageURL: image(optionId) }],
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  it('reads a legacy absolute-URL snapshot as unchanged against its relativised draft', () => {
+    // Publish now relativises, so an untouched legacy form's draft holds `/forms/asset/<id>`
+    // while its stored snapshot still holds the absolute URL. Those name the same image; if the
+    // fingerprint disagreed, every such form would claim unpublished changes forever.
+    const stored = storedSnapshotFingerprint(JSON.stringify(withImages(legacy)));
+    expect(stored).toBe(definitionFingerprint(withImages(ref)));
+  });
+
+  it('fingerprints an older snapshot lacking a collection as it stands, instead of throwing', () => {
+    const older = withImages(legacy);
+    delete older['endScreens'];
+    expect(() => storedSnapshotFingerprint(JSON.stringify(older))).not.toThrow();
+    expect(storedSnapshotFingerprint(JSON.stringify(older))).toContain(legacy(ID));
+  });
+
+  it('still sees a genuinely different image', () => {
+    const stored = storedSnapshotFingerprint(JSON.stringify(withImages(legacy)));
+    expect(stored).not.toBe(definitionFingerprint(withImages(ref, OTHER_ID)));
+  });
+});
+
 describe('publishControlState', () => {
   it('offers Publish when there is no baseline, even on a form marked Published', () => {
     // THE DEFECT. A Published form whose FormVersion read failed (or whose snapshot would not

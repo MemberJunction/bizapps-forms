@@ -36,9 +36,10 @@ export function resolveApiOrigin(): string {
  *
  * Deliberately not {@link resolveApiOrigin}: an MJAPI reverse-proxied at `https://h/api/graphql`
  * serves uploaded images at `/api/forms/asset/<id>`, so resolving a stored `/forms/asset/<id>`
- * against the bare origin would 404 (#270). A second function rather than a change to that one
- * because its existing callers (the respondent link, the upload and response-download URLs) are
- * outside #270; whether they too should honour a prefix is a separate question.
+ * against the bare origin would 404 (#270). The same holds for every request the builder makes to
+ * an MJAPI route — the asset upload and the response-file download use this too. It is a second
+ * function rather than a change to that one because the respondent link is built by
+ * `DistributionManagerComponent` against the origin, and #270 does not touch that link.
  * `apiBaseOf` already maps an empty or malformed URL to `''`, so no try/catch is needed here.
  */
 export function resolveApiBase(): string {

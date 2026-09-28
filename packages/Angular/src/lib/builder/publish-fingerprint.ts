@@ -32,6 +32,7 @@
  * same idea as RFC 8785 JSON Canonicalization) removes that whole class of false positive.
  */
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import { mapDefinitionAssets, toAssetRef } from '../widget/core/asset-ref';
 
 /**
  * Keys excluded from the comparison.
@@ -92,7 +93,15 @@ export function definitionFingerprint(definition: PublishedFormDefinition | unkn
   if (definition === null || typeof definition !== 'object') {
     return '';
   }
-  const source = definition as Record<string, unknown>;
+  // Asset references are compared in their host-independent form (#270). `buildPublishedDefinition`
+  // now relativises them, but a snapshot published before that still holds the absolute
+  // `http://<host>/forms/asset/<id>` — the same image, spelled differently — so without this every
+  // untouched legacy form with an uploaded image would claim unpublished changes forever. Done
+  // HERE, on the one path both sides of the comparison take (a stored snapshot reaches it through
+  // `storedSnapshotFingerprint`), so the draft and the baseline can never disagree about the rule.
+  const source = (
+    hasAssetBearingShape(definition) ? mapDefinitionAssets(definition, toAssetRef) : definition
+  ) as Record<string, unknown>;
   const comparable: Record<string, unknown> = {};
   for (const key of Object.keys(source)) {
     if (!IGNORED_TOP_LEVEL_KEYS.has(key)) {
@@ -100,6 +109,39 @@ export function definitionFingerprint(definition: PublishedFormDefinition | unkn
     }
   }
   return canonicalJson(comparable);
+}
+
+/**
+ * Whether `value` has every collection `mapDefinitionAssets` walks, so relativising it cannot throw.
+ *
+ * A stored snapshot is whatever `JSON.parse` returned, and one written by an older builder can lack
+ * a collection the mapper expects (`endScreens`, say). Such a snapshot is fingerprinted as it
+ * stands — its current behaviour — rather than crashing the comparison: it differs from any
+ * current draft anyway, because the draft always emits those collections.
+ */
+function hasAssetBearingShape(value: object): value is PublishedFormDefinition {
+  const def = value as Partial<Record<keyof PublishedFormDefinition, unknown>>;
+  return (
+    isRecordArray(def.endScreens) &&
+    isRecord(def.styleTokens) &&
+    isRecord(def.styleTokens['cssVariables']) &&
+    isRecordArray(def.pages) &&
+    def.pages.every(
+      (page) =>
+        isRecordArray(page['questions']) &&
+        page['questions'].every((question) => isRecordArray(question['options'])),
+    )
+  );
+}
+
+type JsonRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isRecordArray(value: unknown): value is JsonRecord[] {
+  return Array.isArray(value) && value.every(isRecord);
 }
 
 /**

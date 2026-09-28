@@ -9,6 +9,11 @@ describe('downloadUrl', () => {
     expect(downloadUrl('http://localhost:4000', 'abc')).toBe(`http://localhost:4000${DOWNLOAD_PATH}/abc`);
   });
 
+  it('keeps the path prefix of an API deployed behind one', () => {
+    // Contract, not a driver: the prefix is carried by whatever base the caller passes in.
+    expect(downloadUrl('https://h/api', 'abc')).toBe(`https://h/api${DOWNLOAD_PATH}/abc`);
+  });
+
   it('does not double the slash when the origin has a trailing one', () => {
     expect(downloadUrl('http://localhost:4000/', 'abc')).toBe(`http://localhost:4000${DOWNLOAD_PATH}/abc`);
   });
