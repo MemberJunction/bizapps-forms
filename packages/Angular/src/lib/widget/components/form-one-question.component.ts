@@ -14,6 +14,7 @@ import {
   output,
   signal,
   untracked,
+  viewChildren,
   ElementRef,
 } from '@angular/core';
 import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
@@ -51,6 +52,19 @@ export class FormOneQuestionComponent {
   public readonly commitChange = output<void>();
 
   private readonly hostRef: ElementRef<HTMLElement> = inject(ElementRef);
+
+  /** The one question currently rendered (this render mode shows a single step at a time). */
+  private readonly questionViews = viewChildren(FormQuestionComponent);
+
+  /**
+   * Commit every rendered question's visible text before anything judges it (#268) — an autofill
+   * that fired no event the controls listen for is otherwise "required" while plainly filled in.
+   */
+  private commitVisibleValues(): void {
+    for (const view of this.questionViews()) {
+      view.syncFromDom();
+    }
+  }
 
   /**
    * Raw cursor. Always written through {@link setIndex} so it stays inside the valid
@@ -158,6 +172,7 @@ export class FormOneQuestionComponent {
     if (!q) {
       return;
     }
+    this.commitVisibleValues();
     this.runtime().markTouched(q.id);
     if (this.runtime().errorFor(q)) {
       this.focusCurrent();

@@ -53,6 +53,7 @@ import {
   inputModeFor,
   inputTypeFor,
 } from './input-mode';
+import { compositeAnswer, readCompositeParts, sameAnswer, scalarAnswer } from './control-answer';
 import { DoodlePadComponent, type DoodleCapture } from './doodle-pad.component';
 import { IconComponent } from '../icon.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
@@ -116,6 +117,8 @@ export class FormQuestionComponent {
   public readonly valueChange = output<AnswerValue>();
 
   private readonly uploader = inject(FORMS_UPLOAD_SERVICE);
+  /** This question's own DOM subtree — read back by {@link syncFromDom} (#268), never written. */
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /**
    * Upload state, keyed by question id rather than held here.
    *
@@ -258,7 +261,7 @@ export class FormQuestionComponent {
 
   protected readonly inputType = computed(() => inputTypeFor(this.question().type));
   protected readonly inputMode = computed(() => inputModeFor(this.question().type));
-  protected readonly autocomplete = computed(() => autocompleteFor(this.question().type));
+  protected readonly autocomplete = computed(() => autocompleteFor(this.question().type, this.question().prompt));
 
   protected readonly textValue = computed(() => {
     const v = this.value();
@@ -336,9 +339,25 @@ export class FormQuestionComponent {
 
   // --- Composites (Address / ContactInfo) ----------------------------------
 
-  protected readonly compositeFields = computed<readonly string[]>(() =>
-    this.question().type === 'Address' ? ADDRESS_FIELDS : CONTACT_INFO_FIELDS,
-  );
+  /**
+   * The sub-field names for a composite question, or `[]` for every other type.
+   *
+   * Only ever iterated from inside the `@case ('Address')` / `@case ('ContactInfo')` branch of the
+   * template, so the empty case used to be unreachable and this fell back to `CONTACT_INFO_FIELDS`
+   * unconditionally for anything that was not `'Address'`. {@link syncFromDom} (#268) is the first
+   * caller that reads this for EVERY question type, and treating a ShortText as a five-field
+   * composite because it "wasn't Address" would have made this component lie about its own type.
+   */
+  protected readonly compositeFields = computed<readonly string[]>(() => {
+    switch (this.question().type) {
+      case 'Address':
+        return ADDRESS_FIELDS;
+      case 'ContactInfo':
+        return CONTACT_INFO_FIELDS;
+      default:
+        return [];
+    }
+  });
 
   /** The composite answer as a flat string map, ignoring anything that is not a string. */
   protected readonly compositeValue = computed<Record<string, string>>(() => {
@@ -369,19 +388,37 @@ export class FormQuestionComponent {
   }
 
   /**
-   * Update one part of a composite, emitting the whole object.
+   * A composite part fired `(input)`/`(change)` — re-read every part of THIS composite from the
+   * DOM and commit the merged result (#268 fix-round-1 finding 1).
    *
-   * Blank parts are DROPPED rather than kept as empty strings, so a respondent who tabs through
-   * an optional address without typing leaves no answer at all. Keeping them would emit
-   * `{line1:'', city:''}` — an object `isAnswerSupplied` correctly calls unanswered, but which
-   * every reader downstream still has to receive, store and skip.
+   * The previous handler merged only the one field that fired onto `compositeValue()`, a
+   * snapshot of the `value` input that only refreshes on the next change-detection pass. This
+   * component is zoneless, so nothing schedules one between two DOM events firing in the same
+   * task — and iOS AutoFill fills several ContactInfo/Address parts in exactly that shape, so each
+   * fired `change` clobbered the parts the earlier ones had just written; only the last survived.
+   * Reading every part straight off the DOM — the same read {@link syncFromDom} needs for the
+   * same reason — has no snapshot to go stale, so both share this one command.
    */
-  protected onComposite(field: string, raw: string): void {
-    const next: Record<string, string> = { ...this.compositeValue(), [field]: raw };
-    for (const key of Object.keys(next)) {
-      if (next[key].trim() === '') {
-        delete next[key];
-      }
+  protected syncComposite(): void {
+    const parts = readCompositeParts(this.compositeFields(), (field) =>
+      this.textControl(`${this.inputId()}-${field}`)?.value,
+    );
+    this.emitComposite({ ...this.compositeValue(), ...parts });
+  }
+
+  /**
+   * Emit a whole composite, unless it equals the one already held.
+   *
+   * The equality check exists for the same reason as {@link emitIfChanged}: composite inputs also
+   * bind both `(input)` and `(change)` (#268), so re-emitting the unchanged value on blur must not
+   * look like an edit. `compositeAnswer`/`sameAnswer` carry the actual decisions (blank-part
+   * dropping, key-order-independent equality) — see `control-answer.ts` for why they are tested
+   * there rather than here.
+   */
+  private emitComposite(parts: Record<string, string>): void {
+    const next = compositeAnswer(parts) ?? {};
+    if (sameAnswer(next, this.compositeValue())) {
+      return;
     }
     this.valueChange.emit(Object.keys(next).length > 0 ? next : null);
   }
@@ -629,17 +666,64 @@ export class FormQuestionComponent {
     return typeof raw === 'string' ? raw : '';
   }
 
+  /**
+   * Re-read this question's text controls and commit what differs from the model.
+   *
+   * The renderers call this before Next/Submit validates (#268). `(input)`/`(change)` cover every
+   * autofill path we can observe, but iOS Safari's contact AutoFill is closed source, and a value a
+   * respondent can SEE being judged "required" is the one failure this form cannot explain to them.
+   * Only text-style controls are read: every other control's DOM state is written FROM the model and
+   * has no value a browser could fill.
+   */
+  syncFromDom(): void {
+    if (this.compositeFields().length > 0) {
+      this.syncComposite();
+      return;
+    }
+    const el = this.textControl(this.inputId());
+    if (!el) {
+      return;
+    }
+    if (el instanceof HTMLInputElement && el.type === 'number') {
+      this.onNumber(el.value);
+    } else {
+      this.onText(el.value);
+    }
+  }
+
+  /** The text-style control with this id inside THIS question, or null. */
+  private textControl(id: string): HTMLInputElement | HTMLTextAreaElement | null {
+    const el = this.host.nativeElement.querySelector(`#${CSS.escape(id)}`);
+    const isText =
+      (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.classList.contains('mjf-input');
+    return isText ? el : null;
+  }
+
   protected onText(raw: string): void {
-    this.valueChange.emit(raw === '' ? null : raw);
+    this.emitIfChanged(scalarAnswer(raw, 'text'));
   }
 
   protected onNumber(raw: string): void {
-    if (raw.trim() === '') {
-      this.valueChange.emit(null);
+    this.emitIfChanged(scalarAnswer(raw, 'number'));
+  }
+
+  /**
+   * Emit a scalar answer unless it is the one already held.
+   *
+   * Text controls bind both `(input)` and `(change)` (#268), so a typed value arrives twice — once
+   * per keystroke and again on blur. The second is not an edit and must not look like one.
+   */
+  private emitIfChanged(next: string | number | null): void {
+    if (sameAnswer(next, this.scalarValue())) {
       return;
     }
-    const n = Number(raw);
-    this.valueChange.emit(Number.isFinite(n) ? n : raw);
+    this.valueChange.emit(next);
+  }
+
+  /** The model's current value, narrowed to what a scalar text-style control could hold. */
+  private scalarValue(): string | number | null {
+    const v = this.value();
+    return typeof v === 'string' || typeof v === 'number' ? v : null;
   }
 
   protected onSingleChoice(value: string): void {

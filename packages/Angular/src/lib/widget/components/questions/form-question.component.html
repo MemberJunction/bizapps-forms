@@ -33,6 +33,7 @@
             [attr.aria-invalid]="!!errorMessage()"
             [attr.aria-describedby]="describedBy()"
             (input)="onText($any($event.target).value)"
+            (change)="onText($any($event.target).value)"
           ></textarea>
         }
         @case ('Number') {
@@ -47,6 +48,7 @@
             [attr.aria-invalid]="!!errorMessage()"
             [attr.aria-describedby]="describedBy()"
             (input)="onNumber($any($event.target).value)"
+            (change)="onNumber($any($event.target).value)"
           />
         }
         @case ('SingleChoice') {
@@ -432,6 +434,10 @@
         }
         @default {
           <!-- ShortText · Email · Phone · Website · Date · Time -->
+          <!-- WebKit fills an unfocused field (e.g. Last name, while First name has focus) via
+               contact AutoFill by SETTING `value` and dispatching only `change`, never `input`
+               (#268) — so `(change)` has to reach the same handler or the fill is invisible to
+               validation while the respondent can see it sitting in the box. -->
           <input
             class="mjf-input"
             [id]="inputId()"
@@ -444,6 +450,7 @@
             [attr.aria-invalid]="!!errorMessage()"
             [attr.aria-describedby]="describedBy()"
             (input)="onText($any($event.target).value)"
+            (change)="onText($any($event.target).value)"
           />
         }
       }
@@ -474,7 +481,8 @@
           [attr.aria-required]="cq.isRequired"
           [attr.aria-invalid]="compositeInvalid(field)"
           [attr.aria-describedby]="fieldError ? partErrorId(field) : null"
-          (input)="onComposite(field, $any($event.target).value)"
+          (input)="syncComposite()"
+          (change)="syncComposite()"
         />
         @if (fieldError) {
           <p class="mjf-composite__error" [id]="partErrorId(field)">{{ fieldError }}</p>
