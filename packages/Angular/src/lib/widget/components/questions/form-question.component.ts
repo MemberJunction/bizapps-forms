@@ -260,7 +260,7 @@ export class FormQuestionComponent {
 
   protected readonly inputType = computed(() => inputTypeFor(this.question().type));
   protected readonly inputMode = computed(() => inputModeFor(this.question().type));
-  protected readonly autocomplete = computed(() => autocompleteFor(this.question().type));
+  protected readonly autocomplete = computed(() => autocompleteFor(this.question().type, this.question().prompt));
 
   protected readonly textValue = computed(() => {
     const v = this.value();
