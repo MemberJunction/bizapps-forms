@@ -25,7 +25,7 @@ import {
   resetForwardedWithoutHopsWarningForTests,
   trustedProxyHops,
 } from '../RequestIdentityMiddleware';
-import { currentRequestIdentity, hashClientIp } from '../request-identity';
+import { FORMS_SELF_CALL_HEADER, currentRequestIdentity, hashClientIp } from '../request-identity';
 import type { RequestIdentity } from '../request-identity';
 
 afterEach(() => {
@@ -203,6 +203,32 @@ describe('the X-Forwarded-For-without-trusted-hops warning', () => {
     handler(requestWithForwardedFor('9.9.9.9'), {} as Response, () => {});
 
     expect(forwardedWarnings()).toHaveLength(0);
+  });
+
+  // Forms' own server-side redeem (`respondent-host/redeem.service.ts` `postRedeem`) POSTs to core's
+  // redeem on THIS process and forwards the respondent's address in X-Forwarded-For. Without this
+  // exemption the first form open on every directly-addressed host announced a load balancer that
+  // does not exist (gauntlet #272, F1).
+  it("does not warn for Forms' own redeem call, and does not spend the once-only warning on it", () => {
+    const handler = requestIdentityHandler(0);
+
+    handler(
+      requestWith({ 'x-forwarded-for': '203.0.113.7', [FORMS_SELF_CALL_HEADER]: 'redeem' }, '127.0.0.1'),
+      {} as Response,
+      () => {},
+    );
+    expect(forwardedWarnings()).toHaveLength(0);
+
+    handler(requestWithForwardedFor('9.9.9.9'), {} as Response, () => {});
+    expect(forwardedWarnings()).toHaveLength(1);
+  });
+
+  // A warning, not an error — yet still printed in production, which is why it is not LogStatus
+  // (MJ silences LogStatus when production status is set).
+  it('is classified as a warning', () => {
+    requestIdentityHandler(0)(requestWithForwardedFor('9.9.9.9'), {} as Response, () => {});
+
+    expect(forwardedWarnings()[0]).toContain('[WARNING]');
   });
 
   it('does not warn when the request carries no X-Forwarded-For header', () => {

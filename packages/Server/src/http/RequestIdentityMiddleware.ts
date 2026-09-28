@@ -18,9 +18,9 @@
 import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware } from '@memberjunction/server';
-import { LogError, LogStatus } from '@memberjunction/core';
+import { LogErrorEx, LogStatus } from '@memberjunction/core';
 
-import { hashClientIp, resolveClientIp, runWithRequestIdentity } from './request-identity.js';
+import { FORMS_SELF_CALL_HEADER, hashClientIp, resolveClientIp, runWithRequestIdentity } from './request-identity.js';
 
 /**
  * How many proxies WE operate in front of the API — the number of trailing `X-Forwarded-For`
@@ -72,18 +72,32 @@ let warnedForwardedWithoutHops = false;
  * directly-addressed default, so a request-time warning is the only way to surface it.
  *
  * Once per process, not per request, because a line on every request is a line nobody reads.
+ *
+ * Forms' OWN requests are skipped ({@link FORMS_SELF_CALL_HEADER}). The host page's server-side
+ * redeem POSTs to this same process with the respondent's address in `X-Forwarded-For`, so without
+ * the skip the first form open on every directly-addressed host announced a proxy that is not there.
+ *
+ * Logged as a WARNING through `LogErrorEx`, not through `LogStatus` like the other once-per-process
+ * `[Forms] WARNING:` lines: MJ prints nothing from `LogStatus` once production status is set, and
+ * a hosted production API is the one place this condition matters.
  */
 function warnOnceIfForwardedWithoutTrustedHops(req: Request): void {
-  if (warnedForwardedWithoutHops || req.headers['x-forwarded-for'] === undefined) {
+  if (
+    warnedForwardedWithoutHops ||
+    req.headers['x-forwarded-for'] === undefined ||
+    req.headers[FORMS_SELF_CALL_HEADER] !== undefined
+  ) {
     return;
   }
   warnedForwardedWithoutHops = true;
-  LogError(
-    '[Forms] Request arrived with X-Forwarded-For while FORMS_TRUSTED_PROXY_HOPS=0. If a load ' +
+  LogErrorEx({
+    severity: 'warning',
+    message:
+      '[Forms] Request arrived with X-Forwarded-For while FORMS_TRUSTED_PROXY_HOPS=0. If a load ' +
       'balancer fronts this API, every respondent is keyed on its address and the per-IP ceilings ' +
       '(FORMS_RATELIMIT_IP_MAX, FORMS_COMPLETION_MAX) apply to the whole deployment. Set ' +
       'FORMS_TRUSTED_PROXY_HOPS to the number of proxies you operate.',
-  );
+  });
 }
 
 /** Test-only: forget that the X-Forwarded-For-without-trusted-hops warning has been emitted. */

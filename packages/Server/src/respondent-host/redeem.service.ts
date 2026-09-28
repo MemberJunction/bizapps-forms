@@ -21,7 +21,7 @@ import { LogError, LogStatus, type RunViewParams, type RunViewResult, type UserI
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 
-import { forwardableAddress } from '../http/request-identity.js';
+import { FORMS_SELF_CALL_HEADER, forwardableAddress } from '../http/request-identity.js';
 import { publishedVersionFilter } from '../public-submit/definition-loader.service.js';
 import { distributionWindowRefusal } from '../public-submit/distribution-window.js';
 import { FORM_DISTRIBUTION_ENTITY, FORM_VERSION_ENTITY } from '../public-submit/entity-names.js';
@@ -547,6 +547,9 @@ function forwardedHeaders(clientIp: string | undefined): Record<string, string> 
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     accept: 'application/json',
+    // This POST re-enters our own pre-auth chain; the marker keeps the zero-hops proxy warning from
+    // reading the X-Forwarded-For below as a load balancer's (see FORMS_SELF_CALL_HEADER).
+    [FORMS_SELF_CALL_HEADER]: 'redeem',
   };
   const address = forwardableAddress(clientIp);
   if (address) {
