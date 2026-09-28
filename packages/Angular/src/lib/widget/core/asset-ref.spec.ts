@@ -389,7 +389,8 @@ describe('collectLaterImageUrls', () => {
 
   it('lists option images, then ending images, in the order the respondent meets them', () => {
     const def = base({
-      // Stored out of order on purpose: the renderer sorts by displayOrder, so the prefetch must too.
+      // Pages/questions/endings are stored out of order on purpose: the renderer sorts them by displayOrder,
+      // so the prefetch does too. Options are in published array order (no sort), like form-question.component.html.
       pages: [
         { id: 'p2', displayOrder: 1, questions: [question('q3', 0, [opt('e', 0, '/img/e')])] },
         {
@@ -403,7 +404,7 @@ describe('collectLaterImageUrls', () => {
       ],
       endScreens: [screen('end2', 'Ending', 1, '/img/end2'), screen('end1', 'Ending', 0, '/img/end1')],
     });
-    expect(collectLaterImageUrls(def)).toEqual(['/img/a', '/img/b', '/img/d', '/img/e', '/img/end1', '/img/end2']);
+    expect(collectLaterImageUrls(def)).toEqual(['/img/b', '/img/a', '/img/d', '/img/e', '/img/end1', '/img/end2']);
   });
 
   it('leaves out the welcome image, the logo and CSS assets: the first screen loads those itself', () => {

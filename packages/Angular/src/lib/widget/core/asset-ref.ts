@@ -210,9 +210,11 @@ function byDisplayOrder<T extends { displayOrder: number }>(items: readonly T[])
 }
 
 /**
- * The images a respondent sees AFTER the first screen, in the order they will see them: every
- * question option's image (page, question, option, each by `displayOrder`, matching
- * `form-runtime.ts` and `section-content.ts`), then every ending screen's image. All endings are
+ * The images a respondent sees AFTER the first screen, in the order they will see them: pages
+ * sorted by `displayOrder` (matching `form-runtime.ts:381`), questions sorted by `displayOrder`
+ * (matching `section-content.ts:76`), options in published array order (matching
+ * `form-question.component.html` which iterates `q.options` directly at lines 56/74/100/240),
+ * then ending screens sorted by `displayOrder` (matching `shown-screen.ts:52`). All endings are
  * included because which one shows depends on the answers.
  *
  * Deliberately excludes the welcome image, the logo and CSS assets: the first screen requests
@@ -226,7 +228,7 @@ export function collectLaterImageUrls(def: PublishedFormDefinition): string[] {
   const urls: string[] = [];
   for (const page of byDisplayOrder(def.pages)) {
     for (const question of byDisplayOrder(page.questions)) {
-      for (const option of byDisplayOrder(question.options)) {
+      for (const option of question.options) {
         if (option.imageURL) {
           urls.push(option.imageURL);
         }
