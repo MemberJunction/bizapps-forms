@@ -1,5 +1,6 @@
 /**
- * Run on-submit work on a provider instance of its own.
+ * Run a unit of work — an on-submit hook, or a device-resume route (#265) — on a provider instance
+ * of its own.
  *
  * The instance shares the process provider's connection pool and metadata cache but has its own
  * transaction stack (MJ's CreateIndependentInstance — what MJServer does per request). On the
@@ -7,6 +8,17 @@
  * through that instance: bizapps-forms#260, where Common.LogActivity's transaction made the later
  * on-submit hooks' reads race its COMMIT and fail. Refuses, rather than falling back to the global
  * provider, when an instance cannot be created — the fallback is the defect.
+ *
+ * `withLazyIsolatedProvider` is the primitive: it hands `work` an `acquire()` function instead of
+ * an instance, and the instance is created only on the first call to it (memoized, so concurrent
+ * `acquire()` calls share one instance and a failed creation rejects every later call identically),
+ * released in `finally` only if creation ever succeeded. This is *lazy* because a request-handler
+ * unit of work often exits before touching the DB at all — no pointer, rate-limited, validation
+ * failure (bizapps-forms#265's `/resume`, `/remember`, `/forget`) — and a provider outage on that
+ * path must not turn a cheap early exit into a 500 for work that was never going to touch the DB.
+ *
+ * `withIsolatedProvider` is the eager convenience form built on top: it acquires immediately and
+ * hands `work` the resolved instance, matching its pre-#265 signature exactly.
  */
 import { LogError, Metadata } from '@memberjunction/core';
 import type { DatabaseProviderBase, IMetadataProvider } from '@memberjunction/core';
@@ -16,8 +28,40 @@ export type IsolatedProviderRunner = <T>(
   work: (provider: DatabaseProviderBase) => Promise<T>,
 ) => Promise<T>;
 
+/** Creates the isolated instance on first call, memoized; every later call returns the same promise. */
+export type AcquireIsolatedProvider = () => Promise<DatabaseProviderBase>;
+
 function canCreateIndependentInstance(p: IMetadataProvider | null | undefined): p is DatabaseProviderBase {
   return !!p && typeof (p as Partial<DatabaseProviderBase>).CreateIndependentInstance === 'function';
+}
+
+export async function withLazyIsolatedProvider<T>(
+  purpose: string,
+  work: (acquire: AcquireIsolatedProvider) => Promise<T>,
+  source: IMetadataProvider | null = Metadata.Provider,
+): Promise<T> {
+  let instancePromise: Promise<DatabaseProviderBase> | undefined;
+  const acquire: AcquireIsolatedProvider = () => {
+    if (!instancePromise) {
+      instancePromise = createInstance(purpose, source);
+    }
+    return instancePromise;
+  };
+
+  try {
+    return await work(acquire);
+  } finally {
+    if (instancePromise) {
+      // `instancePromise` is the ONLY other consumer besides `work`'s own await(s) of `acquire()`,
+      // and it's memoized, so this can't trigger a second `CreateIndependentInstance` call and
+      // can't leave a rejection unhandled if `work` never awaited (or already swallowed) it. Only
+      // a SUCCESSFUL creation gets released — a lease that never opened has nothing to close.
+      await instancePromise.then(
+        (instance) => releaseInstance(purpose, instance),
+        () => undefined,
+      );
+    }
+  }
 }
 
 export async function withIsolatedProvider<T>(
@@ -25,12 +69,7 @@ export async function withIsolatedProvider<T>(
   work: (provider: DatabaseProviderBase) => Promise<T>,
   source: IMetadataProvider | null = Metadata.Provider,
 ): Promise<T> {
-  const instance = await createInstance(purpose, source);
-  try {
-    return await work(instance);
-  } finally {
-    await releaseInstance(purpose, instance);
-  }
+  return withLazyIsolatedProvider(purpose, async (acquire) => work(await acquire()), source);
 }
 
 async function createInstance(purpose: string, source: IMetadataProvider | null): Promise<DatabaseProviderBase> {

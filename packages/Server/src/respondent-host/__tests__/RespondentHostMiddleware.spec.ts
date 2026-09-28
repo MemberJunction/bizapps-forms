@@ -49,6 +49,25 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   return { ...actual, RunView, LogStatus: () => undefined, LogError: (message: string) => loggedErrors.push(message) };
 });
 
+/**
+ * The page route leases an isolated provider for its reads (#265) via `withIsolatedProvider`
+ * (eagerly); the pre-auth `/resume` route below leases one via `withLazyIsolatedProvider` (lazily).
+ * Both are faked here the same way `resume-routes-isolation.spec.ts` fakes the lazy form — the
+ * leased instance resolves to a bare object — because this file's own `RunView` fake above
+ * (rowsByEntity) ignores whatever it is constructed with; what these tests care about is the ROWS a
+ * read answers with, not the raw provider underneath. Left unmocked, the route falls through to the
+ * REAL implementations, which ask the real `Metadata.Provider` (unset in a unit test) for an
+ * independent instance and reject every request with a 500.
+ */
+vi.mock('../../automation/isolated-provider', () => ({
+  withLazyIsolatedProvider: async <T>(
+    _purpose: string,
+    work: (acquire: () => Promise<Record<string, never>>) => Promise<T>,
+  ): Promise<T> => work(async () => ({})),
+  withIsolatedProvider: async <T>(_purpose: string, work: (provider: Record<string, never>) => Promise<T>): Promise<T> =>
+    work({}),
+}));
+
 /** The outcome the faked redeem returns; set per test. */
 let redeemOutcome: { ok: boolean; token?: string; distribution?: mjBizAppsFormsFormDistributionEntityType };
 

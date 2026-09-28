@@ -300,6 +300,87 @@ describe('MagicLinkInviteMinter', () => {
   });
 });
 
+/**
+ * `MintAnonymousInvite` gains the same optional `host` the revoke/re-bound paths already have
+ * (bizapps-forms#265 Task 2). A caller running on its own ISOLATED instance — the device-resume
+ * routes — passes it so the invite is created and its resource type resolved on THAT instance,
+ * keeping the write OFF the process-global provider, not because the caller has a transaction of
+ * its own open. Without it, the mint runs through the process-global provider, where a released
+ * `Common.LogActivity`'s open transaction could capture or roll it back (#260). Same idioms
+ * `writeToInvite`/`reportUnloadableInvite` already use for revoke: the invite is created via
+ * `(host ?? new Metadata()).GetEntityObject(...)`, and the resource-type lookup runs
+ * `new RunView(canRunViews(host) ? host : null)`.
+ */
+describe('MagicLinkInviteMinter.MintAnonymousInvite — host routing (#265 Task 2)', () => {
+  beforeEach(() => {
+    mockState.magicLinkEnabled = true;
+    mockState.applications = [{ ID: 'app-forms', Name: 'Forms' }];
+    mockState.roles = [{ ID: 'role-respondent', Name: 'Form Respondent' }];
+    mockState.resourceTypeRows = [];
+    mockState.entityByName = {};
+    mockState.saveSucceeds = true;
+    mockState.lastSavedInvite = undefined;
+    mockState.entityUsers = [];
+    mockState.readUsers = [];
+  });
+
+  it('creates and saves the invite on a supplied host, and resolves the resource type through the SAME host — never a RunView constructed without it', async () => {
+    mockState.entityByName['MJ_BizApps_Forms: Form Distributions'] = { ID: 'entity-dist' };
+    mockState.resourceTypeRows = [{ ID: 'rt-1', EntityID: 'entity-dist' }];
+
+    const md = new Metadata();
+    const hostRunView = vi.fn(async (viewParams: { EntityName: string }) => ({
+      Success: true,
+      Results: mockState.resourceTypeRows,
+      RowCount: mockState.resourceTypeRows.length,
+    }));
+    const host = { GetEntityObject: md.GetEntityObject.bind(md), RunView: hostRunView };
+    const viaHost = vi.spyOn(host, 'GetEntityObject');
+
+    const result = await new MagicLinkInviteMinter().MintAnonymousInvite(params(), contextUser, host);
+
+    expect(result.success).toBe(true);
+    // Created (and saved) via the host, not `new Metadata()` — there is exactly one GetEntityObject
+    // call in the mint path, and it went through the spy on the host's own property.
+    expect(viaHost).toHaveBeenCalledTimes(1);
+    expect(viaHost.mock.calls[0][0]).toBe('MJ: Magic Link Invites');
+    expect(mockState.lastSavedInvite!.ResourceTypeID).toBe('rt-1');
+    expect(mockState.lastSavedInvite!.IdentityMode).toBe('anonymous');
+    // Resource-type lookup resolved through the host's RunView...
+    expect(hostRunView).toHaveBeenCalledTimes(1);
+    expect(hostRunView.mock.calls[0][0]).toMatchObject({ EntityName: 'MJ: Resource Types' });
+    // ...and never through a RunView constructed with no provider — the mocked RunView only
+    // records into `readUsers` on that fallback branch.
+    expect(mockState.readUsers).toEqual([]);
+  });
+
+  it('creates the invite on a host with only GetEntityObject, and falls back to the process RunView for the resource-type lookup', async () => {
+    mockState.entityByName['MJ_BizApps_Forms: Form Distributions'] = { ID: 'entity-dist' };
+    mockState.resourceTypeRows = [{ ID: 'rt-1', EntityID: 'entity-dist' }];
+
+    const md = new Metadata();
+    const host = { GetEntityObject: md.GetEntityObject.bind(md) }; // no RunView on this host
+    const viaHost = vi.spyOn(host, 'GetEntityObject');
+
+    const result = await new MagicLinkInviteMinter().MintAnonymousInvite(params(), contextUser, host);
+
+    expect(result.success).toBe(true);
+    expect(viaHost).toHaveBeenCalledTimes(1);
+    // `canRunViews(host)` is false (no RunView on it) => constructed with `null` => the process-wide
+    // fallback, which is exactly what records into `readUsers`.
+    expect(mockState.lastSavedInvite!.ResourceTypeID).toBe('rt-1');
+    expect(mockState.readUsers.length).toBe(1);
+  });
+
+  it('leaves the no-host path unchanged: still creates via new Metadata() when no host is supplied', async () => {
+    mockState.entityByName['MJ_BizApps_Forms: Form Distributions'] = { ID: 'entity-dist' };
+    const result = await new MagicLinkInviteMinter().MintAnonymousInvite(params(), contextUser);
+    expect(result.success).toBe(true);
+    expect(result.inviteId).toBe('invite-new');
+    expect(mockState.lastSavedInvite!.IdentityMode).toBe('anonymous');
+  });
+});
+
 describe('MagicLinkInviteMinter.RevokeAnonymousInvite', () => {
   beforeEach(() => {
     mockState.magicLinkEnabled = true;

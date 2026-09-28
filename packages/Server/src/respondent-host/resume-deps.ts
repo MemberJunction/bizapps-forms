@@ -5,14 +5,20 @@
  * order, what clears a cookie, who may be given a pointer) and is pure; this one holds the wiring
  * (which entity, which principal, which URL) and is not testable without a server. Splitting them
  * is what let both review must-fixes be proven by unit tests.
+ *
+ * It is ALSO where the per-request isolated provider is threaded (#265): every dependency below
+ * that touches the database awaits `ctx.acquireProvider()` and hands the result to its helper,
+ * rather than letting `new RunView()` / the minter's own fallback reach the process-global
+ * `Metadata.Provider` — see {@link ResumeDepsContext.acquireProvider}.
  */
-import { LogError, RunView, type UserInfo } from '@memberjunction/core';
+import { LogError, RunView, type DatabaseProviderBase, type UserInfo } from '@memberjunction/core';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type {
   mjBizAppsFormsFormDistributionEntityType,
   mjBizAppsFormsFormResponseEntityType,
 } from '@mj-biz-apps/forms-entities';
 
+import type { AcquireIsolatedProvider } from '../automation/isolated-provider.js';
 import {
   findInviteByRawToken,
   mintResponseInvite,
@@ -39,14 +45,20 @@ export interface ResumeDepsContext {
   callerKey: string;
   /** The resolved peer address, forwarded to core so its redeem cap is per respondent. */
   callerIp?: string;
+  /**
+   * The request's isolated provider, created on first use. Every dependency that touches the
+   * database runs on it — never on Metadata.Provider, where another unit of work's open
+   * transaction (Common.LogActivity, bizapps-forms#265) would capture the query.
+   */
+  acquireProvider: AcquireIsolatedProvider;
 }
 
 /** Build the dependency set for one request. */
 export function makeDeviceResumeDeps(ctx: ResumeDepsContext): DeviceResumeDeps {
   const config = getRespondentHostConfig();
   return {
-    loadDistribution: (slug) => loadDistribution(slug, ctx.systemUser),
-    loadResponse: (responseId) => loadResponse(responseId, ctx.systemUser),
+    loadDistribution: async (slug) => loadDistribution(slug, ctx.systemUser, await ctx.acquireProvider()),
+    loadResponse: async (responseId) => loadResponse(responseId, ctx.systemUser, await ctx.acquireProvider()),
     redeem: async (rawToken) => {
       const result = await redeemRawToken(
         { redeemUrl: config.magicLinkRedeemUrl, fetchImpl: fetch, clientIp: ctx.callerIp },
@@ -70,18 +82,19 @@ export function makeDeviceResumeDeps(ctx: ResumeDepsContext): DeviceResumeDeps {
           maxUses: 1,
         },
         ctx.systemUser,
+        await ctx.acquireProvider(),
       );
       return { ok: minted.ok, rawToken: minted.rawToken, expiresAt: minted.expiresAt };
     },
     revoke: async ({ responseId, deviceOnly }) => {
-      await revokeResponseInvites(responseId, { deviceOnly }, ctx.systemUser);
+      await revokeResponseInvites(responseId, { deviceOnly }, ctx.systemUser, await ctx.acquireProvider());
     },
     inviteFor: async (rawToken) => {
-      const found = await findInviteByRawToken(rawToken, ctx.systemUser);
+      const found = await findInviteByRawToken(rawToken, ctx.systemUser, await ctx.acquireProvider());
       return { ok: found.ok, resourceId: found.resourceId, inviteId: found.inviteId };
     },
     revokeInvite: async ({ inviteId, responseId }) => {
-      await revokeInviteById(inviteId, responseId, ctx.systemUser);
+      await revokeInviteById(inviteId, responseId, ctx.systemUser, await ctx.acquireProvider());
     },
     scopeOf: readScopeClaim,
     allowRequest: (key) => FormsRateLimiter.Instance.charge([{ key, max: RESUME_RATE_MAX }]).allowed,
@@ -102,8 +115,12 @@ export function makeDeviceResumeDeps(ctx: ResumeDepsContext): DeviceResumeDeps {
 const RESUME_RATE_MAX = 30;
 
 /** The distribution behind a slug, judged by the SAME predicates the page route uses. */
-async function loadDistribution(slug: string, contextUser: UserInfo): Promise<ResumeDistribution | undefined> {
-  const result = await new RunView().RunView<mjBizAppsFormsFormDistributionEntityType>(
+async function loadDistribution(
+  slug: string,
+  contextUser: UserInfo,
+  provider: DatabaseProviderBase,
+): Promise<ResumeDistribution | undefined> {
+  const result = await new RunView(provider).RunView<mjBizAppsFormsFormDistributionEntityType>(
     {
       EntityName: FORM_DISTRIBUTION_ENTITY,
       ExtraFilter: `Slug=${quoteSqlString(slug)}`,
@@ -135,8 +152,12 @@ async function loadDistribution(slug: string, contextUser: UserInfo): Promise<Re
 }
 
 /** One stored response, for the `/remember` ownership checks. */
-async function loadResponse(responseId: string, contextUser: UserInfo): Promise<ResumeResponseRow | undefined> {
-  const result = await new RunView().RunView<mjBizAppsFormsFormResponseEntityType>(
+async function loadResponse(
+  responseId: string,
+  contextUser: UserInfo,
+  provider: DatabaseProviderBase,
+): Promise<ResumeResponseRow | undefined> {
+  const result = await new RunView(provider).RunView<mjBizAppsFormsFormResponseEntityType>(
     {
       EntityName: FORM_RESPONSE_ENTITY,
       ExtraFilter: `ID=${quoteSqlString(responseId)}`,

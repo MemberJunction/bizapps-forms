@@ -1,4 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const logged: string[] = [];
+
+beforeEach(() => {
+  logged.length = 0;
+});
+
+vi.mock('@memberjunction/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memberjunction/core')>();
+  return {
+    ...actual,
+    LogError: (message: string) => {
+      logged.push(message);
+    },
+  };
+});
 
 import {
   runForget,
@@ -36,6 +52,10 @@ interface DepsConfig {
   inviteResourceId?: string;
   scopeOf?: string;
   allow?: boolean;
+  /** `/forget` failure-tolerance tests: reject `inviteFor` instead of resolving it. */
+  inviteForRejects?: Error;
+  /** `/forget` failure-tolerance tests: reject `revoke` instead of resolving it. */
+  revokeRejects?: Error;
 }
 
 function makeDeps(config: DepsConfig = {}): { deps: DeviceResumeDeps; rec: Recorder } {
@@ -84,13 +104,21 @@ function makeDeps(config: DepsConfig = {}): { deps: DeviceResumeDeps; rec: Recor
         : { ok: true, rawToken: 'mj_ml_rotated', expiresAt: new Date(Date.now() + 86_400_000) };
     },
     revoke: async (args) => {
+      if (config.revokeRejects) {
+        throw config.revokeRejects;
+      }
       rec.revokes.push(args);
     },
-    inviteFor: async () => ({
-      ok: true,
-      resourceId: config.inviteResourceId,
-      inviteId: config.inviteResourceId ? HELD_INVITE_ID : undefined,
-    }),
+    inviteFor: async () => {
+      if (config.inviteForRejects) {
+        throw config.inviteForRejects;
+      }
+      return {
+        ok: true,
+        resourceId: config.inviteResourceId,
+        inviteId: config.inviteResourceId ? HELD_INVITE_ID : undefined,
+      };
+    },
     revokeInvite: async (args) => {
       rec.revokedInvites.push(args);
     },
@@ -501,6 +529,35 @@ describe('runForget', () => {
 
     expect(rec.revokes).toEqual([{ responseId: ROW_ID, deviceOnly: true }]);
     expect(out.setCookie).toContain('Max-Age=0');
+  });
+
+  it('still clears the cookie and logs the slug when inviteFor rejects (isolated provider could not be created)', async () => {
+    // #265: the resume routes now open an isolated provider per request, so a dependency that used
+    // to only ever resolve or answer `{ ok: false }` can now REJECT — an isolation failure or a DB
+    // error surfaces as a rejected promise. The pointer clear is what the person pressing "start
+    // over" can see, so it must happen regardless, but the failure must not vanish silently.
+    const { deps, rec } = makeDeps({ inviteForRejects: new Error('could not create an isolated provider') });
+
+    const out = await runForget(deps, { slug: SLUG, cookieToken: TOKEN });
+
+    expect(out.status).toBe(204);
+    expect(out.setCookie).toContain('Max-Age=0');
+    expect(rec.revokes).toHaveLength(0);
+    expect(logged.some((message) => message.includes(SLUG))).toBe(true);
+  });
+
+  it('still clears the cookie and logs the response id when revoke rejects after inviteFor resolves', async () => {
+    const { deps, rec } = makeDeps({ inviteResourceId: 'r1', revokeRejects: new Error('transaction rolled back') });
+
+    const out = await runForget(deps, { slug: SLUG, cookieToken: TOKEN });
+
+    expect(out.status).toBe(204);
+    expect(out.setCookie).toContain('Max-Age=0');
+    expect(rec.revokes).toHaveLength(0);
+    // The precise phrase the implementation logs, not a bare 'r1' — a loose substring match could
+    // pass on text an earlier, unrelated test happened to log, since `logged` is a module-level
+    // array cleared only by this file's own `beforeEach`.
+    expect(logged.some((message) => message.includes('for response r1'))).toBe(true);
   });
 
   it('clears the cookie even when there is no pointer to revoke', async () => {
