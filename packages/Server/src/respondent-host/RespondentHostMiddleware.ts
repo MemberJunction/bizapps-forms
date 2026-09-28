@@ -42,9 +42,9 @@
  * PRE-AUTH CONTEXT USER: this route runs before auth and is the first Forms code that must read
  * the DB without a request JWT (the redeem is what mints that JWT). There is no request user to
  * borrow, so it uses the MJ-canonical server-side system user — `UserCache.Instance.GetSystemUser()`
- * (the same `UserInfo` the data provider uses for non-request server work) — with a `new Metadata()`
- * provider, exactly as other server-side-only MJ code does. Reads are the slug lookup plus one
- * primary-key read of the form's description for the page's `<head>` (see {@link loadFormIdentity}).
+ * (the same `UserInfo` the data provider uses for non-request server work). Its reads run on a
+ * per-request isolated provider, never `new Metadata()` or the global one — see {@link handleRequest}'s
+ * #265 paragraph for which reads and why.
  */
 import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 import { RegisterClass } from '@memberjunction/global';

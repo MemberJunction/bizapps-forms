@@ -144,7 +144,7 @@ type DistributionRowVerdict =
 
 /** Injectable dependencies so the redeem flow is pure/unit-testable (no live server). */
 export interface RedeemDeps {
-  /** The data provider used for the slug → distribution read (the system-user provider). */
+  /** The data provider used for the slug → distribution read (the request's isolated provider). */
   provider: RedeemRunViewProvider;
   /** A context user for the pre-auth read (system user — see the middleware). */
   contextUser: UserInfo;
