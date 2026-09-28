@@ -172,25 +172,28 @@ function resolveGraphqlPath(): string {
  * MJServer mounts every `BaseServerMiddleware` route — all of `/forms/*`, and core's
  * `/magic-link/redeem` — at the app ROOT; `GRAPHQL_ROOT_PATH` moves GraphQL alone. The widget and
  * the builder find `/forms/*` by one rule: the API URL they are given, minus a trailing `/graphql`
- * (`deriveUploadUrl` and `apiBaseOf` in forms-ng). A root path of `/`, or one ending in `/graphql`,
- * satisfies it. Any other (`/api`, say) makes the host page hand out `https://h/api`, from which
- * both derive `https://h/api/forms/...` — a path nothing serves. A path prefix a reverse proxy adds
- * in `MJAPI_PUBLIC_URL` is fine and is not this: the proxy strips it before MJAPI sees the request.
+ * (`deriveUploadUrl` and `apiBaseOf` in forms-ng). Only two root paths leave that rule pointing at
+ * the app root: `/` and exactly `/graphql`. Any other — `/api`, and equally `/api/graphql`, whose
+ * trailing `/graphql` strips to `/api` — makes both derive `https://h/api/forms/...`, a path nothing
+ * serves. A path prefix a reverse proxy adds in `MJAPI_PUBLIC_URL` is fine and is not this: the proxy
+ * strips it before MJAPI sees the request.
  *
  * A warning rather than a refusal: GraphQL itself still works there, and so does every other app
  * this MJAPI serves; only Forms' images and file uploads break, so boot must not.
  */
 export function graphqlRootPathWarning(rootPath: string | undefined): string | undefined {
-  const normalised = rootPath?.trim().replace(/\/+$/, '') ?? '';
-  if (normalised === '' || /(^|\/)graphql$/i.test(normalised)) {
+  const bare = rootPath?.trim().replace(/^\/+|\/+$/g, '') ?? '';
+  if (bare === '' || /^graphql$/i.test(bare)) {
     return undefined;
   }
+  // Where the widget and builder will actually look: the same "strip a trailing /graphql" rule.
+  const formsBase = `/${bare}`.replace(/\/graphql$/i, '');
   return (
     `[Forms] GRAPHQL_ROOT_PATH is "${rootPath}". MJServer moves only GraphQL there and keeps every ` +
     "Forms route (/forms/*) at the app root, but Forms' respondent widget and builder find those " +
     'routes by stripping a trailing /graphql from the API URL. With this setting they look under ' +
-    `"${normalised}/forms/...", so uploaded form images and respondent file uploads will 404. Use a ` +
-    'root path of "/" or one ending in "/graphql"; to serve MJAPI under a path prefix, put the prefix ' +
+    `"${formsBase}/forms/...", so uploaded form images and respondent file uploads will 404. Use a ` +
+    'root path of "/" or exactly "/graphql"; to serve MJAPI under a path prefix, put the prefix ' +
     'in MJAPI_PUBLIC_URL behind a reverse proxy instead.'
   );
 }

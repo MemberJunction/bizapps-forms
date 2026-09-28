@@ -399,6 +399,16 @@ export const MUTANTS = [
     suite: 'packages/Server',
     killedBy: ['src/public-submit/__tests__/disqualification-gates.spec.ts'],
   },
+  // --- respondent-host: the boot warning for a GRAPHQL_ROOT_PATH Forms cannot address ---------
+  {
+    name: 'root-path/prefixed-graphql-exempt',
+    behaviour: 'a prefixed GraphQL root path such as /api/graphql is warned about, because /forms/* is not under it',
+    file: 'packages/Server/src/respondent-host/config.ts',
+    find: "  if (bare === '' || /^graphql$/i.test(bare)) {",
+    replace: "  if (bare === '' || /(^|\\/)graphql$/i.test(bare)) {",
+    suite: 'packages/Server',
+    killedBy: ['src/respondent-host/__tests__/config.spec.ts'],
+  },
 ];
 
 /**

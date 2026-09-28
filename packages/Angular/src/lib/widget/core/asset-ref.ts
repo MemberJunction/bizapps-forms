@@ -24,9 +24,9 @@
  * here — the same one `deriveUploadUrl` in `../api/forms-api.config.ts` already uses for respondent
  * uploads — is "Forms routes live at the api-url minus a trailing `/graphql`". That holds for a
  * reverse-proxy path prefix carried in `MJAPI_PUBLIC_URL` (the proxy strips it before MJAPI sees the
- * request, so everything lives under it), and for a `GRAPHQL_ROOT_PATH` of `/` or one ending in
- * `/graphql`. It does NOT hold for any other `GRAPHQL_ROOT_PATH` (e.g. `/api`): that moves GraphQL
- * alone, so `/api/forms/asset/<id>` 404s. That configuration is unsupported, and forms-server warns
+ * request, so everything lives under it), and for a `GRAPHQL_ROOT_PATH` of `/` or exactly
+ * `/graphql`. It does NOT hold for any other `GRAPHQL_ROOT_PATH` (e.g. `/api`, or `/api/graphql`,
+ * which strips to `/api`): that moves GraphQL alone, so `/api/forms/asset/<id>` 404s. That configuration is unsupported, and forms-server warns
  * about it at boot (`graphqlRootPathWarning` in `respondent-host/config.ts`).
  *
  * Pure and dependency-free on purpose: the respondent widget uses it, and the widget must not reach
@@ -98,7 +98,7 @@ export function resolveAssetUrl(value: string, apiBase: string): string {
  *
  * The constraint that buys (see the module header): a path prefix is assumed to be where ALL of
  * MJAPI lives, which is true of a reverse-proxy prefix in `MJAPI_PUBLIC_URL` and false of a
- * `GRAPHQL_ROOT_PATH` other than `/` or one ending in `/graphql` — MJServer moves only GraphQL
+ * `GRAPHQL_ROOT_PATH` other than `/` or exactly `/graphql` — MJServer moves only GraphQL
  * there, leaving `/forms/*` at the root. That second configuration is unsupported, not handled.
  */
 export function apiBaseOf(graphqlUrl: string): string {
