@@ -186,10 +186,14 @@ export interface IAnonymousMagicLinkMinter {
    *
    * @param params       what to scope/grant the invite to
    * @param creatingUser the internal staff user saving the distribution (becomes the invite's issuer)
+   * @param host         where to create the invite row when the write must join the caller's
+   *                    open transaction — see {@link InviteWriteHost}. Absent, the
+   *                    implementation writes through its own provider, outside any transaction.
    */
   MintAnonymousInvite(
     params: MintAnonymousInviteParams,
     creatingUser: UserInfo,
+    host?: InviteWriteHost,
   ): Promise<MintAnonymousInviteResult>;
 
   /**

@@ -131,6 +131,7 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
   public async MintAnonymousInvite(
     params: MintAnonymousInviteParams,
     creatingUser: UserInfo,
+    host?: InviteWriteHost,
   ): Promise<MintAnonymousInviteResult> {
     // GRACEFUL GATE: if the host has not enabled core magic links, skip silently
     // (the hook leaves MagicLinkInviteID null and logs that anonymous links are off).
@@ -143,7 +144,7 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     }
 
     try {
-      return await this.createInviteRecord(params, creatingUser);
+      return await this.createInviteRecord(params, creatingUser, host);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       LogError(`[MagicLinkInviteMinter] Mint failed for resource ${params.resourceId}: ${message}`);
@@ -414,10 +415,20 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     return { success: false, changed: false, message: `Could not read magic-link invite ${id}: ${why}.` };
   }
 
-  /** Resolve app + role + resource scope, then persist the anonymous invite row. */
+  /**
+   * Resolve app + role + resource scope, then persist the anonymous invite row.
+   *
+   * Given a `host`, the invite row is created on it (and the resource-type lookup runs through it
+   * too), so both writes/reads join whatever transaction the caller holds open there — exactly the
+   * idiom {@link writeToInvite} and {@link reportUnloadableInvite} already use for revoke/re-bound.
+   * `md` below stays on the process-wide `new Metadata()` for `Applications`/`Roles`: those read the
+   * in-memory metadata cache and issue no query, so they cannot join a transaction, and
+   * `InviteWriteHost` does not promise them anyway.
+   */
   private async createInviteRecord(
     params: MintAnonymousInviteParams,
     creatingUser: UserInfo,
+    host: InviteWriteHost | undefined,
   ): Promise<MintAnonymousInviteResult> {
     const md = new Metadata();
     // Every read and the write itself run as the host's provisioning identity; only the ROW names
@@ -440,10 +451,10 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
       };
     }
 
-    const resourceTypeId = await this.resolveResourceTypeId(params.resourceTypeName, writer);
+    const resourceTypeId = await this.resolveResourceTypeId(params.resourceTypeName, writer, host);
     const expiresAt = this.resolveExpiresAt(params.expiresAt);
 
-    const invite = await md.GetEntityObject<MJMagicLinkInviteEntity>(INVITE_ENTITY, writer);
+    const invite = await (host ?? new Metadata()).GetEntityObject<MJMagicLinkInviteEntity>(INVITE_ENTITY, writer);
     invite.NewRecord();
     const rawToken = generateRawToken();
     invite.TokenHash = hashToken(rawToken);
@@ -496,17 +507,22 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
    * Resolve the ResourceType for the scoped entity, if one is registered. Best-effort:
    * `ResourceTypeID` is nullable on the invite and the per-session scope rides
    * `ResourceID`; a missing resource type does not block minting.
+   *
+   * `md` here builds its own `new Metadata()` for `EntityByName` — an in-memory cache read, so it
+   * cannot join a transaction and `host` would buy nothing. The RunView below is the query half,
+   * which DOES need to run on `host` when one is given — same idiom as {@link reportUnloadableInvite}.
    */
   private async resolveResourceTypeId(
     resourceEntityName: string,
     contextUser: UserInfo,
+    host: InviteWriteHost | undefined,
   ): Promise<string | null> {
     const md = new Metadata();
     const entity = md.EntityByName(resourceEntityName);
     if (!entity) {
       return null;
     }
-    const rv = new RunView();
+    const rv = new RunView(canRunViews(host) ? host : null);
     const result = await rv.RunView<MJResourceTypeEntity>(
       {
         EntityName: RESOURCE_TYPE_ENTITY,
