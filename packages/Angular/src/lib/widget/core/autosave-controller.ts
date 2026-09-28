@@ -8,8 +8,11 @@
  *   - threads the server-returned `responseId` back into the caller so every save
  *     UPSERTS the same partial response (cross-session resume is Phase 2 and NOT
  *     handled here — the id lives only for this widget instance),
- *   - is fail-soft: a rejected save is swallowed (surfaced only via `status`), so the
- *     respondent is never blocked or interrupted.
+ *   - is fail-soft: a rejected save never blocks or interrupts the respondent. It is surfaced via
+ *     `status` (`'error'`, never a throw out of the controller) AND retried on its own, on a
+ *     capped backoff (`RETRY_DELAYS_MS`) — once the cap is spent the status just stays `'error'`;
+ *     the next edit re-arms the normal debounce (not another backoff retry — `failedAttempts`
+ *     resets only on a success), and a final submit carries every answer anyway.
  *
  * Framework-free (takes injected `setTimeout`/`clearTimeout`) so it is unit-testable
  * with fake timers and no Angular. The component wires it to signals + the API.
@@ -32,6 +35,20 @@ export interface TimerApi {
 
 const DEFAULT_DEBOUNCE_MS = 1500;
 
+/**
+ * Backoff schedule for a save the server refused or a request that failed outright. Its length IS
+ * the retry cap — the 4th failure in a row gets no further automatic retry.
+ *
+ * The LAST delay is one full server rate-limit window (`FORMS_RATELIMIT_WINDOW_MS`, default 60s),
+ * because the widget cannot read the server's wait: a refusal carries only the "Please wait N
+ * seconds" sentence. The server's window slides and a refusal charges nothing, so the bucket that
+ * refused the previous attempt has freed by the time a full window has passed — the last retry
+ * cannot land inside it. With 5/15/30s all three retries fell inside one window and the controller
+ * gave up with the respondent's latest answers unsaved (gauntlet #272). An operator who widens the
+ * window beyond the default loses that guarantee, not the retry.
+ */
+const RETRY_DELAYS_MS = [5_000, 15_000, 60_000] as const;
+
 export class AutosaveController {
   private timer: number | null = null;
   private inFlight = false;
@@ -41,6 +58,8 @@ export class AutosaveController {
   private rearm = false;
   private disposed = false;
   private currentStatus: AutosaveStatus = 'idle';
+  /** How many consecutive failures the backoff has already spent; reset to 0 on any success. */
+  private failedAttempts = 0;
 
   constructor(
     private readonly save: AutosaveFn,
@@ -78,13 +97,20 @@ export class AutosaveController {
    * (the final submit) can guarantee no autosave write is still on the wire carrying the
    * same `clientResponseId`. This is what prevents the widget from firing two overlapping
    * writes with the same idempotency key (the source of the cosmetic PK-collision noise).
-   * Never re-arms and never throws — a failed in-flight save is swallowed (fail-soft).
+   * Never re-arms and never leaves a retry armed: a failed in-flight save is logged, never thrown
+   * back at the caller (fail-soft), and the backoff retry it schedules is cancelled below — the
+   * caller is about to send every answer itself.
    */
   public async settle(): Promise<void> {
     this.clearTimer();
     this.rearm = false;
     if (this.inFlightSave) {
       await this.inFlightSave;
+      // A failed in-flight save may have scheduled a backoff retry (`runSave`'s catch/finally
+      // runs `scheduleRetry()` before this await resolves, i.e. AFTER the clear above already
+      // ran) — clear it again so settle() really does leave nothing armed.
+      this.clearTimer();
+      this.rearm = false;
     }
   }
 
@@ -149,23 +175,60 @@ export class AutosaveController {
     void this.inFlightSave;
   }
 
-  /** The awaited body of one save; always resolves (fail-soft), then re-arms if needed. */
+  /**
+   * The awaited body of one save; always resolves (fail-soft — the caller never sees a throw).
+   *
+   * The rearm/retry decision is made AFTER the try/finally, never inside it: `finally` runs on
+   * every exit path including a later `return`, so folding either decision into it would make the
+   * "did it succeed" outcome ambiguous by the time it ran. Keeping it out lets the two stay mutually
+   * exclusive by construction — a ping that arrived mid-save always wins over a backoff retry.
+   */
   private async runSave(): Promise<void> {
+    let failed = false;
     try {
       await this.save();
+      this.failedAttempts = 0;
       this.setStatus('saved');
-    } catch {
-      // Fail-soft: never surface a blocking error for a background autosave.
+    } catch (err) {
+      failed = true;
+      // Never swallow silently: a background autosave still failed, and this is the only place
+      // that says so. `status` tells the UI; this gives whoever reads the console the cause.
+      console.warn('[mj-forms] autosave failed', err);
       this.setStatus('error');
     } finally {
       this.inFlight = false;
       this.inFlightSave = null;
-      if (this.rearm && !this.disposed) {
-        this.rearm = false;
-        this.setStatus('pending');
-        this.arm();
-      }
     }
+    if (this.disposed) {
+      return;
+    }
+    if (this.rearm) {
+      this.rearm = false;
+      this.setStatus('pending');
+      this.arm();
+    } else if (failed) {
+      this.scheduleRetry();
+    }
+  }
+
+  /**
+   * Retry a failed save on {@link RETRY_DELAYS_MS}, capped at its length. Hitting the cap is not
+   * an error path of its own — it is the explicitly-handled "stop automatically retrying" case:
+   * `status` stays `'error'` and the answers since the last good save stay unsaved on the server
+   * until the next edit re-arms the normal debounce or a final submit sends every answer. A
+   * respondent who walks away at that point leaves them only in the tab; the last retry waiting a
+   * full server window is what makes reaching the cap on a rate-limit refusal alone unlikely.
+   */
+  private scheduleRetry(): void {
+    if (this.failedAttempts >= RETRY_DELAYS_MS.length) {
+      return;
+    }
+    const delay = RETRY_DELAYS_MS[this.failedAttempts++];
+    this.clearTimer();
+    this.timer = this.timers.setTimeout(() => {
+      this.timer = null;
+      this.flush();
+    }, delay);
   }
 
   private clearTimer(): void {

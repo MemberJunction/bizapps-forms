@@ -94,7 +94,7 @@ curl -s -X POST http://localhost:4000/graphql \
 | Trap | What happens | What to do |
 |---|---|---|
 | **Blur binding** | Builder inputs bind `(change)`, which fires on **blur**. Playwright's `.fill()` does not blur, so the UI shows a value the DB never received — it looks exactly like a lost-write bug. | Always `browser_press_key: Tab` after typing, *then* query the DB. |
-| **Rate limit** | 5 submissions/min per (session, distribution). A test battery trips it and every later assertion returns "Too many submissions". | Pace submits, or mint a fresh session by re-fetching `/f/<slug>` (each redeem gets a new `mj_sid`). |
+| **Rate limit** | Per (session, distribution) and per minute: 10 final submits (`FORMS_RATELIMIT_MAX`) and, in a separate bucket, 60 autosaves (`FORMS_AUTOSAVE_RATELIMIT_MAX`). A test battery trips it and every later assertion returns "Too many submissions". | Pace submits, or mint a fresh session by re-fetching `/f/<slug>` (each redeem gets a new `mj_sid`). |
 | **`x-session-id`** | `FormResponse.AnonymousSessionID` comes from this **request header**, not the JWT. curl omits it, so curl-created rows take a different server code path than widget rows. | Send `-H 'x-session-id: <value>'` whenever you are testing behaviour that depends on session ownership. |
 | **Column names** | `FormQuestion` uses `Prompt` / `DisplayOrder` (not QuestionText/Sequence); `FormDistribution` uses `ChannelType`; `FormAutomationRun` uses `FormAutomationID` / `FormResponseID`; `Trigger` needs bracket-quoting. Per-form styling is `Form.StyleID` → `FormStyle.CSSVariables` (FormStyle has **no** FormID). | Check `INFORMATION_SCHEMA.COLUMNS` before guessing. |
 | **Wrong origin** | `/f/:slug` is served by the **API** (`:4000`). The same path on Explorer (`:4201`) silently redirects to the workspace and looks like the form failing to load. | Always use `:4000` for respondent links. |
@@ -189,7 +189,7 @@ operations as them, with a System control beside each one.
 - [ ] Answer for a question belonging to **another form** → same
 - [ ] Wrong `formVersionId` → *"version-mismatch"*
 - [ ] Submit to **another distribution's** slug with this token → *"distribution-not-found"*
-- [ ] Exceed 5 submits/min → clear rate-limit message naming the wait
+- [ ] Exceed 10 final submits/min in one session → clear rate-limit message naming the wait (autosaves never count toward it)
 - [ ] Answer typing lands in the right columns: text → `TextValue`, multi-select → `JSONValue`, NPS/number → `NumericValue`
 
 ### H. Response adoption and ownership — **security**

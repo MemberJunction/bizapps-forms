@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hashSessionId, rateLimitKey } from '../source-metadata.service';
+import { autosaveRateLimitKey, hashSessionId, rateLimitKey } from '../source-metadata.service';
 
 /**
  * Pins the rate-limit key's session semantics.
@@ -7,8 +7,8 @@ import { hashSessionId, rateLimitKey } from '../source-metadata.service';
  * These are contract tests, not tests that drove the implementation. They exist because the
  * blank-session collapse below was real, undocumented, and silently defeated three of the
  * repo's own smoke scripts: with no `x-session-id` header every request hashed to one value,
- * so all of a script's submissions shared a single 5-per-60s bucket while appearing to use a
- * fresh session per submission.
+ * so all of a script's submissions shared a single bucket (10-per-60s by default) while
+ * appearing to use a fresh session per submission.
  */
 describe('rateLimitKey session semantics', () => {
   const DIST = 'dist-1';
@@ -49,5 +49,25 @@ describe('rateLimitKey session semantics', () => {
   it('hashes a blank session to a stable value rather than an empty string', () => {
     // A key of `dist:` would collide with anything else that produced an empty segment.
     expect(hashSessionId('')).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+/**
+ * #271: autosaves and final submits must never share a bucket, and the two key functions must
+ * never collide on the same inputs — otherwise an autosave and a Submit press for the same
+ * (session, distribution) would charge the same counter regardless of which function fired.
+ */
+describe('autosaveRateLimitKey', () => {
+  const DIST = 'dist-1';
+
+  it('never collides with rateLimitKey for the same inputs', () => {
+    const inputs = { sessionId: 'session-a', distributionId: DIST };
+    expect(autosaveRateLimitKey(inputs)).not.toBe(rateLimitKey(inputs));
+  });
+
+  it('still gives distinct sessions distinct buckets', () => {
+    expect(autosaveRateLimitKey({ sessionId: 'session-a', distributionId: DIST })).not.toBe(
+      autosaveRateLimitKey({ sessionId: 'session-b', distributionId: DIST }),
+    );
   });
 });

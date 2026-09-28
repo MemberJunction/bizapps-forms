@@ -112,12 +112,16 @@ const RATE_LIMIT_PREFIX = 'Too many submissions.';
  * Stop the run if the limiter answered, rather than letting that answer reach an assertion.
  *
  * EVERY security assertion in this script is shaped `success === false`, so ANY refusal satisfies
- * it — including one this script provoked itself. MJ's per-(session, distribution) limiter allows
- * 5 submissions a minute and hashes a blank session to ONE bucket that every headerless caller
- * shares (`rateLimitKey` → `distributionId:sha256(salt + '')`). `smoke/lib/session.mjs` exists so
- * the other suites can stay out of that bucket by sending a real per-session header; this one
- * cannot, because the absent and blank headers ARE the attack it reproduces, so four of its
- * submissions land there by design and a second run inside the same minute exhausts it.
+ * it — including one this script provoked itself. A headerless submission is not charged to any
+ * per-session bucket while the server can resolve the caller's IP (`rateLimitGatesFor`,
+ * `submit-pipeline.ts`); it is bounded by the per-IP ceilings instead — `FORMS_RATELIMIT_IP_MAX`
+ * saves (default 120) and `FORMS_COMPLETION_MAX` completions (default 20) per minute per
+ * distribution — which every run from this machine shares. Only when no IP resolves do all
+ * headerless callers share ONE per-session bucket (`rateLimitKey` → `distributionId:sha256(salt +
+ * '')`): 10 final submits and, separately, 60 autosaves a minute. `smoke/lib/session.mjs` keeps the
+ * other suites out of that bucket by sending a real per-session header; this one cannot, because the
+ * absent and blank headers ARE the attack it reproduces, so a burst of runs can still reach a
+ * ceiling it did not mean to test.
  *
  * What that looked like before this guard, and why it is worse than a flaky failure: the run
  * printed `ok  REFUSED: attacker omits x-session-id` — the ownership gate credited for a refusal
@@ -148,18 +152,17 @@ function assertNotRateLimited(result, sessionId) {
 /**
  * One submission attempt. Returns the `SubmitFormResponse` payload.
  *
- * THE HEADERLESS BUDGET, because it is a real ceiling and not an abstract one: of the 5 submissions
- * a minute the shared blank-session bucket allows, this script spends 4 — the route-2 probe that
+ * THE HEADERLESS SUBMISSIONS, because on a host that cannot resolve IPs they share one real
+ * per-session bucket (see `assertNotRateLimited`): this script sends 4 — the route-2 probe that
  * omits the header, the BLANK one, and the two saves in "a genuinely headerless client still adopts
  * its OWN row". The blank probe counts because HTTP strips a field value's surrounding whitespace,
  * so `x-session-id: '   '` reaches the server as `''`: over the wire the blank and absent routes
  * are the same request, and only `session-ownership.spec.ts` — which hands `'   '` straight to the
  * pipeline — can tell them apart at all.
  *
- * That leaves ONE submission of margin in a clean window, which is why the absent-header case on
- * the FINAL route is pinned in the spec rather than added here: a fifth would spend the bucket
- * outright and the next headerless caller — this script's own next run, or anyone else's — would
- * be refused by the limiter. The routes this script does drive against the victim's row already
+ * The absent-header case on the FINAL route is pinned in the spec rather than added here, so the
+ * script stays well inside every headerless budget and a repeat run in the same minute is not
+ * refused by the limiter. The routes this script does drive against the victim's row already
  * cover the primary-key collision and the SQL collation it exists for.
  */
 async function submit(token, sessionId, { responseId, answers, formVersionId, partial }) {
