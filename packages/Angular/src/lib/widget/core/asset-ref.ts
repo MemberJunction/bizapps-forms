@@ -203,3 +203,40 @@ export function resolveStyleTokensForRender(tokens: FormStyleTokens, graphqlUrl:
   const apiBase = apiBaseOf(graphqlUrl);
   return mapStyleTokenAssets(tokens, (url) => resolveAssetUrl(url, apiBase));
 }
+
+/** Ascending by `displayOrder`, without mutating the input (the renderer sorts the same way). */
+function byDisplayOrder<T extends { displayOrder: number }>(items: readonly T[]): T[] {
+  return [...items].sort((a, b) => a.displayOrder - b.displayOrder);
+}
+
+/**
+ * The images a respondent sees AFTER the first screen, in the order they will see them: every
+ * question option's image (page, question, option, each by `displayOrder`, matching
+ * `form-runtime.ts` and `section-content.ts`), then every ending screen's image. All endings are
+ * included because which one shows depends on the answers.
+ *
+ * Deliberately excludes the welcome image, the logo and CSS assets: the first screen requests
+ * those itself, and listing them would queue a second request for bytes already in flight.
+ *
+ * Call it on the definition AFTER {@link resolveDefinitionForRender}, so the URLs point at the
+ * API this widget is talking to — the same URLs its `<img>` tags will ask for, which is what lets
+ * the browser cache serve them.
+ */
+export function collectLaterImageUrls(def: PublishedFormDefinition): string[] {
+  const urls: string[] = [];
+  for (const page of byDisplayOrder(def.pages)) {
+    for (const question of byDisplayOrder(page.questions)) {
+      for (const option of byDisplayOrder(question.options)) {
+        if (option.imageURL) {
+          urls.push(option.imageURL);
+        }
+      }
+    }
+  }
+  for (const ending of byDisplayOrder(def.endScreens)) {
+    if (ending.mediaURL) {
+      urls.push(ending.mediaURL);
+    }
+  }
+  return [...new Set(urls)];
+}
