@@ -302,10 +302,13 @@ describe('MagicLinkInviteMinter', () => {
 
 /**
  * `MintAnonymousInvite` gains the same optional `host` the revoke/re-bound paths already have
- * (bizapps-forms#265 Task 2), so a caller with an open transaction — the device-resume routes — can
- * have the invite created and its resource type resolved on ITS provider, not the process-global
- * one. Same idioms `writeToInvite`/`reportUnloadableInvite` already use for revoke: the invite is
- * created via `(host ?? new Metadata()).GetEntityObject(...)`, and the resource-type lookup runs
+ * (bizapps-forms#265 Task 2). A caller running on its own ISOLATED instance — the device-resume
+ * routes — passes it so the invite is created and its resource type resolved on THAT instance,
+ * keeping the write OFF the process-global provider, not because the caller has a transaction of
+ * its own open. Without it, the mint runs through the process-global provider, where a released
+ * `Common.LogActivity`'s open transaction could capture or roll it back (#260). Same idioms
+ * `writeToInvite`/`reportUnloadableInvite` already use for revoke: the invite is created via
+ * `(host ?? new Metadata()).GetEntityObject(...)`, and the resource-type lookup runs
  * `new RunView(canRunViews(host) ? host : null)`.
  */
 describe('MagicLinkInviteMinter.MintAnonymousInvite — host routing (#265 Task 2)', () => {
