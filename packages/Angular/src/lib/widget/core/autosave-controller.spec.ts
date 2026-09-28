@@ -204,7 +204,7 @@ describe('AutosaveController', () => {
   });
 
   describe('capped retry after a refused/failed save (bizapps-forms#271)', () => {
-    it('retries on the backoff — 5s, then 15s, then 30s — and not a 4th time', async () => {
+    it('retries on the backoff — 5s, then 15s, then 60s — and not a 4th time', async () => {
       const save = vi.fn().mockRejectedValue(new Error('Too many submissions'));
       const c = new AutosaveController(save, () => {}, 500);
 
@@ -221,14 +221,49 @@ describe('AutosaveController', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(save).toHaveBeenCalledTimes(3);
 
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(59_999);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(3); // the last retry waits a full 60s window, not 30s
+      await vi.advanceTimersByTimeAsync(1);
       await vi.advanceTimersByTimeAsync(0);
       expect(save).toHaveBeenCalledTimes(4); // 3rd retry — the cap (RETRY_DELAYS_MS.length) is spent
 
       // No 4th retry: the cap is explicit, not "retry forever".
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(120_000);
       expect(save).toHaveBeenCalledTimes(4);
       expect(c.status).toBe('error');
+    });
+
+    // Gauntlet #272 (F2). The widget cannot read the server's wait — the result carries only the
+    // "Please wait N seconds" sentence — so the schedule itself must outlast the window. Modelled on
+    // the server's real limiter: a 60s SLIDING window whose refusals charge nothing
+    // (rate-limit.service.ts `charge`). With the old 5/15/30s schedule every retry fell inside the
+    // window that refused it and the controller gave up with the respondent's last edits unsaved.
+    it('lands the refused progress once the server window frees, with no further edit', async () => {
+      const WINDOW_MS = 60_000;
+      const MAX = 2;
+      const admitted: number[] = [];
+      const save = vi.fn(async () => {
+        const now = Date.now();
+        const recent = admitted.filter((t) => t > now - WINDOW_MS);
+        if (recent.length >= MAX) {
+          throw new Error('Autosave refused: Too many submissions.');
+        }
+        admitted.push(now);
+        return 'r1';
+      });
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const c = new AutosaveController(save, () => {}, 1500);
+
+      // Four edits 2.5s apart, then the respondent stops typing (the UR1 run in the gauntlet).
+      for (let i = 0; i < 4; i++) {
+        c.ping();
+        await vi.advanceTimersByTimeAsync(2_500);
+      }
+      await vi.advanceTimersByTimeAsync(180_000);
+
+      expect(c.status).toBe('saved');
+      expect(admitted).toHaveLength(3); // two before the refusals, one after the window freed
     });
 
     it('resets the retry count on a success, so a later failure retries at 5s again', async () => {
@@ -256,7 +291,7 @@ describe('AutosaveController', () => {
       expect(c.status).toBe('saved');
 
       // A fresh ping fails again. If the count had NOT reset, the next retry would be scheduled
-      // at 30s (index 2); confirm it is at 5s (index 0) instead.
+      // at 60s (index 2); confirm it is at 5s (index 0) instead.
       c.ping();
       await vi.advanceTimersByTimeAsync(500);
       await vi.advanceTimersByTimeAsync(0);
@@ -342,7 +377,7 @@ describe('AutosaveController', () => {
       await settled;
       expect(c.status).toBe('error');
 
-      // A 5s (then 15s, then 30s) backoff retry must NOT be armed after settle() returns.
+      // A 5s (then 15s, then 60s) backoff retry must NOT be armed after settle() returns.
       await vi.advanceTimersByTimeAsync(60_000);
       expect(save).toHaveBeenCalledTimes(1);
     });

@@ -12,7 +12,7 @@
  *     `status` (`'error'`, never a throw out of the controller) AND retried on its own, on a
  *     capped backoff (`RETRY_DELAYS_MS`) — once the cap is spent the status just stays `'error'`;
  *     the next edit re-arms the normal debounce (not another backoff retry — `failedAttempts`
-   *     resets only on a success), and a final submit carries every answer anyway.
+ *     resets only on a success), and a final submit carries every answer anyway.
  *
  * Framework-free (takes injected `setTimeout`/`clearTimeout`) so it is unit-testable
  * with fake timers and no Angular. The component wires it to signals + the API.
@@ -35,8 +35,19 @@ export interface TimerApi {
 
 const DEFAULT_DEBOUNCE_MS = 1500;
 
-/** Backoff schedule for a save the server refused or a request that failed outright. Its length IS the retry cap — the 4th failure in a row gets no further automatic retry. */
-const RETRY_DELAYS_MS = [5_000, 15_000, 30_000] as const;
+/**
+ * Backoff schedule for a save the server refused or a request that failed outright. Its length IS
+ * the retry cap — the 4th failure in a row gets no further automatic retry.
+ *
+ * The LAST delay is one full server rate-limit window (`FORMS_RATELIMIT_WINDOW_MS`, default 60s),
+ * because the widget cannot read the server's wait: a refusal carries only the "Please wait N
+ * seconds" sentence. The server's window slides and a refusal charges nothing, so the bucket that
+ * refused the previous attempt has freed by the time a full window has passed — the last retry
+ * cannot land inside it. With 5/15/30s all three retries fell inside one window and the controller
+ * gave up with the respondent's latest answers unsaved (gauntlet #272). An operator who widens the
+ * window beyond the default loses that guarantee, not the retry.
+ */
+const RETRY_DELAYS_MS = [5_000, 15_000, 60_000] as const;
 
 export class AutosaveController {
   private timer: number | null = null;
@@ -86,8 +97,9 @@ export class AutosaveController {
    * (the final submit) can guarantee no autosave write is still on the wire carrying the
    * same `clientResponseId`. This is what prevents the widget from firing two overlapping
    * writes with the same idempotency key (the source of the cosmetic PK-collision noise).
-   * Never re-arms — a failed in-flight save is logged and left to its own capped retry
-   * (fail-soft), never thrown back at the caller.
+   * Never re-arms and never leaves a retry armed: a failed in-flight save is logged, never thrown
+   * back at the caller (fail-soft), and the backoff retry it schedules is cancelled below — the
+   * caller is about to send every answer itself.
    */
   public async settle(): Promise<void> {
     this.clearTimer();
@@ -202,8 +214,10 @@ export class AutosaveController {
   /**
    * Retry a failed save on {@link RETRY_DELAYS_MS}, capped at its length. Hitting the cap is not
    * an error path of its own — it is the explicitly-handled "stop automatically retrying" case:
-   * `status` stays `'error'`, the next edit re-arms the normal debounce as usual, and a final
-   * submit sends every answer regardless, so nothing the respondent typed is lost by giving up.
+   * `status` stays `'error'` and the answers since the last good save stay unsaved on the server
+   * until the next edit re-arms the normal debounce or a final submit sends every answer. A
+   * respondent who walks away at that point leaves them only in the tab; the last retry waiting a
+   * full server window is what makes reaching the cap on a rate-limit refusal alone unlikely.
    */
   private scheduleRetry(): void {
     if (this.failedAttempts >= RETRY_DELAYS_MS.length) {
