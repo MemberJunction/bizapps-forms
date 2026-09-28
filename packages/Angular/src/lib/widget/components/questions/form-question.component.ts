@@ -368,20 +368,36 @@ export class FormQuestionComponent {
     return this.compositeValue()[field] ?? '';
   }
 
+  /** Update one part of a composite, emitting the whole merged object. */
+  protected onComposite(field: string, raw: string): void {
+    this.emitComposite({ ...this.compositeValue(), [field]: raw });
+  }
+
   /**
-   * Update one part of a composite, emitting the whole object.
+   * Emit a whole composite, unless it equals the one already held.
    *
    * Blank parts are DROPPED rather than kept as empty strings, so a respondent who tabs through
    * an optional address without typing leaves no answer at all. Keeping them would emit
    * `{line1:'', city:''}` — an object `isAnswerSupplied` correctly calls unanswered, but which
    * every reader downstream still has to receive, store and skip.
+   *
+   * The equality check exists for the same reason as {@link emitIfChanged}: composite inputs also
+   * bind both `(input)` and `(change)` (#268), so re-emitting the unchanged value on blur must not
+   * look like an edit.
    */
-  protected onComposite(field: string, raw: string): void {
-    const next: Record<string, string> = { ...this.compositeValue(), [field]: raw };
-    for (const key of Object.keys(next)) {
-      if (next[key].trim() === '') {
-        delete next[key];
+  private emitComposite(parts: Record<string, string>): void {
+    const next: Record<string, string> = {};
+    for (const [key, part] of Object.entries(parts)) {
+      if (part.trim() !== '') {
+        next[key] = part;
       }
+    }
+    const current = this.compositeValue();
+    const same =
+      Object.keys(next).length === Object.keys(current).length &&
+      Object.entries(next).every(([key, part]) => current[key] === part);
+    if (same) {
+      return;
     }
     this.valueChange.emit(Object.keys(next).length > 0 ? next : null);
   }
@@ -630,16 +646,29 @@ export class FormQuestionComponent {
   }
 
   protected onText(raw: string): void {
-    this.valueChange.emit(raw === '' ? null : raw);
+    this.emitIfChanged(raw === '' ? null : raw);
   }
 
   protected onNumber(raw: string): void {
     if (raw.trim() === '') {
-      this.valueChange.emit(null);
+      this.emitIfChanged(null);
       return;
     }
     const n = Number(raw);
-    this.valueChange.emit(Number.isFinite(n) ? n : raw);
+    this.emitIfChanged(Number.isFinite(n) ? n : raw);
+  }
+
+  /**
+   * Emit a scalar answer unless it is the one already held.
+   *
+   * Text controls bind both `(input)` and `(change)` (#268), so a typed value arrives twice — once
+   * per keystroke and again on blur. The second is not an edit and must not look like one.
+   */
+  private emitIfChanged(next: string | number | null): void {
+    if (next === (this.value() ?? null)) {
+      return;
+    }
+    this.valueChange.emit(next);
   }
 
   protected onSingleChoice(value: string): void {
