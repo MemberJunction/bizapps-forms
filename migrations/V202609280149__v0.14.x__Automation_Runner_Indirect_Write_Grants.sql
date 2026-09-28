@@ -1,5 +1,5 @@
 -- =============================================================================================
--- MJ Forms v0.14.x — give `Forms Automation Runner` the two indirect writes its own shipped hooks
+-- MJ Forms v0.14.x — give `Forms Automation Runner` the three indirect writes its own shipped hooks
 -- trigger, WITHOUT the core task-graph writes issue #269 asked for
 -- =============================================================================================
 -- WHAT WAS WRONG (#269). Reproduced on a throwaway clone (MJ 6.1.4 core, common + tasks, Forms at
@@ -11,6 +11,12 @@
 --      RunView against `MJ_BizApps_Tasks: Task Type Status` to resolve the type's default status; the
 --      runner cannot read it, the RunView fails, and the failure is only logged, never surfaced to
 --      whoever saved the task. Silent degradation, not a thrown error.
+--
+--      The same `TaskEntityServer.Save` then writes the new task's 'Created' audit row to
+--      `MJ_BizApps_Tasks: Task Activities`, again as the runner, which holds no grant there. That
+--      save's `false` return is ignored (`logActivity` awaits `activity.Save()` and never checks it),
+--      so this loss is fully silent: no log line at all. Measured: 0 activity rows on 18
+--      runner-created followup tasks (found in review, same indirect-write shape as the status read).
 --
 --   2. `Forms: Upsert Respondent Person` CREATING a Person fires bizapps-common's `Common.LogActivity`,
 --      which runs inline as the runner and saves an Activity. Activities has a writable geo field
@@ -29,6 +35,8 @@
 --                                                         Never Create/Update: the runner does not
 --                                                         author statuses, only reads the one bound
 --                                                         to a task's type.
+--   MJ_BizApps_Tasks: Task Activities    Create only   — the task's 'Created' audit row. Never
+--                                                         Read/Update: `logActivity` only inserts.
 --   MJ: Record Geo Codes                 Read+Create+Update — Read: GeoCodeSyncService looks for an
 --                                                         existing row before creating one, same
 --                                                         "failed read reads as absent" shape as the
@@ -82,16 +90,17 @@
 -- left exactly as an operator wrote it; role and entities are matched by `Name`, not GUID, because
 -- `Role.Name` is UNIQUE and a sibling app installed first can mint the role under a different ID; and
 -- this ships as hand-written SQL — not a regenerated seed — because
--- `metadata/entity-permissions/.entity-permissions.json` already declares both rows under the SAME
+-- `metadata/entity-permissions/.entity-permissions.json` already declares every row under the SAME
 -- ids this file inserts, so a future full regeneration reproduces these exact rows rather than
 -- minting duplicates.
 --
--- ONLY THE ROLE IS A THROW PRECONDITION. Both target entities are CONDITIONAL. `Task Type Status`
+-- ONLY THE ROLE IS A THROW PRECONDITION. Every target entity is CONDITIONAL. `Task Type Status`
 -- is younger than the floor Forms accepts: bizapps-tasks created it in
 -- `V202608200800__v1.2.x_TaskType_Code_Statuses_Workflow_Hooks.sql` (1.2.x), while `mj-app.json`
 -- declares `mj-bizapps-tasks >=1.1.0` — a host on 1.1.x is a valid hard-dependency install with no
 -- such entity yet. A database can also lack bizapps-tasks altogether (the shared dev database has
--- no tasks schema at all). `MJ: Record Geo Codes` is kept conditional defensively: a core whose
+-- no tasks schema at all), which is the only way `Task Activities` is absent — it is in
+-- bizapps-tasks' 1.0.x baseline. `MJ: Record Geo Codes` is kept conditional defensively: a core whose
 -- metadata lacks the entity skips it with a PRINT rather than failing the whole migration. Either
 -- absence means the hook that would use the grant already has nothing to write to, so each is
 -- SKIPPED with a PRINT naming its provider — never a THROW — and the boot-time automation readiness
@@ -120,13 +129,14 @@ DECLARE @Grants TABLE (
 
 INSERT INTO @Grants (Seq, EntityName, NeedRead, NeedCreate, NeedUpdate, InsertID, ProvidedBy) VALUES
     (1, N'MJ_BizApps_Tasks: Task Type Status', 1, 0, 0, 'F039DBBD-F6CA-40C2-B747-94D4F22EC87C', N'bizapps-tasks'),
-    (2, N'MJ: Record Geo Codes',               1, 1, 1, 'F6FE151E-BEE5-42A2-BF2A-A788887046C5', N'MJ core geocoding');
+    (2, N'MJ: Record Geo Codes',               1, 1, 1, 'F6FE151E-BEE5-42A2-BF2A-A788887046C5', N'MJ core geocoding'),
+    (3, N'MJ_BizApps_Tasks: Task Activities',  0, 1, 0, 'F6E07485-3089-4423-85BC-CA732DF41981', N'bizapps-tasks');
 
 UPDATE g SET EntityID = e.ID
 FROM @Grants g
 JOIN [${mjSchema}].[Entity] e ON e.Name = g.EntityName;
 
--- One pass per grant. Bounded by the two rows above — the loop walks Seq 1..2 and nothing else.
+-- One pass per grant. Bounded by the three rows above — the loop walks Seq 1..3 and nothing else.
 DECLARE @Seq INT = 1;
 DECLARE @GrantCount INT = (SELECT COUNT(*) FROM @Grants);
 DECLARE @EntityName NVARCHAR(255), @EntityID UNIQUEIDENTIFIER, @NeedRead BIT, @NeedCreate BIT,

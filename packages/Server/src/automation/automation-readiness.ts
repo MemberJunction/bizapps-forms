@@ -173,6 +173,13 @@ export const AUTOMATION_RUNNER_GRANTS: readonly RunnerGrant[] = [
       "bizapps-tasks' task server resolves the new followup task's default status (Create Followup Task); a failed read " +
       'saves the task with no status and says so only in a log line',
   },
+  {
+    entityName: 'MJ_BizApps_Tasks: Task Activities',
+    read: false, create: true, update: false,
+    reason:
+      "bizapps-tasks' task server writes the new followup task's 'Created' audit activity as this principal (Create " +
+      'Followup Task); it ignores a refused save, so without the grant the activity is lost with no log line at all',
+  },
 ];
 
 /**

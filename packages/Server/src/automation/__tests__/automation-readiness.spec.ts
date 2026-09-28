@@ -84,6 +84,16 @@ describe('assessAutomationReadiness', () => {
     expect(reasons[0]).toContain("lacks Read on 'MJ_BizApps_Tasks: Task Type Status'");
   });
 
+  it("names Create on bizapps-tasks' Task Activities — the followup task's 'Created' audit row is lost silently without it (#269)", () => {
+    const perms = grantedLookup();
+    perms.set('MJ_BizApps_Tasks: Task Activities', { CanRead: false, CanCreate: false, CanUpdate: false });
+
+    const reasons = assessAutomationReadiness(PRINCIPAL, (name) => perms.get(name));
+
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain("lacks Create on 'MJ_BizApps_Tasks: Task Activities'");
+  });
+
   it("gives the Record Geo Codes grant the Activity's geocode as its reason — a Person save never geocodes (#269)", () => {
     // People's Geo* fields are all virtual, and core geocodes only an entity with a writable geo
     // field. The row the runner writes is for the Activity Common.LogActivity saves.

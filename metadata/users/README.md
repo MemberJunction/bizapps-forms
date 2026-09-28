@@ -54,7 +54,8 @@ reserved by RFC 2606 precisely so an address can be unroutable on purpose.
   create + update on People, but keep `MJ: Record Geo Codes` out of `FORMS_BINDING_ALLOWED_ENTITIES`.
 - **The built-in hooks' targets in the two sibling apps:** `People` (read + create + update); for
   `Create Followup Task` — Task Types (read), Tasks and Task Links (create only), and Task Type
-  Status (read only, so the task's default status resolves — #269); for the `Common.LogActivity`
+  Status (read only, so the task's default status resolves) and Task Activities (create only, the
+  task's 'Created' audit row — lost with no log line without it) — both #269; for the `Common.LogActivity`
   action that creating a Person fires — Activity Types (read), Activities (read + create) and
   Activity Links (create).
 

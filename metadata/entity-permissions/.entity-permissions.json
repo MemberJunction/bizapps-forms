@@ -554,5 +554,22 @@
       "Read + Create + Update -- Common.LogActivity (fired when Upsert Respondent Person creates a Person) saves an Activity as the runner, and Activities has a writable geo field (Location), so core's GeoCodeSyncService runs after that save: it reads for an existing row, creates one, then RE-SAVES it with the result. With Create and no Update that re-save is refused and logged on every submit whose automations create a respondent Person (#269, measured), which strands the row at 'pending' until something else settles it. Not the Person itself: People's geo fields are all virtual, so a Person save never geocodes. No Delete.",
       "CONDITIONAL, kept defensively: a core whose metadata lacks this entity has the migration SKIP this grant with a PRINT rather than failing, and the boot readiness report names it if the entity later exists."
     ]
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Tasks: Task Activities",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": false,
+      "CanCreate": true,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": { "ID": "F6E07485-3089-4423-85BC-CA732DF41981" },
+    "_comments": [
+      "Shipped by V202609280149__v0.14.x__Automation_Runner_Indirect_Write_Grants.sql under this SAME id, so a regenerated seed reproduces this row rather than minting a duplicate.",
+      "",
+      "Create ONLY -- bizapps-tasks' TaskEntityServer.Save writes a 'Created' Task Activity for every new task, as the saving user; Create Followup Task saves as the runner. TaskEntityServer ignores the refused save's false return, so without this grant every followup task lost its audit row with NO log line (#269, measured: 0 activities on 18 runner-created tasks).",
+      "CONDITIONAL: a database without bizapps-tasks has no such entity, so the migration SKIPS this grant with a PRINT, and the boot readiness report names it once the entity exists."
+    ]
   }
 ]
