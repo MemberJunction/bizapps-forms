@@ -33,3 +33,35 @@ describe('autofilled text reaches the form (#268)', () => {
     }
   });
 });
+
+const source = (file: string): string =>
+  readFileSync(join(__dirname, file), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+
+/** The body of `name(...) {` up to the next method at the same indent — enough for ordering checks. */
+const methodBody = (file: string, name: string): string => {
+  const src = source(file);
+  const start = src.search(new RegExp(`\\n  (protected |private |public )?${name}\\(`));
+  expect(start, `${file} declares ${name}`).toBeGreaterThan(-1);
+  const rest = src.slice(start + 1);
+  const end = rest.search(/\n  (protected |private |public )?[A-Za-z]+\(/);
+  return end === -1 ? rest : rest.slice(0, end);
+};
+
+describe('Next and Submit judge what the respondent can see (#268)', () => {
+  it('the question exposes a command that re-reads its own controls', () => {
+    expect(source('form-question.component.ts')).toMatch(/\n  syncFromDom\(\): void \{/);
+  });
+
+  it.each([
+    ['../form-scroll.component.ts', 'onNext', /touchAll|areValid/],
+    ['../form-scroll.component.ts', 'onSubmit', /touchAll|areValid/],
+    ['../form-one-question.component.ts', 'onNext', /markTouched|errorFor/],
+  ])('%s %s commits visible values before validating', (file, method, validation) => {
+    const body = methodBody(file, method);
+    const commit = body.indexOf('this.commitVisibleValues()');
+    expect(commit, body).toBeGreaterThan(-1);
+    expect(commit).toBeLessThan(body.search(validation));
+  });
+});

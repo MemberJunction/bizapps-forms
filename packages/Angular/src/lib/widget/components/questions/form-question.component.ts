@@ -116,6 +116,8 @@ export class FormQuestionComponent {
   public readonly valueChange = output<AnswerValue>();
 
   private readonly uploader = inject(FORMS_UPLOAD_SERVICE);
+  /** This question's own DOM subtree — read back by {@link syncFromDom} (#268), never written. */
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /**
    * Upload state, keyed by question id rather than held here.
    *
@@ -336,9 +338,25 @@ export class FormQuestionComponent {
 
   // --- Composites (Address / ContactInfo) ----------------------------------
 
-  protected readonly compositeFields = computed<readonly string[]>(() =>
-    this.question().type === 'Address' ? ADDRESS_FIELDS : CONTACT_INFO_FIELDS,
-  );
+  /**
+   * The sub-field names for a composite question, or `[]` for every other type.
+   *
+   * Only ever iterated from inside the `@case ('Address')` / `@case ('ContactInfo')` branch of the
+   * template, so the empty case used to be unreachable and this fell back to `CONTACT_INFO_FIELDS`
+   * unconditionally for anything that was not `'Address'`. {@link syncFromDom} (#268) is the first
+   * caller that reads this for EVERY question type, and treating a ShortText as a five-field
+   * composite because it "wasn't Address" would have made this component lie about its own type.
+   */
+  protected readonly compositeFields = computed<readonly string[]>(() => {
+    switch (this.question().type) {
+      case 'Address':
+        return ADDRESS_FIELDS;
+      case 'ContactInfo':
+        return CONTACT_INFO_FIELDS;
+      default:
+        return [];
+    }
+  });
 
   /** The composite answer as a flat string map, ignoring anything that is not a string. */
   protected readonly compositeValue = computed<Record<string, string>>(() => {
@@ -643,6 +661,47 @@ export class FormQuestionComponent {
   private settingText(key: string): string {
     const raw = this.question().settings?.[key];
     return typeof raw === 'string' ? raw : '';
+  }
+
+  /**
+   * Re-read this question's text controls and commit what differs from the model.
+   *
+   * The renderers call this before Next/Submit validates (#268). `(input)`/`(change)` cover every
+   * autofill path we can observe, but iOS Safari's contact AutoFill is closed source, and a value a
+   * respondent can SEE being judged "required" is the one failure this form cannot explain to them.
+   * Only text-style controls are read: every other control's DOM state is written FROM the model and
+   * has no value a browser could fill.
+   */
+  syncFromDom(): void {
+    const fields = this.compositeFields();
+    if (fields.length > 0) {
+      const parts: Record<string, string> = {};
+      for (const field of fields) {
+        const el = this.textControl(`${this.inputId()}-${field}`);
+        if (el) {
+          parts[field] = el.value;
+        }
+      }
+      this.emitComposite({ ...this.compositeValue(), ...parts });
+      return;
+    }
+    const el = this.textControl(this.inputId());
+    if (!el) {
+      return;
+    }
+    if (el instanceof HTMLInputElement && el.type === 'number') {
+      this.onNumber(el.value);
+    } else {
+      this.onText(el.value);
+    }
+  }
+
+  /** The text-style control with this id inside THIS question, or null. */
+  private textControl(id: string): HTMLInputElement | HTMLTextAreaElement | null {
+    const el = this.host.nativeElement.querySelector(`#${CSS.escape(id)}`);
+    const isText =
+      (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.classList.contains('mjf-input');
+    return isText ? el : null;
   }
 
   protected onText(raw: string): void {
