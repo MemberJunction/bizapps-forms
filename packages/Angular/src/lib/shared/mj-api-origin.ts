@@ -12,6 +12,7 @@
  * have made a sibling look like a dependency.
  */
 import { GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
+import { apiBaseOf } from '../widget/core/asset-ref';
 
 /**
  * Origin of the configured MJAPI GraphQL endpoint, or `''` when it cannot be determined.
@@ -28,6 +29,20 @@ export function resolveApiOrigin(): string {
     // component that has a perfectly good fallback of its own.
     return '';
   }
+}
+
+/**
+ * The configured MJAPI's BASE — origin plus any path prefix it is deployed under — or `''`.
+ *
+ * Deliberately not {@link resolveApiOrigin}: an MJAPI reverse-proxied at `https://h/api/graphql`
+ * serves uploaded images at `/api/forms/asset/<id>`, so resolving a stored `/forms/asset/<id>`
+ * against the bare origin would 404 (#270). A second function rather than a change to that one
+ * because its existing callers (the respondent link, the upload and response-download URLs) are
+ * outside #270; whether they too should honour a prefix is a separate question.
+ * `apiBaseOf` already maps an empty or malformed URL to `''`, so no try/catch is needed here.
+ */
+export function resolveApiBase(): string {
+  return apiBaseOf(GraphQLDataProvider.Instance?.ConfigData?.URL ?? '');
 }
 
 /** The Explorer session's bearer token, or `''` when there is none (unauthenticated preview). */
