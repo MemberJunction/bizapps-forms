@@ -26,6 +26,10 @@ export type FormRenderMode = 'Scroll' | 'OneQuestion';
 export interface FormStyleTokens {
   cssVariables: Record<string, string>;
   customCSS?: string;
+  /**
+   * Optional logo image. An uploaded image is stored as `/forms/asset/<id>`, relative to the API
+   * base, and renderers resolve it (see forms-ng `widget/core/asset-ref.ts`).
+   */
   logoURL?: string;
 }
 
@@ -89,7 +93,11 @@ export interface PublishedFormQuestionOption {
   value: string;
   displayOrder: number;
   isDefault?: boolean;
-  /** `PictureChoice` only: the image shown above the label. */
+  /**
+   * `PictureChoice` only: the image shown above the label. An uploaded image is stored as
+   * `/forms/asset/<id>`, relative to the API base, and renderers resolve it (see forms-ng
+   * `widget/core/asset-ref.ts`).
+   */
   imageURL?: string;
   /** `Matrix` only: which axis this option is part of. Absent is treated as `Row`. */
   matrixAxis?: MatrixAxis;
@@ -227,7 +235,10 @@ export interface PublishedFormScreen {
   body?: string;
   /** Label for the screen's single button ("Start", "Done"). Widget supplies a default. */
   buttonLabel?: string;
-  /** Optional image shown above the title. */
+  /**
+   * Optional image shown above the title. An uploaded image is stored as `/forms/asset/<id>`,
+   * relative to the API base, and renderers resolve it (see forms-ng `widget/core/asset-ref.ts`).
+   */
   mediaURL?: string;
   /**
    * `Ending` only: where to send the respondent instead of showing the screen.

@@ -43,6 +43,7 @@ import { FORMS_API_SERVICE, SessionExpiredError } from './api/forms-api.interfac
 import { FORMS_API_CONFIG } from './api/forms-api.config';
 import { submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
+import { resolveDefinitionForRender, resolveStyleTokensForRender } from './core/asset-ref';
 import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
@@ -206,9 +207,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * non-CSS parts of one (the logo) can be applied at all.
    */
   public applyPreviewStyle(tokens: FormStyleTokens): void {
+    // Same host-independent resolution as `load()` (#270): the builder preview's draft tokens
+    // can carry the same asset references a published snapshot does.
+    const resolved = resolveStyleTokensForRender(tokens, this.config.graphqlUrl);
     this.logoBroken.set(false);
-    this.styleOverride.set(tokens);
-    applyStyleTokens(this.hostRef.nativeElement, tokens);
+    this.styleOverride.set(resolved);
+    applyStyleTokens(this.hostRef.nativeElement, resolved);
   }
 
   /**
@@ -342,7 +346,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
         this.fail('This form is not available.');
         return;
       }
-      const def = loaded.definition;
+      // Resolve `/forms/asset/<id>` (and any legacy absolute upload-time host, #270) against
+      // THIS widget's own API origin — the one host guaranteed to be reachable from this
+      // browser and to serve these bytes. `MJAPI_PUBLIC_URL` at upload time was not: a form
+      // authored on localhost, a domain change, or a second API instance all left published
+      // forms pointing respondents at a host they cannot reach.
+      const def = resolveDefinitionForRender(loaded.definition, this.config.graphqlUrl);
       applyStyleTokens(this.hostRef.nativeElement, def.styleTokens);
       this.definition.set(def);
       const runtime = new FormRuntime(def);

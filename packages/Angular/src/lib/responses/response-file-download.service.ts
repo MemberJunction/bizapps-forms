@@ -14,7 +14,7 @@
 import { Injectable } from '@angular/core';
 import { LogError } from '@memberjunction/core';
 
-import { resolveApiOrigin, resolveApiToken } from '../shared/mj-api-origin';
+import { resolveApiBase, resolveApiToken } from '../shared/mj-api-origin';
 import { downloadErrorMessage, downloadUrl } from './response-file-download';
 
 /** What a download attempt produced. `error` is set only on failure. */
@@ -32,7 +32,8 @@ export class ResponseFileDownloadService {
    * rejected promise would leave the reader with a spinner that stopped for no stated reason.
    */
   public async download(fileId: string, fileName: string): Promise<DownloadOutcome> {
-    const url = downloadUrl(resolveApiOrigin(), fileId);
+    // The API BASE, so an MJAPI behind a path prefix is reached at `<prefix>/forms/files` (#270).
+    const url = downloadUrl(resolveApiBase(), fileId);
     if (!url) {
       return { ok: false, error: 'Downloads are not available — the API address is not configured.' };
     }

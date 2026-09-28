@@ -22,6 +22,7 @@ import {
   buildStyleTokens,
 } from './json-fields';
 import { parseQuestionScoring, parseSocialLinks } from '@mj-biz-apps/forms-entities';
+import { mapDefinitionAssets, toAssetRef } from '../widget/core/asset-ref';
 
 /**
  * Pure transform from the live builder tree to the immutable
@@ -33,7 +34,9 @@ import { parseQuestionScoring, parseSocialLinks } from '@mj-biz-apps/forms-entit
  * in the stored DisplayOrder values.
  *
  * `styleTokensOverride` lets the builder's live Preview reflect UNSAVED theme edits: when
- * supplied it is used verbatim instead of deriving tokens from `style`.
+ * supplied it replaces the tokens derived from `style`, and — like every other asset reference in
+ * the snapshot — its uploaded-image URLs are relativised to `/forms/asset/<id>` (#270). Every
+ * non-asset value in it is kept as given.
  *
  * `settingsOverride` is the mirror image and exists for the opposite reason: publish must NOT
  * trust the tree, because the Automate tab writes `Form.Settings` through its own entity and the
@@ -44,6 +47,12 @@ import { parseQuestionScoring, parseSocialLinks } from '@mj-biz-apps/forms-entit
  * therefore never fired, and nothing failed — the submit path simply fell back to the legacy
  * hook list. A caller that genuinely has none (the live Preview, which renders a form and runs
  * nothing) must now say so explicitly.
+ *
+ * Every asset reference in the result is relativised to `/forms/asset/<id>` (#270). The builder
+ * stores that form for new uploads, but rows authored before the fix still hold the ABSOLUTE URL
+ * of whichever MJAPI took the upload — often `localhost` — and a published snapshot is immutable,
+ * so this is the last point at which such a row can be kept out of one. The live Preview renders
+ * this same output, which is fine: the preview stage resolves the references again before drawing.
  */
 export function buildPublishedDefinition(
   tree: FormTree,
@@ -54,7 +63,7 @@ export function buildPublishedDefinition(
   settingsOverride?: FormSettings,
 ): PublishedFormDefinition {
   const form = tree.form;
-  return {
+  return mapDefinitionAssets({
     formId: form.ID,
     formVersionId,
     name: form.Name,
@@ -86,7 +95,7 @@ export function buildPublishedDefinition(
     // absent resolve identically and a consumer should not have to tell them apart.
     welcomeScreen: buildWelcomeScreen(tree),
     endScreens: endScreensOf(tree).map(buildScreen),
-  };
+  }, toAssetRef);
 }
 
 /**

@@ -4,15 +4,16 @@
  * Why this exists at all: every image on a form — a welcome screen's picture, a thank-you
  * screen's, a logo, a page background, a picture-choice option — used to be a URL field, which
  * silently assumed the author already had the image hosted somewhere public. Most do not. This
- * service is the other half: hand it a `File`, get back a URL that behaves exactly like a pasted
- * one, so nothing downstream (the snapshot, the widget, the published definition) has to learn
- * that some URLs came from an upload.
+ * service is the other half: hand it a `File`, get back the stored asset.
  *
  * It POSTs `multipart/form-data` to MJAPI's `POST /forms/asset` under the EXPLORER session's
  * bearer token — a different route and a different identity from the widget's respondent upload,
- * which is anonymous and scoped to a distribution. The URL that comes back is absolute and
- * points at MJAPI's anonymous read route, because a respondent loading a published form has no
- * session and may be on a completely different origin.
+ * which is anonymous and scoped to a distribution. The URL that comes back is ABSOLUTE and points
+ * at MJAPI's anonymous read route — a convenience (it is clickable), not what the form stores. The
+ * builder stores `toAssetRef(url)`, the host-independent `/forms/asset/<id>`, and every renderer
+ * resolves that against the API it is talking to: an absolute URL names whichever MJAPI took the
+ * upload, often `localhost`, and broke every form served from anywhere else (#270). See
+ * `../widget/core/asset-ref.ts`.
  *
  * `XMLHttpRequest` rather than `fetch` for the same reason as the respondent uploader: it is the
  * only one that reports upload progress, and an author dragging in a 4 MB photo needs to see
@@ -20,17 +21,19 @@
  */
 import { Injectable } from '@angular/core';
 
-import { resolveApiOrigin, resolveApiToken } from '../shared/mj-api-origin';
+import { resolveApiBase, resolveApiToken } from '../shared/mj-api-origin';
 import { serverErrorText } from '../shared/server-error-text';
-
-/** Route MJAPI serves the authoring-asset endpoints from. */
-const ASSET_PATH = '/forms/asset';
+// The upload POST and the anonymous read share one route, so one constant names both.
+import { ASSET_ROUTE } from '../widget/core/asset-ref';
 
 /** What the server returns for a stored asset. */
 export interface UploadedAsset {
   /** The `MJ: Files` record id. */
   fileId: string;
-  /** Absolute, stable URL to store on the form. */
+  /**
+   * Absolute URL of the uploading MJAPI's read route. Do NOT store it as-is: store
+   * `toAssetRef(url)` so the form keeps working on any host (#270).
+   */
   url: string;
   name: string;
   size: number;
@@ -106,18 +109,20 @@ export function assetErrorMessage(status: number, body: unknown): string {
 
 @Injectable({ providedIn: 'root' })
 export class FormAssetService {
-  /** True when there is an API origin and a session token to upload with. */
+  /** True when there is an API location and a session token to upload with. */
   public get canUpload(): boolean {
-    return !!resolveApiOrigin() && !!resolveApiToken();
+    return !!resolveApiBase() && !!resolveApiToken();
   }
 
   /** Upload one image for a form. Resolves with the stored asset, or rejects with a usable Error. */
   public upload(file: File, formId: string, onProgress?: AssetUploadProgress): Promise<UploadedAsset> {
-    const origin = resolveApiOrigin();
-    if (!origin) {
+    // The API BASE, not its origin: an MJAPI reverse-proxied at `/api` takes the upload at
+    // `/api/forms/asset`, and the bare origin would post past it (#270).
+    const apiBase = resolveApiBase();
+    if (!apiBase) {
       return Promise.reject(new Error('Cannot upload: the MemberJunction API location is not configured.'));
     }
-    return this.send(`${origin}${ASSET_PATH}`, buildAssetFormData(file, formId), onProgress);
+    return this.send(`${apiBase}${ASSET_ROUTE}`, buildAssetFormData(file, formId), onProgress);
   }
 
   /** XHR POST with upload-progress and typed JSON parsing. */

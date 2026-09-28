@@ -30,6 +30,8 @@ import {
 import { CommonModule } from '@angular/common';
 
 import { FORMS_UI_CSS } from '../shared';
+import { resolveApiBase } from '../shared/mj-api-origin';
+import { resolveAssetUrl } from '../widget/core/asset-ref';
 import { ImagePickerDialogComponent } from './image-picker-dialog.component';
 
 const IMAGE_FIELD_CSS = /* css */ `
@@ -111,7 +113,7 @@ const IMAGE_FIELD_CSS = /* css */ `
     <div class="imf">
       @if (value.trim()) {
         <div class="imf-filled">
-          <img class="imf-thumb" [src]="value" alt="" (error)="onPreviewError()" />
+          <img class="imf-thumb" [src]="previewSrc" alt="" (error)="onPreviewError()" />
           <div class="imf-meta">
             <span class="imf-name" [title]="value">{{ displayName }}</span>
             <div class="imf-actions">
@@ -196,6 +198,15 @@ export class ImageFieldComponent {
 
   protected get accessibleName(): string {
     return this.label ? this.label.toLowerCase() : this.ariaLabel;
+  }
+
+  /**
+   * Where the thumbnail loads from. An upload is stored as `/forms/asset/<id>` — relative to the
+   * API (#270) — and the builder runs on Explorer's origin, so binding the stored value directly
+   * would fetch it from Explorer and 404. A pasted external link passes through untouched.
+   */
+  protected get previewSrc(): string {
+    return resolveAssetUrl(this.value, resolveApiBase());
   }
 
   /** What the filled row says: the tail of the URL, which is the file's name for an upload. */

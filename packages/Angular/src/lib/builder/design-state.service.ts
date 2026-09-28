@@ -96,13 +96,14 @@ export class DesignStateService {
    */
   public async duplicateStyle(
     source: mjBizAppsFormsFormStyleEntity,
+    name: string = uniqueStyleName(`${source.Name} (copy)`),
   ): Promise<mjBizAppsFormsFormStyleEntity | undefined> {
     const copy = await this.md.GetEntityObject<mjBizAppsFormsFormStyleEntity>(
       FORMS_ENTITY.FormStyle,
       this.user,
     );
     copy.NewRecord();
-    copy.Name = `${source.Name} (copy)`;
+    copy.Name = name;
     copy.Description = source.Description;
     copy.CSSVariables = source.CSSVariables;
     copy.CustomCSS = source.CustomCSS;
@@ -122,26 +123,24 @@ export class DesignStateService {
    *
    * The Design tab edits tokens directly now, with no preset gallery in between, so it must
    * never write to a style another form is also using — one author restyling their form
-   * would silently restyle everyone else's. `DisplayRank = 0` is the existing marker for
-   * "belongs to a single form" (`duplicateStyle` already sets it, and `loadStyles` hides
-   * rank-0 rows from the gallery), so a rank-0 style assigned to this form is editable as
-   * is. Anything else — a shared preset, or no style at all — is forked first.
+   * would silently restyle everyone else's. `DisplayRank = 0` marks a style MEANT for a single
+   * form (`duplicateStyle` sets it, and `loadStyles` hides rank-0 rows from the gallery), but the
+   * marker alone does not make it so: a template clone copies `StyleID` verbatim, leaving the
+   * original, the template and every form made from it on one rank-0 row. So a rank-0 style is
+   * edited in place only when no other form points at it. Anything else — a shared preset, a
+   * rank-0 style another form also uses, or no style at all — is forked first.
    */
   public async ensureOwnStyle(
     form: mjBizAppsFormsFormEntity,
   ): Promise<mjBizAppsFormsFormStyleEntity | undefined> {
     if (form.StyleID) {
       const current = await this.loadStyleById(form.StyleID);
-      if (current && current.DisplayRank === 0) {
+      if (current && current.DisplayRank === 0 && (await this.isUsedOnlyBy(current.ID, form.ID))) {
         return current;
       }
       if (current) {
-        const fork = await this.duplicateStyle(current);
+        const fork = await this.duplicateStyle(current, uniqueStyleName(`${form.Name} theme`));
         if (!fork) {
-          return undefined;
-        }
-        fork.Name = `${form.Name} theme`;
-        if (!(await this.saveChecked(fork, 'name the forked style'))) {
           return undefined;
         }
         return (await this.applyStyleToForm(form, fork.ID)) ? fork : undefined;
@@ -153,7 +152,7 @@ export class DesignStateService {
       this.user,
     );
     created.NewRecord();
-    created.Name = `${form.Name} theme`;
+    created.Name = uniqueStyleName(`${form.Name} theme`);
     created.Description = 'Design for this form.';
     created.CSSVariables = serializeCssVariables({});
     created.DisplayRank = 0;
@@ -184,6 +183,32 @@ export class DesignStateService {
     return this.saveChecked(style, 'save branding');
   }
 
+  /**
+   * Whether no form other than `formId` points at `styleId` — the one fact `DisplayRank` cannot
+   * tell us. A failed read is not a "no": it answers `false`, so the caller forks, which costs a
+   * spare style row, rather than edits a row that may be restyling someone else's form.
+   */
+  private async isUsedOnlyBy(styleId: string, formId: string): Promise<boolean> {
+    const result = await new RunView().RunView<{ ID: string }>(
+      {
+        EntityName: FORMS_ENTITY.Form,
+        ExtraFilter: `StyleID='${styleId}' AND ID<>'${formId}'`,
+        Fields: ['ID'],
+        MaxRows: 1,
+        ResultType: 'simple',
+      },
+      this.user,
+    );
+    if (!result.Success) {
+      LogError(
+        `Forms design panel could not check whether style ${styleId} is shared before editing it for ` +
+          `form ${formId}; forking it instead: ${result.ErrorMessage}`,
+      );
+      return false;
+    }
+    return result.Results.length === 0;
+  }
+
   private async saveChecked(
     entity: mjBizAppsFormsFormEntity | mjBizAppsFormsFormStyleEntity,
     action: string,
@@ -196,4 +221,21 @@ export class DesignStateService {
     }
     return ok;
   }
+}
+
+/** `FormStyle.Name` is `NVARCHAR(255)`; MJ's `BaseEntity.Validate` refuses anything longer. */
+const STYLE_NAME_MAX_LENGTH = 255;
+
+/**
+ * A style name no other row already holds. `FormStyle.Name` is UNIQUE and a form's name is not —
+ * every new form starts as "Untitled form" — so a name derived from the form alone made the second
+ * same-named form's Design tab fail to load. The suffix is random rather than the form's id because
+ * one form can fork more than once (its style later shared by a clone), and a per-form style's name
+ * is shown only in raw record views, never in the Design tab. The base is shortened to keep the
+ * whole name inside the column: `Form.Name` may itself be 255 characters, and a name that does not
+ * fit fails the save exactly as a duplicate does.
+ */
+function uniqueStyleName(base: string): string {
+  const suffix = ` (${crypto.randomUUID().slice(0, 8)})`;
+  return `${base.slice(0, STYLE_NAME_MAX_LENGTH - suffix.length).trimEnd()}${suffix}`;
 }

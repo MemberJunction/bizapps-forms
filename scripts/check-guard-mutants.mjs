@@ -399,6 +399,44 @@ export const MUTANTS = [
     suite: 'packages/Server',
     killedBy: ['src/public-submit/__tests__/disqualification-gates.spec.ts'],
   },
+  // --- design-state: which style row a form's Design tab may write to ----------------------
+  {
+    name: 'design/shared-rank0-style-edited-in-place',
+    behaviour: 'a rank-0 style another form also points at (a template clone) is forked, not restyled for everyone',
+    file: 'packages/Angular/src/lib/builder/design-state.service.ts',
+    find: '      if (current && current.DisplayRank === 0 && (await this.isUsedOnlyBy(current.ID, form.ID))) {',
+    replace: '      if (current && current.DisplayRank === 0) {',
+    suite: 'packages/Angular',
+    killedBy: ['src/lib/builder/design-state.service.spec.ts'],
+  },
+  {
+    name: 'design/unreadable-share-check-treated-as-exclusive',
+    behaviour: 'a failed "is this style shared?" read forks the style rather than edit a row that may be shared',
+    file: 'packages/Angular/src/lib/builder/design-state.service.ts',
+    find: "        `form ${formId}; forking it instead: ${result.ErrorMessage}`,\n      );\n      return false;",
+    replace: "        `form ${formId}; forking it instead: ${result.ErrorMessage}`,\n      );\n      return true;",
+    suite: 'packages/Angular',
+    killedBy: ['src/lib/builder/design-state.service.spec.ts'],
+  },
+  {
+    name: 'design/style-name-overflows-column',
+    behaviour: 'a style name derived from a long form name is shortened to fit FormStyle.Name (NVARCHAR 255)',
+    file: 'packages/Angular/src/lib/builder/design-state.service.ts',
+    find: '  return `${base.slice(0, STYLE_NAME_MAX_LENGTH - suffix.length).trimEnd()}${suffix}`;',
+    replace: '  return `${base}${suffix}`;',
+    suite: 'packages/Angular',
+    killedBy: ['src/lib/builder/design-state.service.spec.ts'],
+  },
+  // --- respondent-host: the boot warning for a GRAPHQL_ROOT_PATH Forms cannot address ---------
+  {
+    name: 'root-path/prefixed-graphql-exempt',
+    behaviour: 'a prefixed GraphQL root path such as /api/graphql is warned about, because /forms/* is not under it',
+    file: 'packages/Server/src/respondent-host/config.ts',
+    find: "  if (bare === '' || /^graphql$/i.test(bare)) {",
+    replace: "  if (bare === '' || /(^|\\/)graphql$/i.test(bare)) {",
+    suite: 'packages/Server',
+    killedBy: ['src/respondent-host/__tests__/config.spec.ts'],
+  },
 ];
 
 /**

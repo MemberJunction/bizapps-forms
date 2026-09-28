@@ -16,6 +16,8 @@ import { MjFormComponent } from '../widget/mj-form.component';
 import { normalizeApiConfig } from '../widget/api/forms-api.config';
 import { formsWidgetProviders } from '../widget/widget-providers';
 import { sameScreen, type ShownScreen } from '../widget/core/shown-screen';
+import { mapDefinitionAssets, mapStyleTokenAssets, resolveAssetUrl } from '../widget/core/asset-ref';
+import { resolveApiBase } from '../shared/mj-api-origin';
 import { PREVIEW_DEVICES, stageHeight, stageWidth, type PreviewDevice } from './preview-devices';
 import { PREVIEW_STAGE_STYLES } from './form-preview-stage.styles';
 import { screenChips } from './screen-strip';
@@ -30,6 +32,17 @@ import { screenChips } from './screen-strip';
  * Cloudflare challenge at an author who is only previewing.
  */
 const PREVIEW_API_CONFIG = normalizeApiConfig({ graphqlUrl: '' });
+
+/**
+ * Point a stored `/forms/asset/<id>` at the MJAPI the builder is talking to (#270).
+ *
+ * The preview widget cannot do this itself — its `graphqlUrl` is empty on purpose (see
+ * {@link PREVIEW_API_CONFIG}), so its own render-time resolution is a no-op — and left relative,
+ * the reference would load from Explorer's origin and 404.
+ */
+function resolveForBuilder(url: string): string {
+  return resolveAssetUrl(url, resolveApiBase());
+}
 
 /** Matches the 1rem margin on .ps-stage--framed. */
 const FRAME_GUTTER_PX = 16;
@@ -95,7 +108,7 @@ const FRAME_GUTTER_PX = 16;
         [style.width.px]="stagePx()"
         [style.height.px]="stageHeightPx()"
       >
-        <mj-form #form [definition]="definition()"></mj-form>
+        <mj-form #form [definition]="renderDefinition()"></mj-form>
       </div>
     </div>
 
@@ -122,6 +135,11 @@ const FRAME_GUTTER_PX = 16;
 export class FormPreviewStageComponent implements AfterViewInit, OnDestroy {
   /** The draft definition to render (from `buildPublishedDefinition`). */
   public readonly definition = input.required<PublishedFormDefinition>();
+
+  /** {@link definition} with its asset references made absolute — see {@link resolveForBuilder}. */
+  protected readonly renderDefinition = computed(() =>
+    mapDefinitionAssets(this.definition(), resolveForBuilder),
+  );
 
   // Decorator queries for the two ELEMENTS, which are only ever read imperatively (measuring
   // the desk, handing the form's host to the Design tab's themer). `viewChild()`'s string
@@ -172,9 +190,12 @@ export class FormPreviewStageComponent implements AfterViewInit, OnDestroy {
     this.form()?.showScreen(screen);
   }
 
-  /** Re-style the previewed form from a design host's working values. */
+  /**
+   * Re-style the previewed form from a design host's working values. Resolved here for the same
+   * reason as {@link renderDefinition}: a freshly picked logo or background is a relative reference.
+   */
   public applyPreviewStyle(tokens: FormStyleTokens): void {
-    this.form()?.applyPreviewStyle(tokens);
+    this.form()?.applyPreviewStyle(mapStyleTokenAssets(tokens, resolveForBuilder));
   }
 
   /** The width the stage is actually rendered at, and the number shown in the bar. */

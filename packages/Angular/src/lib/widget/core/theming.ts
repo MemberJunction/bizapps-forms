@@ -15,6 +15,11 @@ import { contrastRatio, inkRepair, parseCssColor, readableInk, toCssRgb } from '
  * as the `--mjf-logo-url` token. Token names are passed through verbatim; only
  * `--`-prefixed custom properties are accepted (defensive — never lets a raw color in
  * under a non-custom-property name).
+ *
+ * Values are applied AS GIVEN: an uploaded-image reference is stored host-independently as
+ * `/forms/asset/<id>` (#270), which a browser would resolve against the host PAGE, not the API. A
+ * caller holding stored tokens resolves them first with `resolveStyleTokensForRender`
+ * (`./asset-ref`), as `MjFormComponent` does.
  */
 export function applyStyleTokens(host: HTMLElement, tokens: FormStyleTokens | undefined): void {
   if (!tokens) {

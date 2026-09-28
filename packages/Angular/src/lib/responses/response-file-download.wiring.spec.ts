@@ -23,6 +23,15 @@ const stripped = (file: string): string =>
 const service = (): string => stripped('response-file-download.service.ts');
 const component = (): string => stripped('response-detail.component.ts');
 
+describe('the download finds the API', () => {
+  it('builds its URL from the API BASE, so a prefix-deployed MJAPI is reached (#270)', () => {
+    // Behind a reverse proxy at `/api`, the route is `/api/forms/files/<id>`; the bare origin
+    // would miss MJAPI entirely.
+    expect(service()).toContain('downloadUrl(resolveApiBase(), fileId)');
+    expect(service()).not.toContain('resolveApiOrigin');
+  });
+});
+
 describe('the download carries the session', () => {
   it('sends the bearer token, which a plain link could not', () => {
     // An <a href> or window.open cannot set a header, so the browser would arrive

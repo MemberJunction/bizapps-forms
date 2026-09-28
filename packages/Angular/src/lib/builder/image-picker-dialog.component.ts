@@ -30,6 +30,7 @@ import { CommonModule } from '@angular/common';
 
 import { FORMS_UI_CSS } from '../shared';
 import { FormAssetService } from './form-asset.service';
+import { toAssetRef } from '../widget/core/asset-ref';
 import {
   ACCEPTED_FORMATS_LABEL,
   ACCEPT_ATTRIBUTE,
@@ -372,7 +373,10 @@ export class ImagePickerDialogComponent {
         this.percent = fraction === null ? 0 : Math.round(fraction * 100);
         this.cdr.markForCheck();
       });
-      this.picked.emit(asset.url);
+      // Stored as the host-independent `/forms/asset/<id>`, not the absolute URL the server
+      // returned: that URL names whichever MJAPI took the upload (often localhost), and a form
+      // published with it shows broken images everywhere else (#270). Renderers resolve it.
+      this.picked.emit(toAssetRef(asset.url));
     } catch (err) {
       // Kept on screen: an upload that fails silently leaves the author with no idea whether
       // anything happened.

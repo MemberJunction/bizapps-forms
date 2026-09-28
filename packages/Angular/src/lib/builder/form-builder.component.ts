@@ -436,6 +436,7 @@ export class FormBuilderComponent extends BaseFormComponent {
       : undefined;
     this.publishedFingerprint = storedSnapshotFingerprint(
       await this.publisher.latestPublishedSnapshot(this.record.ID),
+      this.record.ID,
     );
     await this.refreshDraftAutomations();
     this.publishStateReady = true;
