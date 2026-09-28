@@ -191,8 +191,9 @@ Leaving it unset behind a real proxy does not merely miss an optimization: `reso
 ignores `X-Forwarded-For` at zero hops and keys every respondent on the proxy's own peer address
 instead, so every per-IP ceiling below (`FORMS_RATELIMIT_IP_MAX`, `FORMS_COMPLETION_MAX`) collapses
 into one shared bucket for the *entire* deployment rather than one per respondent. MJAPI logs this
-condition once per process — `RequestIdentityMiddleware` warns the first time a request arrives
-carrying `X-Forwarded-For` while `FORMS_TRUSTED_PROXY_HOPS=0` — but the warning is a symptom check,
+condition once per process — `RequestIdentityMiddleware` warns (`[WARNING]`, printed in production
+too) the first time a request arrives carrying `X-Forwarded-For` while `FORMS_TRUSTED_PROXY_HOPS=0`;
+Forms' own internal magic-link redeem call is excluded — but the warning is a symptom check,
 not a substitute for setting the variable at deploy time.
 
 The public-submit path is bounded by a second set of env vars, all read once at process start by
@@ -203,7 +204,7 @@ table mirrors it):
 |---|---|---|
 | `FORMS_RATELIMIT_MAX` | `10` | FINAL submits (completions + knockouts) per window, per (session, distribution). An autosave never charges this bucket. |
 | `FORMS_AUTOSAVE_RATELIMIT_MAX` | `60` | AUTOSAVES (partial saves) per window, per (session, distribution) — its own bucket, so a respondent's own typing can never spend the budget their Submit press needs. |
-| `FORMS_RATELIMIT_IP_MAX` | `120` | Saves per window, per (client IP, distribution) — the ceiling that actually bounds abuse, since the caller cannot choose their IP the way they choose a session id. |
+| `FORMS_RATELIMIT_IP_MAX` | `120` | AUTOSAVES per window, per (client IP, distribution) — the ceiling that actually bounds autosave abuse, since the caller cannot choose their IP the way they choose a session id. Final submits never count toward it, so respondents typing behind one shared address cannot get each other's Submit refused; `FORMS_COMPLETION_MAX` / `FORMS_KNOCKOUT_MAX` bound final submits per address instead. |
 | `FORMS_COMPLETION_MAX` | `20` | COMPLETED submissions per window, per (client IP, distribution) — tighter than the save cap because a completion fires on-submit automations. |
 | `FORMS_KNOCKOUT_MAX` | same as `FORMS_COMPLETION_MAX` | Disqualifying submits per window, per (caller, distribution) — its own bucket so a burst of ineligible respondents cannot lock out real completions. |
 | `FORMS_RATELIMIT_WINDOW_MS` | `60000` | Sliding-window length, in ms, for every ceiling above. |
