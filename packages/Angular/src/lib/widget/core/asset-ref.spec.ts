@@ -424,6 +424,19 @@ describe('collectLaterImageUrls', () => {
     expect(collectLaterImageUrls(def)).toEqual(['/img/same']);
   });
 
+  it('ignores option images on questions that do not render them (only PictureChoice does)', () => {
+    const def = base({
+      pages: [
+        {
+          id: 'p',
+          displayOrder: 0,
+          questions: [{ ...question('q', 0, [opt('a', 0, '/img/a')]), type: 'SingleChoice' as const }],
+        },
+      ],
+    });
+    expect(collectLaterImageUrls(def)).toEqual([]);
+  });
+
   it('skips options and endings without an image, and returns [] for a form with none', () => {
     const def = base({
       pages: [{ id: 'p', displayOrder: 0, questions: [question('q', 0, [opt('a', 0)])] }],

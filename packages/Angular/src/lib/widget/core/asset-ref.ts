@@ -212,7 +212,8 @@ function byDisplayOrder<T extends { displayOrder: number }>(items: readonly T[])
 /**
  * The images a respondent sees AFTER the first screen, in the order they will see them: pages
  * sorted by `displayOrder` (matching `form-runtime.ts:381`), questions sorted by `displayOrder`
- * (matching `section-content.ts:76`), options in published array order (matching
+ * (matching `section-content.ts:76`), and, for PictureChoice questions only (the one type that
+ * renders option images), options in published array order (matching
  * `form-question.component.html` which iterates `q.options` directly at lines 56/74/100/240),
  * then ending screens sorted by `displayOrder` (matching `shown-screen.ts:52`). All endings are
  * included because which one shows depends on the answers.
@@ -228,6 +229,10 @@ export function collectLaterImageUrls(def: PublishedFormDefinition): string[] {
   const urls: string[] = [];
   for (const page of byDisplayOrder(def.pages)) {
     for (const question of byDisplayOrder(page.questions)) {
+      // The snapshot builder copies `imageURL` onto any option, but only PictureChoice renders it.
+      if (question.type !== 'PictureChoice') {
+        continue;
+      }
       for (const option of question.options) {
         if (option.imageURL) {
           urls.push(option.imageURL);
