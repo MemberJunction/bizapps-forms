@@ -222,7 +222,8 @@ const FORM_SCREEN_CSS = /* css */ `
         <!--
           fetchpriority only on the welcome screen: it is the first thing a respondent sees, and it
           competes with the rest of the page for bandwidth. By the time an ending shows, its image
-          has been prefetched (core/image-prefetch.ts). (load)/(error) both report "settled", so a
+          usually has been prefetched (core/image-prefetch.ts), but not always: past the 12-image
+          cap, under Save-Data, or after a stalled link stopped the queue. (load)/(error) both report "settled", so a
           broken image still lets the prefetch queue start.
         -->
         <img
