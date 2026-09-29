@@ -25,6 +25,7 @@ import { ApplicationRef, ComponentRef, createComponent } from '@angular/core';
 import { createApplication } from '@angular/platform-browser';
 
 import { ELEMENT_ATTRIBUTES, configFromAttributes, effectOf, inputsFromAttributes } from './element-attributes';
+import { keepInPlace } from './element-host';
 import { formsWidgetProviders } from './widget-providers';
 import { MjFormComponent } from './mj-form.component';
 
@@ -58,8 +59,17 @@ class MjFormElement extends HTMLElement {
   private componentRef?: ComponentRef<MjFormComponent>;
   /** Serialises mounts so a burst of attribute changes cannot build two applications. */
   private mounting?: Promise<void>;
+  /**
+   * True while a rebuild tears the old application down. That teardown detaches this element from
+   * the page and {@link teardownInPlace} puts it back; both are ours, not the page's, so the
+   * connected/disconnected callbacks they fire must not tear down or mount again.
+   */
+  private rebuilding = false;
 
   public connectedCallback(): void {
+    if (this.rebuilding) {
+      return;
+    }
     void this.mount();
   }
 
@@ -83,6 +93,9 @@ class MjFormElement extends HTMLElement {
   }
 
   public disconnectedCallback(): void {
+    if (this.rebuilding) {
+      return;
+    }
     this.teardown();
   }
 
@@ -101,7 +114,7 @@ class MjFormElement extends HTMLElement {
       if (!this.isConnected) {
         return;
       }
-      this.teardown();
+      this.teardownInPlace();
       const app = await createApplication({
         providers: formsWidgetProviders(configFromAttributes((n) => this.getAttribute(n))),
       });
@@ -122,6 +135,24 @@ class MjFormElement extends HTMLElement {
       this.componentRef = componentRef;
     });
     await this.mounting;
+  }
+
+  /**
+   * Tear the running application down for a rebuild, keeping this element in the page.
+   *
+   * `teardown()` alone is right for `disconnectedCallback`, where the page has already removed the
+   * element. Here the element is still connected, and destroying a component hosted on it detaches
+   * it (see `element-host.ts`) — so without this, the `isConnected` check after
+   * `createApplication` read our own detach as the page removing the form, and a rebuild left
+   * nothing behind.
+   */
+  private teardownInPlace(): void {
+    this.rebuilding = true;
+    try {
+      keepInPlace(this, () => this.teardown());
+    } finally {
+      this.rebuilding = false;
+    }
   }
 
   private teardown(): void {
