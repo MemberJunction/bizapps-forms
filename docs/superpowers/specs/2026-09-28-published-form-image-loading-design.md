@@ -202,7 +202,8 @@ every image field:
 export function collectLaterImageUrls(def: PublishedFormDefinition): string[];
 ```
 
-- It returns every question option's `imageURL`, page by page, question by question and option by option.
+- It returns the `imageURL` of every option of a **PictureChoice** question (the only type that
+  renders option images; the snapshot builder copies `imageURL` onto any option), page by page, question by question and option by option.
   Pages and questions are sorted by `displayOrder` as the renderer sorts them (`form-runtime.ts:381`,
   `section-content.ts:76`); options are taken in published array order, because the renderer does not
   sort them (`form-question.component.html` iterates `q.options`). Then every ending screen's
@@ -238,13 +239,16 @@ export function prefetchImages(urls: readonly string[], env?: PrefetchEnv): Pref
   would split bandwidth with whatever the respondent is doing, including a submit.
 - **Capped at `MAX_PREFETCH_IMAGES`.** URLs past the cap are not requested, with one
   `console.debug('[Forms] Image prefetch capped at 12; skipped N')`.
-- **`PREFETCH_TIMEOUT_MS` per image.** A stalled image is abandoned (its `src` cleared) and the queue
-  moves on.
+- **`PREFETCH_TIMEOUT_MS` per image stops the queue.** A stall that long means prefetching cannot pay
+  off on this link. The in-flight image is **not** aborted (assets carry a weak ETag, so a partial
+  download cannot resume and aborting would waste the bytes already fetched); its handlers are detached
+  and the browser finishes it into the HTTP cache. One `console.debug` reports the stop and the number
+  skipped.
 - **`saveData()` true → nothing is requested**, with one `console.debug` saying so.
 - **Failures never reach the respondent.** A failed image logs
   `console.debug('[Forms] Image prefetch failed: <url>')` and the queue continues. The real `<img>` on
   that screen handles its own failure.
-- **`cancel()`** stops the queue, clears the pending timer, and clears the in-flight image's `src`. It is
+- **`cancel()`** stops the queue, clears the pending timer, and aborts the in-flight image by clearing its `src`. It is
   idempotent.
 - **The HTTP cache does the rest.** Asset responses are `immutable`, so the later `<img>` with the same
   URL is served from cache. Picture options keep `loading="lazy"`: a prefetched lazy image finds the file
@@ -256,7 +260,9 @@ export function prefetchImages(urls: readonly string[], env?: PrefetchEnv): Pref
 
 - In `load()`, the previous handle is cancelled first, next to the existing `this.autosave?.dispose()`.
   This covers "Try again", "Start over" and resume re-loads.
-- After `this.definition.set(def)` and the phase is chosen:
+- After `this.definition.set(def)` and the phase is chosen, **only if intake is still ahead** (phase
+  `welcome` or `ready`). A response resumed onto `done`, or a load that ended in `error`/`expired`, can
+  never show these images, so nothing is planned:
   - **the phase is `welcome` and the welcome screen has a `mediaURL`:** start on
     `<mjf-form-screen (mediaSettled)>`, which is wired in `mj-form.component.html` on the welcome case
     only. It starts once; later emissions are ignored.
@@ -265,7 +271,8 @@ export function prefetchImages(urls: readonly string[], env?: PrefetchEnv): Pref
     started yet. Starting is guarded by one "started for this load" flag, so it happens at most once.
   - **any other case** (no welcome screen, no welcome image, resumed past the welcome screen): start on
     the next idle callback (`requestIdleCallback`, falling back to `setTimeout(…, 0)`).
-- `ngOnDestroy` cancels the handle.
+- `ngOnDestroy` sets a `destroyed` flag and cancels the handle; `startPrefetch()` returns early once
+  destroyed, so a `load()` still awaiting the network cannot start a queue after teardown.
 
 ### Tests
 
@@ -275,11 +282,13 @@ export function prefetchImages(urls: readonly string[], env?: PrefetchEnv): Pref
   - duplicates are removed, keeping the first;
   - welcome media, logo and CSS URLs are excluded;
   - options without `imageURL` are skipped;
+  - option images on a non-PictureChoice question are ignored;
   - an empty definition → `[]`.
 - **`widget/core/image-prefetch.spec.ts`**, with a fake `PrefetchEnv`:
   - one image at a time, in order;
   - 13 URLs → 12 requested and one debug line;
-  - a stalled image times out and the next one starts;
+  - a stalled image stops the queue: no further image, the in-flight `src` untouched, one debug line;
+  - a late load after the timeout starts nothing;
   - `error` moves on;
   - `saveData` → zero images created;
   - `cancel()` mid-queue → no further images and the in-flight `src` cleared;
@@ -291,7 +300,8 @@ export function prefetchImages(urls: readonly string[], env?: PrefetchEnv): Pref
   - `load()` cancels the previous handle before starting;
   - `startIntake()` starts the prefetch when `(mediaSettled)` has not, and the start is guarded to happen
     once per load;
-  - `ngOnDestroy` cancels.
+  - `ngOnDestroy` cancels and sets `destroyed`; `startPrefetch()` checks it;
+  - `planPrefetch` returns early unless the phase is `welcome` or `ready`.
 
 ---
 

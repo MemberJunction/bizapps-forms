@@ -719,6 +719,19 @@ describe('collectLaterImageUrls', () => {
     expect(collectLaterImageUrls(def)).toEqual(['/img/same']);
   });
 
+  it('ignores option images on questions that do not render them (only PictureChoice does)', () => {
+    const def = base({
+      pages: [
+        {
+          id: 'p',
+          displayOrder: 0,
+          questions: [{ ...question('q', 0, [opt('a', 0, '/img/a')]), type: 'SingleChoice' as const }],
+        },
+      ],
+    });
+    expect(collectLaterImageUrls(def)).toEqual([]);
+  });
+
   it('skips options and endings without an image, and returns [] for a form with none', () => {
     const def = base({
       pages: [{ id: 'p', displayOrder: 0, questions: [question('q', 0, [opt('a', 0)])] }],
@@ -746,8 +759,8 @@ function byDisplayOrder<T extends { displayOrder: number }>(items: readonly T[])
 }
 
 /**
- * The images a respondent sees AFTER the first screen, in the order they will see them: every
- * question option's image (pages and questions by `displayOrder`, matching `form-runtime.ts` and
+ * The images a respondent sees AFTER the first screen, in the order they will see them: the
+ * option images of PictureChoice questions, the only type that renders them (pages and questions by `displayOrder`, matching `form-runtime.ts` and
  * `section-content.ts`; options in published array order, because the renderer does not sort them),
  * then every ending screen's image by `displayOrder`. All endings are
  * included because which one shows depends on the answers.
@@ -763,6 +776,10 @@ export function collectLaterImageUrls(def: PublishedFormDefinition): string[] {
   const urls: string[] = [];
   for (const page of byDisplayOrder(def.pages)) {
     for (const question of byDisplayOrder(page.questions)) {
+      // The snapshot builder copies `imageURL` onto any option, but only PictureChoice renders it.
+      if (question.type !== 'PictureChoice') {
+        continue;
+      }
       for (const option of question.options) {
         if (option.imageURL) {
           urls.push(option.imageURL);
@@ -894,23 +911,39 @@ describe('prefetchImages', () => {
     expect(debug).toHaveBeenCalledWith('[Forms] Image prefetch failed: /forms/asset/img-0');
   });
 
-  it(`abandons an image that stalls for ${PREFETCH_TIMEOUT_MS} ms and starts the next`, () => {
-    vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+  it(`stops the whole queue when an image stalls for ${PREFETCH_TIMEOUT_MS} ms, without aborting it`, () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     const { env, images, fireTimers } = fakeEnv();
-    prefetchImages(urls(2), env);
+    prefetchImages(urls(3), env);
     fireTimers();
-    expect(images[0].src).toBe('');
-    expect(images).toHaveLength(2);
-    expect(images[1].src).toBe('/forms/asset/img-1');
+    expect(images).toHaveLength(1);
+    expect(images[0].src).toBe('/forms/asset/img-0'); // left to finish into the HTTP cache
+    expect(images[0].onload).toBeNull();
+    expect(images[0].onerror).toBeNull();
+    expect(debug).toHaveBeenCalledWith(
+      `[Forms] Image prefetch stopped: /forms/asset/img-0 took longer than ${PREFETCH_TIMEOUT_MS} ms; skipped 2 remaining`,
+    );
   });
 
-  it('a late load after the timeout does not start a second copy of the next image', () => {
+  it('a late load after the timeout starts nothing', () => {
     vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     const { env, images, fireTimers } = fakeEnv();
     prefetchImages(urls(3), env);
     fireTimers();
     images[0].load();
-    expect(images).toHaveLength(2);
+    expect(images).toHaveLength(1);
+  });
+
+  it('cancel() after progress starts no more images and clears the in-flight one', () => {
+    const { env, images } = fakeEnv();
+    const handle = prefetchImages(urls(4), env);
+    images[0].load();
+    images[1].load();
+    expect(images).toHaveLength(3);
+    handle.cancel();
+    expect(images[2].src).toBe('');
+    images[2].load();
+    expect(images).toHaveLength(3);
   });
 
   it('requests nothing when the browser asked to save data', () => {
@@ -1062,8 +1095,13 @@ export function prefetchImages(urls: readonly string[], env: PrefetchEnv = brows
       if (outcome === 'failed') {
         console.debug(`[Forms] Image prefetch failed: ${url}`);
       } else if (outcome === 'timed out') {
-        img.src = ''; // after the handlers are detached, so the abort's own error event is ignored
-        console.debug(`[Forms] Image prefetch timed out after ${PREFETCH_TIMEOUT_MS} ms: ${url}`);
+        // Stop the queue, but leave `src` alone so the browser finishes this image into the cache.
+        const skipped = queue.length - index;
+        current = null;
+        console.debug(
+          `[Forms] Image prefetch stopped: ${url} took longer than ${PREFETCH_TIMEOUT_MS} ms; skipped ${skipped} remaining`,
+        );
+        return;
       }
       startNext();
     };
@@ -1180,13 +1218,28 @@ describe('prefetch lifecycle — source smoke', () => {
     expect(body(form, 'public ngOnDestroy(): void')).toContain('this.cancelPrefetch()');
   });
 
+  it('a load() that resumes after destroy cannot start a queue', () => {
+    const destroy = body(form, 'public ngOnDestroy(): void');
+    expect(destroy).toContain('this.destroyed = true');
+    expect(destroy.indexOf('this.destroyed = true')).toBeLessThan(destroy.indexOf('this.cancelPrefetch()'));
+    expect(body(form, 'private startPrefetch(): void')).toContain('this.destroyed ||');
+  });
+
+  it('plans nothing unless intake is still ahead (welcome or ready)', () => {
+    const plan = body(form, 'private planPrefetch(def: PublishedFormDefinition): void');
+    expect(plan).toContain(`phase !== 'welcome' && phase !== 'ready'`);
+    expect(plan.indexOf(`phase !== 'welcome' && phase !== 'ready'`)).toBeLessThan(
+      plan.indexOf('this.schedulePrefetchWhenIdle()'),
+    );
+  });
+
   it('leaving the welcome screen early still starts the prefetch', () => {
     expect(body(form, 'protected startIntake(): void')).toContain('this.startPrefetch()');
   });
 
   it('starts at most once per load', () => {
     const start = body(form, 'private startPrefetch(): void');
-    expect(start).toContain('if (this.prefetchStarted)');
+    expect(start).toContain('this.prefetchStarted)');
     expect(start).toContain('this.prefetchStarted = true');
   });
 
@@ -1271,6 +1324,8 @@ Next, the fields. After `private autosave: AutosaveController | null = null;`, a
   private prefetchUrls: string[] = [];
   private prefetchStarted = false;
   private prefetchGeneration = 0;
+  /** Set on destroy: a `load()` still awaiting the network resumes afterwards and must start nothing. */
+  private destroyed = false;
 ```
 
 Next, `ngOnDestroy`. Change it to:
@@ -1278,6 +1333,7 @@ Next, `ngOnDestroy`. Change it to:
 ```ts
   public ngOnDestroy(): void {
     this.autosave?.dispose();
+    this.destroyed = true;
     this.cancelPrefetch();
   }
 ```
@@ -1325,10 +1381,18 @@ Finally, add these methods directly after `startIntake()`:
    * Decide when this load's prefetch starts. A welcome screen with an image gets the network to
    * itself until that image settles (or the respondent leaves it). In every other case (no welcome
    * screen, no welcome image, resumed past it), start when the browser is idle.
+   *
+   * Only while intake is still ahead. A resumed, already-submitted response opens on `done` (and a
+   * failed or expired load on `error`/`expired`): the respondent can never see an option or an
+   * ending image there, so downloading up to 12 of them would only compete with what is on screen.
    */
   private planPrefetch(def: PublishedFormDefinition): void {
+    const phase = this.phase();
+    if (phase !== 'welcome' && phase !== 'ready') {
+      return;
+    }
     this.prefetchUrls = collectLaterImageUrls(def);
-    if (this.phase() === 'welcome' && def.welcomeScreen?.mediaURL) {
+    if (phase === 'welcome' && def.welcomeScreen?.mediaURL) {
       return;
     }
     this.schedulePrefetchWhenIdle();
@@ -1344,12 +1408,12 @@ Finally, add these methods directly after `startIntake()`:
     if (typeof requestIdleCallback === 'function') {
       requestIdleCallback(start);
     } else {
-      setTimeout(start, 0); // Safari before 18 has no requestIdleCallback
+      setTimeout(start, 0); // Safari does not ship requestIdleCallback by default
     }
   }
 
   private startPrefetch(): void {
-    if (this.prefetchStarted) {
+    if (this.destroyed || this.prefetchStarted) {
       return;
     }
     this.prefetchStarted = true;
@@ -1407,7 +1471,7 @@ Create `.changeset/prefetch-later-form-images.md`:
 '@mj-biz-apps/forms-ng': patch
 ---
 
-Published forms now load the images for later screens in the background, so picture-choice options and ending-screen images appear with their screen instead of several seconds after it on a slow mobile connection. Prefetching waits until the welcome image has loaded (the welcome image is also requested at high priority), fetches one image at a time so it never slows down what the respondent is doing, stops after 12 images, and is skipped entirely when the respondent's browser asks to save data.
+Published forms now load the images for later screens in the background, so picture-choice options and ending-screen images appear with their screen instead of several seconds after it on a slow mobile connection. The welcome image is requested at high priority, and prefetching waits for it to load or fail, or for the respondent to press Start; a form with no welcome image starts when the browser is idle. Images are fetched one at a time so they never slow down what the respondent is doing, up to 12 per form. Prefetching is skipped when the respondent's browser asks to save data or when a response is already submitted, and it stops on a very slow connection rather than competing with the form.
 ```
 
 - [ ] **Step 8: Commit (only if approved)**
