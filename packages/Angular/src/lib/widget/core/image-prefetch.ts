@@ -7,13 +7,19 @@
  * `<img>` created later with the same URL is served from cache with no request.
  *
  * One image at a time, on purpose. On a slow connection, parallel downloads split the bandwidth
- * with whatever the respondent is doing now, including submitting. A failed or stalled image is
- * skipped; the real `<img>` on that screen deals with its own failure.
+ * with whatever the respondent is doing now, including submitting. A failed image is skipped; the
+ * real `<img>` on that screen deals with its own failure.
+ *
+ * A STALL ends the whole queue instead. An image still downloading after PREFETCH_TIMEOUT_MS means
+ * prefetching cannot pay off on this link, and every later image would stall the same way. The
+ * in-flight image is deliberately NOT aborted: assets are served with a weak ETag, so a partial
+ * download cannot be resumed, and aborting would throw away bytes already fetched. Left alone, the
+ * browser finishes it into the HTTP cache. Only `cancel()` aborts an in-flight image.
  */
 
 /** Most images one form load will prefetch. */
 export const MAX_PREFETCH_IMAGES = 12;
-/** An image still downloading after this long is abandoned so the queue keeps moving. */
+/** An image still downloading after this long stops the queue (see the module header). */
 export const PREFETCH_TIMEOUT_MS = 15_000;
 
 /** The slice of `HTMLImageElement` the queue uses; a real `Image` satisfies it. */
@@ -35,7 +41,7 @@ export interface PrefetchEnv {
 }
 
 export interface PrefetchHandle {
-  /** Stop the queue and abandon the in-flight image. Safe to call more than once. */
+  /** Stop the queue and abort the in-flight image. Safe to call more than once. */
   cancel(): void;
 }
 
@@ -110,8 +116,13 @@ export function prefetchImages(urls: readonly string[], env: PrefetchEnv = brows
       if (outcome === 'failed') {
         console.debug(`[Forms] Image prefetch failed: ${url}`);
       } else if (outcome === 'timed out') {
-        img.src = ''; // after the handlers are detached, so the abort's own error event is ignored
-        console.debug(`[Forms] Image prefetch timed out after ${PREFETCH_TIMEOUT_MS} ms: ${url}`);
+        // Stop the queue, but leave `src` alone so the browser finishes this image into the cache.
+        const skipped = queue.length - index;
+        current = null;
+        console.debug(
+          `[Forms] Image prefetch stopped: ${url} took longer than ${PREFETCH_TIMEOUT_MS} ms; skipped ${skipped} remaining`,
+        );
+        return;
       }
       startNext();
     };

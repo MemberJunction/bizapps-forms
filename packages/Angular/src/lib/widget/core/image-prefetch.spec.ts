@@ -72,23 +72,39 @@ describe('prefetchImages', () => {
     expect(debug).toHaveBeenCalledWith('[Forms] Image prefetch failed: /forms/asset/img-0');
   });
 
-  it(`abandons an image that stalls for ${PREFETCH_TIMEOUT_MS} ms and starts the next`, () => {
-    vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+  it(`stops the whole queue when an image stalls for ${PREFETCH_TIMEOUT_MS} ms, without aborting it`, () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     const { env, images, fireTimers } = fakeEnv();
-    prefetchImages(urls(2), env);
+    prefetchImages(urls(3), env);
     fireTimers();
-    expect(images[0].src).toBe('');
-    expect(images).toHaveLength(2);
-    expect(images[1].src).toBe('/forms/asset/img-1');
+    expect(images).toHaveLength(1);
+    expect(images[0].src).toBe('/forms/asset/img-0'); // left to finish into the HTTP cache
+    expect(images[0].onload).toBeNull();
+    expect(images[0].onerror).toBeNull();
+    expect(debug).toHaveBeenCalledWith(
+      `[Forms] Image prefetch stopped: /forms/asset/img-0 took longer than ${PREFETCH_TIMEOUT_MS} ms; skipped 2 remaining`,
+    );
   });
 
-  it('a late load after the timeout does not start a second copy of the next image', () => {
+  it('a late load after the timeout starts nothing', () => {
     vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     const { env, images, fireTimers } = fakeEnv();
     prefetchImages(urls(3), env);
     fireTimers();
     images[0].load();
-    expect(images).toHaveLength(2);
+    expect(images).toHaveLength(1);
+  });
+
+  it('cancel() after progress starts no more images and clears the in-flight one', () => {
+    const { env, images } = fakeEnv();
+    const handle = prefetchImages(urls(4), env);
+    images[0].load();
+    images[1].load();
+    expect(images).toHaveLength(3);
+    handle.cancel();
+    expect(images[2].src).toBe('');
+    images[2].load();
+    expect(images).toHaveLength(3);
   });
 
   it('requests nothing when the browser asked to save data', () => {
