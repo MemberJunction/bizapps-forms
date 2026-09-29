@@ -33,6 +33,7 @@ import { FORMS_UI_CSS } from '../shared';
 import { resolveApiBase } from '../shared/mj-api-origin';
 import { resolveAssetUrl } from '../widget/core/asset-ref';
 import { ImagePickerDialogComponent } from './image-picker-dialog.component';
+import type { ImageUse } from './image-optimize';
 
 const IMAGE_FIELD_CSS = /* css */ `
 :host { display: block; }
@@ -159,6 +160,7 @@ const IMAGE_FIELD_CSS = /* css */ `
       <mjf-image-picker-dialog
         [subject]="accessibleName"
         [formId]="formId"
+        [use]="use"
         (picked)="commit($event)"
         (closed)="picking = false"
       />
@@ -173,6 +175,8 @@ export class ImageFieldComponent {
    * scopes an asset to a form and there is no sensible guess to make on the author's behalf.
    */
   @Input() formId = '';
+  /** Where the image will be shown; a page background is shrunk less than screen media. */
+  @Input() use: ImageUse = 'content';
   /** Shown beside the plus. Omit inside a list where the surrounding row already names it. */
   @Input() label = '';
   @Input() hint = '';

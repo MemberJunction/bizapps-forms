@@ -1,6 +1,6 @@
 /**
  * Shrinks an author's image in the browser before it is uploaded, so a published form does not
- * make every respondent download the original (bizapps-forms perf, 2026-09-28: a 927 KB welcome
+ * make every respondent download the original (bizapps-forms perf, 2026-09-28: a 907 KB welcome
  * photo painted 5.8 s after its text on Slow 4G; the server answered in 5 ms).
  *
  * Why in the builder and not on the server: server-side resizing needs a native image library
@@ -8,29 +8,59 @@
  * modern browser can decode and re-encode it with a canvas.
  *
  * The contract is "never worse than today": anything this module cannot do (an animated GIF, WebP
- * or PNG, a browser without `createImageBitmap`, a file it cannot decode, a result that is not smaller) falls back
- * to the original file, which uploads exactly as before. The server's type and size checks remain
- * the authority.
+ * or PNG, a file whose header does not say whether it is animated, a browser without
+ * `createImageBitmap`, a file it cannot decode, a result that is not smaller) falls back to the
+ * original file, which uploads exactly as before. The server's type and size checks remain the
+ * authority.
+ *
+ * How far an image is shrunk depends on where it is shown ({@link ImageUse}): screen media and
+ * option pictures render at most 352 CSS px wide, but a page background covers the whole viewport.
  *
  * A plain module, not a component, so the decisions are testable in the package's node-only Vitest.
  */
 
-/** Longest side, in pixels, after resizing. Screen media shows at most 352 CSS px (~1056 device px at 3×). */
+/**
+ * Longest side, in pixels, after resizing a CONTENT image. Screen media shows at most 352 CSS px
+ * (`form-screen.component.ts`, `min(100%, 22rem)`), about 1056 device px at 3×.
+ */
 export const MAX_IMAGE_EDGE_PX = 1600;
 /** An image within the edge cap AND at or under this many bytes is uploaded as-is. */
 export const SKIP_BELOW_BYTES = 300 * 1024;
 export const WEBP_QUALITY = 0.82;
 /**
- * Measured in WebKit 26.5 on a 1408×768 photo: q0.85 gave 434 KB at 1600 px, q0.80 gave 368 KB, and
- * q0.80 at 1200 px gave 257 KB. Chrome's WebP path is unaffected.
+ * Measured in WebKit 26.5 on the 1408×768 welcome photo (906,835 B, the fixture `MJ: Files`
+ * C15F7D76): q0.85 gave 413,531 B at full size, q0.80 gave 350,236 B, and q0.80 at 1200 px gave
+ * 239,767 B. Chrome's WebP path is unaffected.
  */
 export const JPEG_QUALITY = 0.8;
 /**
- * Longest side when the browser cannot encode WebP (Safari). Its JPEG/PNG fallback is far heavier
- * than WebP: at 1600 px the same photo measured 434 KB and a 3000×1000 transparent PNG 1231 KB.
- * 1200 px is still above what the widest display needs (352 CSS px is about 1056 device px at 3×).
+ * Longest side of a CONTENT image when the browser cannot encode WebP (Safari). Its JPEG/PNG
+ * fallback is far heavier than WebP: at full size the same photo was 350,236 B at q0.80.
+ * 1200 px is still above what the widest screen media needs (about 1056 device px at 3×).
  */
 export const FALLBACK_MAX_EDGE_PX = 1200;
+
+/**
+ * Longest side of a PAGE BACKGROUND, WebP or not. It is drawn `cover` across the whole viewport
+ * (`mj-form.component.css`), so a 1920 CSS px desktop at 2× needs 3840 device px; the content cap
+ * would stretch it 2.4× (3.2× on Safari) where the original used to render 1:1.
+ */
+export const MAX_BACKGROUND_EDGE_PX = 3840;
+
+/** Where an uploaded image will be shown, which decides how far it can be shrunk. */
+export type ImageUse = 'content' | 'page-background';
+
+export interface ImageLimits {
+  /** Longest side when the browser encodes WebP. */
+  maxEdgePx: number;
+  /** Longest side when it cannot (Safari), for the heavier JPEG/PNG fallback. */
+  fallbackMaxEdgePx: number;
+}
+
+export const IMAGE_LIMITS: Readonly<Record<ImageUse, ImageLimits>> = Object.freeze({
+  content: { maxEdgePx: MAX_IMAGE_EDGE_PX, fallbackMaxEdgePx: FALLBACK_MAX_EDGE_PX },
+  'page-background': { maxEdgePx: MAX_BACKGROUND_EDGE_PX, fallbackMaxEdgePx: MAX_BACKGROUND_EDGE_PX },
+});
 
 /** Header bytes read to look for animation markers; both formats put them before the pixel data. */
 export const ANIMATION_SNIFF_BYTES = 64 * 1024;
@@ -38,6 +68,9 @@ export const ANIMATION_SNIFF_BYTES = 64 * 1024;
 const MAX_HEADER_CHUNKS = 64;
 
 export type OutputImageType = 'image/webp' | 'image/jpeg' | 'image/png';
+
+/** What a file's header says about animation. `unknown`: the header ended before it could tell. */
+export type AnimationSniff = 'animated' | 'still' | 'unknown';
 
 export type ResizePlan = { action: 'skip' } | { action: 'resize'; width: number; height: number };
 
@@ -69,67 +102,79 @@ const readAscii = (b: Uint8Array, at: number, len: number): string => String.fro
 const readLe32 = (b: Uint8Array, at: number): number => (b[at] | (b[at + 1] << 8) | (b[at + 2] << 16) | (b[at + 3] << 24)) >>> 0;
 const readBe32 = (b: Uint8Array, at: number): number => ((b[at] << 24) | (b[at + 1] << 16) | (b[at + 2] << 8) | b[at + 3]) >>> 0;
 
-function isAnimatedWebp(h: Uint8Array): boolean {
+function sniffWebp(h: Uint8Array): AnimationSniff {
   if (h.length < 12 || readAscii(h, 0, 4) !== 'RIFF' || readAscii(h, 8, 4) !== 'WEBP') {
-    return false;
+    return 'unknown';
   }
+  // VP8X's animation flag is authoritative, so once it has been read as clear, running out of
+  // header (a large ICCP chunk) still means still. The ANIM check covers a file that sets no flag.
+  let flagSaysStill = false;
   let at = 12;
   for (let n = 0; n < MAX_HEADER_CHUNKS && at + 8 <= h.length; n++) {
     const id = readAscii(h, at, 4);
-    if (id === 'ANIM') {
-      return true;
+    if (id === 'ANIM' || id === 'ANMF') {
+      return 'animated';
     }
-    if (id === 'VP8X' && at + 8 < h.length && (h[at + 8] & 0x02) !== 0) {
-      return true;
+    if (id === 'VP8X' && at + 8 < h.length) {
+      if ((h[at + 8] & 0x02) !== 0) {
+        return 'animated';
+      }
+      flagSaysStill = true;
+    }
+    if (id === 'VP8 ' || id === 'VP8L') {
+      return 'still'; // image data before any animation chunk
     }
     const size = readLe32(h, at + 4);
     at += 8 + size + (size % 2); // payloads are padded to even length
   }
-  return false;
+  return flagSaysStill ? 'still' : 'unknown';
 }
 
-function isAnimatedPng(h: Uint8Array): boolean {
+function sniffPng(h: Uint8Array): AnimationSniff {
   const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (h.length < signature.length || signature.some((byte, i) => h[i] !== byte)) {
-    return false;
+    return 'unknown';
   }
   let at = signature.length;
   for (let n = 0; n < MAX_HEADER_CHUNKS && at + 8 <= h.length; n++) {
     const type = readAscii(h, at + 4, 4);
     if (type === 'acTL') {
-      return true;
+      return 'animated';
     }
     if (type === 'IDAT') {
-      return false; // acTL is only meaningful before the first IDAT
+      return 'still'; // acTL is only meaningful before the first IDAT
     }
     at += 12 + readBe32(h, at); // length + type + data + CRC
   }
-  return false;
+  // Out of header before the first IDAT: acTL may still follow (APNG only requires it to precede
+  // IDAT, and 70 KB of XMP or an ICC profile can come first). Treating that as still dropped frames.
+  return 'unknown';
 }
 
 /**
- * True when `header` (the first bytes of a file) marks an animated WebP or APNG. Pure. Truncated
- * or malformed headers, and every other type, answer false: the caller then treats the image as
- * a still one, which is the same as before this check existed.
+ * What `header` (the first bytes of a file) says about animation, for WebP and PNG. Pure. A header
+ * that ends before the answer, or is malformed, is `unknown`; the caller keeps such a file as it
+ * is. Every other type is `still` here (GIF is handled by type, before this is called).
  */
-export function isAnimatedImage(header: Uint8Array, contentType: string): boolean {
+export function sniffAnimation(header: Uint8Array, contentType: string): AnimationSniff {
   switch (bareType(contentType)) {
     case 'image/webp':
-      return isAnimatedWebp(header);
+      return sniffWebp(header);
     case 'image/png':
-      return isAnimatedPng(header);
+      return sniffPng(header);
     default:
-      return false;
+      return 'still';
   }
 }
 
-/** Decide whether and how to resize. Pure. Throws on dimensions no real image has. */
-export function planResize(width: number, height: number, bytes: number, contentType: string): ResizePlan {
+/** Decide whether and how to resize, to at most `maxEdgePx` on the longest side. Pure. Throws on dimensions no real image has. */
+export function planResize(width: number, height: number, bytes: number, contentType: string, maxEdgePx: number = MAX_IMAGE_EDGE_PX): ResizePlan {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     throw new Error(`invalid image dimensions ${width}×${height}`);
   }
   // Resizing a GIF keeps only its first frame, so an animated one would silently stop moving.
   // (Animated WebP/APNG are caught earlier, by their header, in optimizeImageForUpload.)
+  // The skip rule stays on the CONTENT cap for every use: a small file is not worth re-encoding.
   if (bareType(contentType) === 'image/gif') {
     return { action: 'skip' };
   }
@@ -137,7 +182,7 @@ export function planResize(width: number, height: number, bytes: number, content
   if (longest <= MAX_IMAGE_EDGE_PX && bytes <= SKIP_BELOW_BYTES) {
     return { action: 'skip' };
   }
-  const scale = Math.min(1, MAX_IMAGE_EDGE_PX / longest);
+  const scale = Math.min(1, maxEdgePx / longest);
   return {
     action: 'resize',
     // At least 1 px: a 10 000 × 10 banner scales to a fraction of a pixel, and a 0-sized canvas throws.
@@ -146,9 +191,9 @@ export function planResize(width: number, height: number, bytes: number, content
   };
 }
 
-/** Dimensions for the no-WebP fallback encode: the original scaled to at most {@link FALLBACK_MAX_EDGE_PX}. Pure. */
-export function fallbackSize(width: number, height: number): { width: number; height: number } {
-  const scale = Math.min(1, FALLBACK_MAX_EDGE_PX / Math.max(width, height));
+/** Dimensions for the no-WebP fallback encode: the original scaled to at most `maxEdgePx` ({@link FALLBACK_MAX_EDGE_PX} by default). Pure. */
+export function fallbackSize(width: number, height: number, maxEdgePx: number = FALLBACK_MAX_EDGE_PX): { width: number; height: number } {
+  const scale = Math.min(1, maxEdgePx / Math.max(width, height));
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
 }
 
@@ -211,21 +256,30 @@ export const browserCodec: ImageCodec = {
 
 /**
  * Return a smaller version of `file` for upload, or `file` itself when it cannot do better.
+ * `use` sets how far it may shrink ({@link IMAGE_LIMITS}).
  * Never rejects: a failure is logged with the file's name and the original is returned.
  */
-export async function optimizeImageForUpload(file: File, codec: ImageCodec = browserCodec): Promise<File> {
+export async function optimizeImageForUpload(file: File, use: ImageUse = 'content', codec: ImageCodec = browserCodec): Promise<File> {
+  const limits = IMAGE_LIMITS[use];
   const sourceType = bareType(file.type);
   if (sourceType === 'image/gif') {
     return file; // checked before decoding: no point paying for a decode we will not use
   }
   let decoded: DecodedImage | undefined;
   try {
-    // Animated WebP and APNG decode to frame 0 like a GIF does, so they are left alone too.
-    if ((sourceType === 'image/webp' || sourceType === 'image/png') && isAnimatedImage(new Uint8Array(await file.slice(0, ANIMATION_SNIFF_BYTES).arrayBuffer()), sourceType)) {
-      return file;
+    // Animated WebP and APNG decode to frame 0 like a GIF does, so they are left alone too, and so
+    // is a file whose header does not say: re-encoding it could drop frames nobody saw.
+    if (sourceType === 'image/webp' || sourceType === 'image/png') {
+      const sniff = sniffAnimation(new Uint8Array(await file.slice(0, ANIMATION_SNIFF_BYTES).arrayBuffer()), sourceType);
+      if (sniff === 'unknown') {
+        console.warn(`[Forms] Image optimization skipped for "${file.name}" (${sourceType}, ${file.size} B): its first ${ANIMATION_SNIFF_BYTES} B do not show whether it is animated, so it is uploaded as it is.`);
+      }
+      if (sniff !== 'still') {
+        return file;
+      }
     }
     decoded = await codec.decode(file);
-    const plan = planResize(decoded.width, decoded.height, file.size, sourceType);
+    const plan = planResize(decoded.width, decoded.height, file.size, sourceType, limits.maxEdgePx);
     if (plan.action === 'skip') {
       return file;
     }
@@ -235,7 +289,7 @@ export async function optimizeImageForUpload(file: File, codec: ImageCodec = bro
     // fallback size. A PNG the browser already returned is reused only when that size is the one it
     // was drawn at; otherwise it is encoded again, at the fallback size.
     if (outputType !== 'image/webp') {
-      const size = fallbackSize(decoded.width, decoded.height);
+      const size = fallbackSize(decoded.width, decoded.height, limits.fallbackMaxEdgePx);
       const alreadyEncoded = bareType(blob.type) === outputType && size.width === plan.width && size.height === plan.height;
       if (!alreadyEncoded) {
         blob = await codec.encode(decoded, size.width, size.height, outputType, outputType === 'image/jpeg' ? JPEG_QUALITY : undefined);

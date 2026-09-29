@@ -15,8 +15,9 @@
  * upload, often `localhost`, and broke every form served from anywhere else (#270). See
  * `../widget/core/asset-ref.ts`.
  *
- * Before sending, the image is shrunk in the browser (`image-optimize.ts`): at most 1600 px on its
- * longest side, re-encoded as WebP where the browser can. Published forms otherwise made every
+ * Before sending, the image is shrunk in the browser (`image-optimize.ts`): re-encoded as WebP where
+ * the browser can, at most 1600 px on its longest side for screen and option images, 3840 px for a
+ * page background (which covers the whole viewport). Published forms otherwise made every
  * respondent download the author's original, often a multi-megabyte phone photo.
  *
  * `XMLHttpRequest` rather than `fetch` for the same reason as the respondent uploader: it is the
@@ -29,7 +30,7 @@ import { resolveApiBase, resolveApiToken } from '../shared/mj-api-origin';
 import { serverErrorText } from '../shared/server-error-text';
 // The upload POST and the anonymous read share one route, so one constant names both.
 import { ASSET_ROUTE } from '../widget/core/asset-ref';
-import { optimizeImageForUpload } from './image-optimize';
+import { optimizeImageForUpload, type ImageUse } from './image-optimize';
 
 /** What the server returns for a stored asset. */
 export interface UploadedAsset {
@@ -139,16 +140,17 @@ export class FormAssetService {
 
   /**
    * Upload one image for a form. Resolves with the stored asset, or rejects with a usable Error.
-   * The file is shrunk first (`image-optimize.ts`); when shrinking cannot help, or the server refuses the shrunk file's type (415), the original is sent.
+   * The file is shrunk first (`image-optimize.ts`), as far as `use` allows; when shrinking cannot
+   * help, or the server refuses the shrunk file's type (415), the original is sent.
    */
-  public async upload(file: File, formId: string, onProgress?: AssetUploadProgress): Promise<UploadedAsset> {
+  public async upload(file: File, formId: string, onProgress?: AssetUploadProgress, use: ImageUse = 'content'): Promise<UploadedAsset> {
     // The API BASE, not its origin: an MJAPI reverse-proxied at `/api` takes the upload at
     // `/api/forms/asset`, and the bare origin would post past it (#270).
     const apiBase = resolveApiBase();
     if (!apiBase) {
       throw new Error('Cannot upload: the MemberJunction API location is not configured.');
     }
-    const optimized = await optimizeImageForUpload(file);
+    const optimized = await optimizeImageForUpload(file, use);
     const url = `${apiBase}${ASSET_ROUTE}`;
     try {
       return await this.send(url, buildAssetFormData(optimized, formId), onProgress);

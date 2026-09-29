@@ -14,11 +14,11 @@ const code = readFileSync(join(__dirname, 'form-asset.service.ts'), 'utf8')
 
 describe('FormAssetService uses the image optimizer — source smoke', () => {
   it('imports the optimizer from its own module', () => {
-    expect(code).toContain("import { optimizeImageForUpload } from './image-optimize'");
+    expect(code).toMatch(/import \{ optimizeImageForUpload\b[^}]*\} from '\.\/image-optimize'/);
   });
 
   it('optimizes before building the multipart body, and sends the optimized file', () => {
-    const optimizeAt = code.indexOf('await optimizeImageForUpload(file)');
+    const optimizeAt = code.indexOf('await optimizeImageForUpload(file, use)');
     const buildAt = code.indexOf('buildAssetFormData(optimized, formId)');
     expect(optimizeAt).toBeGreaterThan(-1);
     expect(buildAt).toBeGreaterThan(optimizeAt);
@@ -31,5 +31,28 @@ describe('FormAssetService uses the image optimizer — source smoke', () => {
     expect(retryCheck).toBeGreaterThan(firstSend);
     expect(originalSend).toBeGreaterThan(retryCheck);
     expect(code.split('buildAssetFormData(file, formId)')).toHaveLength(2); // exactly one original send
+  });
+});
+
+/**
+ * TEMPLATE-TEXT SMOKE: the builder's components cannot be compiled in this node Vitest, so this
+ * pins the one binding that makes a page background shrink less than screen media, from the
+ * Design tab down to the service call. Behaviour past the service is covered in
+ * `form-asset.upload.spec.ts` and `image-optimize.spec.ts`.
+ */
+const read = (file: string): string => readFileSync(join(__dirname, file), 'utf8');
+
+describe('the image use reaches the upload — template smoke', () => {
+  it('marks only the Design tab background as a page background', () => {
+    const html = read('design-panel.component.html');
+    const bgField = html.slice(html.indexOf('ariaLabel="Background image"'), html.indexOf('/>', html.indexOf('ariaLabel="Background image"')));
+    expect(bgField.length).toBeGreaterThan(0);
+    expect(bgField).toContain('use="page-background"');
+    expect(html.split('use="page-background"')).toHaveLength(2);
+  });
+
+  it('passes the use from the image field to the picker, and from the picker to the upload', () => {
+    expect(read('image-field.component.ts')).toContain('[use]="use"');
+    expect(read('image-picker-dialog.component.ts')).toMatch(/this\.assets\.upload\(file, this\.formId, \(fraction\) => \{[\s\S]*?\}, this\.use\)/);
   });
 });
