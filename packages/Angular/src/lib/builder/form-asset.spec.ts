@@ -112,8 +112,14 @@ describe('isAcceptedType — the local screen before an upload', () => {
 });
 
 describe('shouldRetryWithOriginal', () => {
-  const original = fileNamed('photo.jpg');
-  const optimized = fileNamed('photo.webp');
+  const typed = (name: string, type: string): File => new File([new Uint8Array([1, 2, 3])], name, { type });
+  const original = typed('photo.jpg', 'image/jpeg');
+  const optimized = typed('photo.webp', 'image/webp');
+
+  it('does not retry when the optimizer kept the type (Safari JPEG → JPEG): the server refused that type already', () => {
+    const reencoded = typed('photo.jpg', 'image/jpeg');
+    expect(shouldRetryWithOriginal(new AssetUploadError('nope', 415), reencoded, original)).toBe(false);
+  });
 
   it('retries on a 415 when the optimizer changed the file (the server may not accept WebP)', () => {
     expect(shouldRetryWithOriginal(new AssetUploadError('nope', 415), optimized, original)).toBe(true);

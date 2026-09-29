@@ -3,10 +3,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * SOURCE-PRESENCE SMOKE: `FormAssetService` cannot be instantiated in this node environment
- * (XHR, Angular DI), so this guards the seam a refactor could silently drop. It checks that every
- * upload goes through the optimizer, and that the OPTIMIZED file, not the original, is what gets
- * sent. The behaviour itself is covered in `image-optimize.spec.ts`.
+ * SOURCE-PRESENCE SMOKE ("the call still exists"). The behaviour is tested for real in
+ * `form-asset.upload.spec.ts`, which drives `FormAssetService` over a fake XHR, and in
+ * `image-optimize.spec.ts`; this only guards the seam's shape against a refactor that drops it.
  */
 const code = readFileSync(join(__dirname, 'form-asset.service.ts'), 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, '')

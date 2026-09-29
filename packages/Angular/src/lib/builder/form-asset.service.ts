@@ -123,12 +123,17 @@ export class AssetUploadError extends Error {
 
 /**
  * Whether to send the author's original after the optimized file was refused. Only a 415 counts,
- * and only when the optimizer changed the file: an operator's `FORMS_ASSET_ALLOWED_TYPES` may omit
- * `image/webp`, which would otherwise reject a JPEG the author never converted. Any other failure
- * is a verdict on the file, and retrying it produces the same answer.
+ * and only when the optimizer changed the file's TYPE: an operator's `FORMS_ASSET_ALLOWED_TYPES`
+ * may omit `image/webp`, which would otherwise reject a JPEG the author never converted. A file
+ * re-encoded in its own type (Safari's JPEG-to-JPEG fallback) was refused for a type the original
+ * shares, so sending it would only repeat the 415. Any other failure is a verdict on the file.
  */
 export function shouldRetryWithOriginal(error: unknown, optimized: File, original: File): boolean {
-  return error instanceof AssetUploadError && error.status === 415 && optimized !== original;
+  return error instanceof AssetUploadError && error.status === 415 && bareContentType(optimized.type) !== bareContentType(original.type);
+}
+
+function bareContentType(contentType: string): string {
+  return contentType.split(';')[0].trim().toLowerCase();
 }
 
 @Injectable({ providedIn: 'root' })
