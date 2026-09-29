@@ -91,6 +91,8 @@ Run `git -C W branch -vv`. Each branch must NOT track `origin/next`. Unset it wi
 
 - [ ] **Step 1: Write the failing tests**
 
+> **Superseded during implementation (do not build from this snippet as written).** The shipped spec is the authority: it also covers the header sniff for animated WebP/APNG (`sniffAnimation`, which answers `unknown` — and keeps the original — when the first 64 KB end before a PNG's first IDAT), the no-WebP fallback cap (`fallbackSize`, `FALLBACK_MAX_EDGE_PX` 1200, which also moves the second encode below from 1600×1200 to 1200×900), and per-use limits (`ImageUse`, `IMAGE_LIMITS`: a page background is capped at 3840 px). Commits `12504b5`, `9bb9c7f`, and the PR #277 review.
+
 Create `packages/Angular/src/lib/builder/image-optimize.spec.ts`:
 
 ```ts
@@ -317,6 +319,8 @@ Expected: FAIL — `Failed to resolve import "./image-optimize"`.
 
 - [ ] **Step 3: Write the implementation**
 
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `image-optimize.ts` is the authority. It adds the header sniff for animated WebP/APNG (`sniffAnimation`, which answers `unknown` — and keeps the original — when the first 64 KB end before a PNG's first IDAT), the no-WebP fallback cap (`fallbackSize`, `FALLBACK_MAX_EDGE_PX` 1200, `JPEG_QUALITY` 0.8 — not the 0.85 written below), and per-use limits (`ImageUse`, `IMAGE_LIMITS`: a page background is capped at 3840 px). Commits `12504b5`, `9bb9c7f`, and the PR #277 review.
+
 Create `packages/Angular/src/lib/builder/image-optimize.ts`:
 
 ```ts
@@ -522,6 +526,8 @@ git commit -m "feat(forms-ng): shrink images in the browser before upload"
 
 - [ ] **Step 1: Write the failing wiring test**
 
+> **Superseded during implementation (do not build from this snippet as written).** The shipped wiring spec also pins the one-shot 415 retry and, as template text, the `use` binding from the Design tab's background field to the upload. The upload's behaviour is tested directly in `form-asset.upload.spec.ts`.
+
 Create `packages/Angular/src/lib/builder/image-optimize.wiring.spec.ts`:
 
 ```ts
@@ -567,6 +573,8 @@ In `packages/Angular/src/lib/builder/form-asset.service.ts`, add next to the oth
 import { optimizeImageForUpload } from './image-optimize';
 ```
 
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `upload(file, formId, onProgress, use = 'content')` passes `use` to the optimizer and, when the server answers 415 for a changed file, retries once with the original (`AssetUploadError`, `shouldRetryWithOriginal`; commit `276592e`).
+
 Replace the `upload` method with:
 
 ```ts
@@ -608,6 +616,8 @@ pnpm run build
 Expected: all pass. `pnpm test` includes the existing `form-asset.spec.ts` and `asset-ref-wiring.spec.ts`. The latter still asserts `resolveApiBase()` in `form-asset.service.ts`, which is unchanged.
 
 - [ ] **Step 5: Add the changeset**
+
+> **Superseded during implementation.** The shipped changeset is the authority; it states the Safari cap, the animated-image skip and the page-background limit.
 
 Create `.changeset/shrink-images-before-upload.md`:
 
@@ -1488,7 +1498,7 @@ git commit -m "feat(forms-ng): prefetch later screens' images after the welcome 
 Not delegated. It needs the shared hosts, the database, and one browser, which is an exclusive lock.
 
 - [ ] **Step 1: Unblock Explorer.** Rebuild bizapps-caliber's Angular package (`pnpm --filter <caliber angular package> run build` from `~/Projects/mj-dev`), then confirm `/tmp/mj-explorer.log` shows a fresh `Application bundle generation complete`. If caliber fails to build against MJ `next`, stop and report it; it is out of scope.
-- [ ] **Step 2: PR 1 upload check.** Serve the PR 1 branch's builder in Explorer; the workspace links forms-ng from the main checkout, so switch the main checkout to the branch or link the worktree, with Soham's OK because it is shared. In the builder, upload the fixture's 927 KB JPEG (`C15F7D76-…`) to a welcome screen, a PictureChoice option and an ending screen, plus a transparent PNG and an animated GIF.
+- [ ] **Step 2: PR 1 upload check.** Serve the PR 1 branch's builder in Explorer; the workspace links forms-ng from the main checkout, so switch the main checkout to the branch or link the worktree, with Soham's OK because it is shared. In the builder, upload the fixture's 907 KB JPEG (906,835 B, `C15F7D76-…`) to a welcome screen, a PictureChoice option and an ending screen, plus a transparent PNG and an animated GIF.
   - Also upload a portrait phone JPEG stored landscape with EXIF Orientation=6 and over 300 KB (it must upload upright), and an animated WebP (it must come back byte-identical).
   - Do it in Chrome and in WebKit (playwright-core webkit, iPhone profile).
   - For each upload, record `MJ: Files.ContentType` and the served byte size.

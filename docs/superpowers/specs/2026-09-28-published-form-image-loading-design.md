@@ -13,7 +13,7 @@ Three runs agreed within ~20 ms.
 
 | Screen | Text visible | Image request starts | Image painted | Text → image gap |
 |---|---|---|---|---|
-| Welcome (927 KB JPEG, 1408×768) | 2.80 s | 2.79 s | 8.63 s | **5.8 s** |
+| Welcome (907 KB JPEG — 906,835 B, `MJ: Files` C15F7D76 — 1408×768) | 2.80 s | 2.79 s | 8.63 s | **5.8 s** |
 | Question (886 KB / 99 KB / 18 KB options) | click + 0.09 s | when the page renders | up to +6.3 s | **6.3 s** |
 | Ending (949 KB JPEG) | after submit | when the screen renders | +6.0 s | **6.0 s** |
 
@@ -36,7 +36,7 @@ throttle `none` and `slow4g-cpu4`).
    - `runAssetUpload` validates only size and type before `UploadFile` (`Server/src/asset/asset.service.ts`).
 
    The welcome photo displays at most 352 CSS px wide (`.mjf-screen__media { max-width: min(100%, 22rem) }`)
-   but ships at 1408 px and 927 KB. Uploads up to 5 MB are accepted (`FORMS_ASSET_MAX_BYTES`), which is
+   but ships at 1408 px and 907 KB. Uploads up to 5 MB are accepted (`FORMS_ASSET_MAX_BYTES`), which is
    ~29 s on Slow 4G. Cause 1 accounts for ~5.2 s of the welcome screen's 5.8 s.
 2. **Later screens are never prefetched.** Question images are requested only when the page renders
    after "Start"; the ending image only after submit. Nothing in the widget or the host page preloads or
@@ -95,8 +95,8 @@ node-environment spec:
 export function optimizeImageForUpload(file: File, codec?: ImageCodec): Promise<File>;
 ```
 
-`ImageCodec` is the browser seam: `decode(file) → { width, height, draw }` and
-`encode(bitmap, width, height, type, quality) → Blob`. The default implementation uses
+`ImageCodec` is the browser seam: `decode(file) → DecodedImage` (`{ width, height, source, close() }`)
+and `encode(image, width, height, type, quality) → Blob`. The default implementation uses
 `createImageBitmap(file, { imageOrientation: 'from-image' })` plus an `OffscreenCanvas`, falling back to
 a `<canvas>` when `OffscreenCanvas` is unavailable. Tests pass a fake.
 
@@ -118,14 +118,21 @@ fallbackSize(width, height): { width; height } // long edge <= FALLBACK_MAX_EDGE
 
 1. **Skip, returning `file` unchanged:**
    - `image/gif` (resizing would drop the animation);
-   - an animated WebP or APNG, found by sniffing the first 64 KB of the file (WebP: `VP8X` animation
-     flag or an `ANIM` chunk; PNG: an `acTL` chunk before the first `IDAT`). Resizing would keep only
-     frame 0;
+   - an animated WebP or APNG, found by sniffing the first 64 KB of the file (`sniffAnimation`; WebP:
+     `VP8X` animation flag or an `ANIM` chunk; PNG: an `acTL` chunk before the first `IDAT`). Resizing
+     would keep only frame 0;
+   - a WebP or PNG whose first 64 KB do not answer that (`unknown`): a PNG whose ancillary chunks —
+     XMP, an ICC profile — run past the window before its first `IDAT` may still carry an `acTL`.
+     Logged with `console.warn`, then uploaded as it is;
    - any file whose longer side is ≤ `MAX_IMAGE_EDGE_PX` **and** whose size is ≤ `SKIP_BELOW_BYTES`.
 2. **Decode** with EXIF orientation applied, so phone photos stay upright. Re-encoding drops all
    metadata, including GPS location.
-3. **Scale** so the longer side is at most `MAX_IMAGE_EDGE_PX`, preserving aspect ratio and rounding to
-   whole pixels. Never upscale: a large-bytes file within the edge cap is re-encoded at its own size.
+3. **Scale** so the longer side is at most the cap for the image's use (`ImageUse`, `IMAGE_LIMITS`):
+   `MAX_IMAGE_EDGE_PX` (1600) for screen media, options and the logo; `MAX_BACKGROUND_EDGE_PX` (3840)
+   for the page background, which is drawn `cover` across the viewport (a 1920 CSS px desktop at 2×
+   needs 3840 device px; the content cap would stretch it 2.4×). The Design tab's background field
+   passes `use="page-background"` through `ImageFieldComponent` → `ImagePickerDialogComponent` →
+   `FormAssetService.upload(…, use)`. Preserve aspect ratio and round to whole pixels. Never upscale: a large-bytes file within the edge cap is re-encoded at its own size.
 4. **Encode** as `image/webp` at `WEBP_QUALITY`. Safari's canvas cannot encode WebP and returns PNG
    instead, which shows as the blob's `type` differing from the requested type. In that case,
    `pickOutputType` chooses:
@@ -137,9 +144,12 @@ fallbackSize(width, height): { width; height } // long edge <= FALLBACK_MAX_EDGE
    returned is reused only when it was drawn at that size; otherwise it is encoded again.
    The WebP path stays at 1600 px and `WEBP_QUALITY`.
 
-   *Measured 2026-09-28:* Chrome 154 makes the 927 KB photo a 162 KB WebP. WebKit 26.5 JPEG:
-   1600 px q0.85 = 434 KB, 1600 px q0.80 = 368 KB, 1200 px q0.85 = 303 KB, 1200 px q0.80 = 257 KB,
-   1056 px q0.80 = 211 KB. Safari's PNG for a 3000×1000 transparent PNG at 1600 px: 1231 KB.
+   *Measured 2026-09-28 on the welcome photo C15F7D76 (906,835 B):* Chromium 151 makes it a
+   142,166 B WebP; the E2E upload from Chrome 154 stored a 166,176 B `welcome.webp`. WebKit 26.5 JPEG:
+   1408 px q0.85 = 413,531 B, 1408 px q0.80 = 350,236 B, 1200 px q0.85 = 284,329 B, 1200 px q0.80 =
+   239,767 B, 1056 px q0.80 = 195,574 B. (An earlier sweep, 434/368/303/257/211 KB, came from a different
+   source file and does not reproduce on C15F7D76.) Safari's PNG for a 3000×1000 transparent PNG at
+   1600 px: 1231 KB (not re-measured). For a page background both caps are 3840 px.
 5. **Keep whichever is smaller:** if the encoded blob is not smaller than `file`, return `file`.
 6. **Name the result** after the original with the new extension (`photo.jpg` → `photo.webp`). The server
    stores `Name` and `ContentType` from the multipart part.
@@ -184,14 +194,22 @@ upload progress starts.
   - `decode` throws → original returned plus exactly one warning naming the file;
   - `encode` throws → the same;
   - missing `createImageBitmap` → the same.
-- **`isAnimatedImage`** with hand-built headers: animated WebP (VP8X flag; ANIM chunk alone), still WebP,
-  APNG, still PNG (an `acTL` after `IDAT` does not count), truncated input, other types; and an animated
-  WebP `File` is returned as the same object without decoding.
+- **`sniffAnimation`** with hand-built headers: animated WebP (VP8X flag; ANIM chunk alone), still WebP
+  (including a VP8X-flagged still whose ICCP runs past the window), APNG, still PNG (an `acTL` after
+  `IDAT` does not count), a PNG whose `acTL` lies past 64 KB (`unknown`), truncated input (`unknown`),
+  other types (`still`); an animated WebP and a late-`acTL` APNG `File` are returned as the same object
+  without decoding.
+- **Per-use limits:** a 3840×2160 page background is encoded at its own size, and on the no-WebP path
+  too; an 8000 px one is capped at 3840; content keeps 1600/1200.
+- **`FormAssetService.upload` (`builder/form-asset.upload.spec.ts`, the real service over a fake XHR):**
+  `use` reaches the optimizer; a 415 on the optimized file re-sends the original once; a 413 is not
+  retried.
 - **`shouldRetryWithOriginal`:** 415 with a changed file → true; 415 for the original itself, 413, and a
   non-upload error → false.
 - **Wiring (`builder/image-optimize.wiring.spec.ts`, the source-reading pattern of `asset-ref-wiring.spec.ts`):**
   `upload()` awaits `optimizeImageForUpload` before `buildAssetFormData`, sends the optimized file first,
-  and sends the original only in the one retry branch.
+  and sends the original only in the one retry branch. As template text, the Design tab's background
+  field is the only `use="page-background"`, and the field and picker pass `use` on.
 
 ---
 
@@ -326,7 +344,7 @@ the builder components. Each PR must also pass the package's typecheck and its `
 1. **Explorer has to build first.** At the time of writing, Explorer on :4201 fails because of stale
    bizapps-caliber build output (`BaseRealtimeChannelClient` is not exported by MJ `next`'s conversations
    package). Rebuild caliber before any builder check.
-2. **PR 1 — upload.** In the builder in Explorer, upload the fixture's 927 KB JPEG to a welcome screen,
+2. **PR 1 — upload.** In the builder in Explorer, upload the fixture's 907 KB JPEG (C15F7D76) to a welcome screen,
    a PictureChoice option and an ending screen. Do it once in Chrome and once in WebKit
    (playwright-core's `webkit` channel, which exercises the Safari fallback). For each upload, record the
    stored `MJ: Files.ContentType` and the served byte size. Also upload a transparent PNG and an animated
@@ -342,7 +360,7 @@ the builder components. Each PR must also pass the package's typecheck and its `
 
 | Metric | Today | Target |
 |---|---|---|
-| Stored size of the 927 KB, 1408×768 JPEG after upload, measured per engine (Chrome WebP, Safari JPEG) | 927 KB | ≤ 250 KB |
+| Stored size of the 907 KB, 1408×768 JPEG after upload, measured per engine (Chrome WebP, Safari JPEG) | 907 KB | ≤ 250 KB |
 | Welcome image painted | 8.63 s | ≤ 4.5 s |
 | Welcome text visible | 2.80 s | ≤ 3.08 s (no regression > 10%) |
 | Question images painted after the question page's text, with ≥ 3 s on the welcome screen | up to 6.3 s | ≤ 100 ms |
