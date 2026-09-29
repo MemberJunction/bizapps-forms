@@ -219,7 +219,21 @@ const FORM_SCREEN_CSS = /* css */ `
       -->
       <div class="mjf-screen__inner">
       @if (s.mediaURL) {
-        <img class="mjf-screen__media" [src]="s.mediaURL" alt="" />
+        <!--
+          fetchpriority only on the welcome screen: it is the first thing a respondent sees, and it
+          competes with the rest of the page for bandwidth. By the time an ending shows, its image
+          has been prefetched (core/image-prefetch.ts). (load)/(error) both report "settled", so a
+          broken image still lets the prefetch queue start.
+        -->
+        <img
+          class="mjf-screen__media"
+          [src]="s.mediaURL"
+          alt=""
+          decoding="async"
+          [attr.fetchpriority]="isWelcome() ? 'high' : null"
+          (load)="mediaSettled.emit()"
+          (error)="mediaSettled.emit()"
+        />
       } @else if (!isWelcome()) {
         <mjf-icon name="circle-check" class="mjf-screen__done-icon" />
       }
@@ -268,6 +282,11 @@ export class FormScreenComponent {
   public readonly screen = input.required<PublishedFormScreen>();
   /** The button was pressed. Only a Welcome screen normally emits this. */
   public readonly activated = output<void>();
+  /**
+   * This screen's image finished loading, or failed. The shell starts prefetching later screens'
+   * images only after this, so they do not take bandwidth from the image the respondent sees now.
+   */
+  public readonly mediaSettled = output<void>();
 
   protected readonly isWelcome = computed(() => this.screen().screenType === 'Welcome');
 

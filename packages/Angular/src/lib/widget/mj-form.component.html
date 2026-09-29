@@ -108,7 +108,7 @@
            shell, so while it shows there is no runtime rendered, no question in the DOM and
            nothing for a respondent (or a scraper) to fill in. -->
       @if (welcomeScreen(); as ws) {
-        <mjf-form-screen [screen]="ws" (activated)="startIntake()" />
+        <mjf-form-screen [screen]="ws" (activated)="startIntake()" (mediaSettled)="onWelcomeMediaSettled()" />
       }
     }
     @case ('done') {
