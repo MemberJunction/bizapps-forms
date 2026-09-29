@@ -43,7 +43,8 @@ import { FORMS_API_SERVICE, SessionExpiredError } from './api/forms-api.interfac
 import { FORMS_API_CONFIG } from './api/forms-api.config';
 import { submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
-import { resolveDefinitionForRender, resolveStyleTokensForRender } from './core/asset-ref';
+import { collectLaterImageUrls, resolveDefinitionForRender, resolveStyleTokensForRender } from './core/asset-ref';
+import { prefetchImages, type PrefetchHandle } from './core/image-prefetch';
 import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
@@ -303,6 +304,17 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   private responseId: string | undefined;
   private autosave: AutosaveController | null = null;
+  /**
+   * Prefetch of later screens' images (core/image-prefetch.ts). One queue per load: `load()`
+   * cancels it first, and `prefetchGeneration` makes an idle callback scheduled by an EARLIER load
+   * a no-op.
+   */
+  private prefetch: PrefetchHandle | undefined;
+  private prefetchUrls: string[] = [];
+  private prefetchStarted = false;
+  private prefetchGeneration = 0;
+  /** Set on destroy: a `load()` still awaiting the network resumes afterwards and must start nothing. */
+  private destroyed = false;
   /** Submit-point pages already banked this fill, so each fires once. Reset on {@link load}. */
   private bankedSubmitPoints = new Set<string>();
   /**
@@ -326,10 +338,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
 
   public ngOnDestroy(): void {
     this.autosave?.dispose();
+    this.destroyed = true;
+    this.cancelPrefetch();
   }
 
   /** Fetch (or accept) the form definition, theme the host, and build the runtime. */
   private async load(): Promise<void> {
+    this.cancelPrefetch();
     this.phase.set('loading');
     // Fresh load == fresh response identity: mint a new client id and drop any stale
     // server echo so a retry never upserts a previously-abandoned row.
@@ -368,6 +383,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.bankedSubmitPoints = new Set<string>();
       this.endingEarly = false;
       this.phase.set(this.adoptResume(loaded.resume, def, runtime) ?? initialPhaseFor(def));
+      this.planPrefetch(def);
     } catch (err) {
       // A load can meet an expired session too — the error page's "Try again" re-fetches with
       // the same token, and after eight hours that is a 401 with a retry button that loops.
@@ -461,7 +477,66 @@ export class MjFormComponent implements OnInit, OnDestroy {
   protected startIntake(): void {
     if (this.phase() === 'welcome') {
       this.phase.set('ready');
+      // Leaving the welcome screen before its image settled destroys the screen, so its
+      // (mediaSettled) will never fire. Start here instead; startPrefetch() runs once per load.
+      this.startPrefetch();
     }
+  }
+
+  /** The welcome image loaded or failed: later screens' images may now use the network. */
+  protected onWelcomeMediaSettled(): void {
+    this.startPrefetch();
+  }
+
+  /**
+   * Decide when this load's prefetch starts. A welcome screen with an image gets the network to
+   * itself until that image settles (or the respondent leaves it). In every other case (no welcome
+   * screen, no welcome image, resumed past it), start when the browser is idle.
+   *
+   * Only while intake is still ahead. A resumed, already-submitted response opens on `done` (and a
+   * failed or expired load on `error`/`expired`): the respondent can never see an option or an
+   * ending image there, so downloading up to 12 of them would only compete with what is on screen.
+   */
+  private planPrefetch(def: PublishedFormDefinition): void {
+    const phase = this.phase();
+    if (phase !== 'welcome' && phase !== 'ready') {
+      return;
+    }
+    this.prefetchUrls = collectLaterImageUrls(def);
+    if (phase === 'welcome' && def.welcomeScreen?.mediaURL) {
+      return;
+    }
+    this.schedulePrefetchWhenIdle();
+  }
+
+  private schedulePrefetchWhenIdle(): void {
+    const generation = this.prefetchGeneration;
+    const start = (): void => {
+      if (generation === this.prefetchGeneration) {
+        this.startPrefetch();
+      }
+    };
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(start);
+    } else {
+      setTimeout(start, 0); // Safari does not ship requestIdleCallback by default
+    }
+  }
+
+  private startPrefetch(): void {
+    if (this.destroyed || this.prefetchStarted) {
+      return;
+    }
+    this.prefetchStarted = true;
+    this.prefetch = prefetchImages(this.prefetchUrls);
+  }
+
+  private cancelPrefetch(): void {
+    this.prefetchGeneration++;
+    this.prefetch?.cancel();
+    this.prefetch = undefined;
+    this.prefetchStarted = false;
+    this.prefetchUrls = [];
   }
 
   protected isScroll(): boolean {

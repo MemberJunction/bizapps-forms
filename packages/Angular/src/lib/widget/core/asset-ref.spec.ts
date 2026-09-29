@@ -3,6 +3,7 @@ import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contra
 
 import {
   apiBaseOf,
+  collectLaterImageUrls,
   mapCssUrls,
   mapDefinitionAssets,
   mapStyleTokenAssets,
@@ -347,5 +348,101 @@ describe('resolveStyleTokensForRender', () => {
     const tokens = definition().styleTokens;
     const resolved = resolveStyleTokensForRender(tokens, '');
     expect(resolved.logoURL).toBe(`http://old/forms/asset/${ID}`);
+  });
+});
+
+describe('collectLaterImageUrls', () => {
+  const opt = (id: string, displayOrder: number, imageURL?: string) => ({
+    id,
+    label: id,
+    value: id,
+    displayOrder,
+    ...(imageURL ? { imageURL } : {}),
+  });
+  const question = (id: string, displayOrder: number, options: ReturnType<typeof opt>[]) => ({
+    id,
+    type: 'PictureChoice' as const,
+    prompt: id,
+    isRequired: false,
+    displayOrder,
+    options,
+  });
+  const screen = (id: string, screenType: 'Welcome' | 'Ending', displayOrder: number, mediaURL?: string) => ({
+    id,
+    screenType,
+    title: id,
+    displayOrder,
+    ...(mediaURL ? { mediaURL } : {}),
+  });
+  const base = (over: Partial<PublishedFormDefinition>): PublishedFormDefinition =>
+    ({
+      formId: 'f',
+      formVersionId: 'v',
+      name: 'n',
+      renderMode: 'Scroll',
+      settings: {},
+      styleTokens: { cssVariables: {} },
+      pages: [],
+      endScreens: [],
+      ...over,
+    }) as PublishedFormDefinition;
+
+  it('lists option images, then ending images, in the order the respondent meets them', () => {
+    const def = base({
+      // Pages/questions/endings are stored out of order on purpose: the renderer sorts them by displayOrder,
+      // so the prefetch does too. Options are in published array order (no sort), like form-question.component.html.
+      pages: [
+        { id: 'p2', displayOrder: 1, questions: [question('q3', 0, [opt('e', 0, '/img/e')])] },
+        {
+          id: 'p1',
+          displayOrder: 0,
+          questions: [
+            question('q2', 1, [opt('d', 0, '/img/d')]),
+            question('q1', 0, [opt('b', 1, '/img/b'), opt('a', 0, '/img/a')]),
+          ],
+        },
+      ],
+      endScreens: [screen('end2', 'Ending', 1, '/img/end2'), screen('end1', 'Ending', 0, '/img/end1')],
+    });
+    expect(collectLaterImageUrls(def)).toEqual(['/img/b', '/img/a', '/img/d', '/img/e', '/img/end1', '/img/end2']);
+  });
+
+  it('leaves out the welcome image, the logo and CSS assets: the first screen loads those itself', () => {
+    const def = base({
+      welcomeScreen: screen('w', 'Welcome', 0, '/img/welcome'),
+      styleTokens: { cssVariables: { '--mjf-page-bg-image': 'url(/img/bg)' }, logoURL: '/img/logo' },
+      endScreens: [screen('end', 'Ending', 0, '/img/end')],
+    });
+    expect(collectLaterImageUrls(def)).toEqual(['/img/end']);
+  });
+
+  it('drops duplicates, keeping the first place an image is needed', () => {
+    const def = base({
+      pages: [{ id: 'p', displayOrder: 0, questions: [question('q', 0, [opt('a', 0, '/img/same'), opt('b', 1, '/img/same')])] }],
+      endScreens: [screen('end', 'Ending', 0, '/img/same')],
+    });
+    expect(collectLaterImageUrls(def)).toEqual(['/img/same']);
+  });
+
+  it('ignores option images on questions that do not render them (only PictureChoice does)', () => {
+    const def = base({
+      pages: [
+        {
+          id: 'p',
+          displayOrder: 0,
+          questions: [{ ...question('q', 0, [opt('a', 0, '/img/a')]), type: 'SingleChoice' as const }],
+        },
+      ],
+    });
+    expect(collectLaterImageUrls(def)).toEqual([]);
+  });
+
+  it('skips options and endings without an image, and returns [] for a form with none', () => {
+    const def = base({
+      pages: [{ id: 'p', displayOrder: 0, questions: [question('q', 0, [opt('a', 0)])] }],
+      endScreens: [screen('end', 'Ending', 0)],
+    });
+    expect(collectLaterImageUrls(def)).toEqual([]);
+    expect(collectLaterImageUrls(base({}))).toEqual([]);
   });
 });
