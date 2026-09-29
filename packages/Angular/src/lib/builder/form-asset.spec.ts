@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { AssetUploadError, assetErrorMessage, buildAssetFormData, parseAssetResponse, shouldRetryWithOriginal } from './form-asset.service';
-import { isAcceptedType } from './image-formats';
+import { MAX_SIZE_LABEL, UPLOAD_SIZE_HINT, isAcceptedType } from './image-formats';
 
 /** A stand-in File; the browser type is not available under the node test environment. */
 function fileNamed(name: string): File {
@@ -130,5 +130,16 @@ describe('shouldRetryWithOriginal', () => {
 
   it('does not retry an error that is not an upload failure', () => {
     expect(shouldRetryWithOriginal(new Error('boom'), optimized, original)).toBe(false);
+  });
+});
+
+describe('UPLOAD_SIZE_HINT — what the picker says about size', () => {
+  it('says large still images are resized, and keeps the server limit for what is sent as is', () => {
+    expect(UPLOAD_SIZE_HINT).toMatch(/resized/i);
+    expect(UPLOAD_SIZE_HINT.replace(/\u00a0/g, ' ')).toContain(`GIFs and animations up to ${MAX_SIZE_LABEL}`);
+  });
+
+  it('keeps the size on one line: the limit never wraps between its number and its unit', () => {
+    expect(UPLOAD_SIZE_HINT).toContain(MAX_SIZE_LABEL.replace(/ /g, '\u00a0'));
   });
 });

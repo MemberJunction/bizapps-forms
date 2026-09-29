@@ -55,4 +55,11 @@ describe('the image use reaches the upload — template smoke', () => {
     expect(read('image-field.component.ts')).toContain('[use]="use"');
     expect(read('image-picker-dialog.component.ts')).toMatch(/this\.assets\.upload\(file, this\.formId, \(fraction\) => \{[\s\S]*?\}, this\.use\)/);
   });
+
+  it('tells the author large images are resized, not that everything is capped at 5 MB', () => {
+    const picker = read('image-picker-dialog.component.ts');
+    expect(picker).not.toContain('up to {{ sizeHint }}');
+    expect(picker).toContain('{{ sizeHint }}');
+    expect(picker).toMatch(/sizeHint = UPLOAD_SIZE_HINT/);
+  });
 });

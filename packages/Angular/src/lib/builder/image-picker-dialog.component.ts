@@ -35,7 +35,7 @@ import { toAssetRef } from '../widget/core/asset-ref';
 import {
   ACCEPTED_FORMATS_LABEL,
   ACCEPT_ATTRIBUTE,
-  MAX_SIZE_LABEL,
+  UPLOAD_SIZE_HINT,
   isAcceptedType,
 } from './image-formats';
 
@@ -188,7 +188,7 @@ const IMAGE_PICKER_CSS = /* css */ `
             [class.is-dragging]="dragging"
             [disabled]="!canUpload"
             [attr.title]="canUpload ? null : unavailableReason"
-            [attr.aria-label]="'Upload an image: drag one here or press to browse. ' + formatsLabel + ', up to ' + sizeHint + '.'"
+            [attr.aria-label]="'Upload an image: drag one here or press to browse. ' + formatsLabel + '; ' + sizeHint + '.'"
             (click)="browse()"
             (dragenter)="onDragEnter($event)"
             (dragover)="onDragOver($event)"
@@ -197,7 +197,7 @@ const IMAGE_PICKER_CSS = /* css */ `
           >
             <i class="fa-solid fa-arrow-up-from-bracket ipd-drop-icon" aria-hidden="true"></i>
             <span class="ipd-drop-lead">{{ dragging ? 'Drop to upload' : 'Upload or drop an image here' }}</span>
-            <span class="ipd-drop-sub">{{ formatsLabel }} · up to {{ sizeHint }}</span>
+            <span class="ipd-drop-sub">{{ formatsLabel }} · {{ sizeHint }}</span>
           </button>
 
           <div class="ipd-or"><span>or</span></div>
@@ -256,7 +256,7 @@ export class ImagePickerDialogComponent {
   private readonly cdr = inject(ChangeDetectorRef);
 
   protected readonly accept = ACCEPT_ATTRIBUTE;
-  protected readonly sizeHint = MAX_SIZE_LABEL;
+  protected readonly sizeHint = UPLOAD_SIZE_HINT;
   protected readonly formatsLabel = ACCEPTED_FORMATS_LABEL;
 
   protected dragging = false;
