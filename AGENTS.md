@@ -1,8 +1,9 @@
 # AGENTS.md — MJ Forms
 
-This is the canonical instruction file for every coding agent in this repo (Codex, Claude Code,
-Cursor, …). `CLAUDE.md` imports it with `@AGENTS.md` and adds only Claude-specific wiring, so
-**edit guidance here, never in both** — one copy is the only way the two cannot drift.
+This is the instruction file for Codex and other non-Claude coding agents. It carries everything in
+`CLAUDE.md` (the Claude Code guide) plus the section below, which spells out what Claude Code
+applies automatically and everyone else must do by hand. **When you change project guidance,
+change it in both files** — they are deliberate copies, and a change made in one only is drift.
 
 Codex concatenates `AGENTS.md` files from the repo root down to the working directory and stops at
 `project_doc_max_bytes` (32 KiB by default). This file is kept under that cap on purpose — put
