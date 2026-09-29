@@ -1,5 +1,65 @@
 # @mj-biz-apps/forms-server
 
+## 0.14.0
+
+### Minor Changes
+
+- 5ac5ef2: The `Forms Automation Runner` role now gets Read on bizapps-tasks' Task Type Status, Create on its Task Activities, and Read/Create/Update on `MJ: Record Geo Codes`. Without these, Create Followup Task saved tasks with no status and silently without their 'Created' activity, and geocoding the Activity that `Common.LogActivity` writes for a newly created respondent Person was refused and logged on every such submit (#269). Core task-graph writes are still withheld on purpose.
+- 183631b: Adds the v0.14.0 consolidated metadata seed, `V202609291952__v0.14.x__Metadata_Sync.sql`. It changes nothing on a host: the only record `metadata/` gained since v0.13.1 is the three `Forms Automation Runner` grants of #269, and `V202609280149` already ships those under the same ids. A push against a database built from the shipped chain found no difference for any of them. The file carries the one statement the push emits, a rewrite of the All Forms view with its existing values, which every earlier seed also carries. It exists so the release ships the seed that `check:seed-cadence` requires whenever `metadata/` moves.
+
+### Patch Changes
+
+- 1ba678f: Autosaves no longer spend the per-session Submit budget (#271). `FORMS_RATELIMIT_MAX` now counts
+  only FINAL submits (completions and knockouts) and defaults to 10 (was 5, and was shared with
+  autosaves); a new `FORMS_AUTOSAVE_RATELIMIT_MAX` (default 60) is autosave's own bucket, so a
+  respondent's own typing can no longer exhaust the budget their Submit press needs. The per-address
+  ceiling `FORMS_RATELIMIT_IP_MAX` now counts autosaves only, so several respondents typing behind one
+  shared address (an office or campus NAT) can no longer get each other's Submit refused; final
+  submits stay bounded per address by `FORMS_COMPLETION_MAX` / `FORMS_KNOCKOUT_MAX`. The widget now
+  reports a server-refused autosave as an error (previously swallowed silently) and retries it on a
+  capped backoff (5s, 15s, then 60s — one full rate-limit window, so the last retry lands after the
+  window that refused it — then stops; the next edit or a final submit still carries every answer).
+  MJAPI now logs a one-time `[WARNING]` when a request other than Forms' own internal redeem call
+  arrives with `X-Forwarded-For` while `FORMS_TRUSTED_PROXY_HOPS` is 0 (the default): if a load
+  balancer or CDN fronts the API, that setting keys every respondent's per-IP rate limit on the
+  proxy's own address instead of theirs; see `docs/install.md` for the new hosted-deployment section covering
+  `FORMS_TRUSTED_PROXY_HOPS` and the public-submit rate-limit env vars.
+- 3d756d0: Uploaded form images keep working when a form is served from a different host (#270). The builder now stores `/forms/asset/<fileId>` instead of the uploading API's absolute URL, and the widget and builder previews resolve it against the API they are talking to. Forms already published with an absolute `/forms/asset/<id>` URL are repaired on read — no republish or migration needed.
+  The builder's image upload and the Responses tab's file download now also reach an MJAPI deployed behind a path prefix (e.g. `https://host/api/graphql`), and a legacy form no longer reports unpublished changes just because its stored images use the old absolute URL.
+  MJAPI now logs an error at boot when `GRAPHQL_ROOT_PATH` is set to anything other than `/` or exactly `/graphql` (e.g. `/api`, or `/api/graphql`): MJServer moves only GraphQL there, so Forms' images and file uploads would 404. Put a path prefix in `MJAPI_PUBLIC_URL` behind a reverse proxy instead.
+- cc12ef9: The device-resume routes (`POST /f/:slug/resume`, `/remember`, `/forget`) no longer run their
+  database work on the process-global provider (#265). Released common-server (≤ 5.46.3)
+  `Common.LogActivity` holds a transaction open on that same global provider for the duration of an
+  unrelated activity write, and while it was open a device pointer's mint or a start-over's revoke
+  running concurrently on the same connection could be rolled back with it — reproduced on a
+  throwaway database with a harness that held a transaction open on the global provider in the same
+  shape `Common.LogActivity` does, then rolled it back: 14 `/remember` calls each returned 204 with a
+  `Set-Cookie` pointer, but only 4 of the 14 invites were actually persisted. Each of the three routes
+  now opens its own isolated provider instance for the request, created only the first time the
+  request actually touches the database (a request that never gets that far — no cookie, a
+  rate-limited call — opens nothing) and always released afterward. `/forget` keeps its existing
+  guarantee that the browser's pointer is always cleared, including when the isolated provider cannot
+  be created or a dependency call fails; that failure is logged, and the cookie still clears. The
+  `GET /f/:slug` page's own reads — the slug lookup, the published-version check, and the description
+  read that resolve before the resume routes ever run — moved onto the same kind of per-request
+  isolated lease, for the same reason.
+
+  `MagicLinkInviteMinter.MintAnonymousInvite` gained an optional `host` provider parameter so callers
+  running on an isolated instance can mint through it instead of the global one. No migration.
+
+- Updated dependencies [1ba678f]
+- Updated dependencies [2682b0b]
+- Updated dependencies [3d756d0]
+- Updated dependencies [bc1731c]
+- Updated dependencies [2b53eb1]
+- Updated dependencies [91890d5]
+- Updated dependencies [cc12ef9]
+- Updated dependencies [25812b3]
+  - @mj-biz-apps/forms-ng@0.14.0
+  - @mj-biz-apps/forms-core-entities-server@0.14.0
+  - @mj-biz-apps/forms-actions@0.14.0
+  - @mj-biz-apps/forms-entities@0.14.0
+
 ## 0.13.1
 
 ### Patch Changes

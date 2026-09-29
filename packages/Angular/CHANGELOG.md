@@ -1,5 +1,43 @@
 # @mj-biz-apps/forms-ng
 
+## 0.14.0
+
+### Patch Changes
+
+- 1ba678f: Autosaves no longer spend the per-session Submit budget (#271). `FORMS_RATELIMIT_MAX` now counts
+  only FINAL submits (completions and knockouts) and defaults to 10 (was 5, and was shared with
+  autosaves); a new `FORMS_AUTOSAVE_RATELIMIT_MAX` (default 60) is autosave's own bucket, so a
+  respondent's own typing can no longer exhaust the budget their Submit press needs. The per-address
+  ceiling `FORMS_RATELIMIT_IP_MAX` now counts autosaves only, so several respondents typing behind one
+  shared address (an office or campus NAT) can no longer get each other's Submit refused; final
+  submits stay bounded per address by `FORMS_COMPLETION_MAX` / `FORMS_KNOCKOUT_MAX`. The widget now
+  reports a server-refused autosave as an error (previously swallowed silently) and retries it on a
+  capped backoff (5s, 15s, then 60s — one full rate-limit window, so the last retry lands after the
+  window that refused it — then stops; the next edit or a final submit still carries every answer).
+  MJAPI now logs a one-time `[WARNING]` when a request other than Forms' own internal redeem call
+  arrives with `X-Forwarded-For` while `FORMS_TRUSTED_PROXY_HOPS` is 0 (the default): if a load
+  balancer or CDN fronts the API, that setting keys every respondent's per-IP rate limit on the
+  proxy's own address instead of theirs; see `docs/install.md` for the new hosted-deployment section covering
+  `FORMS_TRUSTED_PROXY_HOPS` and the public-submit rate-limit env vars.
+- 2682b0b: The Design tab no longer fails to load for a form that shares its name with another form ("Untitled form" is every new form's name), or whose name is close to the 255-character limit: a form's own style is now named with a short unique suffix that fits the column. Restyling a form made from a template (or a template saved from a form) no longer restyles the original too — the Design tab forks a per-form style that another form also uses before writing to it.
+- 3d756d0: Uploaded form images keep working when a form is served from a different host (#270). The builder now stores `/forms/asset/<fileId>` instead of the uploading API's absolute URL, and the widget and builder previews resolve it against the API they are talking to. Forms already published with an absolute `/forms/asset/<id>` URL are repaired on read — no republish or migration needed.
+  The builder's image upload and the Responses tab's file download now also reach an MJAPI deployed behind a path prefix (e.g. `https://host/api/graphql`), and a legacy form no longer reports unpublished changes just because its stored images use the old absolute URL.
+  MJAPI now logs an error at boot when `GRAPHQL_ROOT_PATH` is set to anything other than `/` or exactly `/graphql` (e.g. `/api`, or `/api/graphql`): MJServer moves only GraphQL there, so Forms' images and file uploads would 404. Put a path prefix in `MJAPI_PUBLIC_URL` behind a reverse proxy instead.
+- bc1731c: Autofilled text is now registered by the respondent widget (#268). iOS Safari's contact AutoFill
+  fills fields that are not focused with a `change` event only, which the widget ignored, so First /
+  Last name showed the respondent's details while Next and Submit reported them as required. Text,
+  number and address/contact inputs now also listen for `change`, Next and Submit re-read every visible
+  text field before validating. An Address or Contact info question that AutoFill fills several
+  parts of in one go now keeps every part; previously each part was merged against a stale copy of
+  the answer, so only the last part filled reached the form and an autosave stored a partial answer.
+  A ShortText whose prompt is "First name", "Last name", "Full name",
+  "Company" (and close variants) now carries the matching `autocomplete` token so AutoFill targets it
+  predictably.
+- 2b53eb1: Published forms now load the images for later screens in the background, so picture-choice options and ending-screen images appear with their screen instead of several seconds after it on a slow mobile connection. The welcome image is requested at high priority, and prefetching waits for it to load or fail, or for the respondent to press Start; a form with no welcome image starts when the browser is idle. Images are fetched one at a time so they never slow down what the respondent is doing, up to 12 per form. Prefetching is skipped when the respondent's browser asks to save data or when a response is already submitted, and it stops on a very slow connection rather than competing with the form.
+- 91890d5: An embedded `<mj-form>` now reconnects when its `api-url`, `token` or `turnstile-site-key` attribute changes after the form has loaded. Before, the change removed the element from the page and the form disappeared: tearing down the old widget detached its own host element, so the rebuild saw an element that was no longer in the page and gave up.
+- 25812b3: Images added in the form builder (welcome and ending screens, picture-choice options, logo, page background) are now shrunk in the browser before upload and re-encoded as WebP, which keeps transparency. Screen and option images are capped at 1600 px on the longest side (1200 px where the browser cannot encode WebP, such as Safari); a page background, which covers the whole screen, is capped at 3840 px so it stays sharp on high-density desktops. Where the browser cannot encode WebP, a JPEG stays JPEG and anything else stays PNG, so transparency is kept there too. A published form no longer makes each respondent download the author's original photo; a 907 KB welcome photo previously took 5.8 s longer than its text to appear on a slow mobile connection. Animated images (GIF, animated WebP and APNG), images whose first 64 KB do not show whether they are animated, small images, and images that would not get smaller are uploaded unchanged. The image picker now says that large photos are resized, and that the 5 MB limit applies to GIFs and animations. Images uploaded before this change keep their original size until they are re-uploaded.
+  - @mj-biz-apps/forms-entities@0.14.0
+
 ## 0.13.1
 
 ### Patch Changes
