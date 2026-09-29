@@ -3,10 +3,12 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  FALLBACK_MAX_EDGE_PX,
   JPEG_QUALITY,
   MAX_IMAGE_EDGE_PX,
   SKIP_BELOW_BYTES,
   WEBP_QUALITY,
+  fallbackSize,
   isAnimatedImage,
   optimizeImageForUpload,
   pickOutputType,
@@ -127,6 +129,27 @@ describe('planResize', () => {
   });
 });
 
+describe('fallbackSize', () => {
+  it('caps the long edge at FALLBACK_MAX_EDGE_PX', () => {
+    expect(FALLBACK_MAX_EDGE_PX).toBe(1200);
+    expect(fallbackSize(1408, 768)).toEqual({ width: 1200, height: 655 });
+    expect(fallbackSize(4032, 3024)).toEqual({ width: 1200, height: 900 });
+    expect(fallbackSize(3024, 4032)).toEqual({ width: 900, height: 1200 });
+  });
+
+  it('never upscales an image already within the cap', () => {
+    expect(fallbackSize(800, 600)).toEqual({ width: 800, height: 600 });
+  });
+
+  it('never rounds a thin image down to a zero-pixel side', () => {
+    expect(fallbackSize(10_000, 10)).toEqual({ width: 1200, height: 1 });
+  });
+
+  it('is pinned at JPEG quality 0.8', () => {
+    expect(JPEG_QUALITY).toBe(0.8);
+  });
+});
+
 describe('pickOutputType', () => {
   it('keeps WebP when the browser encoded WebP', () => {
     expect(pickOutputType('image/jpeg', 'image/webp')).toBe('image/webp');
@@ -213,15 +236,35 @@ describe('optimizeImageForUpload', () => {
     const out = await optimizeImageForUpload(jpeg(3_000 * KB, 'IMG_0001.JPG'), codec);
     expect(out.type).toBe('image/jpeg');
     expect(out.name).toBe('IMG_0001.jpg');
-    expect(codec.encodeCalls[1]).toEqual({ width: 1600, height: 1200, type: 'image/jpeg', quality: JPEG_QUALITY });
+    expect(codec.encodeCalls).toEqual([
+      { width: 1600, height: 1200, type: 'image/webp', quality: WEBP_QUALITY },
+      { width: 1200, height: 900, type: 'image/jpeg', quality: 0.8 },
+    ]);
   });
 
-  it('keeps the PNG the browser already returned instead of encoding twice (transparent PNG on Safari)', async () => {
+  it('re-encodes a transparent PNG at the fallback size when WebP was refused (Safari)', async () => {
     const png = new File([new Uint8Array(2_000 * KB)], 'logo.png', { type: 'image/png' });
-    const codec = fakeCodec({ width: 3000, height: 1000, encoded: [{ type: 'image/png', bytes: 400 * KB }] });
+    const codec = fakeCodec({
+      width: 3000,
+      height: 1000,
+      encoded: [{ type: 'image/png', bytes: 1_231 * KB }, { type: 'image/png', bytes: 400 * KB }],
+    });
     const out = await optimizeImageForUpload(png, codec);
     expect(out.type).toBe('image/png');
-    expect(codec.encodeCalls).toHaveLength(1);
+    expect(out.size).toBe(400 * KB);
+    expect(codec.encodeCalls).toEqual([
+      { width: 1600, height: 533, type: 'image/webp', quality: WEBP_QUALITY },
+      { width: 1200, height: 400, type: 'image/png', quality: undefined },
+    ]);
+  });
+
+  it('reuses the PNG the browser returned when the fallback size equals the first encode', async () => {
+    const png = new File([new Uint8Array(400 * KB)], 'badge.png', { type: 'image/png' });
+    const codec = fakeCodec({ width: 1100, height: 1000, encoded: [{ type: 'image/png', bytes: 200 * KB }] });
+    const out = await optimizeImageForUpload(png, codec);
+    expect(out.type).toBe('image/png');
+    expect(out.size).toBe(200 * KB);
+    expect(codec.encodeCalls).toEqual([{ width: 1100, height: 1000, type: 'image/webp', quality: WEBP_QUALITY }]);
   });
 
   it('returns the original when the result would not be smaller', async () => {

@@ -20,7 +20,17 @@ export const MAX_IMAGE_EDGE_PX = 1600;
 /** An image within the edge cap AND at or under this many bytes is uploaded as-is. */
 export const SKIP_BELOW_BYTES = 300 * 1024;
 export const WEBP_QUALITY = 0.82;
-export const JPEG_QUALITY = 0.85;
+/**
+ * Measured in WebKit 26.5 on a 1408×768 photo: q0.85 gave 434 KB at 1600 px, q0.80 gave 368 KB, and
+ * q0.80 at 1200 px gave 257 KB. Chrome's WebP path is unaffected.
+ */
+export const JPEG_QUALITY = 0.8;
+/**
+ * Longest side when the browser cannot encode WebP (Safari). Its JPEG/PNG fallback is far heavier
+ * than WebP: at 1600 px the same photo measured 434 KB and a 3000×1000 transparent PNG 1231 KB.
+ * 1200 px is still above what the widest display needs (352 CSS px is about 1056 device px at 3×).
+ */
+export const FALLBACK_MAX_EDGE_PX = 1200;
 
 /** Header bytes read to look for animation markers; both formats put them before the pixel data. */
 export const ANIMATION_SNIFF_BYTES = 64 * 1024;
@@ -136,6 +146,12 @@ export function planResize(width: number, height: number, bytes: number, content
   };
 }
 
+/** Dimensions for the no-WebP fallback encode: the original scaled to at most {@link FALLBACK_MAX_EDGE_PX}. Pure. */
+export function fallbackSize(width: number, height: number): { width: number; height: number } {
+  const scale = Math.min(1, FALLBACK_MAX_EDGE_PX / Math.max(width, height));
+  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+}
+
 /**
  * Which type to keep, given what the browser produced when asked for WebP.
  * Safari's canvas cannot encode WebP and returns PNG instead. A JPEG source then goes back to JPEG,
@@ -215,10 +231,15 @@ export async function optimizeImageForUpload(file: File, codec: ImageCodec = bro
     }
     let blob = await codec.encode(decoded, plan.width, plan.height, 'image/webp', WEBP_QUALITY);
     const outputType = pickOutputType(sourceType, blob.type);
-    // Re-encode only when the browser's answer is not already the type we are keeping; a PNG the
-    // browser returned in place of WebP is kept as-is rather than encoded a second time.
-    if (bareType(blob.type) !== outputType) {
-      blob = await codec.encode(decoded, plan.width, plan.height, outputType, outputType === 'image/jpeg' ? JPEG_QUALITY : undefined);
+    // The browser could not encode WebP: its JPEG/PNG is much heavier, so encode at the smaller
+    // fallback size. A PNG the browser already returned is reused only when that size is the one it
+    // was drawn at; otherwise it is encoded again, at the fallback size.
+    if (outputType !== 'image/webp') {
+      const size = fallbackSize(decoded.width, decoded.height);
+      const alreadyEncoded = bareType(blob.type) === outputType && size.width === plan.width && size.height === plan.height;
+      if (!alreadyEncoded) {
+        blob = await codec.encode(decoded, size.width, size.height, outputType, outputType === 'image/jpeg' ? JPEG_QUALITY : undefined);
+      }
     }
     if (blob.size >= file.size) {
       return file;
