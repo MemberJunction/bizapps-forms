@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { assetErrorMessage, buildAssetFormData, parseAssetResponse } from './form-asset.service';
-import { isAcceptedType } from './image-formats';
+import { AssetUploadError, assetErrorMessage, buildAssetFormData, parseAssetResponse, shouldRetryWithOriginal } from './form-asset.service';
+import { MAX_SIZE_LABEL, UPLOAD_SIZE_HINT, isAcceptedType } from './image-formats';
 
 /** A stand-in File; the browser type is not available under the node test environment. */
 function fileNamed(name: string): File {
@@ -108,5 +108,44 @@ describe('isAcceptedType — the local screen before an upload', () => {
 
   it('rejects a blank type rather than guessing', () => {
     expect(isAcceptedType('')).toBe(false);
+  });
+});
+
+describe('shouldRetryWithOriginal', () => {
+  const typed = (name: string, type: string): File => new File([new Uint8Array([1, 2, 3])], name, { type });
+  const original = typed('photo.jpg', 'image/jpeg');
+  const optimized = typed('photo.webp', 'image/webp');
+
+  it('does not retry when the optimizer kept the type (Safari JPEG → JPEG): the server refused that type already', () => {
+    const reencoded = typed('photo.jpg', 'image/jpeg');
+    expect(shouldRetryWithOriginal(new AssetUploadError('nope', 415), reencoded, original)).toBe(false);
+  });
+
+  it('retries on a 415 when the optimizer changed the file (the server may not accept WebP)', () => {
+    expect(shouldRetryWithOriginal(new AssetUploadError('nope', 415), optimized, original)).toBe(true);
+  });
+
+  it('does not retry a 415 for the original itself: same answer forever', () => {
+    expect(shouldRetryWithOriginal(new AssetUploadError('nope', 415), original, original)).toBe(false);
+  });
+
+  it('does not retry other statuses', () => {
+    expect(shouldRetryWithOriginal(new AssetUploadError('too big', 413), optimized, original)).toBe(false);
+    expect(shouldRetryWithOriginal(new AssetUploadError('offline', 0), optimized, original)).toBe(false);
+  });
+
+  it('does not retry an error that is not an upload failure', () => {
+    expect(shouldRetryWithOriginal(new Error('boom'), optimized, original)).toBe(false);
+  });
+});
+
+describe('UPLOAD_SIZE_HINT — what the picker says about size', () => {
+  it('says large still images are resized, and keeps the server limit for what is sent as is', () => {
+    expect(UPLOAD_SIZE_HINT).toMatch(/resized/i);
+    expect(UPLOAD_SIZE_HINT.replace(/\u00a0/g, ' ')).toContain(`GIFs and animations up to ${MAX_SIZE_LABEL}`);
+  });
+
+  it('keeps the size on one line: the limit never wraps between its number and its unit', () => {
+    expect(UPLOAD_SIZE_HINT).toContain(MAX_SIZE_LABEL.replace(/ /g, '\u00a0'));
   });
 });

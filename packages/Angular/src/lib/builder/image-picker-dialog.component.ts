@@ -30,10 +30,12 @@ import { CommonModule } from '@angular/common';
 
 import { FORMS_UI_CSS } from '../shared';
 import { FormAssetService } from './form-asset.service';
+import type { ImageUse } from './image-optimize';
+import { toAssetRef } from '../widget/core/asset-ref';
 import {
   ACCEPTED_FORMATS_LABEL,
   ACCEPT_ATTRIBUTE,
-  MAX_SIZE_LABEL,
+  UPLOAD_SIZE_HINT,
   isAcceptedType,
 } from './image-formats';
 
@@ -186,7 +188,7 @@ const IMAGE_PICKER_CSS = /* css */ `
             [class.is-dragging]="dragging"
             [disabled]="!canUpload"
             [attr.title]="canUpload ? null : unavailableReason"
-            [attr.aria-label]="'Upload an image: drag one here or press to browse. ' + formatsLabel + ', up to ' + sizeHint + '.'"
+            [attr.aria-label]="'Upload an image: drag one here or press to browse. ' + formatsLabel + '; ' + sizeHint + '.'"
             (click)="browse()"
             (dragenter)="onDragEnter($event)"
             (dragover)="onDragOver($event)"
@@ -195,7 +197,7 @@ const IMAGE_PICKER_CSS = /* css */ `
           >
             <i class="fa-solid fa-arrow-up-from-bracket ipd-drop-icon" aria-hidden="true"></i>
             <span class="ipd-drop-lead">{{ dragging ? 'Drop to upload' : 'Upload or drop an image here' }}</span>
-            <span class="ipd-drop-sub">{{ formatsLabel }} · up to {{ sizeHint }}</span>
+            <span class="ipd-drop-sub">{{ formatsLabel }} · {{ sizeHint }}</span>
           </button>
 
           <div class="ipd-or"><span>or</span></div>
@@ -240,6 +242,8 @@ export class ImagePickerDialogComponent {
   @Input() subject = 'an image';
   /** The form the asset is scoped to. Without it only the link half works. */
   @Input() formId = '';
+  /** Where the image will be shown, which decides how far an upload is shrunk. */
+  @Input() use: ImageUse = 'content';
 
   /** A URL was chosen — uploaded or pasted. */
   @Output() readonly picked = new EventEmitter<string>();
@@ -252,7 +256,7 @@ export class ImagePickerDialogComponent {
   private readonly cdr = inject(ChangeDetectorRef);
 
   protected readonly accept = ACCEPT_ATTRIBUTE;
-  protected readonly sizeHint = MAX_SIZE_LABEL;
+  protected readonly sizeHint = UPLOAD_SIZE_HINT;
   protected readonly formatsLabel = ACCEPTED_FORMATS_LABEL;
 
   protected dragging = false;
@@ -371,8 +375,11 @@ export class ImagePickerDialogComponent {
       const asset = await this.assets.upload(file, this.formId, (fraction) => {
         this.percent = fraction === null ? 0 : Math.round(fraction * 100);
         this.cdr.markForCheck();
-      });
-      this.picked.emit(asset.url);
+      }, this.use);
+      // Stored as the host-independent `/forms/asset/<id>`, not the absolute URL the server
+      // returned: that URL names whichever MJAPI took the upload (often localhost), and a form
+      // published with it shows broken images everywhere else (#270). Renderers resolve it.
+      this.picked.emit(toAssetRef(asset.url));
     } catch (err) {
       // Kept on screen: an upload that fails silently leaves the author with no idea whether
       // anything happened.

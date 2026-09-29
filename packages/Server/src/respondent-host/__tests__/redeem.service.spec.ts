@@ -7,6 +7,7 @@ import {
 } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 import { publishedVersionFilter } from '../../public-submit/definition-loader.service';
+import { FORMS_SELF_CALL_HEADER } from '../../http/request-identity';
 
 /**
  * `LogError` is captured with `vi.mock` + `vi.hoisted`, NOT `vi.spyOn(core, 'LogError')`. A spy on
@@ -877,6 +878,16 @@ describe('the address the door forwards to core', () => {
     await redeemSlugToToken(deps({ fetchImpl, clientIp: '198.51.100.7' }), 'customer-survey');
 
     expect(sent[0].headers['x-forwarded-for']).not.toContain(',');
+  });
+
+  // The call re-enters this same process's pre-auth chain, where the X-Forwarded-For-at-zero-hops
+  // warning would otherwise read it as proof of a load balancer (gauntlet #272, F1).
+  it('marks the call as Forms\' own, so the proxy-hops warning can tell it from a proxied request', async () => {
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemSlugToToken(deps({ fetchImpl, clientIp: '198.51.100.7' }), 'customer-survey');
+
+    expect(sent[0].headers[FORMS_SELF_CALL_HEADER]).toBe('redeem');
   });
 
   it('omits the header when the caller could not be identified', async () => {

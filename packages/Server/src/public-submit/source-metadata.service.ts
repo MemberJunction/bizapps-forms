@@ -105,6 +105,21 @@ export function rateLimitKey(inputs: Pick<SourceMetadataInputs, 'sessionId' | 'd
 }
 
 /**
+ * The per-(session, distribution) key for AUTOSAVES — {@link rateLimitKey}'s own bucket for
+ * everything that is not a final submit (#271).
+ *
+ * Before this existed, a partial save and a final submit charged the SAME bucket, so a
+ * respondent's own typing could spend the budget their eventual Submit press needed — at the old
+ * shared default, five autosaves left nothing for the submit itself. Prefixing rather than
+ * re-deriving the composite key keeps the two buckets from ever colliding while guaranteeing they
+ * stay in lockstep on session/distribution semantics: whatever {@link rateLimitKey} decides about
+ * a blank session or a distinct distribution is true of this key too, because this key IS that key.
+ */
+export function autosaveRateLimitKey(inputs: Pick<SourceMetadataInputs, 'sessionId' | 'distributionId'>): string {
+  return `autosave:${rateLimitKey(inputs)}`;
+}
+
+/**
  * The identity an abuse ceiling is keyed on: the one thing about a caller they did not choose.
  *
  * `undefined` when there is no resolved IP, and the ceilings are then simply not applied. There
@@ -170,7 +185,8 @@ export function resetAbuseKeyingWarningForTests(): void {
 }
 
 /**
- * Ceiling on SAVES (partial autosaves included) for one caller on one distribution.
+ * Ceiling on AUTOSAVES for one caller on one distribution. Final submits do not charge it — they
+ * are bounded by {@link completionCeilingKey} / {@link knockoutCeilingKey} (gauntlet #272).
  *
  * Scoped to the distribution as well as the caller so that abusing one form cannot throttle the
  * same person's submission to an unrelated one, and prefixed so it can never collide with the

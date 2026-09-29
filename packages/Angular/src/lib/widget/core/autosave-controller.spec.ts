@@ -202,4 +202,198 @@ describe('AutosaveController', () => {
 
     expect(save).not.toHaveBeenCalled();
   });
+
+  describe('capped retry after a refused/failed save (bizapps-forms#271)', () => {
+    it('retries on the backoff — 5s, then 15s, then 60s — and not a 4th time', async () => {
+      const save = vi.fn().mockRejectedValue(new Error('Too many submissions'));
+      const c = new AutosaveController(save, () => {}, 500);
+
+      c.ping();
+      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(0); // let the rejection settle and the 1st retry get scheduled
+      expect(save).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(3);
+
+      await vi.advanceTimersByTimeAsync(59_999);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(3); // the last retry waits a full 60s window, not 30s
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(4); // 3rd retry — the cap (RETRY_DELAYS_MS.length) is spent
+
+      // No 4th retry: the cap is explicit, not "retry forever".
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(save).toHaveBeenCalledTimes(4);
+      expect(c.status).toBe('error');
+    });
+
+    // Gauntlet #272 (F2). The widget cannot read the server's wait — the result carries only the
+    // "Please wait N seconds" sentence — so the schedule itself must outlast the window. Modelled on
+    // the server's real limiter: a 60s SLIDING window whose refusals charge nothing
+    // (rate-limit.service.ts `charge`). With the old 5/15/30s schedule every retry fell inside the
+    // window that refused it and the controller gave up with the respondent's last edits unsaved.
+    it('lands the refused progress once the server window frees, with no further edit', async () => {
+      const WINDOW_MS = 60_000;
+      const MAX = 2;
+      const admitted: number[] = [];
+      const save = vi.fn(async () => {
+        const now = Date.now();
+        const recent = admitted.filter((t) => t > now - WINDOW_MS);
+        if (recent.length >= MAX) {
+          throw new Error('Autosave refused: Too many submissions.');
+        }
+        admitted.push(now);
+        return 'r1';
+      });
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const c = new AutosaveController(save, () => {}, 1500);
+
+      // Four edits 2.5s apart, then the respondent stops typing (the UR1 run in the gauntlet).
+      for (let i = 0; i < 4; i++) {
+        c.ping();
+        await vi.advanceTimersByTimeAsync(2_500);
+      }
+      await vi.advanceTimersByTimeAsync(180_000);
+
+      expect(c.status).toBe('saved');
+      expect(admitted).toHaveLength(3); // two before the refusals, one after the window freed
+    });
+
+    it('resets the retry count on a success, so a later failure retries at 5s again', async () => {
+      const save = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('rate limited')) // initial save fails
+        .mockRejectedValueOnce(new Error('rate limited')) // 1st retry (5s) fails
+        .mockResolvedValueOnce('r1') // 2nd retry (15s) succeeds — resets failedAttempts
+        .mockRejectedValueOnce(new Error('rate limited')); // next failure, after the reset
+
+      const c = new AutosaveController(save, () => {}, 500);
+
+      c.ping();
+      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(5_000); // 1st retry, fails
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(15_000); // 2nd retry, succeeds
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(3);
+      expect(c.status).toBe('saved');
+
+      // A fresh ping fails again. If the count had NOT reset, the next retry would be scheduled
+      // at 60s (index 2); confirm it is at 5s (index 0) instead.
+      c.ping();
+      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(4);
+      expect(c.status).toBe('error');
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(save).toHaveBeenCalledTimes(4); // not yet at 5s
+
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(5); // retried at 5s — the count did reset
+    });
+
+    it('a ping during a pending retry replaces it with the normal debounce, not the backoff', async () => {
+      const save = vi.fn().mockRejectedValueOnce(new Error('rate limited')).mockResolvedValue('r1');
+      const c = new AutosaveController(save, () => {}, 500);
+
+      c.ping();
+      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(1); // failed; a 5s retry is now pending (fires at t=5500)
+
+      await vi.advanceTimersByTimeAsync(4_000); // t=4500 — retry still 1s away
+      c.ping(); // fresh progress arrives; must cancel the retry and arm the normal debounce (500ms)
+      expect(save).toHaveBeenCalledTimes(1);
+
+      // The debounce (500ms) elapses before the old retry's remaining 1000ms would have.
+      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(2);
+
+      // Nothing further fires at what would have been the old retry's t=5500 mark.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(save).toHaveBeenCalledTimes(2);
+    });
+
+    it('cancel() cancels a pending retry — no further save fires', async () => {
+      const save = vi.fn().mockRejectedValue(new Error('rate limited'));
+      const c = new AutosaveController(save, () => {}, 500);
+
+      c.ping();
+      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(1);
+
+      c.cancel();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(save).toHaveBeenCalledTimes(1);
+    });
+
+    it('settle() cancels a pending retry — no further save fires', async () => {
+      const save = vi.fn().mockRejectedValue(new Error('rate limited'));
+      const c = new AutosaveController(save, () => {}, 500);
+
+      c.ping();
+      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(1);
+
+      await c.settle();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(save).toHaveBeenCalledTimes(1);
+    });
+
+    it('settle() leaves no retry armed when the in-flight save it is awaiting fails (bizapps-forms#271)', async () => {
+      // settle() clears the timer and `rearm` BEFORE awaiting the in-flight save. If that save
+      // then fails WHILE settle() is awaiting it, `runSave()`'s catch/finally runs
+      // scheduleRetry() — arming a fresh backoff timer — before the awaited promise resolves,
+      // i.e. AFTER settle()'s own clear already ran. A settle() that does not re-clear after the
+      // await returns with that retry still live, so a caller who called settle() specifically to
+      // guarantee nothing is still on the wire (e.g. `endEarly()`) gets a save 5s later anyway.
+      let rejectSave!: (e: Error) => void;
+      const save = vi.fn().mockImplementation(() => new Promise<string>((_res, rej) => (rejectSave = rej)));
+      const c = new AutosaveController(save, () => {}, 100);
+
+      c.ping();
+      await vi.advanceTimersByTimeAsync(100); // save is now in flight
+      expect(save).toHaveBeenCalledTimes(1);
+
+      const settled = c.settle(); // starts awaiting the in-flight save
+      rejectSave(new Error('network')); // the save fails while settle() is still awaiting it
+      await settled;
+      expect(c.status).toBe('error');
+
+      // A 5s (then 15s, then 60s) backoff retry must NOT be armed after settle() returns.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(save).toHaveBeenCalledTimes(1);
+    });
+
+    it('dispose() cancels a pending retry — no further save fires', async () => {
+      const save = vi.fn().mockRejectedValue(new Error('rate limited'));
+      const c = new AutosaveController(save, () => {}, 500);
+
+      c.ping();
+      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(save).toHaveBeenCalledTimes(1);
+
+      c.dispose();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(save).toHaveBeenCalledTimes(1);
+    });
+  });
 });

@@ -161,7 +161,7 @@ describe('buildPublishedDefinition', () => {
     expect(def.styleTokens.logoURL).toBe('https://logo');
   });
 
-  it('uses the styleTokensOverride verbatim when supplied (WYSIWYG preview of unsaved edits)', () => {
+  it('uses the non-asset values of a styleTokensOverride as given when supplied (WYSIWYG preview of unsaved edits)', () => {
     const style = {
       CSSVariables: '{"--mjf-accent":"#000000"}',
       CustomCSS: null,
@@ -250,5 +250,69 @@ describe('buildPublishedDefinition social links', () => {
     );
 
     expect(def.endScreens?.[0]?.socialLinks).toBeUndefined();
+  });
+});
+
+describe('buildPublishedDefinition asset references (#270)', () => {
+  const ID = '0b5f3c1e-8a2d-4c6f-9e1a-7d3b2c4e5f60';
+  // What every upload stored before #270: the absolute URL of whichever MJAPI took it.
+  const LEGACY = `http://localhost:4000/forms/asset/${ID}`;
+  const REF = `/forms/asset/${ID}`;
+  const EXTERNAL = 'https://cdn.example.com/cat.png';
+
+  /** A welcome screen whose media still holds a pre-#270 absolute upload URL. */
+  function welcome(mediaURL: string) {
+    return {
+      ID: 'w1',
+      ScreenType: 'Welcome',
+      Title: 'Hi',
+      Body: null,
+      ButtonLabel: null,
+      MediaURL: mediaURL,
+      RedirectURL: null,
+      DisplayOrder: 0,
+      ConditionalRule: null,
+      IsDefault: false,
+      SocialLinks: null,
+    } as unknown as Parameters<typeof buildPublishedDefinition>[0]['screens'][number];
+  }
+
+  it('publishes legacy absolute upload URLs as host-independent references', () => {
+    const p = page('p', 0);
+    p.questions = [
+      question('q', 0, { QuestionType: 'PictureChoice' }, [
+        option('o1', 'Ours', 0, { ImageURL: LEGACY }),
+        option('o2', 'Theirs', 1, { ImageURL: EXTERNAL }),
+      ]),
+    ];
+    const style = {
+      CSSVariables: `{"--mjf-bg-image":"url('${LEGACY}')"}`,
+      CustomCSS: null,
+      LogoURL: LEGACY,
+    } as mjBizAppsFormsFormStyleEntity;
+
+    const def = buildPublishedDefinition(
+      { form: form({}), pages: [p], screens: [welcome(LEGACY)] },
+      style,
+      'v',
+      [],
+    );
+
+    expect(def.welcomeScreen?.mediaURL).toBe(REF);
+    expect(def.pages[0].questions[0].options.map((o) => o.imageURL)).toEqual([REF, EXTERNAL]);
+    expect(def.styleTokens.logoURL).toBe(REF);
+    expect(def.styleTokens.cssVariables['--mjf-bg-image']).toBe(`url('${REF}')`);
+  });
+
+  it('relativises an uploaded-image URL inside a styleTokensOverride, like every other asset reference', () => {
+    const def = buildPublishedDefinition(
+      { form: form({}), pages: [], screens: [] },
+      undefined,
+      'v',
+      [],
+      { cssVariables: {}, logoURL: LEGACY },
+    );
+
+    expect(def.styleTokens.logoURL).toBe(REF);
   });
 });

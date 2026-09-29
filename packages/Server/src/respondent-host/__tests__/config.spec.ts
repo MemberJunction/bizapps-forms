@@ -20,7 +20,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { getGraphqlUrlForRequest, getRespondentHostConfig, resetRespondentHostConfigForTests } from '../config';
+import {
+  getGraphqlUrlForRequest,
+  getRespondentHostConfig,
+  graphqlRootPathWarning,
+  resetRespondentHostConfigForTests,
+} from '../config';
 
 const SAVED = { ...process.env };
 
@@ -130,5 +135,46 @@ describe('getGraphqlUrlForRequest — the page addresses the server that served 
     expect(() => getGraphqlUrlForRequest(getRespondentHostConfig(), undefined)).toThrow(
       /FORMS_GRAPHQL_URL.*MJAPI_PUBLIC_URL/,
     );
+  });
+});
+
+describe('graphqlRootPathWarning — Forms routes live at the api-url minus /graphql (#270)', () => {
+  // MJServer mounts every Forms route at its app ROOT and moves only GraphQL under
+  // GRAPHQL_ROOT_PATH. The widget and builder derive `/forms/*` by stripping a trailing `/graphql`
+  // from the API URL, so the only root paths that leave `/forms/*` addressable are the root itself
+  // and exactly `/graphql`: anything else sends images and uploads to a path nothing serves.
+  it.each([undefined, '', '/', '//', '/graphql', '/GraphQL/', 'graphql'])(
+    'is silent for a supported root path (%s)',
+    (rootPath) => {
+      expect(graphqlRootPathWarning(rootPath)).toBeUndefined();
+    },
+  );
+
+  it('warns, naming the setting and the consequence, for a root path that moves only GraphQL (/api)', () => {
+    const warning = graphqlRootPathWarning('/api');
+    expect(warning).toContain('GRAPHQL_ROOT_PATH');
+    expect(warning).toContain('/api');
+    expect(warning).toMatch(/404/);
+  });
+
+  it('warns for a root path that merely CONTAINS graphql without ending in it', () => {
+    expect(graphqlRootPathWarning('/graphql/v1')).toBeDefined();
+  });
+
+  // Ending in `/graphql` is not enough: stripping it from `https://h/api/graphql` leaves
+  // `https://h/api`, and `/api/forms/asset/<id>` is not where MJServer mounts the route — the same
+  // 404 as `/api`, but with no warning (gauntlet F1, observed on a harness booted with this value).
+  it.each(['/api/graphql', '/v1/graphql', 'api/graphql/'])(
+    'warns for a prefixed GraphQL root path (%s), whose Forms routes are not under the prefix',
+    (rootPath) => {
+      const warning = graphqlRootPathWarning(rootPath);
+      expect(warning).toContain('GRAPHQL_ROOT_PATH');
+      expect(warning).toContain(rootPath);
+    },
+  );
+
+  it('names the path the widget will actually look under, not the root path itself', () => {
+    expect(graphqlRootPathWarning('/api/graphql')).toContain('"/api/forms/..."');
+    expect(graphqlRootPathWarning('/api')).toContain('"/api/forms/..."');
   });
 });

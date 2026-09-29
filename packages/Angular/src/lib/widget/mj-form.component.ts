@@ -43,6 +43,8 @@ import { FORMS_API_SERVICE, SessionExpiredError } from './api/forms-api.interfac
 import { FORMS_API_CONFIG } from './api/forms-api.config';
 import { submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
+import { collectLaterImageUrls, resolveDefinitionForRender, resolveStyleTokensForRender } from './core/asset-ref';
+import { prefetchImages, type PrefetchHandle } from './core/image-prefetch';
 import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
@@ -206,9 +208,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * non-CSS parts of one (the logo) can be applied at all.
    */
   public applyPreviewStyle(tokens: FormStyleTokens): void {
+    // Same host-independent resolution as `load()` (#270): the builder preview's draft tokens
+    // can carry the same asset references a published snapshot does.
+    const resolved = resolveStyleTokensForRender(tokens, this.config.graphqlUrl);
     this.logoBroken.set(false);
-    this.styleOverride.set(tokens);
-    applyStyleTokens(this.hostRef.nativeElement, tokens);
+    this.styleOverride.set(resolved);
+    applyStyleTokens(this.hostRef.nativeElement, resolved);
   }
 
   /**
@@ -299,6 +304,17 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   private responseId: string | undefined;
   private autosave: AutosaveController | null = null;
+  /**
+   * Prefetch of later screens' images (core/image-prefetch.ts). One queue per load: `load()`
+   * cancels it first, and `prefetchGeneration` makes an idle callback scheduled by an EARLIER load
+   * a no-op.
+   */
+  private prefetch: PrefetchHandle | undefined;
+  private prefetchUrls: string[] = [];
+  private prefetchStarted = false;
+  private prefetchGeneration = 0;
+  /** Set on destroy: a `load()` still awaiting the network resumes afterwards and must start nothing. */
+  private destroyed = false;
   /** Submit-point pages already banked this fill, so each fires once. Reset on {@link load}. */
   private bankedSubmitPoints = new Set<string>();
   /**
@@ -322,10 +338,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
 
   public ngOnDestroy(): void {
     this.autosave?.dispose();
+    this.destroyed = true;
+    this.cancelPrefetch();
   }
 
   /** Fetch (or accept) the form definition, theme the host, and build the runtime. */
   private async load(): Promise<void> {
+    this.cancelPrefetch();
     this.phase.set('loading');
     // Fresh load == fresh response identity: mint a new client id and drop any stale
     // server echo so a retry never upserts a previously-abandoned row.
@@ -342,7 +361,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
         this.fail('This form is not available.');
         return;
       }
-      const def = loaded.definition;
+      // Resolve `/forms/asset/<id>` (and any legacy absolute upload-time host, #270) against
+      // THIS widget's own API origin — the one host guaranteed to be reachable from this
+      // browser and to serve these bytes. `MJAPI_PUBLIC_URL` at upload time was not: a form
+      // authored on localhost, a domain change, or a second API instance all left published
+      // forms pointing respondents at a host they cannot reach.
+      const def = resolveDefinitionForRender(loaded.definition, this.config.graphqlUrl);
       applyStyleTokens(this.hostRef.nativeElement, def.styleTokens);
       this.definition.set(def);
       const runtime = new FormRuntime(def);
@@ -359,6 +383,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.bankedSubmitPoints = new Set<string>();
       this.endingEarly = false;
       this.phase.set(this.adoptResume(loaded.resume, def, runtime) ?? initialPhaseFor(def));
+      this.planPrefetch(def);
     } catch (err) {
       // A load can meet an expired session too — the error page's "Try again" re-fetches with
       // the same token, and after eight hours that is a 401 with a retry button that loops.
@@ -452,7 +477,66 @@ export class MjFormComponent implements OnInit, OnDestroy {
   protected startIntake(): void {
     if (this.phase() === 'welcome') {
       this.phase.set('ready');
+      // Leaving the welcome screen before its image settled destroys the screen, so its
+      // (mediaSettled) will never fire. Start here instead; startPrefetch() runs once per load.
+      this.startPrefetch();
     }
+  }
+
+  /** The welcome image loaded or failed: later screens' images may now use the network. */
+  protected onWelcomeMediaSettled(): void {
+    this.startPrefetch();
+  }
+
+  /**
+   * Decide when this load's prefetch starts. A welcome screen with an image gets the network to
+   * itself until that image settles (or the respondent leaves it). In every other case (no welcome
+   * screen, no welcome image, resumed past it), start when the browser is idle.
+   *
+   * Only while intake is still ahead. A resumed, already-submitted response opens on `done` (and a
+   * failed or expired load on `error`/`expired`): the respondent can never see an option or an
+   * ending image there, so downloading up to 12 of them would only compete with what is on screen.
+   */
+  private planPrefetch(def: PublishedFormDefinition): void {
+    const phase = this.phase();
+    if (phase !== 'welcome' && phase !== 'ready') {
+      return;
+    }
+    this.prefetchUrls = collectLaterImageUrls(def);
+    if (phase === 'welcome' && def.welcomeScreen?.mediaURL) {
+      return;
+    }
+    this.schedulePrefetchWhenIdle();
+  }
+
+  private schedulePrefetchWhenIdle(): void {
+    const generation = this.prefetchGeneration;
+    const start = (): void => {
+      if (generation === this.prefetchGeneration) {
+        this.startPrefetch();
+      }
+    };
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(start);
+    } else {
+      setTimeout(start, 0); // Safari does not ship requestIdleCallback by default
+    }
+  }
+
+  private startPrefetch(): void {
+    if (this.destroyed || this.prefetchStarted) {
+      return;
+    }
+    this.prefetchStarted = true;
+    this.prefetch = prefetchImages(this.prefetchUrls);
+  }
+
+  private cancelPrefetch(): void {
+    this.prefetchGeneration++;
+    this.prefetch?.cancel();
+    this.prefetch = undefined;
+    this.prefetchStarted = false;
+    this.prefetchUrls = [];
   }
 
   protected isScroll(): boolean {
@@ -963,8 +1047,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /**
    * Save the current answers as a Partial response (server upserts, runs no hooks/quota).
    * Reuses the returned {@link responseId} so subsequent autosaves update the same record.
-   * Throws on failure so the {@link AutosaveController} can mark the status — it swallows
-   * the error, keeping autosave strictly non-blocking for the respondent.
+   * Throws on failure — a transport error, OR a server REFUSAL (`res.success === false`, e.g. the
+   * autosave rate-limit bucket) — so the {@link AutosaveController} records `'error'` (never
+   * `'saved'` for a save the server threw away) and retries it on its own capped backoff.
    */
   private async savePartial(): Promise<string | undefined> {
     const def = this.definition();
@@ -985,12 +1070,22 @@ export class MjFormComponent implements OnInit, OnDestroy {
     } catch (err) {
       // The autosave is the request most likely to DISCOVER an expiry: it fires on every edit,
       // long before the respondent reaches Submit. Left to the controller alone the failure is
-      // swallowed by design, and the respondent goes on typing into a form that is saving nothing
-      // and will refuse the final send. Still rethrown, so the controller records the failure.
+      // logged and retried on a capped backoff — never diagnosed as a session expiry — so the
+      // respondent would go on typing into a form that is quietly retrying against an expired
+      // session and will refuse the final send regardless. Still rethrown, so the controller
+      // records the failure AND this component gets a chance to check for expiry.
       this.endSessionIfExpired(err);
       throw err;
     }
-    if (res.success && res.responseId) {
+    if (!res.success) {
+      // A logical refusal — the rate-limit bucket, most commonly — is NOT the same as "saved".
+      // Left to return normally here, the controller had no way to tell it apart from a real
+      // save and reported 'saved' for progress the server had just thrown away.
+      throw new Error(`Autosave refused: ${res.errors?.[0]?.message ?? 'no reason given'}`);
+    }
+    // `res.success` is already guaranteed true here — the `!res.success` branch above throws
+    // before this line, so a refusal never reaches it.
+    if (res.responseId) {
       this.responseId = res.responseId;
       this.announceFirstPartial(res.responseId);
     }

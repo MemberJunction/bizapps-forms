@@ -161,6 +161,7 @@
               <mjf-image-field
                 ariaLabel="Background image"
                 hint="Covers the page behind the form. Leave empty for none."
+                use="page-background"
                 [value]="bgImageUrl"
                 [formId]="form.ID"
                 (valueChange)="bgImageUrl = $event; onEdit()"

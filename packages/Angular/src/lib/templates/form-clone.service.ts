@@ -153,6 +153,9 @@ export class FormCloneService {
     copy.Name = options.name.trim();
     copy.Description = options.description === undefined ? source.Description : options.description;
     copy.CategoryID = source.CategoryID;
+    // Shared on purpose, even a per-form (DisplayRank 0) style: the copy LOOKS the same until its
+    // author restyles it, and `DesignStateService.ensureOwnStyle` forks any style another form also
+    // points at before the Design tab writes to it, so one form's edit never restyles the other.
     copy.StyleID = source.StyleID;
     copy.RenderMode = source.RenderMode;
     copy.Settings = source.Settings;

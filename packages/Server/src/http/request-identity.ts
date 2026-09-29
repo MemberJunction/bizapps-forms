@@ -76,6 +76,19 @@ export function hashClientIp(ip: string): string {
 }
 
 /**
+ * Header Forms puts on a request it sends to ITSELF, so this process's own pre-auth chain can tell
+ * that request apart from one a proxy forwarded.
+ *
+ * Only one call carries it today: `postRedeem` (`respondent-host/redeem.service.ts`), which POSTs
+ * to core's magic-link redeem on this same process and forwards the respondent's address in
+ * `X-Forwarded-For`. The one reader is the zero-hops proxy warning in `RequestIdentityMiddleware`,
+ * which would otherwise take Forms' own header as evidence of a load balancer. A client can send
+ * this header too; all it buys is skipping a once-per-process diagnostic for that one request,
+ * because every other request through a real proxy still carries `X-Forwarded-For`.
+ */
+export const FORMS_SELF_CALL_HEADER = 'x-mj-forms-self-call';
+
+/**
  * The address we are willing to hand to ANOTHER SERVICE as an address, or nothing.
  *
  * `resolveClientIp` returns an `X-Forwarded-For` entry trimmed and otherwise untouched, because

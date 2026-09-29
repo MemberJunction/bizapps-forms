@@ -1,7 +1,9 @@
 /**
  * Per-question-type mobile keyboard + autocomplete hints. Driving the right on-screen
  * keyboard per field is a hard requirement of the §2 UX bar ("correct mobile keyboards
- * per field type").
+ * per field type"). {@link autocompleteFor} also reads the ShortText's own PROMPT (#268), since a
+ * generic "First name" / "Company" field is only type `ShortText` — the type alone cannot tell
+ * AutoFill what the field is for.
  *
  * These stay hand-written switches rather than moving into `QUESTION_TYPE_BEHAVIOR`: they are
  * about the HTML control a browser renders, which is presentation, and the contract package has
@@ -48,8 +50,29 @@ export function inputTypeFor(type: FormQuestionType): string {
   }
 }
 
-/** `autocomplete` token to speed up known fields on mobile. */
-export function autocompleteFor(type: FormQuestionType): string {
+/**
+ * Prompts AutoFill can target by NAME, for a ShortText the author labelled as one.
+ *
+ * Without a token, iOS Safari guesses from the label and fills the fields it recognises (#268); a
+ * token makes the target explicit, so a contact card lands in First/Last name predictably. Matching
+ * is anchored and whole-prompt, so "Name of your pet" or "Company size" stay plain text boxes — a
+ * wrong token is worse than none, because AutoFill then confidently fills the wrong thing.
+ */
+const SHORT_TEXT_PROMPT_TOKENS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^(first|given)[\s-]*name$/, 'given-name'],
+  [/^(last|family)[\s-]*name$|^surname$/, 'family-name'],
+  [/^middle[\s-]*name$/, 'additional-name'],
+  [/^(your\s+)?(full\s+)?name$/, 'name'],
+  [/^(company|organi[sz]ation)$/, 'organization'],
+];
+
+function promptToken(prompt: string): string | null {
+  const normalized = prompt.trim().toLowerCase().replace(/[\s*:?]+$/, '');
+  return SHORT_TEXT_PROMPT_TOKENS.find(([pattern]) => pattern.test(normalized))?.[1] ?? null;
+}
+
+/** `autocomplete` token to speed up known fields on mobile, and to target AutoFill by name. */
+export function autocompleteFor(type: FormQuestionType, prompt = ''): string {
   switch (type) {
     case 'Email':
       return 'email';
@@ -58,7 +81,7 @@ export function autocompleteFor(type: FormQuestionType): string {
     case 'Website':
       return 'url';
     default:
-      return 'on';
+      return type === 'ShortText' ? (promptToken(prompt) ?? 'on') : 'on';
   }
 }
 

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DatabaseProviderBase, IMetadataProvider } from '@memberjunction/core';
-import { withIsolatedProvider } from '../isolated-provider';
+import { withIsolatedProvider, withLazyIsolatedProvider } from '../isolated-provider';
 
 const logged: string[] = [];
 
@@ -31,6 +31,20 @@ function makeFakeSource(instance: DatabaseProviderBase): IMetadataProvider {
   return {
     CreateIndependentInstance: vi.fn(async () => instance),
   } as unknown as IMetadataProvider;
+}
+
+/**
+ * Like `makeFakeSource`, but also hands back the spy directly — the lazy-lease tests need to
+ * assert call counts on `CreateIndependentInstance` itself (not just on the instance it produces),
+ * which the `IMetadataProvider` cast otherwise hides.
+ */
+function makeSpiedFakeSource(instance: DatabaseProviderBase): {
+  source: IMetadataProvider;
+  createIndependentInstance: ReturnType<typeof vi.fn>;
+} {
+  const createIndependentInstance = vi.fn(async () => instance);
+  const source = { CreateIndependentInstance: createIndependentInstance } as unknown as IMetadataProvider;
+  return { source, createIndependentInstance };
 }
 
 beforeEach(() => {
@@ -145,6 +159,104 @@ describe('withIsolatedProvider', () => {
       /purpose-7.*CreateIndependentInstance returned the shared provider itself, which isolates nothing/s,
     );
     expect(work).not.toHaveBeenCalled();
+    expect(releaseIndependentInstance).not.toHaveBeenCalled();
+  });
+});
+
+describe('withLazyIsolatedProvider', () => {
+  it('creates nothing and releases nothing when work never calls acquire, and still returns its value', async () => {
+    const instance = makeFakeInstance();
+    const { source, createIndependentInstance } = makeSpiedFakeSource(instance);
+
+    const result = await withLazyIsolatedProvider('lazy-purpose-1', async () => 'value-without-acquiring', source);
+
+    expect(result).toBe('value-without-acquiring');
+    expect(createIndependentInstance).not.toHaveBeenCalled();
+    expect(instance.ReleaseIndependentInstance).not.toHaveBeenCalled();
+  });
+
+  it('memoizes the instance across sequential and concurrent acquire() calls, creating once and releasing once after work resolves', async () => {
+    const instance = makeFakeInstance();
+    const { source, createIndependentInstance } = makeSpiedFakeSource(instance);
+
+    const result = await withLazyIsolatedProvider(
+      'lazy-purpose-2',
+      async (acquire) => {
+        const first = await acquire();
+        const second = await acquire();
+        const [third, fourth] = await Promise.all([acquire(), acquire()]);
+        expect([first, second, third, fourth]).toEqual([instance, instance, instance, instance]);
+        return 'work-result';
+      },
+      source,
+    );
+
+    expect(result).toBe('work-result');
+    expect(createIndependentInstance).toHaveBeenCalledOnce();
+    expect(instance.ReleaseIndependentInstance).toHaveBeenCalledOnce();
+  });
+
+  it('rejects with the error work throws after acquiring, and still releases the instance exactly once', async () => {
+    const instance = makeFakeInstance();
+    const { source } = makeSpiedFakeSource(instance);
+    const boom = new Error('boom');
+
+    await expect(
+      withLazyIsolatedProvider(
+        'lazy-purpose-3',
+        async (acquire) => {
+          await acquire();
+          throw boom;
+        },
+        source,
+      ),
+    ).rejects.toBe(boom);
+
+    expect(instance.ReleaseIndependentInstance).toHaveBeenCalledOnce();
+  });
+
+  it('rejects every acquire() identically without retrying creation, and never releases, when source cannot create an independent instance', async () => {
+    // No CreateIndependentInstance at all (mirrors withIsolatedProvider's purpose-6 case), plus a
+    // ReleaseIndependentInstance spy on the source itself so a wrongly-released SHARED source
+    // would be caught, not just "no instance existed to release".
+    const releaseIndependentInstance = vi.fn(async () => undefined);
+    const source = { ReleaseIndependentInstance: releaseIndependentInstance } as unknown as IMetadataProvider;
+    let firstPromise: Promise<DatabaseProviderBase> | undefined;
+    let secondPromise: Promise<DatabaseProviderBase> | undefined;
+
+    await expect(
+      withLazyIsolatedProvider(
+        'lazy-purpose-4',
+        async (acquire) => {
+          firstPromise = acquire();
+          secondPromise = acquire();
+          return firstPromise;
+        },
+        source,
+      ),
+    ).rejects.toThrow(/lazy-purpose-4.*cannot create an independent instance/s);
+
+    // Same promise reference back from the second call is the observable proof that creation
+    // was memoized rather than retried — there's no source-side spy to count attempts against
+    // when the capability itself is missing.
+    expect(firstPromise).toBe(secondPromise);
+    expect(releaseIndependentInstance).not.toHaveBeenCalled();
+  });
+
+  it('rejects with "isolates nothing", never releasing the shared source, when CreateIndependentInstance resolves to the source itself', async () => {
+    const releaseIndependentInstance = vi.fn(async () => undefined);
+    const source: IMetadataProvider & {
+      CreateIndependentInstance?: () => Promise<unknown>;
+      ReleaseIndependentInstance?: () => Promise<unknown>;
+    } = { ReleaseIndependentInstance: releaseIndependentInstance } as unknown as IMetadataProvider;
+    (source as unknown as { CreateIndependentInstance: () => Promise<unknown> }).CreateIndependentInstance = vi.fn(
+      async () => source,
+    );
+
+    await expect(withLazyIsolatedProvider('lazy-purpose-5', async (acquire) => acquire(), source)).rejects.toThrow(
+      /lazy-purpose-5.*CreateIndependentInstance returned the shared provider itself, which isolates nothing/s,
+    );
+
     expect(releaseIndependentInstance).not.toHaveBeenCalled();
   });
 });

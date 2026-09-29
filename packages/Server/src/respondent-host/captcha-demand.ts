@@ -24,8 +24,9 @@ import type { CaptchaDemand } from './host-readiness';
 
 /**
  * The one method this probe needs from a provider. `new RunView()` satisfies it (the global
- * data provider, the same instance the middleware already uses for the pre-auth slug read), and so
- * does a per-request `DatabaseProviderBase`.
+ * data provider — what the middleware's boot-time probe passes, since it runs once before any
+ * request), and so does a per-request `DatabaseProviderBase`. The page's own slug read is NOT on the
+ * global provider: it runs on a per-request isolated instance (#265).
  */
 export interface CaptchaDemandProvider {
   RunViews<T = unknown>(params: RunViewParams[], contextUser?: UserInfo): Promise<RunViewResult<T>[]>;

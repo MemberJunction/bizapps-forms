@@ -69,6 +69,7 @@ export interface ResumeInviteRequest {
 export async function mintResponseInvite(
   request: ResumeInviteRequest,
   contextUser: UserInfo,
+  provider: DatabaseProviderBase,
 ): Promise<ResumeInviteMint> {
   const minter = MagicLinkMinterRegistry.Instance.Minter;
   if (!minter) {
@@ -89,6 +90,7 @@ export async function mintResponseInvite(
       email: request.channel === 'email' ? request.email : null,
     },
     contextUser,
+    provider,
   );
   if (!result.success || !result.rawToken) {
     LogError(`[Forms] resume invite mint failed for response ${request.responseId}: ${result.message ?? 'unknown'}`);
@@ -123,24 +125,6 @@ export interface RevokeSummary {
 }
 
 /**
- * Retire every live invite for a response — or only the device-held ones.
- *
- * `deviceOnly` is not a convenience switch, it is a security decision with two answers:
- *
- *   - **On final submit, `deviceOnly: false`.** The response is sealed; every credential that could
- *     reopen it dies with it. This is decision 3 as the review flipped it: an Active bearer sitting
- *     in an inbox for another 30 days, reading sealed intake answers, is disclosure the moment that
- *     mail is forwarded — and refusing later can say something useful ("submitted on <date>")
- *     rather than nothing.
- *   - **On start-over, `deviceOnly: true`.** The person pressing "Not you? Start over" is, by
- *     definition, NOT the owner — that is what the control is for. Letting a stranger on a shared
- *     device revoke the owner's emailed link would hand them a way to lock the respondent out of
- *     their own draft. `Email IS NULL` is exactly "held on a device, sent nowhere".
- *
- * Best-effort and never throws: it runs after a row is already written, so reporting a failure
- * would tell a respondent their submission failed when it did not.
- */
-/**
  * Retire ONE invite, named by id — the credential a fresh mint has just superseded.
  *
  * Deliberately not expressed as {@link revokeResponseInvites} with a narrower filter. That one
@@ -158,34 +142,51 @@ export async function revokeInviteById(
   inviteId: string,
   responseId: string,
   contextUser: UserInfo,
+  provider: DatabaseProviderBase,
 ): Promise<void> {
   const minter = MagicLinkMinterRegistry.Instance.Minter;
   if (!minter || !inviteId || !responseId) {
     return;
   }
-  const outcome = await minter.RevokeAnonymousInvite({ inviteId, resourceId: responseId }, contextUser);
+  const outcome = await minter.RevokeAnonymousInvite({ inviteId, resourceId: responseId }, contextUser, provider);
   if (!outcome.success) {
     LogError(`[Forms] could not retire superseded resume invite ${inviteId} of response ${responseId}: ${outcome.message}`);
   }
 }
 
 /**
- * `provider` is the instance every read AND write in this pass runs through — absent, `new
- * RunView()` and the minter's own `new Metadata()` fallback both reach the process-global provider
- * instead. That provider can have another unit of work's transaction open on it (bizapps-forms#260:
- * Common.LogActivity), and any query issued through that instance — by any caller, scoped or not —
- * joins it and races its COMMIT. The sealed-response revoke supplies an isolated instance (see
- * `revokeSealedResponseInvites`). The start-over/`/forget` path does not, and is exposed the same
- * way: it is left on the global provider only because every other respondent-host resume dependency
- * that touches the database (the distribution and response loads, mint, lookup, revoke-by-id) is
- * too, and moving that request onto its own instance is a change of its own, not part of the
- * on-submit fix. (Redeem is an HTTP call to core, not a query through this process's provider.)
+ * Retire every live invite for a response — or only the device-held ones.
+ *
+ * `deviceOnly` is not a convenience switch, it is a security decision with two answers:
+ *
+ *   - **On final submit, `deviceOnly: false`.** The response is sealed; every credential that could
+ *     reopen it dies with it. This is decision 3 as the review flipped it: an Active bearer sitting
+ *     in an inbox for another 30 days, reading sealed intake answers, is disclosure the moment that
+ *     mail is forwarded — and refusing later can say something useful ("submitted on <date>")
+ *     rather than nothing.
+ *   - **On start-over, `deviceOnly: true`.** The person pressing "Not you? Start over" is, by
+ *     definition, NOT the owner — that is what the control is for. Letting a stranger on a shared
+ *     device revoke the owner's emailed link would hand them a way to lock the respondent out of
+ *     their own draft. `Email IS NULL` is exactly "held on a device, sent nowhere".
+ *
+ * Best-effort and never throws: it runs after a row is already written, so reporting a failure
+ * would tell a respondent their submission failed when it did not.
+ *
+ * `provider` is the instance every read AND write of THIS pass runs through — every caller now
+ * hands one of its own: the sealed-response revoke (`submit-pipeline.ts`'s
+ * `revokeSealedResponseInvites`) and the start-over/`/forget` path (`resume-deps.ts`, via
+ * `ResumeDepsContext.acquireProvider`). Without it, `new RunView()` and the minter's own `new
+ * Metadata()` fallback would both reach the process-global provider instead — and that provider can
+ * have another unit of work's transaction open on it (bizapps-forms#260/#265: Common.LogActivity),
+ * so any query issued through it — by any caller, scoped or not — joins that transaction and races
+ * its COMMIT. (Redeem is an HTTP call to core, not a query through this process's provider, so it is
+ * not part of this list.)
  */
 export async function revokeResponseInvites(
   responseId: string,
   options: { deviceOnly: boolean },
   contextUser: UserInfo,
-  provider?: DatabaseProviderBase,
+  provider: DatabaseProviderBase,
 ): Promise<RevokeSummary> {
   const minter = MagicLinkMinterRegistry.Instance.Minter;
   if (!minter || !responseId) {
@@ -235,17 +236,20 @@ export interface InviteByToken {
  * and this is deliberately the same one-way comparison the redeem path performs. The raw token
  * never appears in the filter, so it cannot reach a query log.
  *
- * The one caller is the `/remember` guard, which has to answer "does the pointer this browser
- * already holds name a different draft?" without spending the pointer's single use.
+ * Two callers, both via `resume-deps.ts`'s `inviteFor`: the `/remember` guard, which has to answer
+ * "does the pointer this browser already holds name a different draft?" without spending the
+ * pointer's single use; and `/forget` (`runForget`), which uses it to learn which response's
+ * invite to revoke before clearing the cookie.
  */
 export async function findInviteByRawToken(
   rawToken: string,
   contextUser: UserInfo,
+  provider: DatabaseProviderBase,
 ): Promise<InviteByToken> {
   if (!rawToken) {
     return { ok: true };
   }
-  const found = await new RunView().RunView<MJMagicLinkInviteEntity>(
+  const found = await new RunView(provider).RunView<MJMagicLinkInviteEntity>(
     {
       EntityName: INVITE_ENTITY,
       ExtraFilter: `TokenHash=${quoteSqlString(hashToken(rawToken))}`,
