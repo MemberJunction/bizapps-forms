@@ -21,7 +21,7 @@
 - Never swallow an error. Every `catch` logs with context (what we were doing, and for which file or URL) or rethrows.
 - Cap every loop or queue with a named constant, and handle hitting the cap explicitly.
 - Comments capture the non-obvious *why*. Update any comment you make stale (for example `FormAssetService`'s header).
-- `MAX_IMAGE_EDGE_PX = 1600`, `SKIP_BELOW_BYTES = 300 * 1024`, `WEBP_QUALITY = 0.82`, `JPEG_QUALITY = 0.85`.
+- `MAX_IMAGE_EDGE_PX = 1600`, `SKIP_BELOW_BYTES = 300 * 1024`, `WEBP_QUALITY = 0.82`, `JPEG_QUALITY = 0.8`, `FALLBACK_MAX_EDGE_PX = 1200`.
 - `MAX_PREFETCH_IMAGES = 12`, `PREFETCH_TIMEOUT_MS = 15_000`.
 - One `patch` changeset per PR for `'@mj-biz-apps/forms-ng'` (`.claude/rules/changesets.md`).
 - Tests are `.spec.ts`, colocated. Component wiring is checked by source-reading `*.wiring.spec.ts`, following `src/lib/builder/asset-ref-wiring.spec.ts`.

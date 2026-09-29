@@ -106,10 +106,12 @@ The decisions are pure exported functions, so they are testable without a canvas
 export const MAX_IMAGE_EDGE_PX = 1600;
 export const SKIP_BELOW_BYTES = 300 * 1024;
 export const WEBP_QUALITY = 0.82;
-export const JPEG_QUALITY = 0.85;
+export const JPEG_QUALITY = 0.8;
+export const FALLBACK_MAX_EDGE_PX = 1200; // long edge when the browser cannot encode WebP
 
 planResize(width, height, bytes, type): { action: 'skip' } | { action: 'resize'; width; height }
 pickOutputType(sourceType, encodedType): 'image/webp' | 'image/jpeg' | 'image/png'
+fallbackSize(width, height): { width; height } // long edge <= FALLBACK_MAX_EDGE_PX, never upscales
 ```
 
 ### Behaviour
@@ -129,6 +131,15 @@ pickOutputType(sourceType, encodedType): 'image/webp' | 'image/jpeg' | 'image/pn
    `pickOutputType` chooses:
    - `image/jpeg` at `JPEG_QUALITY` for a JPEG source;
    - `image/png` for every other source, which keeps transparency.
+
+   The fallback is much heavier than WebP, so it is encoded at `fallbackSize` (long edge at most
+   `FALLBACK_MAX_EDGE_PX`, 1200 px) and JPEG uses `JPEG_QUALITY` 0.8. A PNG the browser already
+   returned is reused only when it was drawn at that size; otherwise it is encoded again.
+   The WebP path stays at 1600 px and `WEBP_QUALITY`.
+
+   *Measured 2026-09-28:* Chrome 154 makes the 927 KB photo a 162 KB WebP. WebKit 26.5 JPEG:
+   1600 px q0.85 = 434 KB, 1600 px q0.80 = 368 KB, 1200 px q0.85 = 303 KB, 1200 px q0.80 = 257 KB,
+   1056 px q0.80 = 211 KB. Safari's PNG for a 3000×1000 transparent PNG at 1600 px: 1231 KB.
 5. **Keep whichever is smaller:** if the encoded blob is not smaller than `file`, return `file`.
 6. **Name the result** after the original with the new extension (`photo.jpg` → `photo.webp`). The server
    stores `Name` and `ContentType` from the multipart part.
@@ -331,7 +342,7 @@ the builder components. Each PR must also pass the package's typecheck and its `
 
 | Metric | Today | Target |
 |---|---|---|
-| Stored size of the 927 KB, 1408×768 JPEG after upload | 927 KB | ≤ 250 KB |
+| Stored size of the 927 KB, 1408×768 JPEG after upload, measured per engine (Chrome WebP, Safari JPEG) | 927 KB | ≤ 250 KB |
 | Welcome image painted | 8.63 s | ≤ 4.5 s |
 | Welcome text visible | 2.80 s | ≤ 3.08 s (no regression > 10%) |
 | Question images painted after the question page's text, with ≥ 3 s on the welcome screen | up to 6.3 s | ≤ 100 ms |
