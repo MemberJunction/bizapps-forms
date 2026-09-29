@@ -15,6 +15,11 @@
  * upload, often `localhost`, and broke every form served from anywhere else (#270). See
  * `../widget/core/asset-ref.ts`.
  *
+ * Before sending, the image is shrunk in the browser (`image-optimize.ts`): re-encoded as WebP where
+ * the browser can, at most 1600 px on its longest side for screen and option images, 3840 px for a
+ * page background (which covers the whole viewport). Published forms otherwise made every
+ * respondent download the author's original, often a multi-megabyte phone photo.
+ *
  * `XMLHttpRequest` rather than `fetch` for the same reason as the respondent uploader: it is the
  * only one that reports upload progress, and an author dragging in a 4 MB photo needs to see
  * that something is happening.
@@ -25,6 +30,7 @@ import { resolveApiBase, resolveApiToken } from '../shared/mj-api-origin';
 import { serverErrorText } from '../shared/server-error-text';
 // The upload POST and the anonymous read share one route, so one constant names both.
 import { ASSET_ROUTE } from '../widget/core/asset-ref';
+import { optimizeImageForUpload, type ImageUse } from './image-optimize';
 
 /** What the server returns for a stored asset. */
 export interface UploadedAsset {
@@ -107,6 +113,29 @@ export function assetErrorMessage(status: number, body: unknown): string {
   return 'The upload did not go through. Please try again.';
 }
 
+/** An upload that failed, with the HTTP status (0 for a network error or abort). Its message is author-facing. */
+export class AssetUploadError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = 'AssetUploadError';
+  }
+}
+
+/**
+ * Whether to send the author's original after the optimized file was refused. Only a 415 counts,
+ * and only when the optimizer changed the file's TYPE: an operator's `FORMS_ASSET_ALLOWED_TYPES`
+ * may omit `image/webp`, which would otherwise reject a JPEG the author never converted. A file
+ * re-encoded in its own type (Safari's JPEG-to-JPEG fallback) was refused for a type the original
+ * shares, so sending it would only repeat the 415. Any other failure is a verdict on the file.
+ */
+export function shouldRetryWithOriginal(error: unknown, optimized: File, original: File): boolean {
+  return error instanceof AssetUploadError && error.status === 415 && bareContentType(optimized.type) !== bareContentType(original.type);
+}
+
+function bareContentType(contentType: string): string {
+  return contentType.split(';')[0].trim().toLowerCase();
+}
+
 @Injectable({ providedIn: 'root' })
 export class FormAssetService {
   /** True when there is an API location and a session token to upload with. */
@@ -114,15 +143,31 @@ export class FormAssetService {
     return !!resolveApiBase() && !!resolveApiToken();
   }
 
-  /** Upload one image for a form. Resolves with the stored asset, or rejects with a usable Error. */
-  public upload(file: File, formId: string, onProgress?: AssetUploadProgress): Promise<UploadedAsset> {
+  /**
+   * Upload one image for a form. Resolves with the stored asset, or rejects with a usable Error.
+   * The file is shrunk first (`image-optimize.ts`), as far as `use` allows; when shrinking cannot
+   * help, or the server refuses the shrunk file's type (415), the original is sent.
+   */
+  public async upload(file: File, formId: string, onProgress?: AssetUploadProgress, use: ImageUse = 'content'): Promise<UploadedAsset> {
     // The API BASE, not its origin: an MJAPI reverse-proxied at `/api` takes the upload at
     // `/api/forms/asset`, and the bare origin would post past it (#270).
     const apiBase = resolveApiBase();
     if (!apiBase) {
-      return Promise.reject(new Error('Cannot upload: the MemberJunction API location is not configured.'));
+      throw new Error('Cannot upload: the MemberJunction API location is not configured.');
     }
-    return this.send(`${apiBase}${ASSET_ROUTE}`, buildAssetFormData(file, formId), onProgress);
+    const optimized = await optimizeImageForUpload(file, use);
+    const url = `${apiBase}${ASSET_ROUTE}`;
+    try {
+      return await this.send(url, buildAssetFormData(optimized, formId), onProgress);
+    } catch (err) {
+      if (!shouldRetryWithOriginal(err, optimized, file)) {
+        throw err;
+      }
+      // At most ONE retry, by construction: this second send is outside the try, and a 415 on the
+      // original (optimized === file) is never retried.
+      console.warn(`[Forms] Server rejected the optimized "${optimized.name}" (${optimized.type}); uploading the original "${file.name}" instead.`);
+      return this.send(url, buildAssetFormData(file, formId), onProgress);
+    }
   }
 
   /** XHR POST with upload-progress and typed JSON parsing. */
@@ -150,11 +195,11 @@ export class FormAssetService {
             reject(err instanceof Error ? err : new Error('Upload failed.'));
           }
         } else {
-          reject(new Error(assetErrorMessage(xhr.status, parsedBody)));
+          reject(new AssetUploadError(assetErrorMessage(xhr.status, parsedBody), xhr.status));
         }
       };
-      xhr.onerror = (): void => reject(new Error('Upload failed. Check your connection and try again.'));
-      xhr.onabort = (): void => reject(new Error('Upload cancelled.'));
+      xhr.onerror = (): void => reject(new AssetUploadError('Upload failed. Check your connection and try again.', 0));
+      xhr.onabort = (): void => reject(new AssetUploadError('Upload cancelled.', 0));
 
       xhr.send(body);
     });

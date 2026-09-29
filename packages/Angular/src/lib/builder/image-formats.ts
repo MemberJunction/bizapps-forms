@@ -25,6 +25,15 @@ export const ACCEPTED_FORMATS_LABEL = 'PNG, JPG, GIF or WebP';
 export const MAX_SIZE_LABEL = '5 MB';
 
 /**
+ * The size line under the dropzone. The server's limit applies to the bytes it RECEIVES, and the
+ * builder shrinks still images first (`image-optimize.ts`), so a 7 MB phone photo uploads fine;
+ * saying "up to 5 MB" for every file turned authors away from photos that work. The limit still
+ * binds whatever is sent as is: GIFs, animated WebP and APNG, and files the browser cannot decode.
+ */
+// A non-breaking space inside the limit: the longer line wrapped as "up to 5 / MB" in the dropzone.
+export const UPLOAD_SIZE_HINT = `large photos are resized · GIFs and animations up to ${MAX_SIZE_LABEL.replace(/ /g, '\u00a0')}`;
+
+/**
  * Whether a browser-reported content type is one the server will accept.
  *
  * Screening locally duplicates a check the server also performs, on purpose: refusing a PDF here
