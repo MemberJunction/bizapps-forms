@@ -313,6 +313,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
   private prefetchUrls: string[] = [];
   private prefetchStarted = false;
   private prefetchGeneration = 0;
+  /** Set on destroy: a `load()` still awaiting the network resumes afterwards and must start nothing. */
+  private destroyed = false;
   /** Submit-point pages already banked this fill, so each fires once. Reset on {@link load}. */
   private bankedSubmitPoints = new Set<string>();
   /**
@@ -336,6 +338,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
 
   public ngOnDestroy(): void {
     this.autosave?.dispose();
+    this.destroyed = true;
     this.cancelPrefetch();
   }
 
@@ -489,10 +492,18 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * Decide when this load's prefetch starts. A welcome screen with an image gets the network to
    * itself until that image settles (or the respondent leaves it). In every other case (no welcome
    * screen, no welcome image, resumed past it), start when the browser is idle.
+   *
+   * Only while intake is still ahead. A resumed, already-submitted response opens on `done` (and a
+   * failed or expired load on `error`/`expired`): the respondent can never see an option or an
+   * ending image there, so downloading up to 12 of them would only compete with what is on screen.
    */
   private planPrefetch(def: PublishedFormDefinition): void {
+    const phase = this.phase();
+    if (phase !== 'welcome' && phase !== 'ready') {
+      return;
+    }
     this.prefetchUrls = collectLaterImageUrls(def);
-    if (this.phase() === 'welcome' && def.welcomeScreen?.mediaURL) {
+    if (phase === 'welcome' && def.welcomeScreen?.mediaURL) {
       return;
     }
     this.schedulePrefetchWhenIdle();
@@ -508,12 +519,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (typeof requestIdleCallback === 'function') {
       requestIdleCallback(start);
     } else {
-      setTimeout(start, 0); // Safari before 18 has no requestIdleCallback
+      setTimeout(start, 0); // Safari does not ship requestIdleCallback by default
     }
   }
 
   private startPrefetch(): void {
-    if (this.prefetchStarted) {
+    if (this.destroyed || this.prefetchStarted) {
       return;
     }
     this.prefetchStarted = true;

@@ -52,13 +52,28 @@ describe('prefetch lifecycle — source smoke', () => {
     expect(body(form, 'public ngOnDestroy(): void')).toContain('this.cancelPrefetch()');
   });
 
+  it('a load() that resumes after destroy cannot start a queue', () => {
+    const destroy = body(form, 'public ngOnDestroy(): void');
+    expect(destroy).toContain('this.destroyed = true');
+    expect(destroy.indexOf('this.destroyed = true')).toBeLessThan(destroy.indexOf('this.cancelPrefetch()'));
+    expect(body(form, 'private startPrefetch(): void')).toContain('this.destroyed ||');
+  });
+
+  it('plans nothing unless intake is still ahead (welcome or ready)', () => {
+    const plan = body(form, 'private planPrefetch(def: PublishedFormDefinition): void');
+    expect(plan).toContain(`phase !== 'welcome' && phase !== 'ready'`);
+    expect(plan.indexOf(`phase !== 'welcome' && phase !== 'ready'`)).toBeLessThan(
+      plan.indexOf('this.schedulePrefetchWhenIdle()'),
+    );
+  });
+
   it('leaving the welcome screen early still starts the prefetch', () => {
     expect(body(form, 'protected startIntake(): void')).toContain('this.startPrefetch()');
   });
 
   it('starts at most once per load', () => {
     const start = body(form, 'private startPrefetch(): void');
-    expect(start).toContain('if (this.prefetchStarted)');
+    expect(start).toContain('this.prefetchStarted)');
     expect(start).toContain('this.prefetchStarted = true');
   });
 
