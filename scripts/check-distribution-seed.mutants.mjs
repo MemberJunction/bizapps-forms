@@ -64,12 +64,13 @@
  * mutant count (it was 40s for 66 before CHECK 7): each mutant runs the whole spec in a fresh
  * process, and CHECK 7 reads every shipped `.sql` file TWICE per `runChecks` (once for the seed set,
  * once for the references — the two `shippedSqlFiles` calls in `checkEntityIdReferences`), and
- * CHECK 8 reads each one once more. The spec invokes `runChecks(REPO_ROOT)` FIVE times against the
- * real tree, not once: "the repository itself passes" calls it twice on one line, the sql_variant
- * case twice more, and case 125 once. That is 2,075 real-tree `.sql` reads per spec run (counted at
- * `readFileSync` on 2026-10-01, across every check), x 118 mutants — which is where the minutes are.
- * CHECK 8 took a laptop run to 542s on 2026-10-01; the runner has not been re-measured since CHECK 7, so
- * read "seven minutes" above as a floor. The fixtures are the cheap half: the spec
+ * CHECK 8 reads each one once more. The spec invokes `runChecks(REPO_ROOT)` ONCE against the real
+ * tree and every real-tree case filters that one result (it used to be five calls, 2,075 reads). That
+ * is 419 real-tree `.sql` reads per spec run (counted at `readFileSync` on 2026-10-01, across every
+ * check, including cases 106–107's direct reads), x 127 mutants — which is where the minutes are.
+ * CHECK 8 took a laptop run to 542s on 2026-10-01 with five real-tree calls; collapsing them to one
+ * brought the same laptop to 122s for 127 mutants the same day. The runner has not been re-measured
+ * since CHECK 7, so the "seven minutes" above is stale in the other direction now — re-measure it. The fixtures are the cheap half: the spec
  * builds 106 of them (measured at `mkdtempSync`, not counted off the source — the table-driven loops
  * multiply 22 call sites into 106), and each is a tree of two or three files. It no longer copies
  * the `metadata/` tree into each of them — that was CHECK 1's, and #105 removed the check and the
@@ -393,18 +394,37 @@ const MUTANTS = [
         '    { pattern: INDEX_ON_TABLE },', '    { pattern: /(?!)/gi },'],
     ['check8/shape-grant', 'GRANT / DENY / REVOKE `ON <schema>.<object>` is read, including `OBJECT::` — the line every CodeGen block ends with',
         '    { pattern: GRANT_ON_OBJECT },', '    { pattern: /(?!)/gi },'],
-    ['check8/shape-grant-all', "PG's bulk `ON ALL … IN SCHEMA <schema>` grant is read",
-        '    { pattern: GRANT_ON_ALL_IN_SCHEMA },', '    { pattern: /(?!)/gi },'],
+    ['check8/shape-grant-schema', "a grant on a SCHEMA is read — PG's bulk `ON ALL … IN SCHEMA <schema>` and its kin",
+        '    { pattern: GRANT_ON_SCHEMA },', '    { pattern: /(?!)/gi },'],
+    ['check8/grant-schema-tsql', "T-SQL's `GRANT … ON SCHEMA::[s]` is read, with the schema as the target",
+        '|SCHEMA\\\\s*::\\\\s*|', '|'],
+    ['check8/grant-schema-pg', "PG's `GRANT USAGE ON SCHEMA s` is read, with the schema as the target",
+        '|SCHEMA\\\\s+)(?<target>', ')(?<target>'],
+    ['check8/index-by-name', 'an index dropped or altered by its own qualified name — `DROP INDEX [s].[ix]`, PG `DROP INDEX IF EXISTS s."ix"` — is read',
+        '|SEQUENCE|INDEX))', '|SEQUENCE))'],
+    ['check8/index-drop-on', "T-SQL's `DROP INDEX ix ON [s].[T]` is read, with the TABLE as the target",
+        '|DROP\\\\s+|ALTER\\\\s+)INDEX)', '|ALTER\\\\s+)INDEX)'],
+    ['check8/index-alter-on', "T-SQL's `ALTER INDEX ix|ALL ON [s].[T]` is read, with the TABLE as the target",
+        '|DROP\\\\s+|ALTER\\\\s+)INDEX)', '|DROP\\\\s+)INDEX)'],
     ['check8/shape-schema', 'CREATE / ALTER / DROP SCHEMA is read',
         '    { pattern: DDL_ON_SCHEMA },', '    { pattern: /(?!)/gi },'],
     ['check8/shape-trigger-table', "an UNQUALIFIED trigger is judged by its table's schema — PG CodeGen's trigger shape, and the converted twin of #283",
         '    { pattern: TRIGGER_ON_TABLE },', '    { pattern: /(?!)/gi },'],
     ['check8/trigger-qualified-excluded', 'a schema-qualified trigger is left to shape 1, so T-SQL CodeGen\'s `CREATE TRIGGER [s].trgX ON [s].[T]` is one write, not two',
-        '${IDENTIFIER_PART}(?=\\\\s)(?!\\\\s*\\\\.)${WITHIN_STATEMENT}', '${IDENTIFIER_PART}${WITHIN_STATEMENT}'],
+        '${IDENTIFIER_PART}(?=\\\\s)(?!\\\\s*\\\\.)${TRIGGER_SPAN}', '${IDENTIFIER_PART}${TRIGGER_SPAN}'],
     ['check8/trigger-no-backtrack', 'the trigger name must END at whitespace, so a bare `schema.trgX` cannot backtrack to a shorter token and be claimed twice',
         '${IDENTIFIER_PART}(?=\\\\s)(?!\\\\s*\\\\.)', '${IDENTIFIER_PART}(?!\\\\s*\\\\.)'],
-    ['check8/within-statement', 'a GRANT reads no further than its own statement, so one naming no object cannot take a later join alias for its target',
-        "const WITHIN_STATEMENT = '(?:(?!\\\\n\\\\s*\\\\n)[^;])*?';", "const WITHIN_STATEMENT = '[^;]*?';"],
+    // The span limbs: each probe in spec cases 132–137 isolates exactly one, so each is its own mutant.
+    ['check8/span-blank-line', 'a GRANT reads no further than a blank line, so a `[Grant]` column cannot reach the next statement\'s MERGE … ON',
+        "const STATEMENT_BOUNDARY = '\\\\n\\\\s*\\\\n|\\\\n[ \\\\t]*GO\\\\b';", "const STATEMENT_BOUNDARY = '\\\\n[ \\\\t]*GO\\\\b';"],
+    ['check8/span-go', 'a GRANT reads no further than a `GO` line — CodeGen separates its batches with GO and no blank line',
+        "const STATEMENT_BOUNDARY = '\\\\n\\\\s*\\\\n|\\\\n[ \\\\t]*GO\\\\b';", "const STATEMENT_BOUNDARY = '\\\\n\\\\s*\\\\n';"],
+    ['check8/span-grant-to', 'a GRANT stops at its grantee\'s `TO`, so one naming no object cannot take a later MERGE alias for its target',
+        '|\\\\bTO\\\\b|\\\\bFROM\\\\b)', '|\\\\bFROM\\\\b)'],
+    ['check8/span-grant-from', 'a GRANT stops at `FROM`, so a bracketed `[Grant]` column cannot take the join alias after it for its target',
+        '|\\\\bTO\\\\b|\\\\bFROM\\\\b)', '|\\\\bTO\\\\b)'],
+    ['check8/span-trigger-first-on', "an unqualified trigger stops at its FIRST `ON` — its table — so a join in its body is never read as the trigger's table",
+        '|\\\\bON\\\\b)[^;])*?`;', ')[^;])*?`;'],
     ['check8/mask', 'statements are read off the structure mask, so a foreign name in a comment banner or an OBJECT_ID string is not a write',
         '    const structure = maskSql(sql).structure;', '    const structure = sql;'],
     ['check8/normalise-quotes', 'one layer of `[]` / `""` is stripped before comparing, so `[${flyway:defaultSchema}]` is ours',

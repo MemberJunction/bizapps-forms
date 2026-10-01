@@ -229,7 +229,12 @@ withFixture(
 );
 
 // 7. The real repository must pass, or the gate is not describing this codebase.
-check('the repository itself passes', runChecks(REPO_ROOT).length === 0, JSON.stringify(runChecks(REPO_ROOT)));
+//
+// ONE real-tree run, shared by every real-tree case below (64, 125): `runChecks` is a pure read of
+// the tree and the tree does not change while the spec runs, so a second call can only cost time —
+// and the mutation harness pays that cost once per mutant. Each case still filters for its own check.
+const REAL_TREE_VIOLATIONS = runChecks(REPO_ROOT);
+check('the repository itself passes', REAL_TREE_VIOLATIONS.length === 0, JSON.stringify(REAL_TREE_VIOLATIONS));
 
 // ---------------------------------------------------------------------------
 // CHECK 3 — what a post-hardening seed may grant the anonymous respondent role
@@ -1540,8 +1545,8 @@ check(
 
 check(
     'case 64: the real V202608302200 in this repo passes — the defect it was written for is fixed',
-    !runChecks(REPO_ROOT).some((v) => v.includes('sql_variant')),
-    JSON.stringify(runChecks(REPO_ROOT).filter((v) => v.includes('sql_variant'))),
+    !REAL_TREE_VIOLATIONS.some((v) => v.includes('sql_variant')),
+    JSON.stringify(REAL_TREE_VIOLATIONS.filter((v) => v.includes('sql_variant'))),
 );
 
 // Two holes the first cut of CHECK 6 had, both found by review rather than by the suite: every
@@ -2019,10 +2024,10 @@ check(
         JSON.stringify(findEntityIdReferences(rulesAndBranching).filter((r) => r.id === SEEDED_ENTITY).map((r) => r.line)),
 );
 
-// 116–128. CHECK 8 — shipped SQL never creates, alters, drops or grants on a schema it does not own
-//          (#283). The plan for this check numbered these 108–117; 108–115 were already taken (CHECK 7
-//          and CHECK 2/5 above), and a reused number would make every cross-reference to the old case
-//          quietly wrong — see this file's header.
+// 116–137. CHECK 8 — shipped SQL never creates, alters, drops or grants on a schema it does not own
+//          (#283). They start at 116 because 108–115 were already taken (CHECK 7 and CHECK 2/5 above),
+//          and a reused number would make every cross-reference to the old case quietly wrong — see
+//          this file's header.
 const COMMON_BLOCK = `
 /* Base View SQL for MJ_BizApps_Common: Relationships */
 IF OBJECT_ID('[\${mjSchema}_BizAppsCommon].[vwRelationships]', 'V') IS NOT NULL
@@ -2103,7 +2108,9 @@ GRANT EXECUTE ON OBJECT::[\${mjSchema}].[spCreateEntity] TO [cdp_UI];
 GRANT EXECUTE ON ALL PROCEDURES IN SCHEMA __mj_BizAppsTasks TO cdp_UI;
 CREATE SCHEMA __mj_BizAppsCommon;`;
 check('case 121: core is foreign for DDL — ALTER TABLE, CREATE INDEX ON, GRANT ON OBJECT::, ON ALL ... IN SCHEMA and CREATE SCHEMA are each reported',
-    findForeignSchemaWrites(CORE_DDL).length === 5, JSON.stringify(findForeignSchemaWrites(CORE_DDL)));
+    findForeignSchemaWrites(CORE_DDL).map((h) => `${h.verb}/${h.schema}`).sort().join(',') ===
+        'ALTER TABLE/${mjschema},CREATE INDEX/__mj,CREATE SCHEMA/__mj_bizappscommon,GRANT/${mjschema},GRANT/__mj_bizappstasks',
+    JSON.stringify(findForeignSchemaWrites(CORE_DDL)));
 
 check('case 122: the line number is the statement\'s own line',
     findForeignSchemaWrites('\n\n\nCREATE VIEW [__mj_BizAppsCommon].[v] AS SELECT 1')[0]?.line === 4,
@@ -2117,7 +2124,7 @@ withFixture(
             'case 123: a foreign-schema write is reported ONCE per file and schema, naming the schema, #283 and every line',
             mine.length === 1 &&
                 /__mj_BizAppsCommon|\$\{mjSchema\}_BizAppsCommon/.test(mine[0]) &&
-                new RegExp(`${EARLY}:\\d+(,\\d+){3}\\b`).test(mine[0]),
+                new RegExp(`${EARLY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\d+(,\\d+){3}\\b`).test(mine[0]),
             JSON.stringify(violations),
         );
     },
@@ -2141,7 +2148,7 @@ withFixture(
 );
 
 {
-    const foreignWrites = runChecks(REPO_ROOT).filter((v) => v.includes('#283'));
+    const foreignWrites = REAL_TREE_VIOLATIONS.filter((v) => v.includes('#283'));
     check('case 125: no shipped migration writes a schema this app does not own (the real tree, after #283)',
         foreignWrites.length === 0, JSON.stringify(foreignWrites.slice(0, 3)));
 }
@@ -2177,6 +2184,77 @@ JOIN [\${flyway:defaultSchema}].[FormPage] AS x ON [x].[FormID] = f.[ID]`;
 check('case 128: a GRANT with no ON stops at its statement, so a later join alias is not read as its target',
     findForeignSchemaWrites(GRANT_WITHOUT_OBJECT).length === 0,
     JSON.stringify(findForeignSchemaWrites(GRANT_WITHOUT_OBJECT)));
+
+// 129–131. Write shapes the first cut of CHECK 8 did not read, each a DDL or grant that lands in the
+//          named schema. An index is dropped by its own qualified name in PG (and T-SQL's legacy form),
+//          but T-SQL's `DROP INDEX ix ON [s].[T]` and `ALTER INDEX … ON` name only the TABLE, so the
+//          table is the target. A schema-level grant names no object at all — the schema IS the target.
+const FOREIGN_INDEX_BY_NAME = `DROP INDEX [__mj_BizAppsCommon].[IX_Relationship_Person];
+DROP INDEX IF EXISTS __mj_BizAppsCommon."ix_relationship_person";`;
+check('case 129: `DROP INDEX <schema>.<index>` — T-SQL and PG — is a foreign write',
+    findForeignSchemaWrites(FOREIGN_INDEX_BY_NAME).map((h) => `${h.verb}/${h.schema}`).join(',') ===
+        'DROP INDEX/__mj_bizappscommon,DROP INDEX/__mj_bizappscommon',
+    JSON.stringify(findForeignSchemaWrites(FOREIGN_INDEX_BY_NAME)));
+
+const FOREIGN_INDEX_ON_TABLE = `DROP INDEX [IX_Relationship_Person] ON [__mj_BizAppsCommon].[Relationship];
+DROP INDEX IF EXISTS IX_Person_Email ON [\${mjSchema}_BizAppsCommon].[Person];
+ALTER INDEX ALL ON [__mj].[Entity] REBUILD;
+DROP INDEX [IX_Form_Name] ON [\${flyway:defaultSchema}].[Form];`;
+check('case 130: T-SQL `DROP INDEX ix ON <schema>.<table>` and `ALTER INDEX … ON` are judged by the table, and our own table passes',
+    findForeignSchemaWrites(FOREIGN_INDEX_ON_TABLE).map((h) => `${h.verb}/${h.target}`).join(',') ===
+        'DROP INDEX/[__mj_BizAppsCommon].[Relationship],DROP INDEX/[${mjSchema}_BizAppsCommon].[Person],ALTER INDEX/[__mj].[Entity]',
+    JSON.stringify(findForeignSchemaWrites(FOREIGN_INDEX_ON_TABLE)));
+
+const SCHEMA_GRANTS = `GRANT USAGE ON SCHEMA __mj_BizAppsCommon TO cdp_UI;
+GRANT SELECT ON SCHEMA::[\${mjSchema}_BizAppsCommon] TO [cdp_UI];
+DENY EXECUTE ON SCHEMA :: [__mj] TO [cdp_Integration];
+GRANT USAGE ON SCHEMA __mj_BizAppsForms TO cdp_UI;
+GRANT SELECT ON SCHEMA::[\${flyway:defaultSchema}] TO [cdp_UI];`;
+check('case 131: a schema-level grant — PG `ON SCHEMA s`, T-SQL `ON SCHEMA::[s]` — is judged by that schema, and ours passes',
+    findForeignSchemaWrites(SCHEMA_GRANTS).map((h) => `${h.verb}/${h.schema}`).join(',') ===
+        'GRANT/__mj_bizappscommon,GRANT/${mjschema}_bizappscommon,DENY/__mj',
+    JSON.stringify(findForeignSchemaWrites(SCHEMA_GRANTS)));
+
+// 132–137. How far a GRANT or an unqualified trigger may read before its `ON`. Each probe below is a
+//          LOUD false positive the first cut produced — a join alias reported as a foreign schema —
+//          and a gate that cries wolf on ordinary SQL is a gate somebody disables. The bound stops at
+//          a statement boundary (`;`, a blank line, a `GO` line); a grant also stops at `TO`/`FROM`,
+//          because its object always precedes its grantee; and an unqualified trigger stops at its
+//          FIRST `ON`, which is always its table. Every probe isolates one stop, so each is pinned.
+const fd = '${flyway:defaultSchema}';
+const NO_OBJECT_GRANT_THEN_GO = `GRANT CREATE VIEW TO [cdp_Developer]
+GO
+CREATE VIEW [${fd}].[v] AS SELECT 1 AS a FROM [${fd}].[Form] AS b JOIN [${fd}].[FormPage] AS c ON [b].[ID] = c.[FormID]`;
+check('case 132: a GRANT naming no object, then GO, does not read the next statement\'s join alias as its target',
+    findForeignSchemaWrites(NO_OBJECT_GRANT_THEN_GO).length === 0,
+    JSON.stringify(findForeignSchemaWrites(NO_OBJECT_GRANT_THEN_GO)));
+
+const GRANT_COLUMN_BEFORE_JOIN = `CREATE VIEW [${fd}].[vwGrants] AS SELECT f.[Grant] FROM [${fd}].[Form] AS f JOIN [${fd}].[FormPage] AS p ON p.[FormID] = f.[ID]`;
+check('case 133: a bracketed `[Grant]` column is not a GRANT whose object is the join alias after FROM',
+    findForeignSchemaWrites(GRANT_COLUMN_BEFORE_JOIN).length === 0,
+    JSON.stringify(findForeignSchemaWrites(GRANT_COLUMN_BEFORE_JOIN)));
+
+const UNQUALIFIED_TRIGGER_BODY_JOIN = `CREATE TRIGGER trgUpdateForm ON [Form] AFTER UPDATE AS
+BEGIN
+    UPDATE f SET [Name] = f.[Name] FROM [Form] AS f JOIN [${fd}].[FormPage] AS p ON p.[FormID] = f.[ID]
+END`;
+check('case 134: an unqualified trigger on an unqualified table reads only its own ON, not a join in its body',
+    findForeignSchemaWrites(UNQUALIFIED_TRIGGER_BODY_JOIN).length === 0,
+    JSON.stringify(findForeignSchemaWrites(UNQUALIFIED_TRIGGER_BODY_JOIN)));
+
+const GRANT_COLUMN_THEN = (separator) => `CREATE TABLE [${fd}].[Grantable] ([ID] INT NULL, [Grant] BIT NULL)${separator}MERGE [${fd}].[Grantable] AS t USING [${fd}].[Form] AS s ON t.[ID] = s.[ID] WHEN MATCHED THEN DELETE`;
+check('case 135: the bound stops at a GO line — a `[Grant]` column cannot reach the next batch\'s MERGE ... ON',
+    findForeignSchemaWrites(GRANT_COLUMN_THEN('\nGO\n')).length === 0,
+    JSON.stringify(findForeignSchemaWrites(GRANT_COLUMN_THEN('\nGO\n'))));
+check('case 136: the bound stops at a blank line, the same way',
+    findForeignSchemaWrites(GRANT_COLUMN_THEN('\n\n')).length === 0,
+    JSON.stringify(findForeignSchemaWrites(GRANT_COLUMN_THEN('\n\n'))));
+
+const NO_OBJECT_GRANT_THEN_MERGE = `GRANT CREATE VIEW TO [cdp_Developer]
+MERGE [${fd}].[Form] AS t USING [${fd}].[FormPage] AS s ON t.[ID] = s.[FormID] WHEN MATCHED THEN DELETE`;
+check('case 137: a GRANT stops at its grantee\'s TO, so with no statement boundary at all it still cannot reach a MERGE\'s ON',
+    findForeignSchemaWrites(NO_OBJECT_GRANT_THEN_MERGE).length === 0,
+    JSON.stringify(findForeignSchemaWrites(NO_OBJECT_GRANT_THEN_MERGE)));
 
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);

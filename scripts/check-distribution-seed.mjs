@@ -92,8 +92,8 @@
  *   `mj app install` runs apps leaf-first, so on a fresh host Common installs its objects and Forms
  *   then overwrites them — #283, where `spCreateRelationship` lost two parameters on every fresh
  *   install. Only writes are judged; a cross-schema READ (a foreign key, a view join) is how a hard
- *   dependency is meant to look. What it cannot read — SQL built at run time, and a few write
- *   shapes no shipped file uses — is listed in the section's own docblock.
+ *   dependency is meant to look. It reads a closed list of write shapes, and every write shape it
+ *   is known NOT to read — SQL built at run time among them — is enumerated in the section's docblock.
  *
  * Read-only. No --fix. Exits non-zero on any violation. Node stdlib only, so it runs in CI
  * without an install step.
@@ -1820,8 +1820,8 @@ function checkEntityIdReferences(repoRoot, violations) {
  * parameters on every fresh install of Forms, and nothing in either repo could see it — Common's
  * tests run against Common's install, and Forms' build never calls the procedure it overwrote.
  *
- * Only WRITES are judged: CREATE / ALTER / DROP of an object, an index's table, a trigger's table,
- * a schema, and GRANT / DENY / REVOKE. A cross-schema READ is how a hard dependency is supposed to
+ * Only WRITES are judged: CREATE / ALTER / DROP of an object (index included), an index's table, a
+ * trigger's table, a schema, and GRANT / DENY / REVOKE on an object or a schema. A cross-schema READ is how a hard dependency is supposed to
  * look — `FormResponse.RespondentPersonID REFERENCES __mj_BizAppsCommon.Person(ID)` and the view
  * join behind it are the design (CLAUDE.md: hard FKs, not soft links) — and DML into core metadata
  * (`INSERT INTO [${mjSchema}].[EntityField]`) is what every migration here does. Neither statement
@@ -1835,12 +1835,25 @@ function checkEntityIdReferences(repoRoot, violations) {
  * the `IF OBJECT_ID('[${mjSchema}_BizAppsCommon].[vwX]')` existence probes in front of every block
  * are not writes — the first is a comment and the second a string.
  *
- * WHAT THIS CANNOT SEE, stated plainly. A statement built at run time is invisible: PostgreSQL's
- * `EXECUTE format('DROP VIEW %I.%I', s, v)` names no schema until it runs, and a T-SQL
- * `EXEC('CREATE …')` is a string the mask blanks. Neither is a shape CodeGen emits for its own
- * objects, which is what #283 was. Also out of scope: `GRANT … ON SCHEMA::x`, extended properties
- * and PG `COMMENT ON` written against another app's objects, and `sp_rename`. They are writes, and
- * none of them has shipped here.
+ * WHAT THIS CANNOT SEE, stated plainly. The shapes are a CLOSED list (FOREIGN_WRITE_SHAPES below):
+ * a write in any other shape is not read. The ones known to exist, so nobody assumes coverage:
+ *   - SQL built at run time: PG's `EXECUTE format('DROP VIEW %I.%I', s, v)` names no schema until it
+ *     runs, and T-SQL's `EXEC('CREATE …')` / `sp_executesql` is a string the mask blanks.
+ *   - every target after the FIRST in a multi-object statement: `DROP VIEW a, b`, PG's
+ *     `GRANT SELECT ON a, b TO x`.
+ *   - `TRUNCATE TABLE s.t`, and `SELECT … INTO s.t`.
+ *   - `ENABLE` / `DISABLE TRIGGER x ON s.t`, and `CREATE` / `UPDATE STATISTICS … ON s.t`.
+ *   - PG's `ALTER TABLE ONLY s.t` and `… ON ONLY s.t`, PG's `CREATE` / `DROP INDEX CONCURRENTLY`, and
+ *     PG's `ALTER DEFAULT PRIVILEGES IN SCHEMA s …`.
+ *   - object kinds outside shape 1's list: PG `DOMAIN`, `POLICY`, `AGGREGATE`, `RULE`, `EXTENSION`,
+ *     and T-SQL `DEFAULT` / `RULE` objects, among others.
+ *   - `ALTER SCHEMA x TRANSFER s.obj` (the SOURCE schema; the destination is read), extended
+ *     properties and PG `COMMENT ON` written against another app's objects, and `sp_rename`.
+ * None of these is a shape CodeGen emits for another app's objects, which is what #283 was. Two of
+ * them do ship, read by hand on 2026-10-01: dynamic SQL in V202609011500 (DDL on this app's own
+ * `FormDistribution` and `spCreateFormDistribution`) and in the teardown (row DML only, no DDL), and
+ * PG `CREATE EXTENSION`, which names no schema. Widen a shape — with a spec case and a mutant — the
+ * day one is needed.
  */
 
 /**
@@ -1869,34 +1882,45 @@ const IDENTIFIER_PART = '(?:\\[[^\\]]+\\]|"[^"]+"|[A-Za-z_#@$][\\w$#@{}:]*)';
 const QUALIFIED_NAME = `(?<target>(?<schema>${IDENTIFIER_PART})\\s*\\.\\s*${IDENTIFIER_PART})`;
 
 /**
- * A GRANT's object comes after a privilege list of any length, but never past its own statement:
- * the span stops at `;` or a blank line, so a GRANT that names no object (`GRANT CREATE TABLE TO x`)
- * cannot reach forward to the next statement's `ON`.
+ * How far a GRANT or an unqualified trigger may read between its keyword and its `ON`. Every limb
+ * exists because a span without it reached a LATER `ON` — a view join, a MERGE — and reported the
+ * join alias as a foreign schema, which is a gate crying wolf on ordinary SQL.
+ *
+ * Both spans end at a statement boundary: `;`, a blank line, or a `GO` line (CodeGen separates its
+ * batches with `GO` and no blank line). A grant also ends at `TO` or `FROM`, because its object
+ * always precedes its grantee — which is also what stops a bracketed `[Grant]` column, matched by
+ * `\bGRANT\b`, before the `FROM … JOIN … ON` that follows it. An unqualified trigger ends at its
+ * FIRST `ON`, which in both dialects is always its table, so a join in its body is never read.
  */
-const WITHIN_STATEMENT = '(?:(?!\\n\\s*\\n)[^;])*?';
+const STATEMENT_BOUNDARY = '\\n\\s*\\n|\\n[ \\t]*GO\\b';
+const GRANT_SPAN = `(?:(?!${STATEMENT_BOUNDARY}|\\bTO\\b|\\bFROM\\b)[^;])*?`;
+const TRIGGER_SPAN = `(?:(?!${STATEMENT_BOUNDARY}|\\bON\\b)[^;])*?`;
 
 /** `CREATE [OR ALTER|OR REPLACE] | ALTER | DROP`, the verbs that rewrite an object. */
 const DDL_VERB = '(?:CREATE(?:\\s+OR\\s+(?:ALTER|REPLACE))?|ALTER|DROP)';
 const IF_EXISTS = '(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?';
 
-// The baseline's `DROP VIEW` / `CREATE PROCEDURE` / `CREATE TRIGGER [s].trg` blocks — #283 itself.
+// The baseline's `DROP VIEW` / `CREATE PROCEDURE` / `CREATE TRIGGER [s].trg` blocks — #283 itself —
+// and an index dropped or altered by its own qualified name (PG, and T-SQL's legacy form).
 const DDL_ON_OBJECT = new RegExp(
-    `\\b(?<verb>${DDL_VERB}\\s+(?:MATERIALIZED\\s+)?(?:VIEW|PROC|PROCEDURE|FUNCTION|TRIGGER|TABLE|TYPE|SYNONYM|SEQUENCE))\\s+${IF_EXISTS}${QUALIFIED_NAME}`,
+    `\\b(?<verb>${DDL_VERB}\\s+(?:MATERIALIZED\\s+)?(?:VIEW|PROC|PROCEDURE|FUNCTION|TRIGGER|TABLE|TYPE|SYNONYM|SEQUENCE|INDEX))\\s+${IF_EXISTS}${QUALIFIED_NAME}`,
     'gi',
 );
-// CodeGen's `CREATE INDEX IDX_AUTO_MJ_FKEY_… ON [schema].[Table]`: the index lives on that table.
+// CodeGen's `CREATE INDEX IDX_AUTO_MJ_FKEY_… ON [schema].[Table]`, and T-SQL's `DROP INDEX ix ON …`
+// and `ALTER INDEX ix|ALL ON …`: the index lives on that table, which is the only name given.
 const INDEX_ON_TABLE = new RegExp(
-    `\\b(?<verb>CREATE\\s+(?:UNIQUE\\s+)?(?:(?:NON)?CLUSTERED\\s+)?INDEX)\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?${IDENTIFIER_PART}\\s+ON\\s+${QUALIFIED_NAME}`,
+    `\\b(?<verb>(?:CREATE\\s+(?:UNIQUE\\s+)?(?:(?:NON)?CLUSTERED\\s+)?|DROP\\s+|ALTER\\s+)INDEX)\\s+${IF_EXISTS}${IDENTIFIER_PART}\\s+ON\\s+${QUALIFIED_NAME}`,
     'gi',
 );
 // Every CodeGen block ends `GRANT SELECT|EXECUTE ON [schema].[object] TO …`; PG adds a keyword.
 const GRANT_ON_OBJECT = new RegExp(
-    `\\b(?<verb>GRANT|DENY|REVOKE)\\b${WITHIN_STATEMENT}\\bON\\s+(?:OBJECT::|FUNCTION\\s+|PROCEDURE\\s+|TABLE\\s+|SEQUENCE\\s+)?${QUALIFIED_NAME}`,
+    `\\b(?<verb>GRANT|DENY|REVOKE)\\b${GRANT_SPAN}\\bON\\s+(?:OBJECT::|FUNCTION\\s+|PROCEDURE\\s+|TABLE\\s+|SEQUENCE\\s+)?${QUALIFIED_NAME}`,
     'gi',
 );
-// PG's bulk form, `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA x` — the target is the schema itself.
-const GRANT_ON_ALL_IN_SCHEMA = new RegExp(
-    `\\b(?<verb>GRANT|DENY|REVOKE)\\b${WITHIN_STATEMENT}\\bON\\s+ALL\\s+\\w+\\s+IN\\s+SCHEMA\\s+(?<target>(?<schema>${IDENTIFIER_PART}))`,
+// A grant whose target is a schema itself: PG's bulk `ON ALL FUNCTIONS IN SCHEMA x`, PG's
+// `GRANT USAGE ON SCHEMA x`, and T-SQL's `GRANT SELECT ON SCHEMA::[x]`.
+const GRANT_ON_SCHEMA = new RegExp(
+    `\\b(?<verb>GRANT|DENY|REVOKE)\\b${GRANT_SPAN}\\bON\\s+(?:ALL\\s+\\w+\\s+IN\\s+SCHEMA\\s+|SCHEMA\\s*::\\s*|SCHEMA\\s+)(?<target>(?<schema>${IDENTIFIER_PART}))`,
     'gi',
 );
 // The PG baseline's `CREATE SCHEMA IF NOT EXISTS __mj_BizAppsForms`, or anyone else's.
@@ -1910,7 +1934,7 @@ const DDL_ON_SCHEMA = new RegExp(
 // CodeGen's `CREATE TRIGGER [s].trgX ON [s].[T]` — out of this shape, so it is reported once, not
 // twice, and stops the bare part backtracking to a shorter token to dodge the rule.
 const TRIGGER_ON_TABLE = new RegExp(
-    `\\b(?<verb>${DDL_VERB}\\s+TRIGGER)\\s+${IF_EXISTS}${IDENTIFIER_PART}(?=\\s)(?!\\s*\\.)${WITHIN_STATEMENT}\\bON\\s+${QUALIFIED_NAME}`,
+    `\\b(?<verb>${DDL_VERB}\\s+TRIGGER)\\s+${IF_EXISTS}${IDENTIFIER_PART}(?=\\s)(?!\\s*\\.)${TRIGGER_SPAN}\\bON\\s+${QUALIFIED_NAME}`,
     'gi',
 );
 
@@ -1918,7 +1942,7 @@ const FOREIGN_WRITE_SHAPES = [
     { pattern: DDL_ON_OBJECT },
     { pattern: INDEX_ON_TABLE },
     { pattern: GRANT_ON_OBJECT },
-    { pattern: GRANT_ON_ALL_IN_SCHEMA },
+    { pattern: GRANT_ON_SCHEMA },
     { pattern: DDL_ON_SCHEMA },
     { pattern: TRIGGER_ON_TABLE },
 ];
