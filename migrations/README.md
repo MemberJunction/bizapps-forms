@@ -111,6 +111,35 @@ already ran it believes it ran.
 > read, a conditionally guarded seed is credited as an unconditional one, and only `EntityID`
 > columns are in scope — not `EntityFieldID`, which fails the same way.
 
+> **The third exception, and it passes the same test (2026-10-01, #283).**
+> `B202606281200__v0.1.x_Schema_and_Tables.sql` was edited in place to delete the CodeGen block that
+> created ten `__mj_BizAppsCommon` objects: the `vwContactMethods` and `vwRelationships` base views, the
+> `spCreate`/`spUpdate`/`spDelete` procedures for each of those two entities, and the two update
+> triggers — plus every `GRANT` on them. That run was not scoped to `__mj_BizAppsForms`, so it captured
+> bizapps-common's objects as they stood in June 2026. Forms installs after Common, so on a fresh
+> install the baseline replaced Common's current definitions with those stale copies. Reproduced on a
+> throwaway database: the view and procedures were reverted to the June shapes and Relationship saves
+> failed with `@JobFunctionID is not a parameter for procedure spCreateRelationship`. (The reporter also
+> saw the `JobFunction`/`SeniorityLevel` `EntityField` rows deleted on their install; that was reported
+> but not reproduced.) No later migration carries any of the ten, so the baseline was the only source.
+> It qualified because **a repair shipped as a LATER migration is the same defect pointed the other
+> way**: Forms does not own those definitions, so any repair would be a copy of Common's definitions as
+> of the day it was written, and would go stale the same way. The only correct content for Forms to
+> ship about Common's objects is none. It is safe for hosts that already ran it because Skyway's
+> `Migrate()` never checksum-validates applied migrations (see `docs/database-operations.md`, "never
+> checksum-validates"), and a `B` baseline runs only on a fresh install, so an installed host never
+> re-reads the file; a fresh install now leaves Common's objects untouched. **What this does not
+> repair:** a host that installed Forms (any version up to and including 0.14.x) *after* bizapps-common
+> 5.45 already has the stale copies, and removing them here does not restore Common's. That host must
+> re-apply Common's current definitions (for example, by re-running the Relationship and ContactMethod
+> object batches from bizapps-common's latest migration that defines them, or through Common's
+> CodeGen). Hosts that installed Forms before Common 5.45 are unaffected, because Common's later
+> migration re-created the objects. The durable half is not the edit: `npm run lint:distribution`
+> CHECK 8 now refuses any DDL or permission statement in shipped SQL whose target is not this app's
+> schema. Proved on 2026-10-01 against throwaway databases, before and after: with the old baseline the
+> Common objects were overwritten and the save failed; with the block removed the same install left
+> them as Common created them.
+
 So a release's metadata changes become one new `V<newstamp>__v<ver>__Metadata_Sync.sql` carrying that
 release's records. That delta is the path below.
 
