@@ -2068,6 +2068,6 @@ if (process.argv[1] && process.argv[1].endsWith('check-distribution-seed.mjs')) 
             'seed re-grants the Form Respondent role unfiltered access; no new core-metadata insert is guarded ' +
             'on its own ID alone; no shipped schema sync reaches a schema this app does not own; no extended-property ' +
             'write hands `sql_variant` a MAX-typed value; every `__mj.Entity` id shipped SQL references is one ' +
-            'shipped SQL also seeds; and no shipped DDL or grant reaches a schema this app does not own.',
+            'shipped SQL also seeds; and no shipped DDL or grant of a shape CHECK 8 reads reaches a schema this app does not own.',
     );
 }

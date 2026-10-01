@@ -137,8 +137,10 @@ already ran it believes it ran.
 > would go stale the same way. The only correct content for Forms to ship about Common's objects is
 > none. An installed host never re-reads a `B` file, and Skyway's `Migrate()` never checksum-validates
 > applied migrations anyway (see `docs/database-operations.md`, "never checksum-validates"). The durable
-> half is not the edit: `npm run lint:distribution` CHECK 8 now refuses any DDL or permission
-> statement in shipped SQL whose target is not this app's schema.
+> half is not the edit: `npm run lint:distribution` CHECK 8 now refuses shipped DDL and permission
+> statements whose target is not this app's schema — in the statement shapes it reads, which cover
+> every DDL and grant statement in the CodeGen output shipped today; the shapes it does not read are
+> listed in its docblock.
 >
 > **What this does not repair.** Removing the text restores nothing on a host that already ran it. The
 > affected hosts are those that installed Forms (up to and including 0.14.x) *after* bizapps-common
