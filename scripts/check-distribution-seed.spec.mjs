@@ -26,6 +26,7 @@ import {
     findMaxTypedExtendedPropertyValues,
     findSeededEntityIds,
     findEntityIdReferences,
+    findForeignSchemaWrites,
     RESPONDENT_GUARDED_GRANTS,
 } from './check-distribution-seed.mjs';
 
@@ -55,13 +56,13 @@ const FORM_RESPONSE_ANSWERS = 'D03BCDF5-0B32-4EA8-88E8-F73D70A90810';
  * A minimal repo-shaped fixture: whatever migrations the case needs, plus the background below.
  *
  * It used to copy the whole real `metadata/` tree into every fixture, because CHECK 1 hashed it.
- * With CHECK 1 gone the gate reads only SQL, so the copy would be 99 pointless tree copies per
+ * With CHECK 1 gone the gate reads only SQL, so the copy would be 106 pointless tree copies per
  * run — and the mutation harness runs this whole spec once per mutant.
  *
- * 99 is measured, not counted by eye: `mkdtempSync` fires that many times per run. There are only 15
+ * 106 is measured, not counted by eye: `mkdtempSync` fires that many times per run. There are only 22
  * `withFixture` call sites; the rest come from the table-driven loops, which is exactly why counting
  * call sites off the source gives the wrong answer and measuring gives the right one. It was 87
- * before CHECK 7; re-measure when you add fixtures rather than adjusting the number by arithmetic.
+ * before CHECK 7 and is 106 with CHECK 8; re-measure when you add fixtures rather than adjusting the number by arithmetic.
  *
  * THE BACKGROUND SEED, added with CHECK 7. That check rules on the whole corpus — every entity id
  * shipped SQL references must be one shipped SQL SEEDS — so a fixture that binds a grant to
@@ -2017,6 +2018,165 @@ check(
         'as #155. Resolve by natural key: ' +
         JSON.stringify(findEntityIdReferences(rulesAndBranching).filter((r) => r.id === SEEDED_ENTITY).map((r) => r.line)),
 );
+
+// 116–128. CHECK 8 — shipped SQL never creates, alters, drops or grants on a schema it does not own
+//          (#283). The plan for this check numbered these 108–117; 108–115 were already taken (CHECK 7
+//          and CHECK 2/5 above), and a reused number would make every cross-reference to the old case
+//          quietly wrong — see this file's header.
+const COMMON_BLOCK = `
+/* Base View SQL for MJ_BizApps_Common: Relationships */
+IF OBJECT_ID('[\${mjSchema}_BizAppsCommon].[vwRelationships]', 'V') IS NOT NULL
+    DROP VIEW [\${mjSchema}_BizAppsCommon].[vwRelationships];
+GO
+CREATE VIEW [\${mjSchema}_BizAppsCommon].[vwRelationships]
+AS SELECT r.* FROM [\${mjSchema}_BizAppsCommon].[Relationship] AS r
+GO
+GRANT SELECT ON [\${mjSchema}_BizAppsCommon].[vwRelationships] TO [cdp_UI];
+GO
+CREATE TRIGGER [\${mjSchema}_BizAppsCommon].trgUpdateRelationship ON [\${mjSchema}_BizAppsCommon].[Relationship] AFTER UPDATE AS BEGIN SET NOCOUNT ON; END
+GO
+`;
+check(
+    'case 116: the #283 shape — DROP/CREATE VIEW, GRANT and CREATE TRIGGER in Common\'s schema are each reported',
+    (() => {
+        const hits = findForeignSchemaWrites(COMMON_BLOCK);
+        const verbs = hits.map((h) => h.verb.toUpperCase().split(/\s+/)[0]).sort().join(',');
+        return hits.length === 4 && hits.every((h) => h.schema === '${mjschema}_bizappscommon') && verbs === 'CREATE,CREATE,DROP,GRANT';
+    })(),
+    JSON.stringify(findForeignSchemaWrites(COMMON_BLOCK)),
+);
+
+const CROSS_SCHEMA_READS = `
+CREATE TABLE \${flyway:defaultSchema}.FormResponse (
+    ID UNIQUEIDENTIFIER NOT NULL,
+    RespondentPersonID UNIQUEIDENTIFIER NULL,
+    CONSTRAINT FK_FormResponse_RespondentPerson FOREIGN KEY (RespondentPersonID) REFERENCES __mj_BizAppsCommon.Person(ID)
+);
+GO
+CREATE VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS
+SELECT f.*, p.[DisplayName] AS [RespondentPerson]
+FROM [\${flyway:defaultSchema}].[FormResponse] AS f
+LEFT OUTER JOIN [\${mjSchema}_BizAppsCommon].[Person] AS p ON [f].[RespondentPersonID] = p.[ID]
+GO
+INSERT INTO [\${mjSchema}].[EntityField] ([ID]) VALUES ('00000000-0000-0000-0000-000000000001');
+EXEC [\${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sys,staging', @IncludedSchemaNames='\${flyway:defaultSchema}';
+`;
+check('case 117: a cross-schema READ (FK REFERENCES, view JOIN) and core-metadata DML are not writes',
+    findForeignSchemaWrites(CROSS_SCHEMA_READS).length === 0, JSON.stringify(findForeignSchemaWrites(CROSS_SCHEMA_READS)));
+
+const ONLY_IN_PROSE = `
+-- CREATE VIEW [\${mjSchema}_BizAppsCommon].[vwRelationships] would be wrong here
+/* DROP PROCEDURE [\${mjSchema}_BizAppsCommon].[spCreateRelationship]; */
+IF OBJECT_ID('[\${mjSchema}_BizAppsCommon].[spCreateRelationship]', 'P') IS NOT NULL PRINT 'GRANT EXECUTE ON [__mj_BizAppsCommon].[x] TO y';
+`;
+check('case 118: a foreign name in a comment or a string literal is not a write',
+    findForeignSchemaWrites(ONLY_IN_PROSE).length === 0, JSON.stringify(findForeignSchemaWrites(ONLY_IN_PROSE)));
+
+const OWN_SPELLINGS = `
+CREATE TABLE \${flyway:defaultSchema}.Form (ID INT);
+GO
+CREATE PROCEDURE [\${flyway:defaultSchema}].[spCreateForm] AS SELECT 1
+GO
+CREATE OR REPLACE VIEW __mj_BizAppsForms."vwFormUploads" AS SELECT 1;
+GRANT SELECT ON __mj_BizAppsForms."vwFormUploads" TO cdp_UI;
+GRANT EXECUTE ON FUNCTION \${flyway:defaultSchema}.fn_x() TO cdp_UI;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA "__mj_bizappsforms" TO cdp_UI;
+CREATE SCHEMA IF NOT EXISTS __mj_BizAppsForms;
+CREATE INDEX IDX_AUTO_MJ_FKEY_Form_CategoryID ON [\${flyway:defaultSchema}].[Form] ([CategoryID]);
+DROP VIEW IF EXISTS [\${mjSchema}_BizAppsForms].[vwForms];
+`;
+check('case 119: every spelling of OUR schema passes — placeholder, literal (any case, any quoting), and the teardown\'s ${mjSchema}_BizAppsForms',
+    findForeignSchemaWrites(OWN_SPELLINGS).length === 0, JSON.stringify(findForeignSchemaWrites(OWN_SPELLINGS)));
+
+const UNQUALIFIED = `
+DROP TABLE #FormsDoomed;
+DROP TRIGGER IF EXISTS "trg_update_form" ON \${flyway:defaultSchema}."Form";
+CREATE TRIGGER trg_update_form BEFORE UPDATE ON \${flyway:defaultSchema}."Form" FOR EACH ROW EXECUTE FUNCTION x();
+EXECUTE format('DROP VIEW IF EXISTS %I.%I', s, v);
+`;
+check('case 120: unqualified names, temp tables and dynamic %I.%I are not judged',
+    findForeignSchemaWrites(UNQUALIFIED).length === 0, JSON.stringify(findForeignSchemaWrites(UNQUALIFIED)));
+
+const CORE_DDL = `ALTER TABLE [\${mjSchema}].[EntityField] ADD [Oops] INT NULL;
+CREATE INDEX IX_Oops ON [__mj].[Entity] ([Name]);
+GRANT EXECUTE ON OBJECT::[\${mjSchema}].[spCreateEntity] TO [cdp_UI];
+GRANT EXECUTE ON ALL PROCEDURES IN SCHEMA __mj_BizAppsTasks TO cdp_UI;
+CREATE SCHEMA __mj_BizAppsCommon;`;
+check('case 121: core is foreign for DDL — ALTER TABLE, CREATE INDEX ON, GRANT ON OBJECT::, ON ALL ... IN SCHEMA and CREATE SCHEMA are each reported',
+    findForeignSchemaWrites(CORE_DDL).length === 5, JSON.stringify(findForeignSchemaWrites(CORE_DDL)));
+
+check('case 122: the line number is the statement\'s own line',
+    findForeignSchemaWrites('\n\n\nCREATE VIEW [__mj_BizAppsCommon].[v] AS SELECT 1')[0]?.line === 4,
+    JSON.stringify(findForeignSchemaWrites('\n\n\nCREATE VIEW [__mj_BizAppsCommon].[v] AS SELECT 1')));
+
+withFixture(
+    (root) => writeFileSync(join(root, 'migrations', EARLY), COMMON_BLOCK),
+    (violations) => {
+        const mine = violations.filter((v) => v.includes('#283'));
+        check(
+            'case 123: a foreign-schema write is reported ONCE per file and schema, naming the schema, #283 and every line',
+            mine.length === 1 &&
+                /__mj_BizAppsCommon|\$\{mjSchema\}_BizAppsCommon/.test(mine[0]) &&
+                new RegExp(`${EARLY}:\\d+(,\\d+){3}\\b`).test(mine[0]),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+withFixture(
+    (root) => {
+        mkdirSync(join(root, 'migrations-teardown'), { recursive: true });
+        mkdirSync(join(root, 'migrations-pg'), { recursive: true });
+        writeFileSync(join(root, 'migrations-teardown', 'V001__Retire.sql'), COMMON_BLOCK);
+        writeFileSync(join(root, 'migrations-pg', 'V202608010000__v0.11.x__Fixture.pg.sql'), COMMON_BLOCK);
+    },
+    (violations) => {
+        const mine = violations.filter((v) => v.includes('#283'));
+        check(
+            'case 124: migrations-teardown and migrations-pg are read too — one violation per file',
+            mine.length === 2 && mine.some((v) => v.includes('migrations-teardown')) && mine.some((v) => v.includes('migrations-pg')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+{
+    const foreignWrites = runChecks(REPO_ROOT).filter((v) => v.includes('#283'));
+    check('case 125: no shipped migration writes a schema this app does not own (the real tree, after #283)',
+        foreignWrites.length === 0, JSON.stringify(foreignWrites.slice(0, 3)));
+}
+
+// 126. The PostgreSQL mirror of #283. PG CodeGen names its triggers UNQUALIFIED and qualifies the
+//      table instead (`CREATE TRIGGER trg_update_form BEFORE UPDATE ON ${flyway:defaultSchema}."Form"`,
+//      ten of them in V202606301400), and a trigger lives in its table's schema in both dialects. So
+//      the converted twin of Common's trigger names no schema where shape 1 looks, and only the table
+//      after ON says whose it is. The third statement is the same shape in T-SQL.
+const PG_COMMON_TRIGGER = `DROP TRIGGER IF EXISTS "trg_update_relationship" ON __mj_BizAppsCommon."Relationship";
+CREATE TRIGGER trg_update_relationship BEFORE UPDATE ON __mj_BizAppsCommon."Relationship" FOR EACH ROW EXECUTE FUNCTION __mj_BizAppsCommon.fn_trg_update_relationship();
+CREATE TRIGGER trgUpdateContactMethod
+ON [\${mjSchema}_BizAppsCommon].[ContactMethod] AFTER UPDATE AS BEGIN SET NOCOUNT ON; END`;
+check('case 126: an UNQUALIFIED trigger on a foreign table is a foreign write — PG CodeGen\'s own shape, and T-SQL\'s',
+    findForeignSchemaWrites(PG_COMMON_TRIGGER).length === 3 &&
+        findForeignSchemaWrites(PG_COMMON_TRIGGER).every((h) => /_bizappscommon$/.test(h.schema)),
+    JSON.stringify(findForeignSchemaWrites(PG_COMMON_TRIGGER)));
+
+// 127. ...and a QUALIFIED trigger is still reported once, by shape 1 only. With a bare schema the
+//      trigger-by-table shape could otherwise backtrack `__mj_BizAppsCommon` to `__mj_BizAppsCommo`,
+//      find no `.` after that, and claim the statement a second time.
+const BARE_QUALIFIED_TRIGGER = 'CREATE TRIGGER __mj_BizAppsCommon.trgX ON __mj_BizAppsCommon."Relationship" AFTER UPDATE AS SELECT 1;';
+check('case 127: a schema-qualified trigger name is one write, not two',
+    findForeignSchemaWrites(BARE_QUALIFIED_TRIGGER).length === 1,
+    JSON.stringify(findForeignSchemaWrites(BARE_QUALIFIED_TRIGGER)));
+
+// 128. A GRANT that names no object reads no further than its own statement. Unbounded, it reached
+//      forward to the next `ON` in the file — here a view join, whose alias `[x]` read as a schema.
+const GRANT_WITHOUT_OBJECT = `GRANT CREATE VIEW TO [cdp_Developer]
+
+CREATE VIEW [\${flyway:defaultSchema}].[vwX] AS SELECT f.[ID] FROM [\${flyway:defaultSchema}].[Form] AS f
+JOIN [\${flyway:defaultSchema}].[FormPage] AS x ON [x].[FormID] = f.[ID]`;
+check('case 128: a GRANT with no ON stops at its statement, so a later join alias is not read as its target',
+    findForeignSchemaWrites(GRANT_WITHOUT_OBJECT).length === 0,
+    JSON.stringify(findForeignSchemaWrites(GRANT_WITHOUT_OBJECT)));
 
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);

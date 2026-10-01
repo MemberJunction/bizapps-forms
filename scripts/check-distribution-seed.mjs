@@ -86,6 +86,15 @@
  *   #39 changed `V202608081700` to do and what makes a seed portable across hosts in the first
  *   place. Bind by name and this gate can see the grant; bind by a foreign id and nothing can.
  *
+ * CHECK 8 — SHIPPED SQL NEVER CREATES, ALTERS, DROPS OR GRANTS ON A SCHEMA THIS APP DOES NOT OWN.
+ *   CodeGen writes objects for every schema the dev database holds, so a baseline regenerated next
+ *   to bizapps-common shipped Common's views, procedures and triggers as they stood on that laptop.
+ *   `mj app install` runs apps leaf-first, so on a fresh host Common installs its objects and Forms
+ *   then overwrites them — #283, where `spCreateRelationship` lost two parameters on every fresh
+ *   install. Only writes are judged; a cross-schema READ (a foreign key, a view join) is how a hard
+ *   dependency is meant to look. What it cannot read — SQL built at run time, and a few write
+ *   shapes no shipped file uses — is listed in the section's own docblock.
+ *
  * Read-only. No --fix. Exits non-zero on any violation. Node stdlib only, so it runs in CI
  * without an install step.
  */
@@ -1796,6 +1805,183 @@ function checkEntityIdReferences(repoRoot, violations) {
 }
 
 // ---------------------------------------------------------------------------
+// CHECK 8 — shipped SQL never creates, alters, drops or grants on a schema this app does not own
+// ---------------------------------------------------------------------------
+
+/**
+ * CHECK 8 — SHIPPED SQL WRITES ONLY THIS APP'S OWN SCHEMA.
+ *
+ * CodeGen emits views, CRUD procedures, triggers and grants for every entity in every schema it is
+ * pointed at, not only this app's. So when the dev database held bizapps-common, the regenerated
+ * baseline carried a full copy of Common's `vwRelationships`, `spCreateRelationship` and their
+ * siblings, written into `${mjSchema}_BizAppsCommon` — as it stood on that laptop, on that day.
+ * `mj app install` runs apps leaf-first, so on a fresh host Common installs its objects and Forms
+ * then REPLACES them with that copy. That is #283: bizapps-common's `spCreateRelationship` lost two
+ * parameters on every fresh install of Forms, and nothing in either repo could see it — Common's
+ * tests run against Common's install, and Forms' build never calls the procedure it overwrote.
+ *
+ * Only WRITES are judged: CREATE / ALTER / DROP of an object, an index's table, a trigger's table,
+ * a schema, and GRANT / DENY / REVOKE. A cross-schema READ is how a hard dependency is supposed to
+ * look — `FormResponse.RespondentPersonID REFERENCES __mj_BizAppsCommon.Person(ID)` and the view
+ * join behind it are the design (CLAUDE.md: hard FKs, not soft links) — and DML into core metadata
+ * (`INSERT INTO [${mjSchema}].[EntityField]`) is what every migration here does. Neither statement
+ * shape is read, so neither can fire.
+ *
+ * `${mjSchema}` and `__mj` count as FOREIGN. Core is not this app's to alter either, and nothing
+ * Forms ships has a reason to: DDL there would be overwritten by the next MJ upgrade at best, and
+ * break it at worst. Only the three spellings in OWNED_SCHEMA_SPELLINGS are ours.
+ *
+ * Read off the STRUCTURE mask, so CodeGen's banners (`Base View SQL for MJ_BizApps_Common: …`) and
+ * the `IF OBJECT_ID('[${mjSchema}_BizAppsCommon].[vwX]')` existence probes in front of every block
+ * are not writes — the first is a comment and the second a string.
+ *
+ * WHAT THIS CANNOT SEE, stated plainly. A statement built at run time is invisible: PostgreSQL's
+ * `EXECUTE format('DROP VIEW %I.%I', s, v)` names no schema until it runs, and a T-SQL
+ * `EXEC('CREATE …')` is a string the mask blanks. Neither is a shape CodeGen emits for its own
+ * objects, which is what #283 was. Also out of scope: `GRANT … ON SCHEMA::x`, extended properties
+ * and PG `COMMENT ON` written against another app's objects, and `sp_rename`. They are writes, and
+ * none of them has shipped here.
+ */
+
+/**
+ * This app's schema in every spelling shipped SQL uses for it, after `normaliseSchema`.
+ * `${flyway:defaultSchema}` is what the migrations write; the literal is the PG chain's (and
+ * PostgreSQL folds an unquoted one to lower case, hence comparing lower-cased); and
+ * `${mjSchema}_BizAppsForms` is the only spelling the teardown can use, since the install engine
+ * supplies no default schema to it. Deliberately NOT the same constant as CHECK 5's OWNED_SCHEMA,
+ * which reads `@IncludedSchemaNames` lists and has only ever needed the placeholder.
+ */
+const OWNED_SCHEMA_SPELLINGS = new Set(['${flyway:defaultschema}', '__mj_bizappsforms', '${mjschema}_bizappsforms']);
+
+/**
+ * One identifier part: bracketed, double-quoted, or bare. A bare part admits `{`, `}` and `:` so a
+ * placeholder stays one token — `${flyway:defaultSchema}` and `${mjSchema}_BizAppsCommon` are both
+ * schema names as far as this check is concerned. `%` is not an identifier start, which is why a
+ * PG `format()` template's `%I.%I` is never read as a name.
+ */
+const IDENTIFIER_PART = '(?:\\[[^\\]]+\\]|"[^"]+"|[A-Za-z_#@$][\\w$#@{}:]*)';
+
+/**
+ * A schema-qualified name. Only these are judged: an unqualified name lands in the migration's
+ * default schema, which is ours, and a `#temp` table is never schema-qualified — so neither needs a
+ * rule of its own, and `DROP TABLE #FormsDoomed` falls out by construction.
+ */
+const QUALIFIED_NAME = `(?<target>(?<schema>${IDENTIFIER_PART})\\s*\\.\\s*${IDENTIFIER_PART})`;
+
+/**
+ * A GRANT's object comes after a privilege list of any length, but never past its own statement:
+ * the span stops at `;` or a blank line, so a GRANT that names no object (`GRANT CREATE TABLE TO x`)
+ * cannot reach forward to the next statement's `ON`.
+ */
+const WITHIN_STATEMENT = '(?:(?!\\n\\s*\\n)[^;])*?';
+
+/** `CREATE [OR ALTER|OR REPLACE] | ALTER | DROP`, the verbs that rewrite an object. */
+const DDL_VERB = '(?:CREATE(?:\\s+OR\\s+(?:ALTER|REPLACE))?|ALTER|DROP)';
+const IF_EXISTS = '(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?';
+
+// The baseline's `DROP VIEW` / `CREATE PROCEDURE` / `CREATE TRIGGER [s].trg` blocks — #283 itself.
+const DDL_ON_OBJECT = new RegExp(
+    `\\b(?<verb>${DDL_VERB}\\s+(?:MATERIALIZED\\s+)?(?:VIEW|PROC|PROCEDURE|FUNCTION|TRIGGER|TABLE|TYPE|SYNONYM|SEQUENCE))\\s+${IF_EXISTS}${QUALIFIED_NAME}`,
+    'gi',
+);
+// CodeGen's `CREATE INDEX IDX_AUTO_MJ_FKEY_… ON [schema].[Table]`: the index lives on that table.
+const INDEX_ON_TABLE = new RegExp(
+    `\\b(?<verb>CREATE\\s+(?:UNIQUE\\s+)?(?:(?:NON)?CLUSTERED\\s+)?INDEX)\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?${IDENTIFIER_PART}\\s+ON\\s+${QUALIFIED_NAME}`,
+    'gi',
+);
+// Every CodeGen block ends `GRANT SELECT|EXECUTE ON [schema].[object] TO …`; PG adds a keyword.
+const GRANT_ON_OBJECT = new RegExp(
+    `\\b(?<verb>GRANT|DENY|REVOKE)\\b${WITHIN_STATEMENT}\\bON\\s+(?:OBJECT::|FUNCTION\\s+|PROCEDURE\\s+|TABLE\\s+|SEQUENCE\\s+)?${QUALIFIED_NAME}`,
+    'gi',
+);
+// PG's bulk form, `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA x` — the target is the schema itself.
+const GRANT_ON_ALL_IN_SCHEMA = new RegExp(
+    `\\b(?<verb>GRANT|DENY|REVOKE)\\b${WITHIN_STATEMENT}\\bON\\s+ALL\\s+\\w+\\s+IN\\s+SCHEMA\\s+(?<target>(?<schema>${IDENTIFIER_PART}))`,
+    'gi',
+);
+// The PG baseline's `CREATE SCHEMA IF NOT EXISTS __mj_BizAppsForms`, or anyone else's.
+const DDL_ON_SCHEMA = new RegExp(
+    `\\b(?<verb>(?:CREATE|ALTER|DROP)\\s+SCHEMA)\\s+${IF_EXISTS}(?<target>(?<schema>${IDENTIFIER_PART}))`,
+    'gi',
+);
+// PG CodeGen's `CREATE TRIGGER trg_update_form BEFORE UPDATE ON ${flyway:defaultSchema}."Form"`. A
+// trigger lives in its TABLE's schema in both dialects, and this shape qualifies only the table, so
+// DDL_ON_OBJECT never sees whose it is. `(?=\s)(?!\s*\.)` keeps a QUALIFIED trigger name — T-SQL
+// CodeGen's `CREATE TRIGGER [s].trgX ON [s].[T]` — out of this shape, so it is reported once, not
+// twice, and stops the bare part backtracking to a shorter token to dodge the rule.
+const TRIGGER_ON_TABLE = new RegExp(
+    `\\b(?<verb>${DDL_VERB}\\s+TRIGGER)\\s+${IF_EXISTS}${IDENTIFIER_PART}(?=\\s)(?!\\s*\\.)${WITHIN_STATEMENT}\\bON\\s+${QUALIFIED_NAME}`,
+    'gi',
+);
+
+const FOREIGN_WRITE_SHAPES = [
+    { pattern: DDL_ON_OBJECT },
+    { pattern: INDEX_ON_TABLE },
+    { pattern: GRANT_ON_OBJECT },
+    { pattern: GRANT_ON_ALL_IN_SCHEMA },
+    { pattern: DDL_ON_SCHEMA },
+    { pattern: TRIGGER_ON_TABLE },
+];
+
+/** One layer of `[]` or `""` off, then lower case — the form OWNED_SCHEMA_SPELLINGS is written in. */
+function normaliseSchema(part) {
+    const quoted = /^\[(.*)\]$|^"(.*)"$/s.exec(part);
+    return (quoted ? (quoted[1] ?? quoted[2]) : part).toLowerCase();
+}
+
+/**
+ * Every statement in `sql` that creates, alters, drops or grants on an object in a schema this app
+ * does not own, sorted by line. Pure read; exported for the spec.
+ */
+export function findForeignSchemaWrites(sql) {
+    const structure = maskSql(sql).structure;
+    const hits = [];
+    for (const { pattern } of FOREIGN_WRITE_SHAPES) {
+        for (const match of structure.matchAll(pattern)) {
+            const schema = normaliseSchema(match.groups.schema);
+            if (OWNED_SCHEMA_SPELLINGS.has(schema)) continue;
+            hits.push({
+                verb: match.groups.verb.replace(/\s+/g, ' ').toUpperCase(),
+                target: match.groups.target.replace(/\s+/g, ''),
+                schema,
+                line: structure.slice(0, match.index).split('\n').length,
+            });
+        }
+    }
+    return hits.sort((a, b) => a.line - b.line);
+}
+
+/** Read like CHECK 6 and CHECK 7: a teardown runs on a stranger's database as surely as an install. */
+const FOREIGN_WRITE_DIRS = [...SHIPPED_MIGRATION_DIRS, 'migrations-teardown'];
+
+function checkForeignSchemaWrites(repoRoot, violations) {
+    for (const { path, sql } of shippedSqlFiles(repoRoot, FOREIGN_WRITE_DIRS)) {
+        // One violation per schema per file, listing every line, for the reason CHECK 7 gives: a
+        // regenerated baseline writes a foreign schema forty times, and forty messages train skimming.
+        const bySchema = new Map();
+        for (const { schema, target, line } of findForeignSchemaWrites(sql)) {
+            if (!bySchema.has(schema)) bySchema.set(schema, { lines: new Set(), targets: new Map() });
+            bySchema.get(schema).lines.add(line);
+            // Keyed without quoting, because CodeGen spells one trigger both ways in one block
+            // (`DROP TRIGGER [s].[trgX]`, then `CREATE TRIGGER [s].trgX`) and it is one object.
+            bySchema.get(schema).targets.set(target.replace(/[[\]"]/g, '').toLowerCase(), target);
+        }
+        for (const [schema, { lines, targets }] of bySchema) {
+            violations.push(
+                `${relative(repoRoot, path)}:${[...lines].sort((a, b) => a - b).join(',')} creates, alters, drops or ` +
+                    `grants on objects in \`${schema}\`, a schema this app does not own: ${[...targets.values()].join(', ')}. ` +
+                    '`mj app install` runs apps leaf-first, so the owner installs these objects and then this file ' +
+                    'replaces them with whatever copy it carries — #283: bizapps-common\'s `spCreateRelationship` lost ' +
+                    'two parameters on every fresh install of Forms. This is CodeGen output for another app\'s ' +
+                    'entities: keep CodeGen scoped to `__mj_BizAppsForms` (`includeSchemas` in mj.config.cjs) and delete the ' +
+                    'foreign blocks. A cross-schema READ — a foreign key, a view join — is fine and is not what this ' +
+                    'reports; only CREATE / ALTER / DROP and GRANT / DENY / REVOKE count.',
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Entry point. Skipped when imported (by the spec and the mutation harness).
 // ---------------------------------------------------------------------------
 
@@ -1808,6 +1994,7 @@ export function runChecks(repoRoot = REPO_ROOT) {
     checkSchemaSyncScope(repoRoot, violations);
     checkExtendedPropertyValueTypes(repoRoot, violations);
     checkEntityIdReferences(repoRoot, violations);
+    checkForeignSchemaWrites(repoRoot, violations);
     return violations;
 }
 
@@ -1824,7 +2011,7 @@ if (process.argv[1] && process.argv[1].endsWith('check-distribution-seed.mjs')) 
         '✅ Distribution gate passed — shipped SQL uses only install-supplied placeholders; no post-hardening ' +
             'seed re-grants the Form Respondent role unfiltered access; no new core-metadata insert is guarded ' +
             'on its own ID alone; no shipped schema sync reaches a schema this app does not own; no extended-property ' +
-            'write hands `sql_variant` a MAX-typed value; and every `__mj.Entity` id shipped SQL references is one ' +
-            'shipped SQL also seeds.',
+            'write hands `sql_variant` a MAX-typed value; every `__mj.Entity` id shipped SQL references is one ' +
+            'shipped SQL also seeds; and no shipped DDL or grant reaches a schema this app does not own.',
     );
 }

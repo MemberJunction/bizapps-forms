@@ -49,6 +49,10 @@
  *     `check-distribution-seed.spec.mjs` case 43 covers it, but no narrow mutant expresses it: every
  *     candidate also breaks the inline arguments case 26 already binds, so it is killed for the
  *     wrong reason. Coverage, not mutation, is the tool for that one.
+ *   - a `#temp` skip in CHECK 8. There is none to mutate: only schema-qualified names are judged, and
+ *     a temp table is never qualified, so `DROP TABLE #FormsDoomed` falls out by construction.
+ *     `check-distribution-seed.spec.mjs` case 120 still asserts it, so a regex change that starts
+ *     reading unqualified names is caught there.
  *
  * Node stdlib only and no build step, same constraint as the gate and its spec, so CI runs it
  * without an install.
@@ -59,12 +63,15 @@
  * kept only to say how far a local number sits from the runner's. The step grew by more than the
  * mutant count (it was 40s for 66 before CHECK 7): each mutant runs the whole spec in a fresh
  * process, and CHECK 7 reads every shipped `.sql` file TWICE per `runChecks` (once for the seed set,
- * once for the references — the two `shippedSqlFiles` calls in `checkEntityIdReferences`). The spec
- * invokes `runChecks(REPO_ROOT)` FOUR times against the real tree, not once: line 141 calls it twice
- * on one line, and the sql_variant case twice more. That is 4 x 75 shipped-file reads per spec run,
- * x 96 mutants — which is where the added minutes are. The fixtures are the cheap half: the spec
- * builds 99 of them (measured at `mkdtempSync`, not counted off the source — the table-driven loops
- * multiply 15 call sites into 99), and each is a tree of two or three files. It no longer copies
+ * once for the references — the two `shippedSqlFiles` calls in `checkEntityIdReferences`), and
+ * CHECK 8 reads each one once more. The spec invokes `runChecks(REPO_ROOT)` FIVE times against the
+ * real tree, not once: "the repository itself passes" calls it twice on one line, the sql_variant
+ * case twice more, and case 125 once. That is 2,075 real-tree `.sql` reads per spec run (counted at
+ * `readFileSync` on 2026-10-01, across every check), x 118 mutants — which is where the minutes are.
+ * CHECK 8 took a laptop run to 542s on 2026-10-01; the runner has not been re-measured since CHECK 7, so
+ * read "seven minutes" above as a floor. The fixtures are the cheap half: the spec
+ * builds 106 of them (measured at `mkdtempSync`, not counted off the source — the table-driven loops
+ * multiply 22 call sites into 106), and each is a tree of two or three files. It no longer copies
  * the `metadata/` tree into each of them — that was CHECK 1's, and #105 removed the check and the
  * copy together. Each run is capped by SPEC_TIMEOUT_MS:
  * `mask/block-comment-first-close` injects a `while` loop into the gate, and a mutant that hangs
@@ -373,6 +380,48 @@ const MUTANTS = [
     ['check7/uuid-case', 'a referenced id is normalised to upper case, so CodeGen writing the seed lower-case and the reference upper-case is not read as two different entities',
         '            for (const id of read(match)) found.push({ id: id.toUpperCase(), line, shape });',
         '            for (const id of read(match)) found.push({ id, line, shape });'],
+    // --- CHECK 8: shipped SQL never creates, alters, drops or grants on a schema it does not own --
+    // The failure mode is #283's: a foreign write the check stops reading ships, and the owner's
+    // objects are silently replaced on every fresh install. So every shape is its own mutant, and so
+    // is every spelling of "ours" — dropping one of THOSE fails loudly on the real tree, which is
+    // the direction this file prefers, but only the spec says which spelling broke.
+    ['check8/registered', 'CHECK 8 runs at all — an unregistered check reads no SQL and reports nothing',
+        '    checkForeignSchemaWrites(repoRoot, violations);\n', ''],
+    ['check8/shape-ddl', 'CREATE / ALTER / DROP of a schema-qualified view, procedure, trigger or table is read — the #283 baseline blocks themselves',
+        '    { pattern: DDL_ON_OBJECT },', '    { pattern: /(?!)/gi },'],
+    ['check8/shape-index', '`CREATE INDEX … ON <schema>.<table>` is read, with the TABLE as the target',
+        '    { pattern: INDEX_ON_TABLE },', '    { pattern: /(?!)/gi },'],
+    ['check8/shape-grant', 'GRANT / DENY / REVOKE `ON <schema>.<object>` is read, including `OBJECT::` — the line every CodeGen block ends with',
+        '    { pattern: GRANT_ON_OBJECT },', '    { pattern: /(?!)/gi },'],
+    ['check8/shape-grant-all', "PG's bulk `ON ALL … IN SCHEMA <schema>` grant is read",
+        '    { pattern: GRANT_ON_ALL_IN_SCHEMA },', '    { pattern: /(?!)/gi },'],
+    ['check8/shape-schema', 'CREATE / ALTER / DROP SCHEMA is read',
+        '    { pattern: DDL_ON_SCHEMA },', '    { pattern: /(?!)/gi },'],
+    ['check8/shape-trigger-table', "an UNQUALIFIED trigger is judged by its table's schema — PG CodeGen's trigger shape, and the converted twin of #283",
+        '    { pattern: TRIGGER_ON_TABLE },', '    { pattern: /(?!)/gi },'],
+    ['check8/trigger-qualified-excluded', 'a schema-qualified trigger is left to shape 1, so T-SQL CodeGen\'s `CREATE TRIGGER [s].trgX ON [s].[T]` is one write, not two',
+        '${IDENTIFIER_PART}(?=\\\\s)(?!\\\\s*\\\\.)${WITHIN_STATEMENT}', '${IDENTIFIER_PART}${WITHIN_STATEMENT}'],
+    ['check8/trigger-no-backtrack', 'the trigger name must END at whitespace, so a bare `schema.trgX` cannot backtrack to a shorter token and be claimed twice',
+        '${IDENTIFIER_PART}(?=\\\\s)(?!\\\\s*\\\\.)', '${IDENTIFIER_PART}(?!\\\\s*\\\\.)'],
+    ['check8/within-statement', 'a GRANT reads no further than its own statement, so one naming no object cannot take a later join alias for its target',
+        "const WITHIN_STATEMENT = '(?:(?!\\\\n\\\\s*\\\\n)[^;])*?';", "const WITHIN_STATEMENT = '[^;]*?';"],
+    ['check8/mask', 'statements are read off the structure mask, so a foreign name in a comment banner or an OBJECT_ID string is not a write',
+        '    const structure = maskSql(sql).structure;', '    const structure = sql;'],
+    ['check8/normalise-quotes', 'one layer of `[]` / `""` is stripped before comparing, so `[${flyway:defaultSchema}]` is ours',
+        '    return (quoted ? (quoted[1] ?? quoted[2]) : part).toLowerCase();', '    return part.toLowerCase();'],
+    ['check8/normalise-case', 'the schema is compared lower-cased, so the PG chain\'s `__mj_BizAppsForms` and `"__mj_bizappsforms"` are the same schema',
+        '    return (quoted ? (quoted[1] ?? quoted[2]) : part).toLowerCase();', '    return quoted ? (quoted[1] ?? quoted[2]) : part;'],
+    ['check8/owned-literal', 'the literal `__mj_BizAppsForms` is ours — the PG chain spells it that way',
+        "'${flyway:defaultschema}', '__mj_bizappsforms', '${mjschema}_bizappsforms'", "'${flyway:defaultschema}', '${mjschema}_bizappsforms'"],
+    ['check8/owned-teardown', '`${mjSchema}_BizAppsForms` is ours — the only spelling a teardown has',
+        "'__mj_bizappsforms', '${mjschema}_bizappsforms']", "'__mj_bizappsforms']"],
+    ['check8/core-is-foreign', '`${mjSchema}` is NOT ours — DDL on core is refused even though DML into core metadata is routine',
+        "'${mjschema}_bizappsforms']);", "'${mjschema}_bizappsforms', '${mjschema}', '__mj']);"],
+    ['check8/teardown-scanned', 'migrations-teardown is read by CHECK 8 too — a teardown runs on a stranger\'s database as surely as an install',
+        "const FOREIGN_WRITE_DIRS = [...SHIPPED_MIGRATION_DIRS, 'migrations-teardown'];", 'const FOREIGN_WRITE_DIRS = SHIPPED_MIGRATION_DIRS;'],
+    ['check8/one-per-file', 'writes are reported once per (file, schema) with every line, not once per statement',
+        '        for (const { schema, target, line } of findForeignSchemaWrites(sql)) {',
+        "        for (const { schema: owner, target, line } of findForeignSchemaWrites(sql)) { const schema = `${owner}:${line}`;"],
 ];
 
 /**
