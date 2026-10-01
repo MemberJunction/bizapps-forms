@@ -1850,10 +1850,22 @@ function checkEntityIdReferences(repoRoot, violations) {
  *   - `ALTER SCHEMA x TRANSFER s.obj` (the SOURCE schema; the destination is read), extended
  *     properties and PG `COMMENT ON` written against another app's objects, and `sp_rename`.
  * None of these is a shape CodeGen emits for another app's objects, which is what #283 was. Two of
- * them do ship, read by hand on 2026-10-01: dynamic SQL in V202609011500 (DDL on this app's own
- * `FormDistribution` and `spCreateFormDistribution`) and in the teardown (row DML only, no DDL), and
- * PG `CREATE EXTENSION`, which names no schema. Widen a shape — with a spec case and a mutant — the
- * day one is needed.
+ * them do ship. Every shipped file that builds SQL at run time (grep `EXEC\s*\(|sp_executesql|
+ * EXECUTE\s+format` over all three directories, 2026-10-01):
+ *   - T-SQL B202606281200: `EXEC('CREATE SCHEMA __mj_BizAppsForms')` — this app's own schema.
+ *   - V202609011500: DDL on this app's own `FormDistribution` and `spCreateFormDistribution`.
+ *   - the teardown: row DML only, no DDL.
+ *   - PG B202606281200: twenty `EXECUTE format('DROP VIEW IF EXISTS %I.%I CASCADE', …)` loops, each
+ *     dropping whatever views `pg_depend` says read a Forms column before that column's type
+ *     changes. The schema is a run-time value; on the empty history a `B` file runs on, only this
+ *     app's views can depend on its columns.
+ *   - PG V202608072330 and V202608081200: view-replace blocks, which drop one of this app's views
+ *     (`v_target_schema` is the literal `'__mj_BizAppsForms'`) and then try to re-create each
+ *     dependent view captured from `pg_depend`, verbatim and in its own schema, warning rather than
+ *     failing on any that will not restore. The replacement view is a `$vsql$` literal this check
+ *     does read.
+ * And PG `CREATE EXTENSION`, which names no schema. Widen a shape — with a spec case and a mutant —
+ * the day one is needed.
  */
 
 /**
