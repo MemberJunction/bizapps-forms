@@ -56,13 +56,13 @@ const FORM_RESPONSE_ANSWERS = 'D03BCDF5-0B32-4EA8-88E8-F73D70A90810';
  * A minimal repo-shaped fixture: whatever migrations the case needs, plus the background below.
  *
  * It used to copy the whole real `metadata/` tree into every fixture, because CHECK 1 hashed it.
- * With CHECK 1 gone the gate reads only SQL, so the copy would be 106 pointless tree copies per
+ * With CHECK 1 gone the gate reads only SQL, so the copy would be 108 pointless tree copies per
  * run — and the mutation harness runs this whole spec once per mutant.
  *
- * 106 is measured, not counted by eye: `mkdtempSync` fires that many times per run. There are only 22
- * `withFixture` call sites; the rest come from the table-driven loops, which is exactly why counting
+ * 108 is measured, not counted by eye: `mkdtempSync` fires that many times per run. There are only 22
+ * `withFixture` call sites and the two bare roots of cases 138–139; the rest come from the table-driven loops, which is exactly why counting
  * call sites off the source gives the wrong answer and measuring gives the right one. It was 87
- * before CHECK 7 and is 106 with CHECK 8; re-measure when you add fixtures rather than adjusting the number by arithmetic.
+ * before CHECK 7, 106 with CHECK 8 and 108 with cases 138–139; re-measure when you add fixtures rather than adjusting the number by arithmetic.
  *
  * THE BACKGROUND SEED, added with CHECK 7. That check rules on the whole corpus — every entity id
  * shipped SQL references must be one shipped SQL SEEDS — so a fixture that binds a grant to
@@ -2255,6 +2255,29 @@ MERGE [${fd}].[Form] AS t USING [${fd}].[FormPage] AS s ON t.[ID] = s.[FormID] W
 check('case 137: a GRANT stops at its grantee\'s TO, so with no statement boundary at all it still cannot reach a MERGE\'s ON',
     findForeignSchemaWrites(NO_OBJECT_GRANT_THEN_MERGE).length === 0,
     JSON.stringify(findForeignSchemaWrites(NO_OBJECT_GRANT_THEN_MERGE)));
+
+// 138–139. The gate's postcondition on its own input: a run that read no shipped migration is a
+//          failure, not a pass. Every check skips a missing directory and reads only top-level
+//          `.sql`, so before this a renamed `migrations/`, or its files moved into a `v1/`
+//          subfolder, printed the full success line having inspected nothing.
+function withBareRoot(build, assert) {
+    const root = mkdtempSync(join(tmpdir(), 'dist-gate-'));
+    try {
+        build(root);
+        assert(runChecks(root));
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+}
+withBareRoot(() => {}, (violations) =>
+    check('case 138: a tree with no `migrations/` directory fails — the gate inspected nothing',
+        violations.some((v) => /no shipped migration/i.test(v)), JSON.stringify(violations)));
+withBareRoot((root) => {
+    mkdirSync(join(root, 'migrations', 'v1'), { recursive: true });
+    writeFileSync(join(root, 'migrations', 'v1', 'V202701010000__x.sql'), 'SELECT 1;\n');
+}, (violations) =>
+    check('case 139: `.sql` only in a subfolder of `migrations/` fails the same way — the read is not recursive',
+        violations.some((v) => /no shipped migration/i.test(v)), JSON.stringify(violations)));
 
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);

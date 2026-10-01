@@ -67,12 +67,12 @@
  * CHECK 8 reads each one once more. The spec invokes `runChecks(REPO_ROOT)` ONCE against the real
  * tree and every real-tree case filters that one result (it used to be five calls, 2,075 reads). That
  * is 419 real-tree `.sql` reads per spec run (counted at `readFileSync` on 2026-10-01, across every
- * check, including cases 106–107's direct reads), x 127 mutants — which is where the minutes are.
+ * check, including cases 106–107's direct reads), x 128 mutants — which is where the minutes are.
  * CHECK 8 took a laptop run to 542s on 2026-10-01 with five real-tree calls; collapsing them to one
  * brought the same laptop to 122s for 127 mutants the same day. The runner has not been re-measured
  * since CHECK 7, so the "seven minutes" above is stale in the other direction now — re-measure it. The fixtures are the cheap half: the spec
- * builds 106 of them (measured at `mkdtempSync`, not counted off the source — the table-driven loops
- * multiply 22 call sites into 106), and each is a tree of two or three files. It no longer copies
+ * builds 108 of them (measured at `mkdtempSync`, not counted off the source — the table-driven loops
+ * multiply 22 `withFixture` call sites, plus cases 138–139's two bare roots, into 108), and each is a tree of two or three files. It no longer copies
  * the `metadata/` tree into each of them — that was CHECK 1's, and #105 removed the check and the
  * copy together. Each run is capped by SPEC_TIMEOUT_MS:
  * `mask/block-comment-first-close` injects a `while` loop into the gate, and a mutant that hangs
@@ -442,6 +442,8 @@ const MUTANTS = [
     ['check8/one-per-file', 'writes are reported once per (file, schema) with every line, not once per statement',
         '        for (const { schema, target, line } of findForeignSchemaWrites(sql)) {',
         "        for (const { schema: owner, target, line } of findForeignSchemaWrites(sql)) { const schema = `${owner}:${line}`;"],
+    ['postcondition/inspected-something', 'a run that read no top-level migration fails rather than printing the success line',
+        '    if (count === 0) {', '    if (count < 0) {'],
 ];
 
 /**

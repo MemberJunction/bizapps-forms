@@ -2009,9 +2009,29 @@ function checkForeignSchemaWrites(repoRoot, violations) {
 // Entry point. Skipped when imported (by the spec and the mutation harness).
 // ---------------------------------------------------------------------------
 
+/**
+ * The gate's postcondition on its own input. Every check skips a directory that does not exist and
+ * reads only top-level `.sql` (see `shippedSqlFiles`), so a tree whose `migrations/` was renamed, or
+ * whose files moved into a subfolder, produces no violations from any of them — and "read nothing"
+ * would print the same success line as "read everything and it was clean". Counted, not read: the
+ * checks below read the files themselves.
+ */
+function checkSomethingWasInspected(repoRoot, violations) {
+    const dir = join(repoRoot, 'migrations');
+    const count = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.sql')).length : 0;
+    if (count === 0) {
+        violations.push(
+            'migrations/ holds no shipped migration (no top-level .sql file), so every check inspected nothing ' +
+                'and a pass would mean nothing. The gate reads `migrations/` flat (not recursively): restore ' +
+                'it, or move the files back out of any subfolder.',
+        );
+    }
+}
+
 /** Runs every check against a repo root and returns the violations found. */
 export function runChecks(repoRoot = REPO_ROOT) {
     const violations = [];
+    checkSomethingWasInspected(repoRoot, violations);
     checkPlaceholders(repoRoot, violations);
     checkRespondentGrants(repoRoot, violations);
     checkIdOnlyGuards(repoRoot, violations);
