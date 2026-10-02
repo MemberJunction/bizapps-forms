@@ -1,0 +1,119 @@
+import { describe, expect, it } from 'vitest';
+import {
+  RelatedEntitySectionKey,
+  ResolveFormContributions,
+} from '@memberjunction/ng-base-forms/dist/lib/panel-slot/form-contribution.js';
+import {
+  BuildPersonFormResponsesFilter,
+  FormatResponseWhen,
+  PERSON_FORMS_REGISTRATION,
+  PERSON_FORMS_SECTION_KEY,
+  ToPersonFormResponseRows,
+  type PersonFormResponseRaw,
+} from './person-form-responses.model';
+
+const PEOPLE = 'MJ_BizApps_Common: People';
+const RESPONSES = 'MJ_BizApps_Forms: Form Responses';
+const REL = {
+  RelatedEntity: RESPONSES,
+  RelatedEntityID: '11111111-1111-1111-1111-111111111111',
+  RelatedEntityJoinField: 'RespondentPersonID',
+  DisplayInForm: true,
+};
+
+describe('PERSON_FORMS_REGISTRATION', () => {
+  it('targets People, after-related, with the forms key and no join field', () => {
+    expect(PERSON_FORMS_REGISTRATION.entity).toBe('MJ_BizApps_Common: People');
+    expect(PERSON_FORMS_REGISTRATION.slot).toBe('after-related');
+    expect(PERSON_FORMS_REGISTRATION.relatedEntity).toBe(RESPONSES);
+    expect(PERSON_FORMS_REGISTRATION.contributionKey).toBe('forms');
+    expect(PERSON_FORMS_SECTION_KEY).toBe('forms');
+    expect(PERSON_FORMS_REGISTRATION.relatedJoinField).toBeUndefined();
+  });
+
+  it('claims the stock grid and wins as the only registered contribution', () => {
+    const r = ResolveFormContributions({
+      EntityName: PEOPLE,
+      RelatedEntities: [REL],
+      IsaChildEntityIDs: [],
+      Registrations: [{ Priority: 0, Metadata: PERSON_FORMS_REGISTRATION }],
+      BakedSectionKeys: [],
+      ShowRelatedEntities: true,
+    });
+    expect(r.StockGrids).toEqual([]);
+    expect(r.Winners).toHaveLength(1);
+    expect(r.Winners[0].Kind).toBe('registered');
+    expect(r.Winners[0].ContributionKey).toBe('forms');
+  });
+
+  it('hides a baked grid on a host whose Person form was regenerated', () => {
+    const key = RelatedEntitySectionKey(REL, [REL]);
+    const r = ResolveFormContributions({
+      EntityName: PEOPLE,
+      RelatedEntities: [REL],
+      IsaChildEntityIDs: [],
+      Registrations: [{ Priority: 0, Metadata: PERSON_FORMS_REGISTRATION }],
+      BakedSectionKeys: [key],
+      ShowRelatedEntities: true,
+    });
+    expect(r.HiddenBakedSectionKeys).toContain(key);
+  });
+
+  it('counter-example: adding relatedJoinField leaves a stock grid mounted', () => {
+    const r = ResolveFormContributions({
+      EntityName: PEOPLE,
+      RelatedEntities: [REL],
+      IsaChildEntityIDs: [],
+      Registrations: [
+        { Priority: 0, Metadata: { ...PERSON_FORMS_REGISTRATION, relatedJoinField: 'RespondentPersonID' } },
+      ],
+      BakedSectionKeys: [],
+      ShowRelatedEntities: true,
+    });
+    expect(r.StockGrids.length).toBeGreaterThan(0);
+  });
+});
+
+describe('BuildPersonFormResponsesFilter', () => {
+  it('returns the exact predicate for a GUID', () => {
+    const id = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    expect(BuildPersonFormResponsesFilter(id)).toBe(`RespondentPersonID='${id}'`);
+  });
+  it.each(['', "x' OR 1=1 --"])('rejects %j', (bad) => {
+    expect(() => BuildPersonFormResponsesFilter(bad)).toThrow(/GUID/i);
+  });
+});
+
+describe('ToPersonFormResponseRows', () => {
+  const mk = (over: Partial<PersonFormResponseRaw>): PersonFormResponseRaw => ({
+    ID: 'a', FormID: 'f', Form: 'Intake', Status: 'Complete',
+    StartedAt: null, SubmittedAt: null, __mj_CreatedAt: '2026-01-01T00:00:00Z', ...over,
+  });
+
+  it('maps tone, in-progress, dates and preserves order', () => {
+    const rows = ToPersonFormResponseRows([
+      mk({ ID: '1', Status: 'Complete', StartedAt: '2026-01-02T10:00:00Z', SubmittedAt: '2026-01-02T10:05:00Z' }),
+      mk({ ID: '2', Status: 'Partial', StartedAt: '2026-01-03T10:00:00Z' }),
+      mk({ ID: '3', Status: 'Disqualified' }),
+    ]);
+    expect(rows.map((r) => r.ResponseID)).toEqual(['1', '2', '3']);
+    expect(rows.map((r) => r.Tone)).toEqual(['success', 'warning', 'danger']);
+    expect(rows.map((r) => r.IsInProgress)).toEqual([false, true, false]);
+    expect(rows[0].StartedAt).toBeInstanceOf(Date);
+    expect(rows[0].SubmittedAt).toBeInstanceOf(Date);
+    expect(rows[1].SubmittedAt).toBeNull();
+    expect(rows[2].StartedAt).toBeNull();
+    expect(rows[0].FormName).toBe('Intake');
+  });
+});
+
+describe('FormatResponseWhen', () => {
+  it('renders an em dash for null', () => {
+    expect(FormatResponseWhen(null)).toBe('—');
+  });
+  it('renders a date', () => {
+    const s = FormatResponseWhen(new Date('2026-01-02T10:00:00Z'));
+    expect(s.length).toBeGreaterThan(0);
+    expect(s).not.toContain('Invalid');
+  });
+});
