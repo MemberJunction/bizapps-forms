@@ -62,6 +62,9 @@ describe('PERSON_FORMS_REGISTRATION', () => {
   });
 
   it('counter-example: adding relatedJoinField leaves a stock grid mounted', () => {
+    // MJ resolver defect, filed as MemberJunction/MJ#4990: with both contributionKey and
+    // relatedJoinField set, the stock grid key is never claimed. If this test flips, MJ fixed it
+    // and the registration may name RespondentPersonID explicitly.
     const r = ResolveFormContributions({
       EntityName: PEOPLE,
       RelatedEntities: [REL],
@@ -99,7 +102,9 @@ describe('ToPersonFormResponseRows', () => {
       mk({ ID: '3', Status: 'Disqualified' }),
     ]);
     expect(rows.map((r) => r.ResponseID)).toEqual(['1', '2', '3']);
-    expect(rows.map((r) => r.Tone)).toEqual(['success', 'warning', 'danger']);
+    // Agrees with Forms' own Responses list: only Complete is coloured success; Partial is
+    // warning because the issue requires an in-progress response to be clearly marked.
+    expect(rows.map((r) => r.Tone)).toEqual(['success', 'warning', 'neutral']);
     expect(rows.map((r) => r.IsInProgress)).toEqual([false, true, false]);
     expect(rows[0].StartedAt).toBeInstanceOf(Date);
     expect(rows[0].SubmittedAt).toBeInstanceOf(Date);
@@ -115,12 +120,12 @@ describe('ToPersonFormResponseRows', () => {
     expect(row.SubmittedText).toBe('—');
   });
 
-  it('treats a status a later CHECK widening adds as a warning, not in progress', () => {
+  it('treats a status a later CHECK widening adds as neutral, not in progress', () => {
     // The Raw type only admits today's statuses; the server can still send a newer one.
     const widened = (status: string): PersonFormResponseRaw =>
       mk({ Status: status as ResponseStatus });
     const [row] = ToPersonFormResponseRows([widened('Abandoned')]);
-    expect(row.Tone).toBe('warning');
+    expect(row.Tone).toBe('neutral');
     expect(row.IsInProgress).toBe(false);
   });
 

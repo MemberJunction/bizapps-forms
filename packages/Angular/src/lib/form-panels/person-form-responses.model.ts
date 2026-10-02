@@ -2,12 +2,14 @@
  * Pure model for the "Forms" section on Common's Person record form (#285).
  *
  * `relatedJoinField` is deliberately NOT set on the registration. Reproduced against MJ
- * 6.1.4's real `ResolveFormContributions`: with both `contributionKey` and
- * `relatedJoinField` set, the stock grid key `related:<entity>:RespondentPersonID` is never
- * claimed, so MJ's stock related-entity grid still mounts beside this panel. Omitting it
- * claims every FK from Form Responses to People, and there is exactly one
- * (RespondentPersonID). The spec pins the counter-example, so if MJ fixes the resolver that
- * test flips and tells us the field may be added.
+ * 6.1.4's real `ResolveFormContributions` and filed upstream as MemberJunction/MJ#4990: with
+ * both `contributionKey` and `relatedJoinField` set, the stock grid key
+ * `related:<entity>:RespondentPersonID` is never claimed, so MJ's stock related-entity grid
+ * still mounts beside this panel. Omitting it claims EVERY FK from Form Responses to People,
+ * which is correct only while there is exactly one: `FK_FormResponse_RespondentPerson`
+ * (FormResponse.RespondentPersonID -> Common Person). A second FK to Person would be silently
+ * claimed by this panel too — revisit this registration if one is ever added. The spec pins the
+ * counter-example, so if MJ fixes the resolver that test flips and the field may be added.
  */
 import type { FormPanelRegistrationMetadata } from '@memberjunction/ng-base-forms';
 import { FORMS_ENTITY } from '../shared/entity-names';
@@ -38,7 +40,12 @@ export interface PersonFormResponseRaw {
   __mj_CreatedAt: Date | string;
 }
 
-export type PersonFormResponseTone = 'success' | 'warning' | 'danger';
+/**
+ * Badge tone. Agrees with Forms' own Responses list (only Complete is coloured success), except
+ * that Partial is `warning` because an in-progress response must be clearly marked. `neutral`
+ * renders the plain badge with no modifier.
+ */
+export type PersonFormResponseTone = 'success' | 'warning' | 'neutral';
 
 export interface PersonFormResponseRow {
   ResponseID: string;
@@ -67,8 +74,8 @@ export function BuildPersonFormResponsesFilter(personId: string): string {
 function toneFor(status: ResponseStatus): PersonFormResponseTone {
   switch (status) {
     case 'Complete': return 'success';
-    case 'Disqualified': return 'danger';
-    default: return 'warning'; // Partial, and any status a later CHECK widening adds
+    case 'Partial': return 'warning';
+    default: return 'neutral'; // Disqualified, and any status a later CHECK widening adds
   }
 }
 

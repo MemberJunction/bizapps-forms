@@ -31,12 +31,20 @@ describe('Person Forms panel wiring', () => {
     );
   });
 
-  it('mounts the list only for a saved record whose section is expanded', () => {
-    // Lazy by design: a collapsed section must not run the query.
-    // The unsaved branch comes first, so the list sits behind both conditions.
+  it('mounts the list behind the unsaved branch and the expansion latch', () => {
+    // Lazy until first expanded, then kept mounted; the latch itself is exercised for real in
+    // person-form-responses.panel.spec.ts. This pins that the template uses it.
     expect(panel()).toMatch(
-      /@if\s*\(\s*!Record\.IsSaved\s*\)\s*\{[\s\S]*?\}\s*@else if\s*\(\s*FormComponent\.IsSectionExpanded\(SectionKey\)\s*\)\s*\{\s*<mjf-person-form-responses-list/,
+      /@if\s*\(\s*!Record\.IsSaved\s*\)\s*\{[\s\S]*?\}\s*@else if\s*\(\s*ListMounted\s*\)\s*\{\s*<mjf-person-form-responses-list/,
     );
+  });
+
+  it('shows the row count in the section header (accordion layout reads BadgeCount)', () => {
+    expect(panel()).toContain('[BadgeCount]="FormComponent.GetSectionRowCount(SectionKey)"');
+  });
+
+  it('pads the unsaved message off the card edge with tokens', () => {
+    expect(panel()).toMatch(/\.pfr-unsaved\s*\{[^}]*padding:\s*var\(--mjf-gap\)\s+var\(--mjf-card-pad-sm\)/);
   });
 
   it('says why the section is empty on an unsaved record instead of rendering nothing', () => {
@@ -67,6 +75,20 @@ describe('Person Forms panel wiring', () => {
 
   it('gives the form-name button a minimum tap height from the tap token', () => {
     expect(list()).toMatch(/\.pfr-open\s*\{[^}]*min-height:\s*var\(--mjf-tap\)/);
+  });
+
+  it('pads the loading, error and empty states off the card edge with tokens', () => {
+    // related-entity panels have zero content padding; the table pads its own cells.
+    const source = list();
+    expect(source).toMatch(/\.pfr-state\s*\{[^}]*padding:\s*var\(--mjf-gap\)\s+var\(--mjf-card-pad-sm\)/);
+    expect(source.match(/class="pfr-state"/g)?.length).toBe(3);
+  });
+
+  it('gives a neutral status a plain badge rather than a modifier class', () => {
+    const source = list();
+    expect(source).not.toContain('mjf-badge--{{');
+    expect(source).toContain(`[class.mjf-badge--success]="r.Tone === 'success'"`);
+    expect(source).toContain(`[class.mjf-badge--warning]="r.Tone === 'warning'"`);
   });
 
   it('binds pre-formatted date text rather than formatting in the template', () => {
