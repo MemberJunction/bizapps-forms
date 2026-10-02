@@ -11,9 +11,11 @@ import {
   ToPersonFormResponseRows,
   type PersonFormResponseRaw,
 } from './person-form-responses.model';
+import { FORMS_ENTITY } from '../shared/entity-names';
+import type { ResponseStatus } from '../responses/response-models';
 
 const PEOPLE = 'MJ_BizApps_Common: People';
-const RESPONSES = 'MJ_BizApps_Forms: Form Responses';
+const RESPONSES = FORMS_ENTITY.FormResponse;
 const REL = {
   RelatedEntity: RESPONSES,
   RelatedEntityID: '11111111-1111-1111-1111-111111111111',
@@ -104,6 +106,28 @@ describe('ToPersonFormResponseRows', () => {
     expect(rows[1].SubmittedAt).toBeNull();
     expect(rows[2].StartedAt).toBeNull();
     expect(rows[0].FormName).toBe('Intake');
+  });
+
+  it('pre-formats the display dates, and marks a missing one with a dash', () => {
+    const started = '2026-01-02T10:00:00Z';
+    const [row] = ToPersonFormResponseRows([mk({ StartedAt: started, SubmittedAt: null })]);
+    expect(row.StartedText).toBe(FormatResponseWhen(new Date(started)));
+    expect(row.SubmittedText).toBe('—');
+  });
+
+  it('treats a status a later CHECK widening adds as a warning, not in progress', () => {
+    // The Raw type only admits today's statuses; the server can still send a newer one.
+    const widened = (status: string): PersonFormResponseRaw =>
+      mk({ Status: status as ResponseStatus });
+    const [row] = ToPersonFormResponseRows([widened('Abandoned')]);
+    expect(row.Tone).toBe('warning');
+    expect(row.IsInProgress).toBe(false);
+  });
+
+  it('maps an unparseable date string to null and a dash', () => {
+    const [row] = ToPersonFormResponseRows([mk({ StartedAt: 'not a date' })]);
+    expect(row.StartedAt).toBeNull();
+    expect(row.StartedText).toBe('—');
   });
 });
 

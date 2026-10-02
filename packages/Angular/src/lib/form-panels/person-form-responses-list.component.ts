@@ -12,7 +12,6 @@ import { FORMS_UI_CSS } from '../shared';
 import { FORMS_ENTITY } from '../shared/entity-names';
 import {
   BuildPersonFormResponsesFilter,
-  FormatResponseWhen,
   PERSON_FORM_RESPONSE_FIELDS,
   ToPersonFormResponseRows,
   type PersonFormResponseRaw,
@@ -21,11 +20,12 @@ import {
 
 type ListState = 'loading' | 'ready' | 'error';
 
-const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded. Reload the record to try again.";
+// No advice to reload the record: a record refresh does not remount this list. Retry does.
+const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded.";
 
 /**
  * The body of the Person "Forms" section: every form response linked to one person, newest
- * first. Loads once when mounted — the panel mounts it only while the section is expanded —
+ * first. Loads when mounted (the panel mounts it only while the section is expanded) and again on Retry,
  * and reports the row count so the section header can show it.
  */
 @Component({
@@ -45,6 +45,10 @@ const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded. R
           <span class="mjf-empty-icon"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i></span>
           <span class="mjf-empty-title">Forms could not be loaded</span>
           <p class="mjf-empty-body">{{ ErrorMessage() }}</p>
+          <button type="button" class="mjf-btn mjf-btn--sm" (click)="Retry()">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+            Retry
+          </button>
         </div>
       }
       @default {
@@ -81,7 +85,7 @@ const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded. R
                     <td>
                       <span class="mjf-badge mjf-badge--{{ r.Tone }}">{{ r.Status }}</span>
                     </td>
-                    <td class="pfr-when">{{ When(r.StartedAt) }}</td>
+                    <td class="pfr-when">{{ r.StartedText }}</td>
                     <td class="pfr-when">
                       @if (r.IsInProgress) {
                         <span class="pfr-progress">
@@ -89,7 +93,7 @@ const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded. R
                           In progress
                         </span>
                       } @else {
-                        {{ When(r.SubmittedAt) }}
+                        {{ r.SubmittedText }}
                       }
                     </td>
                   </tr>
@@ -117,6 +121,7 @@ const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded. R
       }
 
       .pfr-open {
+        min-height: var(--mjf-tap);
         padding: 0;
         border: none;
         background: none;
@@ -156,11 +161,13 @@ export class PersonFormResponsesListComponent implements OnInit {
     void this.load();
   }
 
-  public When(value: Date | null): string {
-    return FormatResponseWhen(value);
+  /** Re-runs the load from the error state; back to loading, then ready or error. */
+  public Retry(): void {
+    void this.load();
   }
 
   private async load(): Promise<void> {
+    this.State.set('loading');
     try {
       const result = await new RunView().RunView<PersonFormResponseRaw>({
         EntityName: FORMS_ENTITY.FormResponse,

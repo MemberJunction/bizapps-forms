@@ -2,6 +2,7 @@ import { Component } from '@angular/core';
 import { CompositeKey } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
+import { FORMS_UI_CSS } from '../shared';
 import { FORMS_ENTITY } from '../shared/entity-names';
 import { PERSON_FORMS_REGISTRATION, PERSON_FORMS_SECTION_KEY } from './person-form-responses.model';
 import { PersonFormResponsesListComponent } from './person-form-responses-list.component';
@@ -34,7 +35,9 @@ import { PersonFormResponsesListComponent } from './person-form-responses-list.c
       [Form]="FormComponent"
       [FormContext]="FormContext"
       [DefaultExpanded]="false">
-      @if (Record.IsSaved && FormComponent.IsSectionExpanded(SectionKey)) {
+      @if (!Record.IsSaved) {
+        <p class="pfr-unsaved">Save this person to see the forms they fill in.</p>
+      } @else if (FormComponent.IsSectionExpanded(SectionKey)) {
         <mjf-person-form-responses-list
           [PersonID]="PersonID"
           (Loaded)="OnLoaded($event)"
@@ -43,6 +46,17 @@ import { PersonFormResponsesListComponent } from './person-form-responses-list.c
       }
     </mj-collapsible-panel>
   `,
+  styles: [
+    FORMS_UI_CSS,
+    `
+      .pfr-unsaved {
+        margin: 0;
+        padding: var(--mjf-gap) 0;
+        font-size: var(--mjf-meta);
+        color: var(--mj-text-secondary);
+      }
+    `,
+  ],
 })
 export class PersonFormResponsesPanel extends BaseFormPanel {
   public readonly SectionKey = PERSON_FORMS_SECTION_KEY;

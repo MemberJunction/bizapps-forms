@@ -33,9 +33,15 @@ describe('Person Forms panel wiring', () => {
 
   it('mounts the list only for a saved record whose section is expanded', () => {
     // Lazy by design: a collapsed section must not run the query.
+    // The unsaved branch comes first, so the list sits behind both conditions.
     expect(panel()).toMatch(
-      /@if\s*\(\s*Record\.IsSaved\s*&&\s*FormComponent\.IsSectionExpanded\(SectionKey\)\s*\)/,
+      /@if\s*\(\s*!Record\.IsSaved\s*\)\s*\{[\s\S]*?\}\s*@else if\s*\(\s*FormComponent\.IsSectionExpanded\(SectionKey\)\s*\)\s*\{\s*<mjf-person-form-responses-list/,
     );
+  });
+
+  it('says why the section is empty on an unsaved record instead of rendering nothing', () => {
+    expect(panel()).toMatch(/@if\s*\(\s*!Record\.IsSaved\s*\)/);
+    expect(panel()).toContain('Save this person to see the forms they fill in.');
   });
 
   it('reports the loaded row count to the section badge', () => {
@@ -53,6 +59,20 @@ describe('Person Forms panel wiring', () => {
     expect(source).toContain('BuildPersonFormResponsesFilter(this.PersonID)');
     expect(source).toContain("ResultType: 'simple'");
     expect(source).toContain('LogError(');
+  });
+
+  it('offers a Retry button in the error state that re-runs the load', () => {
+    expect(list()).toMatch(/<button[^>]*\(click\)="Retry\(\)"[^>]*>[\s\S]*?Retry[\s\S]*?<\/button>/);
+  });
+
+  it('gives the form-name button a minimum tap height from the tap token', () => {
+    expect(list()).toMatch(/\.pfr-open\s*\{[^}]*min-height:\s*var\(--mjf-tap\)/);
+  });
+
+  it('binds pre-formatted date text rather than formatting in the template', () => {
+    expect(list()).toContain('{{ r.StartedText }}');
+    expect(list()).toContain('{{ r.SubmittedText }}');
+    expect(list()).not.toMatch(/When\(r\./);
   });
 
   it('names the entity from the FORMS_ENTITY table rather than a string literal', () => {

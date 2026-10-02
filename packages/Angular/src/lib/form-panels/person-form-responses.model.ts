@@ -48,6 +48,10 @@ export interface PersonFormResponseRow {
   IsInProgress: boolean;
   StartedAt: Date | null;
   SubmittedAt: Date | null;
+  /** `StartedAt` as display text, formatted once here so the template does not re-format per check. */
+  StartedText: string;
+  /** `SubmittedAt` as display text; `—` when not submitted. */
+  SubmittedText: string;
 }
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -70,17 +74,27 @@ function toneFor(status: ResponseStatus): PersonFormResponseTone {
 
 /** Maps raw rows to display rows, preserving order (the server sorts). */
 export function ToPersonFormResponseRows(raw: readonly PersonFormResponseRaw[]): PersonFormResponseRow[] {
-  return raw.map((r) => ({
-    ResponseID: r.ID,
-    FormName: r.Form,
-    Status: r.Status,
-    Tone: toneFor(r.Status),
-    IsInProgress: r.Status === 'Partial',
-    StartedAt: toDate(r.StartedAt),
-    SubmittedAt: toDate(r.SubmittedAt),
-  }));
+  return raw.map((r) => {
+    const startedAt = toDate(r.StartedAt);
+    const submittedAt = toDate(r.SubmittedAt);
+    return {
+      ResponseID: r.ID,
+      FormName: r.Form,
+      Status: r.Status,
+      Tone: toneFor(r.Status),
+      IsInProgress: r.Status === 'Partial',
+      StartedAt: startedAt,
+      SubmittedAt: submittedAt,
+      StartedText: FormatResponseWhen(startedAt),
+      SubmittedText: FormatResponseWhen(submittedAt),
+    };
+  });
 }
 
+/**
+ * Formats a response timestamp for the Person Forms list in the viewer's locale (medium date,
+ * short time). `null` — never started, never submitted, or unparseable — renders as `—`.
+ */
 export function FormatResponseWhen(value: Date | null): string {
   if (value === null) return '—';
   return value.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
