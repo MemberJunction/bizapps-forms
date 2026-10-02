@@ -32,11 +32,18 @@ describe('Person Forms panel wiring', () => {
   });
 
   it('mounts the list behind the unsaved branch and the expansion latch', () => {
-    // Lazy until first expanded, then kept mounted; the latch itself is exercised for real in
-    // person-form-responses.panel.spec.ts. This pins that the template uses it.
+    // Lazy until first expanded, then kept mounted; the latch itself is exercised for real as
+    // SectionMountLatch in person-form-responses.model.spec.ts. This pins that the template uses it.
     expect(panel()).toMatch(
       /@if\s*\(\s*!Record\.IsSaved\s*\)\s*\{[\s\S]*?\}\s*@else if\s*\(\s*ListMounted\s*\)\s*\{\s*<mjf-person-form-responses-list/,
     );
+  });
+
+  it('feeds the mount latch the record, its saved state and the expansion on every check', () => {
+    expect(panel()).toMatch(
+      /ngDoCheck\(\): void \{\s*this\.mountLatch\.Observe\(this\.Record, this\.Record\.IsSaved, this\.FormComponent\.IsSectionExpanded\(this\.SectionKey\)\);/,
+    );
+    expect(panel()).toMatch(/get ListMounted\(\): boolean \{\s*return this\.mountLatch\.IsMounted\(\);/);
   });
 
   it('shows the row count in the section header (accordion layout reads BadgeCount)', () => {

@@ -1,10 +1,14 @@
 import { Component, DoCheck } from '@angular/core';
-import { BaseEntity, CompositeKey } from '@memberjunction/core';
+import { CompositeKey } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
 import { FORMS_UI_CSS } from '../shared';
 import { FORMS_ENTITY } from '../shared/entity-names';
-import { PERSON_FORMS_REGISTRATION, PERSON_FORMS_SECTION_KEY } from './person-form-responses.model';
+import {
+  PERSON_FORMS_REGISTRATION,
+  PERSON_FORMS_SECTION_KEY,
+  SectionMountLatch,
+} from './person-form-responses.model';
 import { PersonFormResponsesListComponent } from './person-form-responses-list.component';
 
 /**
@@ -69,19 +73,15 @@ import { PersonFormResponsesListComponent } from './person-form-responses-list.c
 export class PersonFormResponsesPanel extends BaseFormPanel implements DoCheck {
   public readonly SectionKey = PERSON_FORMS_SECTION_KEY;
 
-  /** The record the list was first expanded for; null until then. */
-  private mountedFor: BaseEntity | null = null;
+  private readonly mountLatch = new SectionMountLatch<object>();
 
   /** Whether the list is mounted: latched on first expansion of a saved record, per record. */
   public get ListMounted(): boolean {
-    return this.mountedFor !== null && this.mountedFor === this.Record && this.Record.IsSaved;
+    return this.mountLatch.IsMounted();
   }
 
   public ngDoCheck(): void {
-    if (this.mountedFor !== this.Record) this.mountedFor = null;
-    if (this.mountedFor === null && this.Record.IsSaved && this.FormComponent.IsSectionExpanded(this.SectionKey)) {
-      this.mountedFor = this.Record;
-    }
+    this.mountLatch.Observe(this.Record, this.Record.IsSaved, this.FormComponent.IsSectionExpanded(this.SectionKey));
   }
 
   public get PersonID(): string {

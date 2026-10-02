@@ -160,6 +160,24 @@ describe('PersonFormResponsesListComponent', () => {
     expect(loaded).toEqual([1, 2]);
   });
 
+  it('keeps the newer result when an earlier load fails after it', async () => {
+    let resolveFirst: (r: FakeRunViewResult) => void = () => undefined;
+    runViewMock.mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }));
+    runViewMock.mockResolvedValueOnce(ok('new'));
+    const { list, refreshed } = createList();
+
+    list.ngOnInit();
+    refreshed.emit({});
+    await settle();
+    resolveFirst({ Success: false, ErrorMessage: 'late failure', Results: [] });
+    await settle();
+
+    expect(list.State()).toBe('ready');
+    expect(list.Rows().map((r) => r.ResponseID)).toEqual(['new']);
+    // Still logged: a superseded failure is a real failure, it just no longer owns the screen.
+    expect(logErrorMock.mock.calls[0][0]).toContain('late failure');
+  });
+
   it('applies only the latest load when an earlier one resolves after it', async () => {
     let resolveFirst: (r: FakeRunViewResult) => void = () => undefined;
     runViewMock.mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }));

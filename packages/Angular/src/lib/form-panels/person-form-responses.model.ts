@@ -106,3 +106,22 @@ export function FormatResponseWhen(value: Date | null): string {
   if (value === null) return '—';
   return value.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
+
+/**
+ * Keeps a lazily-mounted section body mounted once it has been shown: unmounted until the section
+ * is first expanded for a saved record, then mounted through any collapse/expand, until the record
+ * changes. Records are compared by identity, so a different record starts lazy again.
+ */
+export class SectionMountLatch<TRecord extends object> {
+  private latchedFor: TRecord | null = null;
+
+  /** Feeds one change-detection pass of the host. */
+  public Observe(record: TRecord, isSaved: boolean, isExpanded: boolean): void {
+    if (this.latchedFor !== record) this.latchedFor = null;
+    if (this.latchedFor === null && isSaved && isExpanded) this.latchedFor = record;
+  }
+
+  public IsMounted(): boolean {
+    return this.latchedFor !== null;
+  }
+}

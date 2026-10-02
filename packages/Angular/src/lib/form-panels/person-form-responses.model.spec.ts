@@ -8,6 +8,7 @@ import {
   FormatResponseWhen,
   PERSON_FORMS_REGISTRATION,
   PERSON_FORMS_SECTION_KEY,
+  SectionMountLatch,
   ToPersonFormResponseRows,
   type PersonFormResponseRaw,
 } from './person-form-responses.model';
@@ -144,5 +145,38 @@ describe('FormatResponseWhen', () => {
     const s = FormatResponseWhen(new Date('2026-01-02T10:00:00Z'));
     expect(s.length).toBeGreaterThan(0);
     expect(s).not.toContain('Invalid');
+  });
+});
+
+describe('SectionMountLatch', () => {
+  // Records are compared by identity only, so any object stands in for one.
+  const recordA = { id: 'a' };
+  const recordB = { id: 'b' };
+
+  it('stays unmounted (no query) until the section is first expanded', () => {
+    const latch = new SectionMountLatch<object>();
+    latch.Observe(recordA, true, false);
+    expect(latch.IsMounted()).toBe(false);
+  });
+
+  it('mounts on expansion and stays mounted after a collapse', () => {
+    const latch = new SectionMountLatch<object>();
+    latch.Observe(recordA, true, true);
+    expect(latch.IsMounted()).toBe(true);
+    latch.Observe(recordA, true, false);
+    expect(latch.IsMounted()).toBe(true);
+  });
+
+  it('never mounts for an unsaved record, even when expanded', () => {
+    const latch = new SectionMountLatch<object>();
+    latch.Observe(recordA, false, true);
+    expect(latch.IsMounted()).toBe(false);
+  });
+
+  it('resets when the record changes, so a collapsed section for the new record stays lazy', () => {
+    const latch = new SectionMountLatch<object>();
+    latch.Observe(recordA, true, true);
+    latch.Observe(recordB, true, false);
+    expect(latch.IsMounted()).toBe(false);
   });
 });
