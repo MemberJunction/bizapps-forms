@@ -98,6 +98,12 @@ describe('Person Forms panel wiring', () => {
     expect(source).toContain(`[class.mjf-badge--warning]="r.Tone === 'warning'"`);
   });
 
+  it('renders the form name in the row button and the status text in the badge', () => {
+    // #285 AC8: tests cover the row rendering. Each assertion names the cell it pins.
+    expect(list()).toMatch(/class="pfr-open"[\s\S]*?>\s*\{\{ r\.FormName \}\}\s*<\/button>/);
+    expect(list()).toMatch(/<span\s+class="mjf-badge"[^>]*>\{\{ r\.Status \}\}<\/span>/);
+  });
+
   it('binds pre-formatted date text rather than formatting in the template', () => {
     expect(list()).toContain('{{ r.StartedText }}');
     expect(list()).toContain('{{ r.SubmittedText }}');
