@@ -111,6 +111,64 @@ already ran it believes it ran.
 > read, a conditionally guarded seed is credited as an unconditional one, and only `EntityID`
 > columns are in scope — not `EntityFieldID`, which fails the same way.
 
+> **The third exception, on a different test (2026-10-01, #283).**
+> `B202606281200__v0.1.x_Schema_and_Tables.sql` was edited in place to delete the CodeGen block that
+> created ten `__mj_BizAppsCommon` objects: the `vwContactMethods` and `vwRelationships` base views, the
+> `spCreate`/`spUpdate`/`spDelete` procedures for each of those two entities, and the two update
+> triggers — plus every `GRANT` on them. That run was not scoped to `__mj_BizAppsForms`, so it captured
+> bizapps-common's objects as they stood in June 2026. Forms installs after Common, so on a fresh
+> install the baseline replaced Common's current definitions with those stale copies. Proved on
+> 2026-10-01 against throwaway databases, before and after: with the old baseline the view and
+> procedures reverted to the June shapes and Relationship saves failed with
+> `@JobFunctionID is not a parameter for procedure spCreateRelationship`; with the block removed the
+> same install left them as Common created them. (The reporter also saw the `JobFunction`/
+> `SeniorityLevel` `EntityField` rows deleted on their install; that was reported but not reproduced.)
+> No later migration carries any of the ten, so the baseline was the only source.
+>
+> **This file does NOT pass the test #39 and #155 passed** — it applies cleanly everywhere, so a later
+> migration could run. It qualifies on a new and deliberately narrower test, and a future exception
+> must meet all of it, not borrow its spirit: **the file is a `B` baseline, which Skyway runs only on
+> an empty migration history** (`skyway/packages/core/src/migration/types.ts`: "Runs only on empty
+> databases"), so the edit reaches fresh installs and nothing else; **on a fresh install the removed
+> text is itself the defect**, not a step a later migration could correct; **and the only legitimate
+> repair for hosts already damaged belongs to the schema's owner**, not to this app. That last limb is
+> why a later Forms migration would be the same defect pointed the other way: Forms does not own those
+> definitions, so any repair would be a copy of Common's definitions as of the day it was written, and
+> would go stale the same way. The only correct content for Forms to ship about Common's objects is
+> none. An installed host never re-reads a `B` file, and Skyway's `Migrate()` never checksum-validates
+> applied migrations anyway (see `docs/database-operations.md`, "never checksum-validates"). The durable
+> half is not the edit: `npm run lint:distribution` CHECK 8 now refuses shipped DDL and permission
+> statements whose target is not this app's schema — in the statement shapes it reads, which cover
+> every DDL and grant statement in the CodeGen output shipped today; the shapes it does not read are
+> listed in its docblock.
+>
+> **What this does not repair.** Removing the text restores nothing on a host that already ran it. The
+> affected hosts are those that installed Forms (up to and including 0.14.x) *after* bizapps-common
+> 5.45; hosts that installed Forms first are fine, because Common's `V202609211200` re-created the
+> objects after the baseline had run. Only three of the ten objects differ functionally from Common's
+> current definitions: `vwRelationships`, `spCreateRelationship` and `spUpdateRelationship`. The
+> ContactMethod view and procedures, `spDeleteRelationship` and the two triggers were overwritten with
+> functionally identical copies — there is nothing to do for them. To detect the damage, this returns
+> **no row** on a damaged host:
+>
+> ```sql
+> SELECT 1 FROM sys.parameters
+>  WHERE object_id = OBJECT_ID('__mj_BizAppsCommon.spCreateRelationship') AND name = '@JobFunctionID';
+> ```
+>
+> To repair, re-run two sections of bizapps-common's
+> `V202609211200__v5.45.x__Job_Function_Seniority.sql`: the `vwRelationships` drop/create and its
+> permissions block, and the "CREATE PROCEDURE FOR Relationship" section through the
+> `spUpdateRelationship` permissions (which re-creates `spCreateRelationship`, `spUpdateRelationship`
+> and `trgUpdateRelationship`), substituting `${flyway:defaultSchema}` → `__mj_BizAppsCommon` and
+> `${mjSchema}` → `__mj`. **Run them with `QUOTED_IDENTIFIER ON`** — `sqlcmd -I`, or a client that
+> defaults it on such as SSMS or Azure Data Studio. Plain `sqlcmd -i` defaults it OFF, the setting is
+> captured into each procedure, and every Relationship save then fails with `INSERT failed because
+> the following SET options have incorrect settings: 'QUOTED_IDENTIFIER'`. Or wait for the owned repair tracked in
+> [bizapps-common#219](https://github.com/MemberJunction/bizapps-common/issues/219). If the
+> `JobFunction`/`SeniorityLevel` `EntityField` rows are missing too, that same migration's guarded
+> `EntityField` inserts (or Common's CodeGen) restore them.
+
 So a release's metadata changes become one new `V<newstamp>__v<ver>__Metadata_Sync.sql` carrying that
 release's records. That delta is the path below.
 
