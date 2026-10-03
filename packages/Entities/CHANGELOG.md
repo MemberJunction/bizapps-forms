@@ -1,5 +1,13 @@
 # @mj-biz-apps/forms-entities
 
+## 0.15.0
+
+### Minor Changes
+
+- ec91d1e: Fresh installs no longer overwrite bizapps-common's Relationship and Contact Method views, procedures and triggers. The Forms baseline migration carried stale copies of ten `__mj_BizAppsCommon` objects, and on a host that installed Forms after Common 5.45 every Relationship save failed with `@JobFunctionID is not a parameter for procedure spCreateRelationship`. The baseline now creates objects only in `__mj_BizAppsForms`, and `lint:distribution` now refuses the shapes that did this — creating, altering or dropping a view, procedure, function, trigger, table or index (among others), and granting on one — anywhere outside it. (It reads a closed list of statement shapes; the ones it does not read, such as SQL built at run time, are listed in the check's own documentation.)
+
+  **Already-installed hosts:** upgrading Forms does not restore anything. Hosts that installed Forms (0.14.x or earlier) _after_ bizapps-common 5.45 still have stale copies; hosts that installed Forms first are unaffected. Only `vwRelationships`, `spCreateRelationship` and `spUpdateRelationship` differ from Common's current definitions — the Contact Method objects, `spDeleteRelationship` and the triggers are functionally identical, so leave them. A host is damaged if `spCreateRelationship` has no `@JobFunctionID` parameter. To repair, re-run those three objects' batches from bizapps-common's `V202609211200__v5.45.x__Job_Function_Seniority.sql` (with the schema placeholders substituted, and with `QUOTED_IDENTIFIER ON`), or wait for the owned repair in [bizapps-common#219](https://github.com/MemberJunction/bizapps-common/issues/219). `migrations/README.md` has the detection query and the exact steps.
+
 ## 0.14.0
 
 ## 0.13.1

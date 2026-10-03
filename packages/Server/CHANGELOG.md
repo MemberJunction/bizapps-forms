@@ -1,5 +1,16 @@
 # @mj-biz-apps/forms-server
 
+## 0.15.0
+
+### Patch Changes
+
+- Updated dependencies [ec91d1e]
+- Updated dependencies [8e8f700]
+  - @mj-biz-apps/forms-entities@0.15.0
+  - @mj-biz-apps/forms-ng@0.15.0
+  - @mj-biz-apps/forms-actions@0.15.0
+  - @mj-biz-apps/forms-core-entities-server@0.15.0
+
 ## 0.14.0
 
 ### Minor Changes
