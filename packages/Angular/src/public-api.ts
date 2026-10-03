@@ -17,6 +17,8 @@ import { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifes
 
 // Form Category hierarchy tree panel (side-effect @RegisterClass).
 import './lib/form-panels/form-category-hierarchy.panel';
+// Person "Forms" section on Common's People form (#285) — side-effect @RegisterClassEx(BaseFormPanel).
+import './lib/form-panels/person-form-responses.panel';
 
 // Individual-response surface: the side-effect import fires
 // @RegisterClass(BaseFormComponent, 'MJ_BizApps_Forms: Form Responses', 10), which overrides the
