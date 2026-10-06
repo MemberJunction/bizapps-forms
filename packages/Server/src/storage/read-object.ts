@@ -86,6 +86,11 @@ export interface StoredObjectRead {
   content: Buffer;
   servedBy: ReadAccountRef;
   failedAttempts: ReadAttempt[];
+  /**
+   * True when the account that last served this object in this process was tried first and failed,
+   * which changes the likely cause a fallback warning should name.
+   */
+  rememberedAccountFailed: boolean;
 }
 
 /**
@@ -112,6 +117,16 @@ export interface StorageReadEngine {
     accountId: string,
     contextUser: UserInfo,
   ): Promise<{ GetObject(params: { fullPath: string }): Promise<Buffer> }>;
+}
+
+/**
+ * One `FORMS_*_STORAGE_ACCOUNT` pin as a read uses it: the value orders the probe, the name goes
+ * into the fallback warning. Carried together so the two cannot drift apart.
+ */
+export interface ReadPin {
+  envVar: string;
+  /** The configured account id; `undefined` when unset. */
+  value: string | undefined;
 }
 
 /** Where an object lives, as `MJ: Files` records it. */
@@ -161,29 +176,36 @@ export function describeReadAttempts(attempts: ReadonlyArray<ReadAttempt>): stri
  * Pure. The warning for a read that succeeded only after other accounts failed, or `undefined`
  * when the first account tried served it.
  *
- * Names both causes because the log line cannot tell them apart: the object was written under a
- * different pin or by another host sharing the database, OR the earlier account is failing (its
- * error is shown). It names the pins that order the route's reads as context, never as an
- * instruction to re-pin — re-pinning is wrong for the second cause and for a legacy row. "Once per
- * object" holds because {@link readStoredObject} remembers the serving account.
+ * Names the likely causes, because the log line cannot tell them apart. Normally: the object was
+ * written under a different pin or by another host sharing the database, OR the earlier account is
+ * failing. When the account that served it before was the one that failed: that account is
+ * failing, or the object moved. It names the read order as context, never as an instruction to
+ * re-pin — re-pinning is wrong for a failing account and for a legacy row. "Once per object" holds
+ * because {@link readStoredObject} remembers the serving account.
  *
  * @param label The route's noun for the object, e.g. `Asset` or `Download`.
- * @param pinEnvVars The env vars that order this route's reads, in the order they are tried.
+ * @param pins The pins that order this route's reads, in the order they are tried — the same list
+ *   passed to {@link readStoredObject}.
  */
 export function describeReadFallback(
   label: string,
   fileId: string,
   providerKey: string,
   read: StoredObjectRead,
-  pinEnvVars: ReadonlyArray<string>,
+  pins: ReadonlyArray<ReadPin>,
 ): string | undefined {
   if (read.failedAttempts.length === 0) return undefined;
+  const cause = read.rememberedAccountFailed
+    ? 'The account that last served this object in this process failed this time (its error is shown first): ' +
+      'that account is failing or the object has moved. '
+    : 'Usually it was written under a different pin or by another host sharing this database; otherwise ' +
+      'the earlier account is failing (its error is shown). ';
+  const order = ['the account that last served this object (if any)', ...pins.map((p) => p.envVar)].join(', then ');
   return (
     `[Forms] ${label} ${fileId} (key ${providerKey}) is held by ${describeReadAccount(read.servedBy)}, ` +
     `not by the account(s) tried first: ${describeReadAttempts(read.failedAttempts)}. ` +
-    'Usually it was written under a different pin or by another host sharing this database; otherwise ' +
-    'the earlier account is failing (its error is shown). ' +
-    `This route's reads are ordered by ${pinEnvVars.join(', then ')}, then the provider's other accounts. ` +
+    cause +
+    `This route's reads are ordered by ${order}, then the provider's other accounts. ` +
     'Logged once per object while this process remembers where it lives.'
   );
 }
@@ -287,15 +309,17 @@ export async function readStoredObject(
   storage: StorageReadEngine,
   systemUser: UserInfo,
   ref: StoredObjectRef,
-  preferredAccountIds: ReadonlyArray<string | undefined>,
+  pins: ReadonlyArray<ReadPin>,
 ): Promise<StoredObjectRead> {
   await configureStorage(storage, systemUser);
   const remembered = findRememberedAccountId(ref);
-  const { candidates, truncated } = findReadCandidates(storage, ref.providerId, preferredAccountIds, remembered);
+  const pinnedIds = pins.map((p) => p.value);
+  const { candidates, truncated } = findReadCandidates(storage, ref.providerId, pinnedIds, remembered);
   if (candidates.length === 0) {
     throw new NoStorageAccountError(ref.providerId);
   }
   const failedAttempts: ReadAttempt[] = [];
+  let rememberedAccountFailed = false;
   for (const account of candidates) {
     try {
       const driver = await storage.GetDriver(account.accountId, systemUser);
@@ -304,11 +328,14 @@ export async function readStoredObject(
       // stored path as an id 404s on ID-keyed providers (#261). Every MJ driver resolves `fullPath`.
       const content = await driver.GetObject({ fullPath: ref.providerKey });
       rememberServingAccount(ref, account.accountId);
-      return { content, servedBy: account, failedAttempts };
+      return { content, servedBy: account, failedAttempts, rememberedAccountFailed };
     } catch (error) {
       // Not swallowed: recorded, and surfaced in StoredObjectReadError if no later account serves it.
       failedAttempts.push({ account, error: error instanceof Error ? error.message : String(error) });
-      if (remembered && UUIDsEqual(account.accountId, remembered)) forgetServingAccount(ref);
+      if (remembered && UUIDsEqual(account.accountId, remembered)) {
+        rememberedAccountFailed = true;
+        forgetServingAccount(ref);
+      }
     }
   }
   throw new StoredObjectReadError(failedAttempts, truncated);

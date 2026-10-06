@@ -320,15 +320,16 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
   }
 
   try {
+    const pins = [{ envVar: 'FORMS_ASSET_STORAGE_ACCOUNT', value: getAssetConfig().storageAccountId }];
     const read = await readStoredObject(
       ctx.storage,
       ctx.systemUser,
       { providerId: file.ProviderID, providerKey: file.ProviderKey },
-      [getAssetConfig().storageAccountId],
+      pins,
     );
     // Set only when an account other than the first one tried served the bytes. A warning, not an
     // error: the image went out.
-    const fallback = describeReadFallback('Asset', wanted, file.ProviderKey, read, ['FORMS_ASSET_STORAGE_ACCOUNT']);
+    const fallback = describeReadFallback('Asset', wanted, file.ProviderKey, read, pins);
     if (fallback) LogErrorEx({ severity: 'warning', message: fallback });
     return {
       ok: true,

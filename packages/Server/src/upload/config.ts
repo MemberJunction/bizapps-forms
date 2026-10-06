@@ -12,8 +12,10 @@
  *                                   Default: common images + PDF + plain text + office docs.
  *  - `FORMS_UPLOAD_STORAGE_ACCOUNT` Optional FileStorageAccount ID to force a specific
  *                                   account; when unset the engine uses the first active one.
- *                                   Downloads (`GET /forms/files/:id`) also read it FIRST, since
- *                                   it is where respondent files are written (#290).
+ *                                   Downloads (`GET /forms/files/:id`) also try it ahead of
+ *                                   `FORMS_DOWNLOAD_STORAGE_ACCOUNT`, since it is where respondent
+ *                                   files are written (#290). Once this process has read a file,
+ *                                   the account that served it is tried ahead of the pin.
  *  - `FORMS_UPLOAD_IP_MAX`          Max uploads per rate-limit window per client IP. Default 30.
  *  - `FORMS_UPLOAD_PATH_PREFIX`     Optional storage path prefix. Default `forms-uploads/<date>`.
  *                                   REFUSED if it lands under the authoring-asset prefix — see

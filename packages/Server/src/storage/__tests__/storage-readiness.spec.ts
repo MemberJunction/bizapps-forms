@@ -41,7 +41,7 @@ describe('assessStoragePins', () => {
     const { errors } = assessStoragePins([A, B], pins('DEADBEEF-0000-4000-8000-000000000000', B.id));
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('FORMS_ASSET_STORAGE_ACCOUNT is set to DEADBEEF-0000-4000-8000-000000000000');
-    expect(errors[0]).toContain('which is not an active File Storage Account here; uploads through it fail and reads skip it.');
+    expect(errors[0]).toContain('which names no File Storage Account here; uploads through it fail and reads skip it.');
     expect(errors[0]).toContain(`"Account A" (${A.id}, Box)`);
     expect(errors[0]).toContain(`"Account B" (${B.id}, Local Disk Storage)`);
   });

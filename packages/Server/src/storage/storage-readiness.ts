@@ -59,7 +59,7 @@ export function assessStoragePins(
     const named = accounts.find((a) => UUIDsEqual(a.id, value));
     if (!named) {
       errors.push(
-        `${pin.envVar} is set to ${value}, which is not an active File Storage Account here; ` +
+        `${pin.envVar} is set to ${value}, which names no File Storage Account here; ` +
           `${pin.role === 'write' ? 'uploads through it fail and reads skip it' : 'reads skip it'}. Active accounts: ${list}.`,
       );
     } else if (!named.providerActive) {
