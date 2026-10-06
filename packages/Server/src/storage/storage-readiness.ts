@@ -13,6 +13,12 @@ export interface StorageAccountSummary {
   id: string;
   name: string;
   providerName: string;
+  /**
+   * The PROVIDER's IsActive. Carried rather than filtered out because MJ's upload resolution
+   * (`ResolveStorageAccount(id)`) and read listing (`GetAccountsByProviderID`) both ignore it, so a
+   * pin naming such an account is still used — it needs its own verdict, not "unknown".
+   */
+  providerActive: boolean;
 }
 
 export interface StoragePin {
@@ -32,14 +38,15 @@ function describeAccount(a: StorageAccountSummary): string {
 }
 
 /**
- * @param accounts Accounts whose provider is active; the caller filters, so this stays pure.
+ * @param accounts Every account the host has, on active and inactive providers alike.
  * @param pins The pins as configured; an empty string counts as unset.
  */
 export function assessStoragePins(
   accounts: ReadonlyArray<StorageAccountSummary>,
   pins: ReadonlyArray<StoragePin>,
 ): StorageReadiness {
-  const list = accounts.map(describeAccount).join(', ') || 'none';
+  const active = accounts.filter((a) => a.providerActive);
+  const list = active.map(describeAccount).join(', ') || 'none';
   const errors: string[] = [];
   const unsetWritePins: string[] = [];
 
@@ -49,18 +56,25 @@ export function assessStoragePins(
       continue;
     }
     const value = pin.value;
-    if (!accounts.some((a) => UUIDsEqual(a.id, value))) {
+    const named = accounts.find((a) => UUIDsEqual(a.id, value));
+    if (!named) {
       errors.push(
         `${pin.envVar} is set to ${value}, which is not an active File Storage Account here; ` +
           `${pin.role === 'write' ? 'uploads through it fail and reads skip it' : 'reads skip it'}. Active accounts: ${list}.`,
+      );
+    } else if (!named.providerActive) {
+      errors.push(
+        `${pin.envVar} is set to ${value}, which names "${named.name}" on provider "${named.providerName}", ` +
+          `which is inactive; Forms still ${pin.role === 'write' ? 'writes to and reads from' : 'reads from'} it, ` +
+          'but MJ treats the provider as switched off — reactivate the provider or repin.',
       );
     }
   }
 
   const warnings: string[] = [];
-  if (accounts.length > 1 && unsetWritePins.length > 0) {
+  if (active.length > 1 && unsetWritePins.length > 0) {
     warnings.push(
-      `${accounts.length} File Storage Accounts exist (${list}) but ${unsetWritePins.join(' and ')} ` +
+      `${active.length} File Storage Accounts exist (${list}) but ${unsetWritePins.join(' and ')} ` +
         `${unsetWritePins.length > 1 ? 'are' : 'is'} not set, so uploads go to whichever account the engine resolves first, ` +
         `which can differ between hosts sharing this database. Reads still find the file, but every host ` +
         `sharing the database should pin the same account.`,

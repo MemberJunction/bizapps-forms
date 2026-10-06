@@ -59,9 +59,13 @@ export class StorageReadinessMiddleware extends BaseServerMiddleware {
         );
         return;
       }
-      const accounts = engine.AccountsWithProviders
-        .filter((a) => a.provider.IsActive !== false)
-        .map((a) => ({ id: a.account.ID, name: a.account.Name, providerName: a.provider.Name }));
+      // Every account, inactive providers included: MJ still uploads to and reads from them by id.
+      const accounts = engine.AccountsWithProviders.map((a) => ({
+        id: a.account.ID,
+        name: a.account.Name,
+        providerName: a.provider.Name,
+        providerActive: a.provider.IsActive,
+      }));
       const { warnings, errors } = assessStoragePins(accounts, [
         { envVar: 'FORMS_ASSET_STORAGE_ACCOUNT', value: getAssetConfig().storageAccountId, role: 'write' },
         { envVar: 'FORMS_UPLOAD_STORAGE_ACCOUNT', value: getUploadConfig().storageAccountId, role: 'write' },

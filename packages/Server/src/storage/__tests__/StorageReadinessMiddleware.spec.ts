@@ -75,6 +75,15 @@ describe('StorageReadinessMiddleware.ConfigureExpressApp', () => {
     expect(logged.warnings[0]).not.toContain('n-C');
   });
 
+  it('passes accounts on an inactive provider through, so a pin naming one gets its own error', async () => {
+    engine.AccountsWithProviders = [acct('A'), acct('C', false)];
+    process.env.FORMS_UPLOAD_STORAGE_ACCOUNT = 'C';
+    await new StorageReadinessMiddleware().ConfigureExpressApp(app);
+    expect(logged.errors).toHaveLength(1);
+    expect(logged.errors[0]).toMatch(/^\[Forms\] Storage is NOT ready: FORMS_UPLOAD_STORAGE_ACCOUNT is set to C, /);
+    expect(logged.errors[0]).toContain('which names "n-C" on provider "P", which is inactive');
+  });
+
   it('errors when a pin names no active account', async () => {
     engine.AccountsWithProviders = [acct('A')];
     process.env.FORMS_UPLOAD_STORAGE_ACCOUNT = 'ZZZ';
@@ -91,9 +100,17 @@ describe('StorageReadinessMiddleware.ConfigureExpressApp', () => {
     ]);
   });
 
-  it('is always enabled and contributes no route middleware', () => {
+  it('is always enabled and contributes no route middleware', async () => {
     const mw = new StorageReadinessMiddleware();
     expect(mw.Label).toBe('mj:formsStorageReadiness');
     expect(mw.Enabled).toBe(true);
+    // Any route registration (app.use / app.get / ...) reads a property of the app; this one throws.
+    const untouchable = new Proxy({} as Application, {
+      get(_target, property) {
+        throw new Error(`ConfigureExpressApp touched app.${String(property)}`);
+      },
+    });
+    await expect(mw.ConfigureExpressApp(untouchable)).resolves.toBeUndefined();
+    expect(logged.errors).toEqual([]);
   });
 });
