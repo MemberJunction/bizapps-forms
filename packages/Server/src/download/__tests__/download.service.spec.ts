@@ -1,7 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { logError, logErrorEx } = vi.hoisted(() => ({ logError: vi.fn(), logErrorEx: vi.fn() }));
+vi.mock('@memberjunction/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memberjunction/core')>()),
+  LogError: logError,
+  LogErrorEx: logErrorEx,
+}));
+
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 
 import { resetDownloadConfigCache } from '../config';
+import { resetUploadConfigForTests } from '../../upload/config';
 import {
   loadResponseFile,
   type DownloadContext,
@@ -93,8 +102,17 @@ function context(stubs: Stubs = {}): DownloadContext {
 
 beforeEach(() => {
   resetDownloadConfigCache();
+  resetUploadConfigForTests();
+  logError.mockClear();
+  logErrorEx.mockClear();
   delete readAs.upload;
   delete readAs.file;
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  resetDownloadConfigCache();
+  resetUploadConfigForTests();
 });
 
 describe('loadResponseFile — the authorization', () => {
@@ -226,5 +244,82 @@ describe('loadResponseFile — what the reader gets', () => {
       FILE_ID,
     );
     expect(result.payload?.contentType).toBe('application/octet-stream');
+  });
+});
+
+describe('loadResponseFile — the account the bytes are read from (#290)', () => {
+  const UPLOAD_ACCOUNT = 'AAAAAAAA-0000-4000-8000-00000000000A';
+  const DOWNLOAD_ACCOUNT = 'BBBBBBBB-0000-4000-8000-00000000000B';
+  const OTHER_ACCOUNT = 'CCCCCCCC-0000-4000-8000-00000000000C';
+  const accounts = () => [
+    { ID: OTHER_ACCOUNT, Name: 'Other' },
+    { ID: DOWNLOAD_ACCOUNT, Name: 'Download' },
+    { ID: UPLOAD_ACCOUNT, Name: 'Upload' },
+  ];
+
+  function pins(): void {
+    vi.stubEnv('FORMS_UPLOAD_STORAGE_ACCOUNT', UPLOAD_ACCOUNT);
+    vi.stubEnv('FORMS_DOWNLOAD_STORAGE_ACCOUNT', DOWNLOAD_ACCOUNT);
+    resetDownloadConfigCache();
+    resetUploadConfigForTests();
+  }
+
+  it('tries the upload pin before the download pin, then the rest of the provider', async () => {
+    pins();
+    const GetDriver = vi.fn(async () => ({
+      GetObject: async (): Promise<Buffer> => {
+        throw new Error('nope');
+      },
+    }));
+    await loadResponseFile(context({ storage: { GetAccountsByProviderID: accounts, GetDriver } }), FILE_ID);
+    expect(GetDriver.mock.calls.map((c) => (c as unknown as [string])[0])).toEqual([
+      UPLOAD_ACCOUNT,
+      DOWNLOAD_ACCOUNT,
+      OTHER_ACCOUNT,
+    ]);
+  });
+
+  it('keeps the generic 500 on total failure and logs the accounts, key and provider', async () => {
+    pins();
+    const result = await loadResponseFile(
+      context({
+        storage: {
+          GetAccountsByProviderID: accounts,
+          GetDriver: async () => ({
+            GetObject: async (): Promise<Buffer> => {
+              throw new Error('disk gone');
+            },
+          }),
+        },
+      }),
+      FILE_ID,
+    );
+    expect(result.failure).toEqual({ status: 500, error: 'That file could not be read from storage.' });
+    const line = String(logError.mock.calls[0][0]);
+    for (const id of [UPLOAD_ACCOUNT, DOWNLOAD_ACCOUNT, OTHER_ACCOUNT]) expect(line).toContain(id);
+    expect(line).toContain('Provider 1');
+    expect(line).toContain('key forms-uploads/2026-08-19/abc/resume.pdf');
+  });
+
+  it('warns when a fallback account served the file', async () => {
+    pins();
+    const result = await loadResponseFile(
+      context({
+        storage: {
+          GetAccountsByProviderID: accounts,
+          GetDriver: async (id: string) => ({
+            GetObject: async (): Promise<Buffer> => {
+              if (id !== OTHER_ACCOUNT) throw new Error('missing');
+              return Buffer.from('PDF BYTES');
+            },
+          }),
+        },
+      }),
+      FILE_ID,
+    );
+    expect(result.ok).toBe(true);
+    const arg = logErrorEx.mock.calls[0][0] as { severity: string; message: string };
+    expect(arg.severity).toBe('warning');
+    expect(arg.message).toContain(OTHER_ACCOUNT);
   });
 });

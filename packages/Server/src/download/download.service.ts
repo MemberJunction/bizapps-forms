@@ -43,12 +43,18 @@
  * requiring one would deny the very readers this exists for. Eligibility is the caller's; the
  * privileged read is the system's.
  */
-import { LogError } from '@memberjunction/core';
+import { LogError, LogErrorEx } from '@memberjunction/core';
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import { escapeSqlString } from '@mj-biz-apps/forms-entities';
 
 import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names.js';
-import { readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
+import {
+  describeReadAccount,
+  describeReadAttempts,
+  readStoredObject,
+  type StorageReadEngine,
+} from '../storage/read-object.js';
+import { getUploadConfig } from '../upload/config.js';
 import { getDownloadConfig } from './config.js';
 
 /** MJ core's file registry, read only after the provenance row has authorized the caller. */
@@ -140,12 +146,23 @@ export async function loadResponseFile(ctx: DownloadContext, fileId: string): Pr
   }
 
   try {
-    const { content } = await readStoredObject(
+    // Respondent files are WRITTEN through the upload pin, so that is where they most likely are;
+    // the download pin is the operator's explicit read override and is tried second.
+    const { content, servedBy, failedAttempts } = await readStoredObject(
       ctx.storage,
       ctx.elevatedUser,
       { providerId: file.ProviderID, providerKey: file.ProviderKey },
-      [getDownloadConfig().storageAccountId],
+      [getUploadConfig().storageAccountId, getDownloadConfig().storageAccountId],
     );
+    if (failedAttempts.length > 0) {
+      LogErrorEx({
+        severity: 'warning',
+        message:
+          `[Forms] Download ${wanted} (key ${file.ProviderKey}) was served by ${describeReadAccount(servedBy)} ` +
+          `after failing on ${describeReadAttempts(failedAttempts)}. ` +
+          'Pin FORMS_UPLOAD_STORAGE_ACCOUNT to the account uploads go to.',
+      });
+    }
     return {
       ok: true,
       payload: {
@@ -158,7 +175,9 @@ export async function loadResponseFile(ctx: DownloadContext, fileId: string): Pr
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    LogError(`[Forms] Download failed for file ${wanted}: ${detail}`);
+    LogError(
+      `[Forms] Download read failed for ${wanted} (key ${file.ProviderKey}, provider ${file.ProviderID}): ${detail}`,
+    );
     return fail(500, 'That file could not be read from storage.');
   }
 }

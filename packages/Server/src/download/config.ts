@@ -9,8 +9,10 @@
  *
  * Env vars:
  *  - `FORMS_DOWNLOAD_ENABLED`         `false` to turn the route off. Default on.
- *  - `FORMS_DOWNLOAD_STORAGE_ACCOUNT` Optional FileStorageAccount ID used only when the file's
- *                                     own provider has no account; unset uses the first account.
+ *  - `FORMS_DOWNLOAD_STORAGE_ACCOUNT` Optional FileStorageAccount ID. Reads try it after
+ *                                     `FORMS_UPLOAD_STORAGE_ACCOUNT` (where respondent files are
+ *                                     written), first among the file's provider's accounts, then
+ *                                     every other account on that provider (#290).
  */
 
 /** Base path the download route hangs off; the file id is the next path segment. */

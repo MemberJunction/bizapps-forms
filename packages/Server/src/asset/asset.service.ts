@@ -18,7 +18,7 @@
  * else: a file whose `ProviderKey` is not under `forms-assets/` is a 404 here, so the route
  * cannot be turned into a reader for the résumés the respondent-upload endpoint stores.
  */
-import { LogError } from '@memberjunction/core';
+import { LogError, LogErrorEx } from '@memberjunction/core';
 import type { EntityInfo, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 
 import { FORM_ENTITY } from '../public-submit/entity-names.js';
@@ -30,7 +30,12 @@ import {
   isPublicAssetKey,
 } from './config.js';
 import type { ParsedFile } from '../upload/multipart.js';
-import { readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
+import {
+  describeReadAccount,
+  describeReadAttempts,
+  readStoredObject,
+  type StorageReadEngine,
+} from '../storage/read-object.js';
 
 /** Entity-definition lookup — satisfied by a global `Metadata` and by a per-request provider. */
 export interface AssetMetadataProvider {
@@ -320,12 +325,23 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
   }
 
   try {
-    const { content } = await readStoredObject(
+    const { content, servedBy, failedAttempts } = await readStoredObject(
       ctx.storage,
       ctx.systemUser,
       { providerId: file.ProviderID, providerKey: file.ProviderKey },
       [getAssetConfig().storageAccountId],
     );
+    if (failedAttempts.length > 0) {
+      // Served, but not by the pinned account: the host is misconfigured or this is a legacy row.
+      // A warning, not an error, so it is visible without paging anyone.
+      LogErrorEx({
+        severity: 'warning',
+        message:
+          `[Forms] Asset ${wanted} (key ${file.ProviderKey}) was served by ${describeReadAccount(servedBy)} ` +
+          `after failing on ${describeReadAttempts(failedAttempts)}. ` +
+          'Pin FORMS_ASSET_STORAGE_ACCOUNT to the account uploads go to.',
+      });
+    }
     return {
       ok: true,
       asset: {
@@ -336,7 +352,9 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    LogError(`[Forms] Asset read failed for ${wanted}: ${detail}`);
+    LogError(
+      `[Forms] Asset read failed for ${wanted} (key ${file.ProviderKey}, provider ${file.ProviderID}): ${detail}`,
+    );
     return failRead(500, 'Could not read the image.');
   }
 }

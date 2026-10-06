@@ -25,7 +25,9 @@
  *  - `FORMS_ASSET_MAX_BYTES`       Max accepted image size in bytes. Default 5242880 (5 MiB).
  *  - `FORMS_ASSET_ALLOWED_TYPES`   Comma-separated content-type allowlist. Default: PNG, JPEG,
  *                                  GIF and WebP. See the SVG note below before adding it.
- *  - `FORMS_ASSET_STORAGE_ACCOUNT` Optional FileStorageAccount ID; unset uses the first account.
+ *  - `FORMS_ASSET_STORAGE_ACCOUNT` Optional FileStorageAccount ID. Uploads go through it; reads try it
+ *                                  FIRST among the file's provider's accounts, then every other
+ *                                  account on that provider. Unset uses the first account (#290).
  *  - `MJAPI_PUBLIC_URL`            Origin the returned absolute asset URL is built against
  *                                  (shared with the respondent host page). That URL is a
  *                                  convenience; forms store `/forms/asset/<id>` (#270).
