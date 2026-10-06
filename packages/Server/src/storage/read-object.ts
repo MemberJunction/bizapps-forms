@@ -145,9 +145,13 @@ function findFallbackCandidate(
   storage: StorageReadEngine,
   preferredAccountIds: ReadonlyArray<string | undefined>,
 ): ReadAccountRef[] {
-  const firstPreferred = preferredAccountIds.find((id): id is string => !!id);
-  const resolved =
-    (firstPreferred ? storage.ResolveStorageAccount(firstPreferred) : null) ?? storage.ResolveStorageAccount(undefined);
+  let resolved: ReturnType<StorageReadEngine['ResolveStorageAccount']> = null;
+  for (const id of preferredAccountIds) {
+    if (!id) continue;
+    resolved = storage.ResolveStorageAccount(id);
+    if (resolved) break;
+  }
+  resolved ??= storage.ResolveStorageAccount(undefined);
   if (!resolved) return [];
   return [
     {

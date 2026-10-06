@@ -84,7 +84,6 @@ const A: AccountRow = { ID: 'AAAAAAAA-0000-4000-8000-000000000001', Name: 'Accou
 const B: AccountRow = { ID: 'BBBBBBBB-0000-4000-8000-000000000002', Name: 'Account B', ProviderID: 'P1' };
 const REF = { providerId: 'P1', providerKey: KEY };
 
-
 describe('readStoredObject — provider-agnostic reads (#261)', () => {
   it('reads a path-keyed file back on an ID-keyed provider such as Box', async () => {
     const driver = idKeyedDriver();
@@ -157,7 +156,9 @@ describe('readStoredObject: probing the provider accounts (#290)', () => {
 
   it('tries an account that is both pinned and on the provider exactly once', async () => {
     const { storage, driverCalls } = multiAccountEngine([A, B], {});
-    await readStoredObject(storage, SYSTEM, REF, [A.ID, A.ID.toLowerCase()]).catch(() => undefined);
+    await expect(readStoredObject(storage, SYSTEM, REF, [A.ID, A.ID.toLowerCase()])).rejects.toBeInstanceOf(
+      StoredObjectReadError,
+    );
     expect(driverCalls).toEqual([A.ID, B.ID]);
   });
 
@@ -195,6 +196,18 @@ describe('readStoredObject: probing the provider accounts (#290)', () => {
     expect(driverCalls).toEqual([orphan.ID]);
     expect(read.servedBy.accountId).toBe(orphan.ID);
     expect(resolveCalls).toContain(orphan.ID);
+  });
+
+  it('tries each preferred id in turn when the provider has no account, skipping ones that do not resolve', async () => {
+    const orphan: AccountRow = { ID: 'DDDDDDDD-0000-4000-8000-000000000004', Name: 'Orphan', ProviderID: 'P9' };
+    const { storage, resolveCalls } = multiAccountEngine(
+      [orphan],
+      { [orphan.ID]: { [KEY]: BYTES } },
+      { resolve: (id) => (id === orphan.ID ? orphan.ID : null) },
+    );
+    const read = await readStoredObject(storage, SYSTEM, REF, ['GONE', orphan.ID]);
+    expect(resolveCalls).toEqual(['GONE', orphan.ID]);
+    expect(read.servedBy.accountId).toBe(orphan.ID);
   });
 
   it('falls back to the default account when the provider has none and nothing is preferred', async () => {
