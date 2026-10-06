@@ -19,18 +19,21 @@
  * SEAM NOTE: the same `BaseServerExtension` migration noted on `RespondentHostMiddleware` applies
  * to the GET half here.
  */
-import type { NextFunction, RequestHandler, Request, Response } from 'express';
+import type { Application, NextFunction, RequestHandler, Request, Response } from 'express';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware } from '@memberjunction/server';
-import { LogError, LogStatus, Metadata, RunView, type UserInfo } from '@memberjunction/core';
+import { LogError, LogErrorEx, LogStatus, Metadata, RunView, type UserInfo } from '@memberjunction/core';
 import { FileStorageEngine } from '@memberjunction/storage';
 import { UserCache } from '@memberjunction/generic-database-provider';
-import type { MJFileEntity } from '@memberjunction/core-entities';
+import { FileStorageEngineBase, type MJFileEntity } from '@memberjunction/core-entities';
 
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
 import { getRequestOrigin } from '../http/request-origin.js';
 import { matchSingleSegmentRoute } from '../http/route-match.js';
 import { parseMultipart } from '../upload/multipart.js';
+import { getUploadConfig } from '../upload/config.js';
+import { getDownloadConfig } from '../download/config.js';
+import { assessStoragePins } from '../storage/storage-readiness.js';
 import {
   ASSET_RESPONSE_HEADERS,
   ASSET_ROUTE,
@@ -65,6 +68,38 @@ export class AssetMiddleware extends BaseServerMiddleware {
 
   public override get Enabled(): boolean {
     return getAssetConfig().enabled;
+  }
+
+  /**
+   * Boot-time check of the storage-account pins; registers no route (#290 item 2).
+   *
+   * Same reasoning as `RespondentHostMiddleware.reportReadiness`: a wrong or missing pin is silent
+   * until a respondent or author pays for it, far from the env var that caused it. Reads only the
+   * engine's METADATA (`FileStorageEngineBase`), never `FileStorageEngine.Config`, which would
+   * initialise every driver and refresh Box tokens at boot. Must never throw out of boot — MJAPI
+   * also serves other apps — so any failure is logged with what was being checked.
+   */
+  public override async ConfigureExpressApp(_app: Application): Promise<void> {
+    try {
+      const systemUser = UserCache.Instance.GetSystemUser();
+      if (!systemUser) {
+        LogError('[Forms] Could not check storage-account pins at boot: the user cache has no system user.');
+        return;
+      }
+      await FileStorageEngineBase.Instance.Config(false, systemUser);
+      const accounts = FileStorageEngineBase.Instance.AccountsWithProviders
+        .filter((a) => a.provider.IsActive !== false)
+        .map((a) => ({ id: a.account.ID, name: a.account.Name, providerName: a.provider.Name }));
+      const { warnings, errors } = assessStoragePins(accounts, [
+        { envVar: 'FORMS_ASSET_STORAGE_ACCOUNT', value: getAssetConfig().storageAccountId },
+        { envVar: 'FORMS_UPLOAD_STORAGE_ACCOUNT', value: getUploadConfig().storageAccountId },
+        { envVar: 'FORMS_DOWNLOAD_STORAGE_ACCOUNT', value: getDownloadConfig().storageAccountId },
+      ]);
+      for (const e of errors) LogError(`[Forms] Storage is NOT ready: ${e}`);
+      for (const w of warnings) LogErrorEx({ severity: 'warning', message: `[Forms] Storage: ${w}` });
+    } catch (e) {
+      LogError(`[Forms] Could not check storage-account pins at boot: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   /**
