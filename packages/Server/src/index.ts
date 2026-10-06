@@ -63,6 +63,9 @@ import './upload/UploadMiddleware.js';
 // with no session). The read route serves ONLY objects stored under the public asset prefix.
 import './asset/AssetMiddleware.js';
 
+// Boot-time storage-account pin check (#290); registers no route, and is not gated on assets.
+import './storage/StorageReadinessMiddleware.js';
+
 // Import the response-file download middleware so its @RegisterClass fires and MJ server
 // bootstrap discovers GET /forms/files/:fileId — an AUTHENTICATED reader downloading one
 // respondent-uploaded answer. Mounted post-auth because identity is the guard here, unlike the

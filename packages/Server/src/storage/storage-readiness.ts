@@ -18,15 +18,14 @@ export interface StorageAccountSummary {
 export interface StoragePin {
   envVar: string;
   value: string | undefined;
+  /** 'write' pins choose an upload's destination; 'read' pins only order reads, which probe anyway. */
+  role: 'write' | 'read';
 }
 
 export interface StorageReadiness {
   warnings: string[];
   errors: string[];
 }
-
-/** The pins whose absence makes an upload's destination ambiguous. Download is excluded: reads probe. */
-const WRITE_PIN_ENV_VARS: ReadonlySet<string> = new Set(['FORMS_ASSET_STORAGE_ACCOUNT', 'FORMS_UPLOAD_STORAGE_ACCOUNT']);
 
 function describeAccount(a: StorageAccountSummary): string {
   return `"${a.name}" (${a.id}, ${a.providerName})`;
@@ -46,14 +45,14 @@ export function assessStoragePins(
 
   for (const pin of pins) {
     if (!pin.value) {
-      if (WRITE_PIN_ENV_VARS.has(pin.envVar)) unsetWritePins.push(pin.envVar);
+      if (pin.role === 'write') unsetWritePins.push(pin.envVar);
       continue;
     }
     const value = pin.value;
     if (!accounts.some((a) => UUIDsEqual(a.id, value))) {
       errors.push(
         `${pin.envVar} is set to ${value}, which is not an active File Storage Account here; ` +
-          `uploads through it fail and reads skip it. Active accounts: ${list}.`,
+          `${pin.role === 'write' ? 'uploads through it fail and reads skip it' : 'reads skip it'}. Active accounts: ${list}.`,
       );
     }
   }

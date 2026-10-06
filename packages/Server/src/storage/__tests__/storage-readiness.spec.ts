@@ -6,9 +6,9 @@ const A: StorageAccountSummary = { id: '0CD8473E-F36B-1410-8D16-00822C986318', n
 const B: StorageAccountSummary = { id: 'B2900000-0000-4000-8000-0000000000AB', name: 'Account B', providerName: 'Local Disk Storage' };
 
 const pins = (asset?: string, upload?: string, download?: string): StoragePin[] => [
-  { envVar: 'FORMS_ASSET_STORAGE_ACCOUNT', value: asset },
-  { envVar: 'FORMS_UPLOAD_STORAGE_ACCOUNT', value: upload },
-  { envVar: 'FORMS_DOWNLOAD_STORAGE_ACCOUNT', value: download },
+  { envVar: 'FORMS_ASSET_STORAGE_ACCOUNT', value: asset, role: 'write' },
+  { envVar: 'FORMS_UPLOAD_STORAGE_ACCOUNT', value: upload, role: 'write' },
+  { envVar: 'FORMS_DOWNLOAD_STORAGE_ACCOUNT', value: download, role: 'read' },
 ];
 
 describe('assessStoragePins', () => {
@@ -33,6 +33,8 @@ describe('assessStoragePins', () => {
     const { errors } = assessStoragePins([A, B], pins(A.id, B.id, 'nope'));
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('FORMS_DOWNLOAD_STORAGE_ACCOUNT is set to nope');
+    expect(errors[0]).toContain('reads skip it');
+    expect(errors[0]).not.toContain('uploads through it fail');
   });
 
   it('warns once, naming every account and every unset write pin, when several accounts exist', () => {
