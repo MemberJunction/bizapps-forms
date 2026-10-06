@@ -169,9 +169,19 @@ export function formatBytes(bytes: number): string {
   return mb >= 1 ? `${Number(mb.toFixed(mb % 1 === 0 ? 0 : 1))} MB` : `${Math.round(bytes / 1024)} KB`;
 }
 
-/** True when a stored object's provider key sits under the public asset prefix. */
+/**
+ * True when a stored object's provider key sits under the public asset prefix — and STAYS there.
+ *
+ * A prefix test alone passes `forms-assets/../uploads/resume.pdf`, which a path-resolving driver
+ * (local disk, for one) reads from outside the asset tree. Reads probe the same key on every
+ * account of the file's provider (#290), so one such driver anywhere is enough. Hence: no `.` or
+ * `..` segment, and no backslash at all, since some drivers treat it as a separator. Forms never
+ * writes such a key: `safeFileName` maps a dot-only name to `image`.
+ */
 export function isPublicAssetKey(providerKey: string | null | undefined): providerKey is string {
-  return typeof providerKey === 'string' && providerKey.startsWith(`${ASSET_STORAGE_PREFIX}/`);
+  if (typeof providerKey !== 'string' || !providerKey.startsWith(`${ASSET_STORAGE_PREFIX}/`)) return false;
+  if (providerKey.includes('\\')) return false;
+  return !providerKey.split('/').some((segment) => segment === '.' || segment === '..');
 }
 
 /**

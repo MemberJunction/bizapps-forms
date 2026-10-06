@@ -359,5 +359,7 @@ function safeFileName(filename: string): string {
     .replace(/[^A-Za-z0-9._ -]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  return cleaned || 'image';
+  // `.` and `..` survive the character filter but would make a path segment the read guard
+  // (`isPublicAssetKey`) refuses, so the author's upload would never display.
+  return cleaned === '' || cleaned === '.' || cleaned === '..' ? 'image' : cleaned;
 }

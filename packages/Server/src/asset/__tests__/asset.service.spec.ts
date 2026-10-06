@@ -192,6 +192,14 @@ describe('runAssetUpload', () => {
     expect(ctx.storage.UploadFile).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'pawd.png' }));
   });
 
+  it('never stores a dot-segment filename, which the read guard would refuse to serve', async () => {
+    for (const filename of ['..', '.']) {
+      const ctx = uploadContext();
+      await runAssetUpload(ctx, { file: { ...png(), filename }, formId: FORM_ID });
+      expect(ctx.storage.UploadFile).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'image' }));
+    }
+  });
+
   it('turns a storage failure into a 500 instead of throwing out of the route', async () => {
     const ctx = uploadContext({
       storage: {
