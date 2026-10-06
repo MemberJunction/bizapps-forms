@@ -9,10 +9,12 @@
  *
  * Env vars:
  *  - `FORMS_DOWNLOAD_ENABLED`         `false` to turn the route off. Default on.
- *  - `FORMS_DOWNLOAD_STORAGE_ACCOUNT` Optional FileStorageAccount ID. Reads try it after
- *                                     `FORMS_UPLOAD_STORAGE_ACCOUNT` (where respondent files are
- *                                     written), first among the file's provider's accounts, then
- *                                     every other account on that provider (#290).
+ *  - `FORMS_DOWNLOAD_STORAGE_ACCOUNT` Optional FileStorageAccount ID, a read HINT rather than an
+ *                                     override. Reads try `FORMS_UPLOAD_STORAGE_ACCOUNT` (where
+ *                                     respondent files are written), then this, then every other
+ *                                     account on the file's provider (#290). A pin on another
+ *                                     provider than the file's is skipped. Once this process has
+ *                                     read a file, the account that served it is tried first.
  */
 
 /** Base path the download route hangs off; the file id is the next path segment. */

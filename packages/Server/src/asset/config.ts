@@ -28,6 +28,8 @@
  *  - `FORMS_ASSET_STORAGE_ACCOUNT` Optional FileStorageAccount ID. Uploads go through it; reads try it
  *                                  FIRST among the file's provider's accounts, then every other
  *                                  account on that provider. Unset uses the first account (#290).
+ *                                  Once this process has read a file, the account that served it
+ *                                  is tried ahead of the pin.
  *  - `MJAPI_PUBLIC_URL`            Origin the returned absolute asset URL is built against
  *                                  (shared with the respondent host page). That URL is a
  *                                  convenience; forms store `/forms/asset/<id>` (#270).

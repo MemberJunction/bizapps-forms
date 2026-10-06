@@ -20,8 +20,8 @@ import {
 import { resetRememberedReadsForTests, type StorageReadEngine } from '../../storage/read-object';
 
 const FILE_ID = '11111111-2222-4333-8444-555555555555';
-const CALLER = { ID: 'caller' } as unknown as UserInfo;
-const SYSTEM = { ID: 'system' } as unknown as UserInfo;
+const CALLER = { ID: 'caller' } as UserInfo;
+const SYSTEM = { ID: 'system' } as UserInfo;
 
 function provenance(over: Partial<UploadProvenanceRow> = {}): UploadProvenanceRow {
   return { FileID: FILE_ID, FileName: 'resume.pdf', ContentType: 'application/pdf', Status: 'Active', ...over };
@@ -268,13 +268,13 @@ describe('loadResponseFile — the account the bytes are read from (#290)', () =
 
   it('tries the upload pin before the download pin, then the rest of the provider', async () => {
     pins();
-    const GetDriver = vi.fn(async () => ({
+    const GetDriver = vi.fn(async (_accountId: string) => ({
       GetObject: async (): Promise<Buffer> => {
         throw new Error('nope');
       },
     }));
     await loadResponseFile(context({ storage: { GetAccountsByProviderID: accounts, GetDriver } }), FILE_ID);
-    expect(GetDriver.mock.calls.map((c) => (c as unknown as [string])[0])).toEqual([
+    expect(GetDriver.mock.calls.map((c) => c[0])).toEqual([
       UPLOAD_ACCOUNT,
       DOWNLOAD_ACCOUNT,
       OTHER_ACCOUNT,
@@ -297,10 +297,12 @@ describe('loadResponseFile — the account the bytes are read from (#290)', () =
       FILE_ID,
     );
     expect(result.failure).toEqual({ status: 500, error: 'That file could not be read from storage.' });
+    expect(logError).toHaveBeenCalledTimes(1);
     const line = String(logError.mock.calls[0][0]);
     for (const id of [UPLOAD_ACCOUNT, DOWNLOAD_ACCOUNT, OTHER_ACCOUNT]) expect(line).toContain(id);
     expect(line).toContain('Provider 1');
     expect(line).toContain('key forms-uploads/2026-08-19/abc/resume.pdf');
+    expect(line).toContain('provider provider-1');
   });
 
   it('warns when a fallback account served the file', async () => {
