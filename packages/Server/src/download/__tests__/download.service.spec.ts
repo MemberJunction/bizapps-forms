@@ -79,8 +79,12 @@ function context(stubs: Stubs = {}): DownloadContext {
     },
     storage: {
       Config: vi.fn(async () => undefined),
-      GetAccountsByProviderID: () => [{ ID: 'account-1' }],
-      ResolveStorageAccount: () => ({ account: { ID: 'account-1' } }),
+      GetAccountsByProviderID: () => [{ ID: 'account-1', Name: 'Account 1' }],
+      GetProviderById: () => ({ ID: 'provider-1', Name: 'Provider 1' }),
+      ResolveStorageAccount: () => ({
+        account: { ID: 'account-1', Name: 'Account 1' },
+        provider: { ID: 'provider-1', Name: 'Provider 1' },
+      }),
       GetDriver: async () => ({ GetObject: async () => Buffer.from('PDF BYTES') }),
       ...stubs.storage,
     } as StorageReadEngine,

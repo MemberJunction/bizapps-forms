@@ -320,11 +320,11 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
   }
 
   try {
-    const content = await readStoredObject(
+    const { content } = await readStoredObject(
       ctx.storage,
       ctx.systemUser,
       { providerId: file.ProviderID, providerKey: file.ProviderKey },
-      getAssetConfig().storageAccountId,
+      [getAssetConfig().storageAccountId],
     );
     return {
       ok: true,

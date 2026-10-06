@@ -140,11 +140,11 @@ export async function loadResponseFile(ctx: DownloadContext, fileId: string): Pr
   }
 
   try {
-    const content = await readStoredObject(
+    const { content } = await readStoredObject(
       ctx.storage,
       ctx.elevatedUser,
       { providerId: file.ProviderID, providerKey: file.ProviderKey },
-      getDownloadConfig().storageAccountId,
+      [getDownloadConfig().storageAccountId],
     );
     return {
       ok: true,

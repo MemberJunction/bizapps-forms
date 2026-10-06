@@ -226,8 +226,12 @@ function readContext(file: StoredAssetRecord | undefined, storage?: Partial<Asse
     systemUser: SYSTEM,
     storage: {
       Config: vi.fn(async () => undefined),
-      GetAccountsByProviderID: () => [{ ID: 'account-1' }],
-      ResolveStorageAccount: () => ({ account: { ID: 'fallback-account' } }),
+      GetAccountsByProviderID: () => [{ ID: 'account-1', Name: 'Account 1' }],
+      GetProviderById: () => ({ ID: 'provider-1', Name: 'Provider 1' }),
+      ResolveStorageAccount: () => ({
+        account: { ID: 'fallback-account', Name: 'Fallback' },
+        provider: { ID: 'provider-1', Name: 'Provider 1' },
+      }),
       GetDriver: vi.fn(async () => ({ GetObject: getObject })),
       ...storage,
     },
