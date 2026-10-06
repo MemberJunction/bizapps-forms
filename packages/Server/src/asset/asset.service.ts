@@ -30,12 +30,7 @@ import {
   isPublicAssetKey,
 } from './config.js';
 import type { ParsedFile } from '../upload/multipart.js';
-import {
-  describeReadAccount,
-  describeReadAttempts,
-  readStoredObject,
-  type StorageReadEngine,
-} from '../storage/read-object.js';
+import { describeReadFallback, readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
 
 /** Entity-definition lookup — satisfied by a global `Metadata` and by a per-request provider. */
 export interface AssetMetadataProvider {
@@ -325,27 +320,20 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
   }
 
   try {
-    const { content, servedBy, failedAttempts } = await readStoredObject(
+    const read = await readStoredObject(
       ctx.storage,
       ctx.systemUser,
       { providerId: file.ProviderID, providerKey: file.ProviderKey },
       [getAssetConfig().storageAccountId],
     );
-    if (failedAttempts.length > 0) {
-      // Served, but not by the pinned account: the host is misconfigured or this is a legacy row.
-      // A warning, not an error, so it is visible without paging anyone.
-      LogErrorEx({
-        severity: 'warning',
-        message:
-          `[Forms] Asset ${wanted} (key ${file.ProviderKey}) was served by ${describeReadAccount(servedBy)} ` +
-          `after failing on ${describeReadAttempts(failedAttempts)}. ` +
-          'Pin FORMS_ASSET_STORAGE_ACCOUNT to the account uploads go to.',
-      });
-    }
+    // Set only when an account other than the first one tried served the bytes. A warning, not an
+    // error: the image went out.
+    const fallback = describeReadFallback('Asset', wanted, file.ProviderKey, read, ['FORMS_ASSET_STORAGE_ACCOUNT']);
+    if (fallback) LogErrorEx({ severity: 'warning', message: fallback });
     return {
       ok: true,
       asset: {
-        content,
+        content: read.content,
         contentType: file.ContentType?.trim() || 'application/octet-stream',
         fileName: file.Name?.trim() || 'image',
       },

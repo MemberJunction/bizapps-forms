@@ -322,5 +322,7 @@ describe('loadResponseFile — the account the bytes are read from (#290)', () =
     const arg = logErrorEx.mock.calls[0][0] as { severity: string; message: string };
     expect(arg.severity).toBe('warning');
     expect(arg.message).toContain(OTHER_ACCOUNT);
+    expect(arg.message).toContain('ordered by FORMS_UPLOAD_STORAGE_ACCOUNT, then FORMS_DOWNLOAD_STORAGE_ACCOUNT, then');
+    expect(arg.message).not.toMatch(/\bPin FORMS_/);
   });
 });

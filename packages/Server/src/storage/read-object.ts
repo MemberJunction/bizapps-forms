@@ -136,6 +136,37 @@ export function describeReadAttempts(attempts: ReadonlyArray<ReadAttempt>): stri
   return attempts.map((a) => `${describeReadAccount(a.account)}: ${a.error}`).join('; ');
 }
 
+/**
+ * Pure. The warning for a read that succeeded only after other accounts failed, or `undefined`
+ * when the first account tried served it.
+ *
+ * Names both causes because the log line cannot tell them apart: the object was written under a
+ * different pin or by another host sharing the database, OR the earlier account is failing (its
+ * error is shown). It names the pins that order the route's reads as context, never as an
+ * instruction to re-pin — re-pinning is wrong for the second cause and for a legacy row. "Once per
+ * object" holds because {@link readStoredObject} remembers the serving account.
+ *
+ * @param label The route's noun for the object, e.g. `Asset` or `Download`.
+ * @param pinEnvVars The env vars that order this route's reads, in the order they are tried.
+ */
+export function describeReadFallback(
+  label: string,
+  fileId: string,
+  providerKey: string,
+  read: StoredObjectRead,
+  pinEnvVars: ReadonlyArray<string>,
+): string | undefined {
+  if (read.failedAttempts.length === 0) return undefined;
+  return (
+    `[Forms] ${label} ${fileId} (key ${providerKey}) is held by ${describeReadAccount(read.servedBy)}, ` +
+    `not by the account(s) tried first: ${describeReadAttempts(read.failedAttempts)}. ` +
+    'Usually it was written under a different pin or by another host sharing this database; otherwise ' +
+    'the earlier account is failing (its error is shown). ' +
+    `This route's reads are ordered by ${pinEnvVars.join(', then ')}, then the provider's other accounts. ` +
+    'Logged once per object while this process remembers where it lives.'
+  );
+}
+
 /** Every candidate failed. `attempts` is never empty; `truncated` = more accounts existed than were tried. */
 export class StoredObjectReadError extends Error {
   readonly attempts: ReadAttempt[];

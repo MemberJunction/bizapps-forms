@@ -48,12 +48,7 @@ import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/cor
 import { escapeSqlString } from '@mj-biz-apps/forms-entities';
 
 import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names.js';
-import {
-  describeReadAccount,
-  describeReadAttempts,
-  readStoredObject,
-  type StorageReadEngine,
-} from '../storage/read-object.js';
+import { describeReadFallback, readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
 import { getUploadConfig } from '../upload/config.js';
 import { getDownloadConfig } from './config.js';
 
@@ -146,27 +141,23 @@ export async function loadResponseFile(ctx: DownloadContext, fileId: string): Pr
   }
 
   try {
-    // Respondent files are WRITTEN through the upload pin, so that is where they most likely are;
-    // the download pin is the operator's explicit read override and is tried second.
-    const { content, servedBy, failedAttempts } = await readStoredObject(
+    // Respondent files are WRITTEN through the upload pin, so that is where they most likely are.
+    // The download pin is a read hint, tried second; every other account on the provider follows.
+    const read = await readStoredObject(
       ctx.storage,
       ctx.elevatedUser,
       { providerId: file.ProviderID, providerKey: file.ProviderKey },
       [getUploadConfig().storageAccountId, getDownloadConfig().storageAccountId],
     );
-    if (failedAttempts.length > 0) {
-      LogErrorEx({
-        severity: 'warning',
-        message:
-          `[Forms] Download ${wanted} (key ${file.ProviderKey}) was served by ${describeReadAccount(servedBy)} ` +
-          `after failing on ${describeReadAttempts(failedAttempts)}. ` +
-          'Pin FORMS_UPLOAD_STORAGE_ACCOUNT to the account uploads go to.',
-      });
-    }
+    const fallback = describeReadFallback('Download', wanted, file.ProviderKey, read, [
+      'FORMS_UPLOAD_STORAGE_ACCOUNT',
+      'FORMS_DOWNLOAD_STORAGE_ACCOUNT',
+    ]);
+    if (fallback) LogErrorEx({ severity: 'warning', message: fallback });
     return {
       ok: true,
       payload: {
-        content,
+        content: read.content,
         // The provenance row's copy wins: it is what the Responses tab displayed, and a download
         // whose name differs from the name that was clicked reads as the wrong file.
         contentType: (upload.ContentType || file.ContentType || '').trim() || 'application/octet-stream',

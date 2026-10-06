@@ -5,9 +5,11 @@ import {
   MAX_REMEMBERED_READS,
   NoStorageAccountError,
   StoredObjectReadError,
+  describeReadFallback,
   readStoredObject,
   resetRememberedReadsForTests,
   type StorageReadEngine,
+  type StoredObjectRead,
 } from '../read-object.js';
 
 // The serving-account memo is process-wide; without this, one test's read reorders the next's.
@@ -329,5 +331,45 @@ describe('readStoredObject: remembering the account that served an object (#290)
     driverCalls.length = 0;
     await readStoredObject(storage, SYSTEM, REF, [B.ID]);
     expect(driverCalls).toEqual([A.ID]);
+  });
+});
+
+describe('describeReadFallback', () => {
+  const served = { accountId: A.ID, accountName: 'Account A', providerId: 'P1', providerName: 'Provider P1' };
+  const tried = { accountId: B.ID, accountName: 'Account B', providerId: 'P1', providerName: 'Provider P1' };
+  const fallback: StoredObjectRead = {
+    content: BYTES,
+    servedBy: served,
+    failedAttempts: [{ account: tried, error: `ENOENT ${KEY}` }],
+  };
+  const PINS = ['FORMS_UPLOAD_STORAGE_ACCOUNT', 'FORMS_DOWNLOAD_STORAGE_ACCOUNT'];
+
+  it('says nothing when the first account served the object', () => {
+    expect(describeReadFallback('Download', 'file-1', KEY, { ...fallback, failedAttempts: [] }, PINS)).toBeUndefined();
+  });
+
+  it('names the object, the account holding it, and each account tried first with its error', () => {
+    const message = describeReadFallback('Download', 'file-1', KEY, fallback, PINS) ?? '';
+    expect(message).toMatch(/^\[Forms\] Download file-1 \(key forms-assets\/form-1\/uuid\/logo\.png\) is held by /);
+    expect(message).toContain(`account "Account A" (${A.ID}) on provider "Provider P1" (P1)`);
+    expect(message).toContain(`account "Account B" (${B.ID}) on provider "Provider P1" (P1): ENOENT ${KEY}`);
+  });
+
+  it('names both causes rather than assuming the pin is wrong', () => {
+    const message = describeReadFallback('Download', 'file-1', KEY, fallback, PINS) ?? '';
+    expect(message).toContain('written under a different pin or by another host sharing this database');
+    expect(message).toContain('the earlier account is failing');
+    expect(message).not.toMatch(/\bPin FORMS_/);
+  });
+
+  it('names the pins that order this route\'s reads, in order, as context', () => {
+    const message = describeReadFallback('Download', 'file-1', KEY, fallback, PINS) ?? '';
+    expect(message).toContain('ordered by FORMS_UPLOAD_STORAGE_ACCOUNT, then FORMS_DOWNLOAD_STORAGE_ACCOUNT, then');
+  });
+
+  it('says it is logged once per object, which the serving-account memo makes true', () => {
+    expect(describeReadFallback('Asset', 'file-1', KEY, fallback, ['FORMS_ASSET_STORAGE_ACCOUNT'])).toContain(
+      'Logged once per object while this process remembers where it lives.',
+    );
   });
 });
