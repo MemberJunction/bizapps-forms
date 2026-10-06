@@ -172,6 +172,24 @@ export function describeReadAttempts(attempts: ReadonlyArray<ReadAttempt>): stri
   return attempts.map((a) => `${describeReadAccount(a.account)}: ${a.error}`).join('; ');
 }
 
+const REDACTED_KEY = '<storage key>';
+
+/**
+ * Pure. Replaces every occurrence of `providerKey`, and then of its final path segment, with
+ * `<storage key>`. Both are matched as literal strings.
+ *
+ * Why the final segment too: a respondent upload's key ends in the uploader's filename, which is
+ * personal data, and some drivers (and cloud SDK messages) report only the object's basename. The
+ * full key goes first so a path is replaced whole rather than leaving its directories behind. An
+ * empty key, or an empty final segment (a key ending in `/`), redacts nothing for that part.
+ */
+export function redactStorageKey(text: string, providerKey: string): string {
+  if (providerKey === '') return text;
+  const withoutKey = text.split(providerKey).join(REDACTED_KEY);
+  const baseName = providerKey.slice(providerKey.lastIndexOf('/') + 1);
+  return baseName === '' ? withoutKey : withoutKey.split(baseName).join(REDACTED_KEY);
+}
+
 /**
  * Pure. The warning for a read that succeeded only after other accounts failed, or `undefined`
  * when the first account tried served it.
@@ -184,13 +202,17 @@ export function describeReadAttempts(attempts: ReadonlyArray<ReadAttempt>): stri
  * because {@link readStoredObject} remembers the serving account.
  *
  * @param label The route's noun for the object, e.g. `Asset` or `Download`.
+ * @param providerKey The object's storage key, shown as `(key …)`; `undefined` omits that clause.
+ *   Pass `undefined` for respondent files, whose key ends in the uploader's filename and so must
+ *   not reach a log. This function does NOT redact the attempt errors (they may repeat the key):
+ *   a caller that omits the key must run the returned line through {@link redactStorageKey}.
  * @param pins The pins that order this route's reads, in the order they are tried — the same list
  *   passed to {@link readStoredObject}.
  */
 export function describeReadFallback(
   label: string,
   fileId: string,
-  providerKey: string,
+  providerKey: string | undefined,
   read: StoredObjectRead,
   pins: ReadonlyArray<ReadPin>,
 ): string | undefined {
@@ -202,7 +224,7 @@ export function describeReadFallback(
       'the earlier account is failing (its error is shown). ';
   const order = ['the account that last served this object (if any)', ...pins.map((p) => p.envVar)].join(', then ');
   return (
-    `[Forms] ${label} ${fileId} (key ${providerKey}) is held by ${describeReadAccount(read.servedBy)}, ` +
+    `[Forms] ${label} ${fileId}${providerKey === undefined ? '' : ` (key ${providerKey})`} is held by ${describeReadAccount(read.servedBy)}, ` +
     `not by the account(s) tried first: ${describeReadAttempts(read.failedAttempts)}. ` +
     cause +
     `This route's reads are ordered by ${order}, then the provider's other accounts. ` +

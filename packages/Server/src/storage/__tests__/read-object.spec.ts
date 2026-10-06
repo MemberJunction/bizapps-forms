@@ -7,6 +7,7 @@ import {
   StorageMetadataNotLoadedError,
   StoredObjectReadError,
   describeReadFallback,
+  redactStorageKey,
   readStoredObject,
   resetRememberedReadsForTests,
   type StorageReadEngine,
@@ -453,5 +454,51 @@ describe('readStoredObject: a File Storage metadata load that failed (#290)', ()
     await readStoredObject(storage, SYSTEM, REF, pins());
     expect(storage.Config).toHaveBeenCalledTimes(1);
     expect(storage.Config).toHaveBeenCalledWith(false, SYSTEM);
+  });
+});
+
+describe('redactStorageKey', () => {
+  const PRIVATE = 'forms-uploads/abc/Jane_Doe_Resume.pdf';
+
+  it('replaces every occurrence of the full key', () => {
+    expect(redactStorageKey(`open '/r/${PRIVATE}' then ${PRIVATE}`, PRIVATE)).toBe(
+      "open '/r/<storage key>' then <storage key>",
+    );
+  });
+
+  it('replaces the bare filename when a driver reports only the basename', () => {
+    expect(redactStorageKey('No such object: Jane_Doe_Resume.pdf', PRIVATE)).toBe('No such object: <storage key>');
+  });
+
+  it('leaves unrelated text alone', () => {
+    expect(redactStorageKey('token refresh refused', PRIVATE)).toBe('token refresh refused');
+  });
+
+  it('treats the key as a literal, not a pattern', () => {
+    expect(redactStorageKey('a.b and axb', 'a.b')).toBe('<storage key> and axb');
+  });
+
+  it('returns the text unchanged when the key is empty', () => {
+    expect(redactStorageKey('anything at all', '')).toBe('anything at all');
+  });
+
+  it('does not redact an empty final segment of a key ending in a slash', () => {
+    expect(redactStorageKey('dir/ listing', 'dir/')).toBe('<storage key> listing');
+  });
+});
+
+describe('describeReadFallback without a key', () => {
+  it('has no key clause and leaves the attempt text alone', () => {
+    const acct = { accountId: A.ID, accountName: 'Account A', providerId: 'P1', providerName: 'Provider P1' };
+    const read: StoredObjectRead = {
+      content: BYTES,
+      servedBy: acct,
+      failedAttempts: [{ account: acct, error: 'boom' }],
+      rememberedAccountFailed: false,
+    };
+    const message = describeReadFallback('Download', 'file-1', undefined, read, []) ?? '';
+    expect(message).not.toContain('(key');
+    expect(message).toContain('Download file-1 is held by');
+    expect(message).toContain(': boom');
   });
 });

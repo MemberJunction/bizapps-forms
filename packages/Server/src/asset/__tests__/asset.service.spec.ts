@@ -410,6 +410,7 @@ describe('loadAssetBytes — the account the bytes are read from (#290)', () => 
     const arg = logErrorEx.mock.calls[0][0] as { severity: string; message: string };
     expect(arg.severity).toBe('warning');
     expect(arg.message).toContain(`"Account B" (${ACCOUNT_B})`);
+    expect(arg.message).toContain(`(key forms-assets/${FORM_ID}/logo.png)`); // public prefix: the operator's main clue
     expect(arg.message).toContain('(if any), then FORMS_ASSET_STORAGE_ACCOUNT, then');
     expect(arg.message).not.toMatch(/\bPin FORMS_/);
   });

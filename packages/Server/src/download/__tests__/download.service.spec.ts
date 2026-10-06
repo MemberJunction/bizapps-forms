@@ -281,7 +281,7 @@ describe('loadResponseFile — the account the bytes are read from (#290)', () =
     ]);
   });
 
-  it('keeps the generic 500 on total failure and logs the accounts, key and provider', async () => {
+  it('keeps the generic 500 on total failure and logs the accounts, file id and provider (never the key)', async () => {
     pins();
     const result = await loadResponseFile(
       context({
@@ -301,7 +301,8 @@ describe('loadResponseFile — the account the bytes are read from (#290)', () =
     const line = String(logError.mock.calls[0][0]);
     for (const id of [UPLOAD_ACCOUNT, DOWNLOAD_ACCOUNT, OTHER_ACCOUNT]) expect(line).toContain(id);
     expect(line).toContain('Provider 1');
-    expect(line).toContain('key forms-uploads/2026-08-19/abc/resume.pdf');
+    expect(line).not.toContain('forms-uploads/');
+    expect(line).toContain(FILE_ID);
     expect(line).toContain('provider provider-1');
   });
 
@@ -327,5 +328,55 @@ describe('loadResponseFile — the account the bytes are read from (#290)', () =
     expect(arg.message).toContain(OTHER_ACCOUNT);
     expect(arg.message).toContain('(if any), then FORMS_UPLOAD_STORAGE_ACCOUNT, then FORMS_DOWNLOAD_STORAGE_ACCOUNT, then');
     expect(arg.message).not.toMatch(/\bPin FORMS_/);
+  });
+});
+
+describe('loadResponseFile — respondent file names stay out of the logs (#290)', () => {
+  const PRIVATE_KEY = 'forms-uploads/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/Jane_Doe_Resume.pdf';
+  const TWO_ACCOUNTS = () => [
+    { ID: 'account-1', Name: 'Account 1' },
+    { ID: 'account-2', Name: 'Account 2' },
+  ];
+  const echo = (): Promise<Buffer> => {
+    throw new Error(`ENOENT: no such file or directory, open '/data/storage/${PRIVATE_KEY}'`);
+  };
+
+  function expectNoPersonalData(line: string): void {
+    expect(line).not.toContain('Jane_Doe_Resume');
+    expect(line).not.toContain('forms-uploads/');
+    expect(line).toContain(FILE_ID);
+    expect(line).toContain('provider-1');
+  }
+
+  it('logs neither the key nor the file name on total failure, and the response body is unchanged', async () => {
+    const result = await loadResponseFile(
+      context({
+        file: ok([fileRow({ ProviderKey: PRIVATE_KEY })]),
+        storage: { GetAccountsByProviderID: TWO_ACCOUNTS, GetDriver: async () => ({ GetObject: echo }) },
+      }),
+      FILE_ID,
+    );
+    expect(result.failure).toEqual({ status: 500, error: 'That file could not be read from storage.' });
+    expectNoPersonalData(String(logError.mock.calls[0][0]));
+  });
+
+  it('logs neither the key nor the file name in the fallback warning', async () => {
+    const result = await loadResponseFile(
+      context({
+        file: ok([fileRow({ ProviderKey: PRIVATE_KEY })]),
+        storage: {
+          GetAccountsByProviderID: TWO_ACCOUNTS,
+          GetDriver: async (id: string) => ({
+            GetObject: async (): Promise<Buffer> => (id === 'account-2' ? Buffer.from('PDF BYTES') : echo()),
+          }),
+        },
+      }),
+      FILE_ID,
+    );
+    expect(result.ok).toBe(true);
+    const message = (logErrorEx.mock.calls[0][0] as { message: string }).message;
+    expect(message).not.toContain('Jane_Doe_Resume');
+    expect(message).not.toContain('forms-uploads/');
+    expect(message).toContain(FILE_ID);
   });
 });

@@ -329,6 +329,8 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
     );
     // Set only when an account other than the first one tried served the bytes. A warning, not an
     // error: the image went out.
+    // The key stays in the asset route's lines, unlike the download route's: asset keys sit under the
+    // public `forms-assets/` prefix and are not respondent data, and they are the operator's main clue.
     const fallback = describeReadFallback('Asset', wanted, file.ProviderKey, read, pins);
     if (fallback) LogErrorEx({ severity: 'warning', message: fallback });
     return {
@@ -341,6 +343,7 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
+    // Key kept on purpose; see the fallback warning above.
     LogError(
       `[Forms] Asset read failed for ${wanted} (key ${file.ProviderKey}, provider ${file.ProviderID}): ${detail}`,
     );

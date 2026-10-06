@@ -48,7 +48,7 @@ import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/cor
 import { escapeSqlString } from '@mj-biz-apps/forms-entities';
 
 import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names.js';
-import { describeReadFallback, readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
+import { describeReadFallback, readStoredObject, redactStorageKey, type StorageReadEngine } from '../storage/read-object.js';
 import { getUploadConfig } from '../upload/config.js';
 import { getDownloadConfig } from './config.js';
 
@@ -153,8 +153,11 @@ export async function loadResponseFile(ctx: DownloadContext, fileId: string): Pr
       { providerId: file.ProviderID, providerKey: file.ProviderKey },
       pins,
     );
-    const fallback = describeReadFallback('Download', wanted, file.ProviderKey, read, pins);
-    if (fallback) LogErrorEx({ severity: 'warning', message: fallback });
+    // No key here, unlike the asset route: a respondent file's key ends in the uploader's filename,
+    // which is personal data. The file id is enough to look the key up in `MJ: Files`. The attempt
+    // errors can repeat the key, so the whole line is redacted as well.
+    const fallback = describeReadFallback('Download', wanted, undefined, read, pins);
+    if (fallback) LogErrorEx({ severity: 'warning', message: redactStorageKey(fallback, file.ProviderKey) });
     return {
       ok: true,
       payload: {
@@ -167,8 +170,9 @@ export async function loadResponseFile(ctx: DownloadContext, fileId: string): Pr
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
+    // Key withheld and `detail` redacted, for the reason given at the fallback warning above.
     LogError(
-      `[Forms] Download read failed for ${wanted} (key ${file.ProviderKey}, provider ${file.ProviderID}): ${detail}`,
+      `[Forms] Download read failed for ${wanted} (provider ${file.ProviderID}): ${redactStorageKey(detail, file.ProviderKey)}`,
     );
     return fail(500, 'That file could not be read from storage.');
   }
