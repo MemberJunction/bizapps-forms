@@ -88,6 +88,7 @@ function context(stubs: Stubs = {}): DownloadContext {
     },
     storage: {
       Config: vi.fn(async () => undefined),
+      Loaded: true,
       GetAccountsByProviderID: () => [{ ID: 'account-1', Name: 'Account 1' }],
       GetProviderById: () => ({ ID: 'provider-1', Name: 'Provider 1' }),
       ResolveStorageAccount: () => ({

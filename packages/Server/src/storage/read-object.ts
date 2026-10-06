@@ -97,6 +97,12 @@ export interface StoredObjectRead {
  */
 export interface StorageReadEngine {
   Config(forceRefresh?: boolean, contextUser?: UserInfo): Promise<void>;
+  /**
+   * False after a metadata load that failed. MJ 6.1.4's `FileStorageEngine` still marks itself
+   * configured in that case (its base engine logs and swallows the error), so `Config(false)` never
+   * retries; this is the only signal. See {@link readStoredObject}.
+   */
+  readonly Loaded: boolean;
   GetAccountsByProviderID(providerId: string): ReadonlyArray<{ ID: string; Name: string }>;
   GetProviderById(providerId: string): { ID: string; Name: string } | undefined;
   ResolveStorageAccount(
@@ -123,6 +129,21 @@ export class NoStorageAccountError extends Error {
   constructor(providerId: string) {
     super(`No storage account resolves for provider ${providerId}.`);
     this.name = 'NoStorageAccountError';
+  }
+}
+
+/**
+ * Raised when File Storage metadata is still not loaded after one forced reload. Without it the
+ * read would report "no storage account resolves", which names the wrong cause for the life of
+ * the process.
+ */
+export class StorageMetadataNotLoadedError extends Error {
+  constructor() {
+    super(
+      'File Storage metadata did not load on this host; see the engine error logged earlier. ' +
+        'Reads cannot resolve a storage account until it does.',
+    );
+    this.name = 'StorageMetadataNotLoadedError';
   }
 }
 
@@ -242,9 +263,22 @@ function findFallbackCandidate(
 }
 
 /**
+ * Load the engine's metadata, retrying ONCE with a forced refresh when an earlier load failed:
+ * one transient database error on the first storage use would otherwise leave every later read
+ * failing with the wrong cause. Still not loaded → {@link StorageMetadataNotLoadedError}.
+ */
+async function configureStorage(storage: StorageReadEngine, systemUser: UserInfo): Promise<void> {
+  await storage.Config(false, systemUser);
+  if (storage.Loaded) return;
+  await storage.Config(true, systemUser);
+  if (!storage.Loaded) throw new StorageMetadataNotLoadedError();
+}
+
+/**
  * Fetch the bytes, probing {@link findReadCandidates} in order — the account that last served this
  * object first, so a fallback-served object costs one call (and no failed attempt) from its second
- * read on. Throws {@link NoStorageAccountError} when nothing resolves and
+ * read on. Throws {@link StorageMetadataNotLoadedError} when the engine's metadata will not load,
+ * {@link NoStorageAccountError} when nothing resolves and
  * {@link StoredObjectReadError}, carrying every attempt, when every candidate fails. Callers turn
  * those into their own route's error, because a 404 and a 500 mean different things to the two
  * routes that use this.
@@ -255,7 +289,7 @@ export async function readStoredObject(
   ref: StoredObjectRef,
   preferredAccountIds: ReadonlyArray<string | undefined>,
 ): Promise<StoredObjectRead> {
-  await storage.Config(false, systemUser);
+  await configureStorage(storage, systemUser);
   const remembered = findRememberedAccountId(ref);
   const { candidates, truncated } = findReadCandidates(storage, ref.providerId, preferredAccountIds, remembered);
   if (candidates.length === 0) {

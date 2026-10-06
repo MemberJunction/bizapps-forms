@@ -4,6 +4,7 @@ import {
   MAX_READ_ACCOUNTS,
   MAX_REMEMBERED_READS,
   NoStorageAccountError,
+  StorageMetadataNotLoadedError,
   StoredObjectReadError,
   describeReadFallback,
   readStoredObject,
@@ -40,6 +41,7 @@ function idKeyedDriver() {
 function engine(driver: ReturnType<typeof idKeyedDriver>): StorageReadEngine {
   return {
     Config: vi.fn(async () => undefined),
+    Loaded: true,
     GetAccountsByProviderID: () => [{ ID: 'box-account', Name: 'Box main' }],
     GetProviderById: () => ({ ID: 'box', Name: 'Box.com' }),
     ResolveStorageAccount: () => null,
@@ -64,6 +66,7 @@ function multiAccountEngine(
   const providers = new Map(accounts.map((a) => [a.ProviderID, { ID: a.ProviderID, Name: `Provider ${a.ProviderID}` }]));
   const storage: StorageReadEngine = {
     Config: vi.fn(async () => undefined),
+    Loaded: true,
     GetAccountsByProviderID: (pid) => accounts.filter((a) => a.ProviderID === pid),
     GetProviderById: (pid) => providers.get(pid),
     ResolveStorageAccount: (id) => {
@@ -371,5 +374,56 @@ describe('describeReadFallback', () => {
     expect(describeReadFallback('Asset', 'file-1', KEY, fallback, ['FORMS_ASSET_STORAGE_ACCOUNT'])).toContain(
       'Logged once per object while this process remembers where it lives.',
     );
+  });
+});
+
+describe('readStoredObject: a File Storage metadata load that failed (#290)', () => {
+  /**
+   * MJ 6.1.4's FileStorageEngine marks itself configured even when its metadata load failed (the
+   * base engine logs and swallows the error), so Config(false) never retries; only `Loaded` tells.
+   * `loadsOnForcedRefresh` says whether a Config(true) recovers it.
+   */
+  function unloadedEngine(loadsOnForcedRefresh: boolean) {
+    const state = { loaded: false };
+    const { storage, driverCalls } = multiAccountEngine([A], { [A.ID]: { [KEY]: BYTES } });
+    const Config = vi.fn(async (forceRefresh?: boolean) => {
+      if (forceRefresh && loadsOnForcedRefresh) state.loaded = true;
+    });
+    const unloaded: StorageReadEngine = {
+      ...storage,
+      Config,
+      get Loaded() {
+        return state.loaded;
+      },
+    };
+    return { storage: unloaded, Config, driverCalls };
+  }
+
+  it('forces ONE metadata reload when the engine reports it is not loaded, then reads', async () => {
+    const { storage, Config, driverCalls } = unloadedEngine(true);
+    const read = await readStoredObject(storage, SYSTEM, REF, []);
+    expect(read.content.equals(BYTES)).toBe(true);
+    expect(Config.mock.calls.filter(([force]) => force === true)).toHaveLength(1);
+    expect(Config).toHaveBeenCalledWith(true, SYSTEM);
+    expect(driverCalls).toEqual([A.ID]);
+  });
+
+  it('rejects with StorageMetadataNotLoadedError, never "no account resolves", when the reload fails too', async () => {
+    const { storage, Config, driverCalls } = unloadedEngine(false);
+    const attempt = readStoredObject(storage, SYSTEM, REF, []);
+    await expect(attempt).rejects.toBeInstanceOf(StorageMetadataNotLoadedError);
+    await expect(attempt).rejects.toThrow(
+      'File Storage metadata did not load on this host; see the engine error logged earlier. ' +
+        'Reads cannot resolve a storage account until it does.',
+    );
+    expect(Config.mock.calls.filter(([force]) => force === true)).toHaveLength(1);
+    expect(driverCalls).toEqual([]);
+  });
+
+  it('does not force a reload when the metadata is loaded', async () => {
+    const { storage } = multiAccountEngine([A], { [A.ID]: { [KEY]: BYTES } });
+    await readStoredObject(storage, SYSTEM, REF, []);
+    expect(storage.Config).toHaveBeenCalledTimes(1);
+    expect(storage.Config).toHaveBeenCalledWith(false, SYSTEM);
   });
 });

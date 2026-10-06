@@ -241,6 +241,7 @@ function readContext(file: StoredAssetRecord | undefined, storage?: Partial<Asse
     systemUser: SYSTEM,
     storage: {
       Config: vi.fn(async () => undefined),
+      Loaded: true,
       GetAccountsByProviderID: () => [{ ID: 'account-1', Name: 'Account 1' }],
       GetProviderById: () => ({ ID: 'provider-1', Name: 'Provider 1' }),
       ResolveStorageAccount: () => ({
