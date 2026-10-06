@@ -17,7 +17,7 @@ import {
   type StoredFileRow,
   type UploadProvenanceRow,
 } from '../download.service';
-import type { StorageReadEngine } from '../../storage/read-object';
+import { resetRememberedReadsForTests, type StorageReadEngine } from '../../storage/read-object';
 
 const FILE_ID = '11111111-2222-4333-8444-555555555555';
 const CALLER = { ID: 'caller' } as unknown as UserInfo;
@@ -103,6 +103,7 @@ function context(stubs: Stubs = {}): DownloadContext {
 beforeEach(() => {
   resetDownloadConfigCache();
   resetUploadConfigForTests();
+  resetRememberedReadsForTests();
   logError.mockClear();
   logErrorEx.mockClear();
   delete readAs.upload;

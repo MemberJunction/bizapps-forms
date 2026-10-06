@@ -10,6 +10,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
 import type { EntityInfo, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import type { ParsedFile } from '../../upload/multipart';
 import { resetAssetConfigForTests } from '../config';
+import { resetRememberedReadsForTests } from '../../storage/read-object';
 import {
   checkAuthorScope,
   loadAssetBytes,
@@ -75,6 +76,7 @@ function uploadContext(overrides: Partial<AssetUploadContext> = {}): AssetUpload
 
 beforeEach(() => {
   resetAssetConfigForTests();
+  resetRememberedReadsForTests();
   logError.mockClear();
   logErrorEx.mockClear();
 });

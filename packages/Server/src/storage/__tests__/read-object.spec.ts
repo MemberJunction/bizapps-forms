@@ -1,12 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import {
   MAX_READ_ACCOUNTS,
+  MAX_REMEMBERED_READS,
   NoStorageAccountError,
   StoredObjectReadError,
   readStoredObject,
+  resetRememberedReadsForTests,
   type StorageReadEngine,
 } from '../read-object.js';
+
+// The serving-account memo is process-wide; without this, one test's read reorders the next's.
+beforeEach(() => resetRememberedReadsForTests());
 
 const SYSTEM = {} as UserInfo;
 const KEY = 'forms-assets/form-1/uuid/logo.png';
@@ -225,5 +230,104 @@ describe('readStoredObject: probing the provider accounts (#290)', () => {
   it('rejects with NoStorageAccountError when nothing resolves', async () => {
     const { storage } = multiAccountEngine([], {});
     await expect(readStoredObject(storage, SYSTEM, REF, ['x'])).rejects.toBeInstanceOf(NoStorageAccountError);
+  });
+});
+
+describe('readStoredObject: remembering the account that served an object (#290)', () => {
+  /** Pin B; the bytes live only in A — the cross-host shape the live smoke reproduced. */
+  function fallbackServed() {
+    return multiAccountEngine([A, B], { [A.ID]: { [KEY]: BYTES } });
+  }
+
+  it('reads a fallback-served object a second time with ONE GetDriver call, through the serving account', async () => {
+    const { storage, driverCalls } = fallbackServed();
+    await readStoredObject(storage, SYSTEM, REF, [B.ID]);
+    driverCalls.length = 0;
+    const second = await readStoredObject(storage, SYSTEM, REF, [B.ID]);
+    expect(driverCalls).toEqual([A.ID]);
+    expect(second.servedBy.accountId).toBe(A.ID);
+  });
+
+  it('reports no failed attempts on the second read, so callers warn once per object, not per request', async () => {
+    const { storage } = fallbackServed();
+    const first = await readStoredObject(storage, SYSTEM, REF, [B.ID]);
+    const second = await readStoredObject(storage, SYSTEM, REF, [B.ID]);
+    expect(first.failedAttempts).toHaveLength(1);
+    expect(second.failedAttempts).toEqual([]);
+  });
+
+  it('remembers per provider case-insensitively, since SQL Server returns ids upper-case and callers may not', async () => {
+    const { storage, driverCalls } = fallbackServed();
+    const caseBlind: StorageReadEngine = {
+      ...storage,
+      GetAccountsByProviderID: (pid) => storage.GetAccountsByProviderID(pid.toUpperCase()),
+    };
+    await readStoredObject(caseBlind, SYSTEM, { providerId: 'P1', providerKey: KEY }, [B.ID]);
+    driverCalls.length = 0;
+    await readStoredObject(caseBlind, SYSTEM, { providerId: 'p1', providerKey: KEY }, [B.ID]);
+    expect(driverCalls).toEqual([A.ID]);
+  });
+
+  it('forgets a remembered account that later fails, and the normal order resumes', async () => {
+    const stored: Record<string, Record<string, Buffer>> = { [A.ID]: { [KEY]: BYTES } };
+    const { storage, driverCalls } = multiAccountEngine([A, B], stored);
+    await readStoredObject(storage, SYSTEM, REF, [B.ID]);
+    delete stored[A.ID];
+
+    driverCalls.length = 0;
+    await expect(readStoredObject(storage, SYSTEM, REF, [B.ID])).rejects.toBeInstanceOf(StoredObjectReadError);
+    expect(driverCalls).toEqual([A.ID, B.ID]);
+
+    driverCalls.length = 0;
+    await expect(readStoredObject(storage, SYSTEM, REF, [B.ID])).rejects.toBeInstanceOf(StoredObjectReadError);
+    expect(driverCalls).toEqual([B.ID, A.ID]);
+  });
+
+  it('never resurrects a remembered account the engine no longer has', async () => {
+    const accounts = [A, B];
+    const { storage, driverCalls } = multiAccountEngine(accounts, {
+      [A.ID]: { [KEY]: BYTES },
+      [B.ID]: { [KEY]: BYTES },
+    });
+    // No pin: A (engine order) serves and is remembered.
+    await readStoredObject(storage, SYSTEM, REF, []);
+    accounts.splice(0, 1);
+    driverCalls.length = 0;
+    const read = await readStoredObject(storage, SYSTEM, REF, []);
+    expect(driverCalls).toEqual([B.ID]);
+    expect(read.servedBy.accountId).toBe(B.ID);
+  });
+
+  it(`evicts the oldest object once more than MAX_REMEMBERED_READS (${MAX_REMEMBERED_READS}) are remembered`, async () => {
+    const fillers = Array.from({ length: MAX_REMEMBERED_READS }, (_, i) => `forms-assets/filler/${i}.png`);
+    const { storage, driverCalls } = multiAccountEngine([A, B], {
+      [A.ID]: { [KEY]: BYTES },
+      [B.ID]: Object.fromEntries(fillers.map((key) => [key, BYTES])),
+    });
+    await readStoredObject(storage, SYSTEM, REF, [B.ID]);
+    for (const key of fillers) await readStoredObject(storage, SYSTEM, { providerId: 'P1', providerKey: key }, [B.ID]);
+
+    driverCalls.length = 0;
+    const read = await readStoredObject(storage, SYSTEM, REF, [B.ID]);
+    expect(driverCalls).toEqual([B.ID, A.ID]);
+    expect(read.failedAttempts).toHaveLength(1);
+  });
+
+  it('keeps a recently re-read object when the cap evicts, because a hit makes it the newest entry', async () => {
+    const fillers = Array.from({ length: MAX_REMEMBERED_READS }, (_, i) => `forms-assets/filler/${i}.png`);
+    const { storage, driverCalls } = multiAccountEngine([A, B], {
+      [A.ID]: { [KEY]: BYTES },
+      [B.ID]: Object.fromEntries(fillers.map((key) => [key, BYTES])),
+    });
+    await readStoredObject(storage, SYSTEM, REF, [B.ID]);
+    for (const key of fillers.slice(0, -1)) {
+      await readStoredObject(storage, SYSTEM, { providerId: 'P1', providerKey: key }, [B.ID]);
+    }
+    await readStoredObject(storage, SYSTEM, REF, [B.ID]); // hit: now the newest
+    await readStoredObject(storage, SYSTEM, { providerId: 'P1', providerKey: fillers[fillers.length - 1] }, [B.ID]);
+
+    driverCalls.length = 0;
+    await readStoredObject(storage, SYSTEM, REF, [B.ID]);
+    expect(driverCalls).toEqual([A.ID]);
   });
 });

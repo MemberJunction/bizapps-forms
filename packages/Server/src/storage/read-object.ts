@@ -9,7 +9,9 @@
  * (pinned) account first, because that is the one the upload used and the common case is then a
  * single call, and falls back through the rest of the file's provider's accounts, which also covers
  * legacy rows written before a pin was set or under a different one (#290). Every failed try is
- * reported, so a log line can name the account and provider that actually failed.
+ * reported, so a log line can name the account and provider that actually failed. The account that
+ * served an object is remembered in-process and tried first next time, so the fallback (and its
+ * warning) happens once per object, not once per request.
  *
  * The guards that decide WHETHER a caller may read a given object stay with their callers: the
  * asset route's guard is the storage prefix, the download route's is the caller's permissions.
@@ -21,6 +23,49 @@ import { UUIDsEqual } from '@memberjunction/global';
 export const MAX_READ_ACCOUNTS = 8;
 
 const UNKNOWN_PROVIDER_NAME = '(unknown provider)';
+
+/** Upper bound on objects whose serving account is remembered; past it the oldest is forgotten. */
+export const MAX_REMEMBERED_READS = 1000;
+
+/**
+ * `<PROVIDER ID>|<provider key>` → the id of the account that last served that object, oldest first
+ * (Map insertion order, re-inserted on every successful read so eviction drops the least recent).
+ *
+ * Why it exists: an object held by an account other than the preferred one would otherwise fail on
+ * the preferred account on EVERY read — a remote round trip on Box — and every caller would log a
+ * fallback warning per request, for the life of the file. Remembering the serving account makes the
+ * second read a single call with no failed attempts. A per-process cache, not a record: losing it
+ * (restart, eviction) costs only the probe it saved.
+ */
+const rememberedReads = new Map<string, string>();
+
+function rememberedReadKey(ref: StoredObjectRef): string {
+  // Provider ids are UUIDs: SQL Server returns them upper-case, other callers may not.
+  return `${ref.providerId.toUpperCase()}|${ref.providerKey}`;
+}
+
+function findRememberedAccountId(ref: StoredObjectRef): string | undefined {
+  return rememberedReads.get(rememberedReadKey(ref));
+}
+
+function rememberServingAccount(ref: StoredObjectRef, accountId: string): void {
+  const key = rememberedReadKey(ref);
+  rememberedReads.delete(key);
+  rememberedReads.set(key, accountId);
+  if (rememberedReads.size > MAX_REMEMBERED_READS) {
+    const oldest = rememberedReads.keys().next();
+    if (!oldest.done) rememberedReads.delete(oldest.value);
+  }
+}
+
+function forgetServingAccount(ref: StoredObjectRef): void {
+  rememberedReads.delete(rememberedReadKey(ref));
+}
+
+/** Test seam: forget every remembered serving account. */
+export function resetRememberedReadsForTests(): void {
+  rememberedReads.clear();
+}
 
 /** One storage account as the read names it in logs. */
 export interface ReadAccountRef {
@@ -107,25 +152,27 @@ export class StoredObjectReadError extends Error {
 }
 
 /**
- * Pure. The accounts to try, in order: preferred accounts that sit on the file's provider first
- * (in preferred order, deduped), then the rest of the provider's accounts in engine order, capped
- * at {@link MAX_READ_ACCOUNTS}. A preferred account on ANOTHER provider cannot hold this file, so
- * it does not reorder anything.
+ * Pure. The accounts to try, in order: the account that last served this object (if any), then
+ * preferred accounts — each only if it sits on the file's provider, in that order, deduped — then
+ * the rest of the provider's accounts in engine order, capped at {@link MAX_READ_ACCOUNTS}. An
+ * account on ANOTHER provider, or one the engine no longer has, cannot hold this file, so it does
+ * not reorder anything.
  *
  * When the provider has no account at all (a legacy row whose provider was replaced) the closest
  * answer is the first preferred id the engine resolves, else the engine default; `[]` if nothing
- * resolves.
+ * resolves. The remembered account plays no part there: there is only ever one candidate.
  */
 export function findReadCandidates(
   storage: StorageReadEngine,
   providerId: string,
   preferredAccountIds: ReadonlyArray<string | undefined>,
+  rememberedAccountId?: string,
 ): { candidates: ReadAccountRef[]; truncated: boolean } {
   const onProvider = storage.GetAccountsByProviderID(providerId);
   if (onProvider.length === 0) {
     return { candidates: findFallbackCandidate(storage, preferredAccountIds), truncated: false };
   }
-  const preferred = preferredAccountIds
+  const preferred = [rememberedAccountId, ...preferredAccountIds]
     .filter((id): id is string => !!id)
     .map((id) => onProvider.find((a) => UUIDsEqual(a.ID, id)))
     .filter((a): a is { ID: string; Name: string } => a !== undefined);
@@ -164,10 +211,12 @@ function findFallbackCandidate(
 }
 
 /**
- * Fetch the bytes, probing {@link findReadCandidates} in order. Throws
- * {@link NoStorageAccountError} when nothing resolves and {@link StoredObjectReadError}, carrying
- * every attempt, when every candidate fails. Callers turn those into their own route's error,
- * because a 404 and a 500 mean different things to the two routes that use this.
+ * Fetch the bytes, probing {@link findReadCandidates} in order — the account that last served this
+ * object first, so a fallback-served object costs one call (and no failed attempt) from its second
+ * read on. Throws {@link NoStorageAccountError} when nothing resolves and
+ * {@link StoredObjectReadError}, carrying every attempt, when every candidate fails. Callers turn
+ * those into their own route's error, because a 404 and a 500 mean different things to the two
+ * routes that use this.
  */
 export async function readStoredObject(
   storage: StorageReadEngine,
@@ -176,7 +225,8 @@ export async function readStoredObject(
   preferredAccountIds: ReadonlyArray<string | undefined>,
 ): Promise<StoredObjectRead> {
   await storage.Config(false, systemUser);
-  const { candidates, truncated } = findReadCandidates(storage, ref.providerId, preferredAccountIds);
+  const remembered = findRememberedAccountId(ref);
+  const { candidates, truncated } = findReadCandidates(storage, ref.providerId, preferredAccountIds, remembered);
   if (candidates.length === 0) {
     throw new NoStorageAccountError(ref.providerId);
   }
@@ -188,10 +238,12 @@ export async function readStoredObject(
       // Dropbox / SharePoint); it only coincides with the path on Azure / S3 / GCS, so reading the
       // stored path as an id 404s on ID-keyed providers (#261). Every MJ driver resolves `fullPath`.
       const content = await driver.GetObject({ fullPath: ref.providerKey });
+      rememberServingAccount(ref, account.accountId);
       return { content, servedBy: account, failedAttempts };
     } catch (error) {
       // Not swallowed: recorded, and surfaced in StoredObjectReadError if no later account serves it.
       failedAttempts.push({ account, error: error instanceof Error ? error.message : String(error) });
+      if (remembered && UUIDsEqual(account.accountId, remembered)) forgetServingAccount(ref);
     }
   }
   throw new StoredObjectReadError(failedAttempts, truncated);
