@@ -105,6 +105,14 @@ describe('welcome gate wiring — source smoke (#291)', () => {
     expect(hold).toContain("if (this.phase() === 'loading') this.phase.set('welcome')");
     expect(hold).toContain('imagesSettled: () => this.startPrefetch()');
   });
+  it('a logo the gate saw fail is marked broken before the reveal, so its bar never paints and then vanishes', () => {
+    const hold = body(form, 'private holdForWelcomeImages(welcomeImage: string, generation: number): void');
+    const reveal = hold.slice(hold.indexOf('reveal:'), hold.indexOf('imagesSettled:'));
+    expect(reveal.length).toBeGreaterThan(0);
+    // Only the logo the gate actually loaded: a preview may have swapped it during the wait.
+    expect(reveal).toMatch(/failed\.has\(logo\) && this\.logoUrl\(\) === logo\) this\.logoBroken\.set\(true\)/);
+    expect(reveal.indexOf('this.logoBroken.set(true)')).toBeLessThan(reveal.indexOf('this.waitingForWelcomeImage.set(false)'));
+  });
   it('the MJ loader shows only while waiting for the welcome images; the neutral spinner otherwise', () => {
     expect(html).toMatch(/@if \(waitingForWelcomeImage\(\)\) \{\s*<mjf-mj-loader \/>\s*\} @else \{\s*<span class="mjf-spinner"/);
   });

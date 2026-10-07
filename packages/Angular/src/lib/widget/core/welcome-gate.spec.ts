@@ -53,6 +53,23 @@ describe('gateWelcomeScreen', () => {
     expect(h.imagesSettled).toHaveBeenCalledTimes(1);
   });
 
+  it('reveals naming the images it saw fail, so the shell never renders a url already known to be broken', () => {
+    const { env, images } = fakeEnv();
+    const h = hooks();
+    gateWelcomeScreen(['/welcome', '/logo'], h, env);
+    images[1].onerror?.(new Event('error'));
+    images[0].onload?.(new Event('load'));
+    expect(h.reveal).toHaveBeenCalledWith(new Set(['/logo']));
+  });
+
+  it('a stalled image is not reported as failed: only an image that failed is', () => {
+    const { env, fireTimers } = fakeEnv();
+    const h = hooks();
+    gateWelcomeScreen(['/welcome'], h, env);
+    fireTimers();
+    expect(h.reveal).toHaveBeenCalledWith(new Set());
+  });
+
   it('a stalled image reveals at the wait limit, and settles only when it really finishes', () => {
     const { env, images, fireTimers } = fakeEnv();
     const h = hooks();

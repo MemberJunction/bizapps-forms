@@ -515,7 +515,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
     const logo = this.logoUrl();
     gateWelcomeScreen(logo ? [welcomeImage, logo] : [welcomeImage], {
       isCurrent: () => !this.destroyed && generation === this.loadGeneration,
-      reveal: () => {
+      reveal: (failed) => {
+        // The gate already saw this logo fail; rendering it would request it again and drop the bar
+        // a round trip later, moving the screen just shown. Only the logo the gate loaded: a preview
+        // may have swapped it during the wait.
+        if (logo && failed.has(logo) && this.logoUrl() === logo) this.logoBroken.set(true);
         this.waitingForWelcomeImage.set(false);
         if (this.phase() === 'loading') this.phase.set('welcome');
       },
