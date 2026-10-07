@@ -92,15 +92,15 @@ describe('welcome gate wiring — source smoke (#291)', () => {
   it('gates only a load that opens on a welcome screen with an image', () => {
     const load = body(form, 'private async load(): Promise<void>');
     expect(load).toMatch(/opening === 'welcome' \? def\.welcomeScreen\?\.mediaURL/);
-    expect(load).toContain('this.holdForWelcomeImages(');
+    expect(load).toContain('this.holdForWelcomeImages(welcomeImage, generation)');
   });
   it('every load starts a new generation and clears the wait', () => {
     const load = body(form, 'private async load(): Promise<void>');
-    expect(load).toContain('this.loadGeneration++');
+    expect(load).toContain('const generation = ++this.loadGeneration');
     expect(load).toContain('this.waitingForWelcomeImage.set(false)');
   });
   it('the gate is current only for this load and a live widget, and never overrides an author command', () => {
-    const hold = body(form, 'private holdForWelcomeImages(welcomeImage: string): void');
+    const hold = body(form, 'private holdForWelcomeImages(welcomeImage: string, generation: number): void');
     expect(hold).toContain('!this.destroyed && generation === this.loadGeneration');
     expect(hold).toContain("if (this.phase() === 'loading') this.phase.set('welcome')");
     expect(hold).toContain('imagesSettled: () => this.startPrefetch()');

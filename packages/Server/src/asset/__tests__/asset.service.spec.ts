@@ -488,6 +488,14 @@ describe('loadAssetBytes — kept bytes never bypass the guard (#291)', () => {
     expect((await loadAssetBytes(ctx, FILE_ID)).asset?.content.toString()).toBe('PNGDATA');
   });
 
+  it('hits the cache when the same asset is read by a lower-case file id after an upper-case one', async () => {
+    const getObject = vi.fn(async () => Buffer.from('PNGDATA'));
+    const ctx = readContext(fileRecord({ ProviderKey: KEY }), driverWith(getObject));
+    await loadAssetBytes(ctx, FILE_ID.toUpperCase());
+    await loadAssetBytes(ctx, FILE_ID.toLowerCase());
+    expect(getObject).toHaveBeenCalledTimes(1);
+  });
+
   it('shares one storage read between concurrent first requests', async () => {
     const getObject = vi.fn(async () => Buffer.from('PNGDATA'));
     const ctx = readContext(fileRecord({ ProviderKey: KEY }), driverWith(getObject));

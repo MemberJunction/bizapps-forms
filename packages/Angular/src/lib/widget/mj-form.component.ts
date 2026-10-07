@@ -356,7 +356,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /** Fetch (or accept) the form definition, theme the host, and build the runtime. */
   private async load(): Promise<void> {
     this.cancelPrefetch();
-    this.loadGeneration++;
+    const generation = ++this.loadGeneration;
     this.waitingForWelcomeImage.set(false);
     this.phase.set('loading');
     // Fresh load == fresh response identity: mint a new client id and drop any stale
@@ -401,7 +401,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
       // Plan before holding: prefetchUrls must be set before anything can start the queue.
       this.planPrefetch(def, opening, gated);
       if (welcomeImage) {
-        this.holdForWelcomeImages(welcomeImage); // phase stays 'loading' until the gate reveals
+        this.holdForWelcomeImages(welcomeImage, generation); // phase stays 'loading' until the gate reveals
       } else {
         this.phase.set(opening);
       }
@@ -510,8 +510,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * is ready, or WELCOME_IMAGE_WAIT_MS passes — see core/welcome-gate.ts. A preview's showScreen()
    * during the wait moves the phase itself; the reveal then leaves that choice alone.
    */
-  private holdForWelcomeImages(welcomeImage: string): void {
-    const generation = this.loadGeneration;
+  private holdForWelcomeImages(welcomeImage: string, generation: number): void {
     this.waitingForWelcomeImage.set(true);
     const logo = this.logoUrl();
     gateWelcomeScreen(logo ? [welcomeImage, logo] : [welcomeImage], {

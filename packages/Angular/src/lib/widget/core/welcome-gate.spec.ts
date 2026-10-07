@@ -66,7 +66,7 @@ describe('gateWelcomeScreen', () => {
     expect(h.imagesSettled).toHaveBeenCalledTimes(1);
   });
 
-  it('a stale or destroyed load reveals nothing and starts nothing', () => {
+  it('a stale or destroyed load reveals nothing and starts no prefetch', () => {
     const { env, images } = fakeEnv();
     const h = hooks(false);
     gateWelcomeScreen(['/welcome'], h, env);

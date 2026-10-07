@@ -32,6 +32,7 @@ import {
   isPublicAssetKey,
 } from './config.js';
 import type { ParsedFile } from '../upload/multipart.js';
+import { MAX_CACHED_ASSET_ENTRY_BYTES } from './asset-byte-cache.js';
 import type { ByteBudgetCache } from './asset-byte-cache.js';
 import { describeReadFallback, readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
 
@@ -156,7 +157,7 @@ export function assetCacheKey(fileId: string, providerId: string, providerKey: s
   return `${fileId.toUpperCase()}|${providerId.toUpperCase()}|${providerKey}`;
 }
 
-const GUID_PATTERN =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function failUpload(status: number, error: string): AssetUploadResult {
   return { ok: false, failure: { status, error } };
@@ -294,8 +295,9 @@ async function storeAsset(
     });
     // Warm the read cache with bytes already in hand, so the author's preview and the first
     // respondent on this host skip the provider round trip (#291). A copy: `file.data` is a view
-    // into the whole multipart body. No path or provider reported → no key → nothing kept.
-    if (stored.StoragePath && stored.Provider?.ID) {
+    // into the whole multipart body. No path or provider reported → no key → nothing kept. An
+    // oversize body is skipped before the copy, since the cache would refuse it anyway.
+    if (stored.StoragePath && stored.Provider?.ID && file.data.length <= MAX_CACHED_ASSET_ENTRY_BYTES) {
       ctx.cache.Put(assetCacheKey(stored.FileID, stored.Provider.ID, stored.StoragePath), Buffer.from(file.data));
     }
     return {
@@ -356,7 +358,7 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    // Key kept on purpose; see the fallback warning above.
+    // Key kept on purpose; see the fallback warning in `readAssetFromStorage`.
     LogError(
       `[Forms] Asset read failed for ${wanted} (key ${file.ProviderKey}, provider ${file.ProviderID}): ${detail}`,
     );
