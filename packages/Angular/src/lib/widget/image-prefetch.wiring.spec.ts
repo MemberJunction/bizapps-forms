@@ -30,7 +30,9 @@ describe('welcome image priority — source smoke', () => {
     expect(screen).toContain(`[attr.fetchpriority]="isWelcome() ? 'high' : null"`);
   });
 
-  it('reports the image settling on load AND on error, so a broken image still releases the queue', () => {
+  it('the screen image no longer reports load/error — the welcome gate owns that (#291)', () => {
+    expect(screen).not.toContain('(load)=');
+    expect(screen).not.toContain('(error)=');
   });
 });
 
@@ -38,7 +40,7 @@ describe('prefetch lifecycle — source smoke', () => {
   it('load() cancels the previous queue before anything else can start one', () => {
     const load = body(form, 'private async load(): Promise<void>');
     expect(load).toContain('this.cancelPrefetch()');
-    expect(load.indexOf('this.cancelPrefetch()')).toBeLessThan(load.indexOf('this.planPrefetch(def, opening)'));
+    expect(load.indexOf('this.cancelPrefetch()')).toBeLessThan(load.indexOf('this.planPrefetch(def, opening, gated)'));
   });
 
   it('ngOnDestroy cancels the queue', () => {
@@ -53,7 +55,7 @@ describe('prefetch lifecycle — source smoke', () => {
   });
 
   it('plans nothing unless intake is still ahead (welcome or ready)', () => {
-    const plan = body(form, 'private planPrefetch(def: PublishedFormDefinition, opening: WidgetPhase): void');
+    const plan = body(form, 'private planPrefetch(def: PublishedFormDefinition, opening: WidgetPhase, gated: boolean): void');
     expect(plan).toContain(`opening !== 'welcome' && opening !== 'ready'`);
     expect(plan.indexOf(`opening !== 'welcome' && opening !== 'ready'`)).toBeLessThan(
       plan.indexOf('this.schedulePrefetchWhenIdle()'),
@@ -79,6 +81,14 @@ describe('prefetch lifecycle — source smoke', () => {
 });
 
 describe('welcome gate wiring — source smoke (#291)', () => {
+  it('an author command ends the gate wait, so the logo is not hidden above the chosen screen', () => {
+    const show = body(form, 'public showScreen(selection: ShownScreen): void');
+    expect(show).toContain('this.waitingForWelcomeImage.set(false)');
+  });
+  it('plans the prefetch before holding, so prefetchUrls is set before anything can start the queue', () => {
+    const load = body(form, 'private async load(): Promise<void>');
+    expect(load.indexOf('this.planPrefetch(')).toBeLessThan(load.indexOf('this.holdForWelcomeImages('));
+  });
   it('gates only a load that opens on a welcome screen with an image', () => {
     const load = body(form, 'private async load(): Promise<void>');
     expect(load).toMatch(/opening === 'welcome' \? def\.welcomeScreen\?\.mediaURL/);

@@ -397,12 +397,14 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.endingEarly = false;
       const opening = this.adoptResume(loaded.resume, def, runtime) ?? initialPhaseFor(def);
       const welcomeImage = opening === 'welcome' ? def.welcomeScreen?.mediaURL?.trim() : undefined;
+      const gated = !!welcomeImage;
+      // Plan before holding: prefetchUrls must be set before anything can start the queue.
+      this.planPrefetch(def, opening, gated);
       if (welcomeImage) {
         this.holdForWelcomeImages(welcomeImage); // phase stays 'loading' until the gate reveals
       } else {
         this.phase.set(opening);
       }
-      this.planPrefetch(def, opening);
     } catch (err) {
       // A load can meet an expired session too — the error page's "Try again" re-fetches with
       // the same token, and after eight hours that is a 401 with a retry button that loops.
@@ -483,6 +485,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
       return;
     }
     this.endingScreen.set(target.ending);
+    this.waitingForWelcomeImage.set(false); // an author command ends the gate's wait
     this.phase.set(target.phase);
   }
 
@@ -530,13 +533,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * failed or expired load on `error`/`expired`): the respondent can never see an option or an
    * ending image there, so downloading up to 12 of them would only compete with what is on screen.
    */
-  private planPrefetch(def: PublishedFormDefinition, opening: WidgetPhase): void {
+  private planPrefetch(def: PublishedFormDefinition, opening: WidgetPhase, gated: boolean): void {
     if (opening !== 'welcome' && opening !== 'ready') {
       return;
     }
     this.prefetchUrls = collectLaterImageUrls(def);
-    if (opening === 'welcome' && def.welcomeScreen?.mediaURL) {
-      return;
+    if (gated) {
+      return; // the welcome gate's imagesSettled starts it
     }
     this.schedulePrefetchWhenIdle();
   }
