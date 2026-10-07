@@ -475,8 +475,11 @@ async function storeFile(
  * `LogError`, not `LogStatus`: MJ silences `LogStatus` under NODE_ENV=production. The detail is run
  * through {@link redactStorageKey} because MJ's `UploadFile` quotes the object path, which ends in the
  * respondent's file name (personal data, kept out of logs since #290). MJ strips leading dots from
- * that name before building the path, so the key is redacted in its dot-stripped spelling, which is
- * a substring of both spellings and so covers whichever one the error quotes.
+ * that name before building the path (strip leading dots, then trim), so the key is redacted in that
+ * cleaned spelling. It is a contiguous substring of the raw name `safeFileName` returned (which
+ * already has no separators or control characters), so one redaction covers whichever spelling
+ * the error quotes. This intentionally DUPLICATES MJ's `cleanFileName` rule in `@memberjunction/storage`
+ * `FileStorageEngine.UploadFile`; it can drift on an MJ upgrade and must be revisited if MJ changes it.
  */
 function logStorageFailure(
   error: unknown,
@@ -488,7 +491,7 @@ function logStorageFailure(
       ? error
       : inspect(error, { depth: 3, breakLength: Infinity });
   const slash = at.storageKey.lastIndexOf('/');
-  const key = at.storageKey.slice(0, slash + 1) + at.storageKey.slice(slash + 1).replace(/^\.+/, '');
+  const key = at.storageKey.slice(0, slash + 1) + at.storageKey.slice(slash + 1).replace(/^\.+/, '').trim();
   LogError(
     `[Forms] upload storage failed for response ${at.responseId ?? '(none)'}, question ${at.questionId ?? '(none)'}, `
       + `distribution ${at.distributionId ?? '(unresolved)'}: ${redactStorageKey(detail, key)}`,

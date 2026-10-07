@@ -440,6 +440,26 @@ describe('runUpload — a storage failure tells the respondent nothing about the
     expect(line).not.toContain('Jane-Doe');
   });
 
+  it('keeps a dots-then-space file name out of the logged detail, as MJ trims it after stripping the dots', async () => {
+    // MJ cleans the name as strip-leading-dots THEN trim, so `. Jane-Doe.png` is quoted as
+    // `Jane-Doe.png` in the PutObject path but as the raw `. Jane-Doe.png` in the Files-record clause.
+    const file: ParsedFile = { ...pngFile(), filename: '. Jane-Doe.png' };
+    const upload = vi.fn(async (options: { fileName: string; pathPrefix?: string }) => {
+      const cleaned = options.fileName.replace(/^\.+/, '').trim();
+      throw new Error(
+        `PutObject returned false for path '${options.pathPrefix}/${cleaned}'; `
+          + `failed to save MJ: Files record for '${options.fileName}'`,
+      );
+    });
+    const storage = storageEngine({ UploadFile: upload as unknown as UploadStorageEngine['UploadFile'] }).engine;
+
+    await runUpload(context({ storage }), request({ file }));
+
+    const line = logged.find((l) => l.includes('PutObject returned false'));
+    expect(line).toBeDefined();
+    expect(line).not.toContain('Jane-Doe');
+  });
+
   it('logs (none) when the widget sent no response id', async () => {
     await runUpload(context({ storage: failingStorage('UploadFile', new Error(PROVIDER_DETAIL)) }), request());
 
