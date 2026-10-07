@@ -3,6 +3,8 @@
  * and storage) with the storage provider + auth mocked.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { EntityInfo, EntityUserPermissionInfo, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import { runUpload, UPLOAD_FAILED_MESSAGE, type UploadContext, type UploadRequest, type UploadStorageEngine } from '../upload.service';
 import { resetUploadConfigForTests } from '../config';
@@ -371,6 +373,19 @@ describe('runUpload — a storage failure tells the respondent nothing about the
 
   it('exports the authored sentence the smoke suite and widget depend on', () => {
     expect(UPLOAD_FAILED_MESSAGE).toBe(AUTHORED);
+  });
+
+  it('source-text pin: smoke:errors compares the upload 5xx against this same sentence', () => {
+    // The smoke keeps its own copy because a .mjs cannot import this TypeScript constant, and its
+    // comment points here as what catches the two drifting apart. Nothing else reads the smoke file.
+    const smoke = readFileSync(
+      fileURLToPath(new URL('../../../../../smoke/respondent-errors-path.mjs', import.meta.url)),
+      'utf8',
+    );
+    const literal = smoke.match(/^const UPLOAD_FAILED = '([^']*)';$/m)?.[1];
+
+    expect(literal, 'smoke/respondent-errors-path.mjs no longer declares UPLOAD_FAILED').toBeDefined();
+    expect(literal).toBe(UPLOAD_FAILED_MESSAGE);
   });
 
   it.each([
