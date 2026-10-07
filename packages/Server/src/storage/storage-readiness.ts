@@ -33,6 +33,13 @@ export interface StorageReadiness {
   errors: string[];
 }
 
+/**
+ * What an unknown READ pin costs. Most reads skip it, but a respondent file uploaded before v0.11.0
+ * whose provider has no account is read through this pin alone (read-object's legacy rule) and fails.
+ */
+const READ_PIN_UNKNOWN =
+  'reads skip it, except a respondent file uploaded before v0.11.0 whose provider has no account, which is read through this pin alone and fails';
+
 function describeAccount(a: StorageAccountSummary): string {
   return `"${a.name}" (${a.id}, ${a.providerName})`;
 }
@@ -60,7 +67,7 @@ export function assessStoragePins(
     if (!named) {
       errors.push(
         `${pin.envVar} is set to ${value}, which names no File Storage Account here; ` +
-          `${pin.role === 'write' ? 'uploads through it fail and reads skip it' : 'reads skip it'}. Active accounts: ${list}.`,
+          `${pin.role === 'write' ? 'uploads through it fail and reads skip it' : READ_PIN_UNKNOWN}. Active accounts: ${list}.`,
       );
     } else if (!named.providerActive) {
       errors.push(

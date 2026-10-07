@@ -10,8 +10,9 @@
  * single call, and falls back through the rest of the file's provider's accounts, which also covers
  * legacy rows written before a pin was set or under a different one (#290). Every failed try is
  * reported, so a log line can name the account and provider that actually failed. The account that
- * served an object is remembered in-process and tried first next time, so the fallback (and its
- * warning) happens once per object, not once per request.
+ * served an object is remembered in-process and tried first next time, so once an object has been
+ * read the fallback (and its warning) does not repeat per request. It is remembered only when a read
+ * succeeds, so requests that overlap the first read of an object each fall back and each warn.
  *
  * Probing is only safe for a key that names one object across all accounts. Every key Forms has
  * written since v0.11.0 does (a per-upload UUID directory); a respondent upload from before that does
@@ -261,7 +262,8 @@ export function redactStorageKey(text: string, providerKey: string): string {
  * failing. When the account that served it before was the one that failed: that account is
  * failing, or the object moved. It names the read order as context, never as an instruction to
  * re-pin — re-pinning is wrong for a failing account and for a legacy row. "Once per object" holds
- * because {@link readStoredObject} remembers the serving account.
+ * from the first completed read on, because {@link readStoredObject} remembers the serving account
+ * then; reads already in flight before that each log it.
  *
  * @param label The route's noun for the object, e.g. `Asset` or `Download`.
  * @param providerKey The object's storage key, shown as `(key …)`; `undefined` omits that clause.
@@ -290,7 +292,7 @@ export function describeReadFallback(
     `not by the account(s) tried first: ${describeReadAttempts(read.failedAttempts)}. ` +
     cause +
     `This route's reads are ordered by ${order}, then the provider's other accounts. ` +
-    'Logged once per object while this process remembers where it lives.'
+    'Logged once per object once this process has read it; requests that overlap that first read each log it.'
   );
 }
 

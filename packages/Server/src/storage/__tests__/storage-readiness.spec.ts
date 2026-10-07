@@ -51,6 +51,8 @@ describe('assessStoragePins', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('FORMS_DOWNLOAD_STORAGE_ACCOUNT is set to nope');
     expect(errors[0]).toContain('reads skip it');
+    // Not for every read: an older respondent file on a provider with no account is read through it alone.
+    expect(errors[0]).toContain('uploaded before v0.11.0');
     expect(errors[0]).not.toContain('uploads through it fail');
   });
 

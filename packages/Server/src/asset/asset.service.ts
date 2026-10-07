@@ -363,7 +363,8 @@ function safeFileName(filename: string): string {
     .replace(/[^A-Za-z0-9._ -]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  // `.` and `..` survive the character filter but would make a path segment the read guard
-  // (`isPublicAssetKey`) refuses, so the author's upload would never display.
+  // `.` and `..` survive the character filter. MJ's UploadFile would store either as `file` (it
+  // strips leading dots), so no dot-only segment ever reaches a key; mapping them here as well keeps
+  // the name this returns to the author the same as the name that is stored.
   return cleaned === '' || cleaned === '.' || cleaned === '..' ? 'image' : cleaned;
 }

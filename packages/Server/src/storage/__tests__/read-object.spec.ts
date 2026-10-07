@@ -260,6 +260,18 @@ describe('readStoredObject: remembering the account that served an object (#290)
     expect(second.servedBy.accountId).toBe(A.ID);
   });
 
+  // Contract, not a driver of the code: the memo is filled only when a read succeeds, so reads that
+  // overlap the first one have nothing to consult. This pins what the warning text now says.
+  it('reports the failed attempt on every read that overlaps the first, since nothing is remembered yet', async () => {
+    const { storage } = fallbackServed();
+    const [one, two] = await Promise.all([
+      readStoredObject(storage, SYSTEM, REF, pins(B.ID)),
+      readStoredObject(storage, SYSTEM, REF, pins(B.ID)),
+    ]);
+    expect(one.failedAttempts).toHaveLength(1);
+    expect(two.failedAttempts).toHaveLength(1);
+  });
+
   it('reports no failed attempts on the second read, so callers warn once per object, not per request', async () => {
     const { storage } = fallbackServed();
     const first = await readStoredObject(storage, SYSTEM, REF, pins(B.ID));
@@ -401,9 +413,9 @@ describe('describeReadFallback', () => {
     expect(message).not.toContain('Usually it was written under a different pin');
   });
 
-  it('says it is logged once per object, which the serving-account memo makes true', () => {
+  it('says it is logged once per object after the first read, and that overlapping first reads each log it', () => {
     expect(describeReadFallback('Asset', 'file-1', KEY, fallback, [{ envVar: 'FORMS_ASSET_STORAGE_ACCOUNT', value: B.ID }])).toContain(
-      'Logged once per object while this process remembers where it lives.',
+      'Logged once per object once this process has read it; requests that overlap that first read each log it.',
     );
   });
 });

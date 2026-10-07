@@ -179,7 +179,8 @@ export function formatBytes(bytes: number): string {
  * (local disk, for one) reads from outside the asset tree. Reads probe the same key on every
  * account of the file's provider (#290), so one such driver anywhere is enough. Hence: no `.` or
  * `..` segment, and no backslash at all, since some drivers treat it as a separator. Forms never
- * writes such a key: `safeFileName` maps a dot-only name to `image`.
+ * writes such a key: the prefix is its own, and MJ's UploadFile strips leading dots from the file
+ * name and turns any slash or backslash in it into `_`.
  */
 export function isPublicAssetKey(providerKey: string | null | undefined): providerKey is string {
   if (typeof providerKey !== 'string' || !providerKey.startsWith(`${ASSET_STORAGE_PREFIX}/`)) return false;
