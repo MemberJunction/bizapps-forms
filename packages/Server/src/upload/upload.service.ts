@@ -181,8 +181,10 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   if (!req.questionId) {
     return fail(400, 'Missing required field "questionId".');
   }
-  // `responseId` is attacker-controlled and exact-match on purpose (the widget sends
-  // `crypto.randomUUID()` verbatim or omits it). A non-GUID would only fail later, in the provenance
+  // `responseId` is attacker-controlled and exact-match on purpose: the widget sends a canonical GUID
+  // verbatim or omits it — its own minted id (`core/client-id.ts`), or after a resume the server's
+  // FormResponse ID, which arrives upper-case (`mj-form.component.ts` `adoptResume`), hence the `i`
+  // flag and no other leniency. A non-GUID would only fail later, in the provenance
   // insert AFTER the bytes are stored, and make the SQL layer echo the whole batch (the respondent's
   // file name, and any line breaks in the id) into the log. Refuse it before anything is stored.
   if (req.responseId !== undefined && !GUID_SHAPE.test(req.responseId)) {
