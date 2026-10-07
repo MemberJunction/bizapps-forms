@@ -28,6 +28,7 @@ import type { mjBizAppsFormsFormUploadEntity } from '@mj-biz-apps/forms-entities
 import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names';
 import { checkRespondentScope, type ScopeMetadataProvider } from '../public-submit/scope-check.service';
 import { resolvePublishedDefinition, type DefinitionRunViewProvider } from '../public-submit/definition-loader.service';
+import { withoutQueryEcho } from '../public-submit/persistence.service';
 import { redactStorageKey } from '../storage/read-object';
 import { checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE } from '../http/embed-origin';
 import { contentTypeAllowed, getUploadConfig, uploadTooLargeMessage } from './config';
@@ -316,12 +317,13 @@ export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<
     if (await row.Save()) {
       return true;
     }
-    LogError(`Forms upload: provenance row save failed: ${row.LatestResult?.CompleteMessage ?? 'unknown'}`);
+    // `withoutQueryEcho`, as on the submit path: a SQL failure's diagnostic ends with the batch it ran,
+    // and that batch assigns the respondent's file name to `@FileName` (kept out of logs since #290).
+    LogError(`Forms upload: provenance row save failed: ${withoutQueryEcho(row.LatestResult?.CompleteMessage ?? '')}`);
     return false;
   } catch (error) {
-    LogError(
-      `Forms upload: provenance row could not be written: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    const detail = error instanceof Error ? error.message : String(error);
+    LogError(`Forms upload: provenance row could not be written: ${withoutQueryEcho(detail)}`);
     return false;
   }
 }
