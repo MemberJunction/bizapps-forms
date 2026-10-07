@@ -20,6 +20,7 @@ import { readCappedBody, type ReadableRequest } from '../../http/request-body';
 import { parseMultipart } from '../../upload/multipart';
 import { assetBodyCap, assetTooLargeMessage, getAssetConfig, resetAssetConfigForTests } from '../config';
 import { runAssetUpload, type AssetUploadContext } from '../asset.service';
+import { ByteBudgetCache } from '../asset-byte-cache';
 
 const BOUNDARY = '----formsAssetBoundary';
 const CONTENT_TYPE = `multipart/form-data; boundary=${BOUNDARY}`;
@@ -52,9 +53,14 @@ function uploadContext(): AssetUploadContext {
     storage: {
       Config: vi.fn(async () => undefined),
       HasStorageAccounts: true,
-      UploadFile: vi.fn(async () => ({ FileID: 'file-1', StoragePath: 'forms-assets/x/photo.png' })),
+      UploadFile: vi.fn(async () => ({
+        FileID: 'file-1',
+        StoragePath: 'forms-assets/x/photo.png',
+        Provider: { ID: 'provider-1', Name: 'Provider 1' },
+      })),
     },
     elevatedUser: { ID: 'system' } as UserInfo,
+    cache: new ByteBudgetCache(1024 * 1024, 1024 * 1024),
   };
 }
 

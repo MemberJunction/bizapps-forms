@@ -12,6 +12,8 @@
  * reaches the result, and ALL of it reaches the server log with the entity it came from.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { persistSubmission, SAVE_FAILED_MESSAGE, withoutQueryEcho, type PersistenceInputs } from '../persistence.service';
 import { expectPersistFailure, makeContextUser, makeDefinition, makeFakeProvider, respondentPermissions } from './fakes';
@@ -143,5 +145,20 @@ describe('the logged line carries the diagnostic but not the answers', () => {
     expect(line, 'the failure must still be logged').toBeDefined();
     expect(line).not.toContain('DECLARE @');
     expect(line).not.toContain('Parameters:');
+  });
+});
+
+describe('the smoke suite checks the respondent against this exact sentence', () => {
+  it('source-text pin: smoke:errors compares the refused save against SAVE_FAILED_MESSAGE', () => {
+    // The smoke keeps its own copy because a .mjs cannot import this TypeScript constant, and its
+    // comment points here as what catches the two drifting apart. Nothing else reads the smoke file.
+    const smoke = readFileSync(
+      fileURLToPath(new URL('../../../../../smoke/respondent-errors-path.mjs', import.meta.url)),
+      'utf8',
+    );
+    const literal = smoke.match(/^\s*const SAVE_FAILED = '([^']*)';$/m)?.[1];
+
+    expect(literal, 'smoke/respondent-errors-path.mjs no longer declares SAVE_FAILED').toBeDefined();
+    expect(literal).toBe(SAVE_FAILED_MESSAGE);
   });
 });

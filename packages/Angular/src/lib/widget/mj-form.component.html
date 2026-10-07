@@ -43,7 +43,9 @@
   <!--
     The form's logo, above every phase.
     A logo is the form's IDENTITY, not decoration on one screen, so it stays put while the
-    respondent moves welcome -> questions -> thank-you. It used to render nowhere at all:
+    respondent moves welcome -> questions -> thank-you. The one exception: while the welcome
+    gate waits (`waitingForWelcomeImage`) the logo is held back (`shownLogoUrl`), so it arrives
+    together with the welcome screen. It used to render nowhere at all:
     applyStyleTokens set a --mjf-logo-url custom property that no rule and no template ever
     read, so an author could upload a logo, save it, publish it, and never see it.
 
@@ -53,7 +55,7 @@
     alt is empty on purpose: the form's name sits right beneath it, and a screen reader
     announcing the brand twice is worse than not announcing the picture.
   -->
-  @if (logoUrl(); as logo) {
+  @if (shownLogoUrl(); as logo) {
     <div class="mjf-logo-bar">
       <img class="mjf-logo" [src]="logo" alt="" decoding="async" (error)="onLogoError()" />
     </div>
@@ -93,7 +95,11 @@
   @switch (phase()) {
     @case ('loading') {
       <div class="mjf-state" role="status" aria-live="polite">
-        <span class="mjf-spinner" aria-hidden="true"></span>
+        @if (waitingForWelcomeImage()) {
+          <mjf-mj-loader />
+        } @else {
+          <span class="mjf-spinner" aria-hidden="true"></span>
+        }
         <span>Loading form…</span>
       </div>
     }
@@ -108,7 +114,7 @@
            shell, so while it shows there is no runtime rendered, no question in the DOM and
            nothing for a respondent (or a scraper) to fill in. -->
       @if (welcomeScreen(); as ws) {
-        <mjf-form-screen [screen]="ws" (activated)="startIntake()" (mediaSettled)="onWelcomeMediaSettled()" />
+        <mjf-form-screen [screen]="ws" (activated)="startIntake()" />
       }
     }
     @case ('done') {

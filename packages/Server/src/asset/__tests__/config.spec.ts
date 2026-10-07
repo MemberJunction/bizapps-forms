@@ -96,6 +96,26 @@ describe('the public-prefix invariant', () => {
     expect(isPublicAssetKey(null)).toBe(false);
   });
 
+  it('refuses a key with a dot segment or a backslash, which could step out of the asset tree', () => {
+    // A read now probes the same key on EVERY account of the provider (#290), so a key that a
+    // driver resolves outside forms-assets/ must never pass this guard on any of them.
+    for (const bad of [
+      'forms-assets/../uploads/x.pdf',
+      'forms-assets/a/../../x',
+      'forms-assets/./x',
+      'forms-assets\\..\\x',
+      'forms-assets/a\\b.png',
+      'forms-assets/a/..',
+    ]) {
+      expect(isPublicAssetKey(bad), bad).toBe(false);
+    }
+  });
+
+  it('still accepts an ordinary asset key, dots inside a name included', () => {
+    expect(isPublicAssetKey('forms-assets/44444444-4444-4444-4444-444444444444/0b6f1c2e-uuid/logo.png')).toBe(true);
+    expect(isPublicAssetKey('forms-assets/form/uuid/logo..v2.png')).toBe(true);
+  });
+
   it('does NOT treat a lookalike sibling prefix as public', () => {
     // `startsWith('forms-assets')` without the separator would publish this. The separator is
     // what stops a neighbouring bucket folder inheriting the invariant.

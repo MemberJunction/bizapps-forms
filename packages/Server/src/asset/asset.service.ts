@@ -17,8 +17,10 @@
  * load for a respondent who has no session at all. The guard is the storage prefix and nothing
  * else: a file whose `ProviderKey` is not under `forms-assets/` is a 404 here, so the route
  * cannot be turned into a reader for the résumés the respondent-upload endpoint stores.
+ * Bytes are served from the process-wide `AssetByteCache` once read; the guard runs on every
+ * request first.
  */
-import { LogError } from '@memberjunction/core';
+import { LogError, LogErrorEx } from '@memberjunction/core';
 import type { EntityInfo, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 
 import { FORM_ENTITY } from '../public-submit/entity-names.js';
@@ -30,7 +32,9 @@ import {
   isPublicAssetKey,
 } from './config.js';
 import type { ParsedFile } from '../upload/multipart.js';
-import { readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
+import { MAX_CACHED_ASSET_ENTRY_BYTES } from './asset-byte-cache.js';
+import type { ByteBudgetCache } from './asset-byte-cache.js';
+import { describeReadFallback, readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
 
 /** Entity-definition lookup — satisfied by a global `Metadata` and by a per-request provider. */
 export interface AssetMetadataProvider {
@@ -54,7 +58,7 @@ export interface AssetUploadStorage {
     contextUser: UserInfo;
     storageAccountId?: string;
     pathPrefix?: string;
-  }): Promise<{ FileID: string; StoragePath?: string }>;
+  }): Promise<{ FileID: string; StoragePath?: string; Provider?: { ID: string; Name: string } }>;
 }
 
 /**
@@ -94,6 +98,8 @@ export interface AssetUploadContext {
    * elevated, because an ordinary author role carries no `MJ: Files` grant on a clean install.
    */
   elevatedUser?: UserInfo;
+  /** The same cache the read route uses; a successful upload warms it. */
+  cache: ByteBudgetCache;
 }
 
 /** Injected context for the read path. */
@@ -103,6 +109,8 @@ export interface AssetReadContext {
   storage: AssetReadStorage;
   /** Loads the `MJ: Files` row, or undefined when there is none. */
   loadFile: (fileId: string, user: UserInfo) => Promise<StoredAssetRecord | undefined>;
+  /** Process-wide copy of served bytes; consulted only after the guard. */
+  cache: ByteBudgetCache;
 }
 
 /** The write route's JSON success body (the builder's contract). */
@@ -138,6 +146,15 @@ export interface AssetReadResult {
   ok: boolean;
   asset?: AssetBytes;
   failure?: AssetFailure;
+}
+
+/**
+ * Pure. The cache key for one asset: its id plus WHERE its row says the bytes are now. The row is
+ * read on every request, so a row re-pointed at another object or provider is never answered with
+ * the old bytes.
+ */
+export function assetCacheKey(fileId: string, providerId: string, providerKey: string): string {
+  return `${fileId.toUpperCase()}|${providerId.toUpperCase()}|${providerKey}`;
 }
 
 const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -276,6 +293,13 @@ async function storeAsset(
       storageAccountId: cfg.storageAccountId,
       pathPrefix: assetPathPrefix(formId),
     });
+    // Warm the read cache with bytes already in hand, so the author's preview and the first
+    // respondent on this host skip the provider round trip (#291). A copy: `file.data` is a view
+    // into the whole multipart body. No path or provider reported → no key → nothing kept. An
+    // oversize body is skipped before the copy, since the cache would refuse it anyway.
+    if (stored.StoragePath && stored.Provider?.ID && file.data.length <= MAX_CACHED_ASSET_ENTRY_BYTES) {
+      ctx.cache.Put(assetCacheKey(stored.FileID, stored.Provider.ID, stored.StoragePath), Buffer.from(file.data));
+    }
     return {
       ok: true,
       success: {
@@ -320,11 +344,9 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
   }
 
   try {
-    const content = await readStoredObject(
-      ctx.storage,
-      ctx.systemUser,
-      { providerId: file.ProviderID, providerKey: file.ProviderKey },
-      getAssetConfig().storageAccountId,
+    const providerKey = file.ProviderKey;
+    const content = await ctx.cache.GetOrLoad(assetCacheKey(wanted, file.ProviderID, providerKey), () =>
+      readAssetFromStorage(ctx, wanted, file.ProviderID, providerKey),
     );
     return {
       ok: true,
@@ -336,9 +358,30 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    LogError(`[Forms] Asset read failed for ${wanted}: ${detail}`);
+    // Key kept on purpose; see the fallback warning in `readAssetFromStorage`.
+    LogError(
+      `[Forms] Asset read failed for ${wanted} (key ${file.ProviderKey}, provider ${file.ProviderID}): ${detail}`,
+    );
     return failRead(500, 'Could not read the image.');
   }
+}
+
+/** One provider read, warning when an account other than the first one tried served it. */
+async function readAssetFromStorage(
+  ctx: AssetReadContext,
+  fileId: string,
+  providerId: string,
+  providerKey: string,
+): Promise<Buffer> {
+  const pins = [{ envVar: 'FORMS_ASSET_STORAGE_ACCOUNT', value: getAssetConfig().storageAccountId, legacyFallback: true }];
+  const read = await readStoredObject(ctx.storage, ctx.systemUser, { providerId, providerKey }, pins);
+  // Set only when an account other than the first one tried served the bytes. A warning, not an
+  // error: the image went out.
+  // The key stays in the asset route's lines, unlike the download route's: asset keys sit under the
+  // public `forms-assets/` prefix and are not respondent data, and they are the operator's main clue.
+  const fallback = describeReadFallback('Asset', fileId, providerKey, read, pins);
+  if (fallback) LogErrorEx({ severity: 'warning', message: fallback });
+  return read.content;
 }
 
 /** Strip any `; charset=` parameter from a content type. */
@@ -353,5 +396,8 @@ function safeFileName(filename: string): string {
     .replace(/[^A-Za-z0-9._ -]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  return cleaned || 'image';
+  // `.` and `..` survive the character filter. MJ's UploadFile would store either as `file` (it
+  // strips leading dots), so no dot-only segment ever reaches a key; mapping them here as well keeps
+  // the name this returns to the author the same as the name that is stored.
+  return cleaned === '' || cleaned === '.' || cleaned === '..' ? 'image' : cleaned;
 }

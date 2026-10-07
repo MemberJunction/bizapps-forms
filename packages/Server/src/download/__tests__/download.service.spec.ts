@@ -1,18 +1,27 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { logError, logErrorEx } = vi.hoisted(() => ({ logError: vi.fn(), logErrorEx: vi.fn() }));
+vi.mock('@memberjunction/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memberjunction/core')>()),
+  LogError: logError,
+  LogErrorEx: logErrorEx,
+}));
+
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 
 import { resetDownloadConfigCache } from '../config';
+import { resetUploadConfigForTests } from '../../upload/config';
 import {
   loadResponseFile,
   type DownloadContext,
   type StoredFileRow,
   type UploadProvenanceRow,
 } from '../download.service';
-import type { StorageReadEngine } from '../../storage/read-object';
+import { resetRememberedReadsForTests, type StorageReadEngine } from '../../storage/read-object';
 
 const FILE_ID = '11111111-2222-4333-8444-555555555555';
-const CALLER = { ID: 'caller' } as unknown as UserInfo;
-const SYSTEM = { ID: 'system' } as unknown as UserInfo;
+const CALLER = { ID: 'caller' } as UserInfo;
+const SYSTEM = { ID: 'system' } as UserInfo;
 
 function provenance(over: Partial<UploadProvenanceRow> = {}): UploadProvenanceRow {
   return { FileID: FILE_ID, FileName: 'resume.pdf', ContentType: 'application/pdf', Status: 'Active', ...over };
@@ -24,7 +33,7 @@ function fileRow(over: Partial<StoredFileRow> = {}): StoredFileRow {
     Name: 'resume.pdf',
     ContentType: 'application/pdf',
     ProviderID: 'provider-1',
-    ProviderKey: 'forms-uploads/2026-08-19/abc/resume.pdf',
+    ProviderKey: 'forms-uploads/2026-08-19/3f2b9c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e/resume.pdf',
     Status: 'Active',
     ...over,
   };
@@ -79,8 +88,13 @@ function context(stubs: Stubs = {}): DownloadContext {
     },
     storage: {
       Config: vi.fn(async () => undefined),
-      GetAccountsByProviderID: () => [{ ID: 'account-1' }],
-      ResolveStorageAccount: () => ({ account: { ID: 'account-1' } }),
+      Loaded: true,
+      GetAccountsByProviderID: () => [{ ID: 'account-1', Name: 'Account 1' }],
+      GetProviderById: () => ({ ID: 'provider-1', Name: 'Provider 1' }),
+      ResolveStorageAccount: () => ({
+        account: { ID: 'account-1', Name: 'Account 1' },
+        provider: { ID: 'provider-1', Name: 'Provider 1' },
+      }),
       GetDriver: async () => ({ GetObject: async () => Buffer.from('PDF BYTES') }),
       ...stubs.storage,
     } as StorageReadEngine,
@@ -89,8 +103,18 @@ function context(stubs: Stubs = {}): DownloadContext {
 
 beforeEach(() => {
   resetDownloadConfigCache();
+  resetUploadConfigForTests();
+  resetRememberedReadsForTests();
+  logError.mockClear();
+  logErrorEx.mockClear();
   delete readAs.upload;
   delete readAs.file;
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  resetDownloadConfigCache();
+  resetUploadConfigForTests();
 });
 
 describe('loadResponseFile — the authorization', () => {
@@ -107,7 +131,7 @@ describe('loadResponseFile — the authorization', () => {
       FILE_ID,
     );
     expect(result.ok).toBe(true);
-    expect(getObject).toHaveBeenCalledWith({ fullPath: 'forms-uploads/2026-08-19/abc/resume.pdf' });
+    expect(getObject).toHaveBeenCalledWith({ fullPath: 'forms-uploads/2026-08-19/3f2b9c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e/resume.pdf' });
   });
 
   it('checks the provenance row AS THE CALLER, which is what makes it an authorization', async () => {
@@ -222,5 +246,179 @@ describe('loadResponseFile — what the reader gets', () => {
       FILE_ID,
     );
     expect(result.payload?.contentType).toBe('application/octet-stream');
+  });
+});
+
+describe('loadResponseFile — the account the bytes are read from (#290)', () => {
+  const UPLOAD_ACCOUNT = 'AAAAAAAA-0000-4000-8000-00000000000A';
+  const DOWNLOAD_ACCOUNT = 'BBBBBBBB-0000-4000-8000-00000000000B';
+  const OTHER_ACCOUNT = 'CCCCCCCC-0000-4000-8000-00000000000C';
+  const accounts = () => [
+    { ID: OTHER_ACCOUNT, Name: 'Other' },
+    { ID: DOWNLOAD_ACCOUNT, Name: 'Download' },
+    { ID: UPLOAD_ACCOUNT, Name: 'Upload' },
+  ];
+
+  function pins(): void {
+    vi.stubEnv('FORMS_UPLOAD_STORAGE_ACCOUNT', UPLOAD_ACCOUNT);
+    vi.stubEnv('FORMS_DOWNLOAD_STORAGE_ACCOUNT', DOWNLOAD_ACCOUNT);
+    resetDownloadConfigCache();
+    resetUploadConfigForTests();
+  }
+
+  // A respondent file written before v0.11.0 has no per-upload UUID in its key, so another account
+  // may hold someone else's file at the same key. Such a file is read as before #290: through the
+  // download pin when its provider has no account — never the upload pin, never a probe.
+  it('reads a pre-v0.11.0 file on a provider with no account through the download pin only', async () => {
+    pins();
+    const GetDriver = vi.fn(async (_accountId: string) => ({ GetObject: async () => Buffer.from('MINE') }));
+    const resolveCalls: Array<string | undefined> = [];
+    const result = await loadResponseFile(
+      context({
+        file: ok([fileRow({ ProviderKey: 'forms-uploads/2026-08-01/signature.png' })]),
+        storage: {
+          GetAccountsByProviderID: () => [],
+          ResolveStorageAccount: (id?: string) => {
+            resolveCalls.push(id);
+            return id
+              ? { account: { ID: id, Name: id }, provider: { ID: 'provider-9', Name: 'Provider 9' } }
+              : null;
+          },
+          GetDriver,
+        },
+      }),
+      FILE_ID,
+    );
+    expect(result.ok).toBe(true);
+    expect(GetDriver.mock.calls.map((c) => c[0])).toEqual([DOWNLOAD_ACCOUNT]);
+    expect(resolveCalls).toEqual([DOWNLOAD_ACCOUNT]);
+  });
+
+  it('reads a pre-v0.11.0 file under a configured prefix that ends in a UUID through one account only', async () => {
+    vi.stubEnv('FORMS_UPLOAD_PATH_PREFIX', 'tenants/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c');
+    pins();
+    const GetDriver = vi.fn(async (_accountId: string) => ({ GetObject: async () => Buffer.from('MINE') }));
+    await loadResponseFile(
+      context({
+        file: ok([fileRow({ ProviderKey: 'tenants/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c/signature.png' })]),
+        storage: { GetAccountsByProviderID: accounts, GetDriver },
+      }),
+      FILE_ID,
+    );
+    expect(GetDriver.mock.calls.map((c) => c[0])).toEqual([OTHER_ACCOUNT]);
+  });
+
+  it('tries the upload pin before the download pin, then the rest of the provider', async () => {
+    pins();
+    const GetDriver = vi.fn(async (_accountId: string) => ({
+      GetObject: async (): Promise<Buffer> => {
+        throw new Error('nope');
+      },
+    }));
+    await loadResponseFile(context({ storage: { GetAccountsByProviderID: accounts, GetDriver } }), FILE_ID);
+    expect(GetDriver.mock.calls.map((c) => c[0])).toEqual([
+      UPLOAD_ACCOUNT,
+      DOWNLOAD_ACCOUNT,
+      OTHER_ACCOUNT,
+    ]);
+  });
+
+  it('keeps the generic 500 on total failure and logs the accounts, file id and provider (never the key)', async () => {
+    pins();
+    const result = await loadResponseFile(
+      context({
+        storage: {
+          GetAccountsByProviderID: accounts,
+          GetDriver: async () => ({
+            GetObject: async (): Promise<Buffer> => {
+              throw new Error('disk gone');
+            },
+          }),
+        },
+      }),
+      FILE_ID,
+    );
+    expect(result.failure).toEqual({ status: 500, error: 'That file could not be read from storage.' });
+    expect(logError).toHaveBeenCalledTimes(1);
+    const line = String(logError.mock.calls[0][0]);
+    for (const id of [UPLOAD_ACCOUNT, DOWNLOAD_ACCOUNT, OTHER_ACCOUNT]) expect(line).toContain(id);
+    expect(line).toContain('Provider 1');
+    expect(line).not.toContain('forms-uploads/');
+    expect(line).toContain(FILE_ID);
+    expect(line).toContain('provider provider-1');
+  });
+
+  it('warns when a fallback account served the file', async () => {
+    pins();
+    const result = await loadResponseFile(
+      context({
+        storage: {
+          GetAccountsByProviderID: accounts,
+          GetDriver: async (id: string) => ({
+            GetObject: async (): Promise<Buffer> => {
+              if (id !== OTHER_ACCOUNT) throw new Error('missing');
+              return Buffer.from('PDF BYTES');
+            },
+          }),
+        },
+      }),
+      FILE_ID,
+    );
+    expect(result.ok).toBe(true);
+    const arg = logErrorEx.mock.calls[0][0] as { severity: string; message: string };
+    expect(arg.severity).toBe('warning');
+    expect(arg.message).toContain(OTHER_ACCOUNT);
+    expect(arg.message).toContain('(if any), then FORMS_UPLOAD_STORAGE_ACCOUNT, then FORMS_DOWNLOAD_STORAGE_ACCOUNT, then');
+    expect(arg.message).not.toMatch(/\bPin FORMS_/);
+  });
+});
+
+describe('loadResponseFile — respondent file names stay out of the logs (#290)', () => {
+  const PRIVATE_KEY = 'forms-uploads/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/Jane_Doe_Resume.pdf';
+  const TWO_ACCOUNTS = () => [
+    { ID: 'account-1', Name: 'Account 1' },
+    { ID: 'account-2', Name: 'Account 2' },
+  ];
+  const echo = (): Promise<Buffer> => {
+    throw new Error(`ENOENT: no such file or directory, open '/data/storage/${PRIVATE_KEY}'`);
+  };
+
+  function expectNoPersonalData(line: string): void {
+    expect(line).not.toContain('Jane_Doe_Resume');
+    expect(line).not.toContain('forms-uploads/');
+    expect(line).toContain(FILE_ID);
+    expect(line).toContain('provider-1');
+  }
+
+  it('logs neither the key nor the file name on total failure, and the response body is unchanged', async () => {
+    const result = await loadResponseFile(
+      context({
+        file: ok([fileRow({ ProviderKey: PRIVATE_KEY })]),
+        storage: { GetAccountsByProviderID: TWO_ACCOUNTS, GetDriver: async () => ({ GetObject: echo }) },
+      }),
+      FILE_ID,
+    );
+    expect(result.failure).toEqual({ status: 500, error: 'That file could not be read from storage.' });
+    expectNoPersonalData(String(logError.mock.calls[0][0]));
+  });
+
+  it('logs neither the key nor the file name in the fallback warning', async () => {
+    const result = await loadResponseFile(
+      context({
+        file: ok([fileRow({ ProviderKey: PRIVATE_KEY })]),
+        storage: {
+          GetAccountsByProviderID: TWO_ACCOUNTS,
+          GetDriver: async (id: string) => ({
+            GetObject: async (): Promise<Buffer> => (id === 'account-2' ? Buffer.from('PDF BYTES') : echo()),
+          }),
+        },
+      }),
+      FILE_ID,
+    );
+    expect(result.ok).toBe(true);
+    const message = (logErrorEx.mock.calls[0][0] as { message: string }).message;
+    expect(message).not.toContain('Jane_Doe_Resume');
+    expect(message).not.toContain('forms-uploads/');
+    expect(message).toContain(FILE_ID);
   });
 });
