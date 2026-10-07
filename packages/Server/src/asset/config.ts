@@ -29,7 +29,8 @@
  *                                  FIRST among the file's provider's accounts, then every other
  *                                  account on that provider. Unset uses the first account (#290).
  *                                  Once this process has read a file, the account that served it
- *                                  is tried ahead of the pin.
+ *                                  is tried ahead of the pin. (A key without a per-upload UUID is
+ *                                  read through one account only; no released asset key lacks it.)
  *  - `MJAPI_PUBLIC_URL`            Origin the returned absolute asset URL is built against
  *                                  (shared with the respondent host page). That URL is a
  *                                  convenience; forms store `/forms/asset/<id>` (#270).

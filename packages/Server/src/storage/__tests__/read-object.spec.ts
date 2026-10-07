@@ -7,6 +7,7 @@ import {
   StorageMetadataNotLoadedError,
   StoredObjectReadError,
   describeReadFallback,
+  isUniqueStorageKey,
   redactStorageKey,
   readStoredObject,
   resetRememberedReadsForTests,
@@ -22,7 +23,8 @@ const pins = (...ids: Array<string | undefined>): ReadPin[] => ids.map((value, i
 beforeEach(() => resetRememberedReadsForTests());
 
 const SYSTEM = {} as UserInfo;
-const KEY = 'forms-assets/form-1/uuid/logo.png';
+// Shaped like every key Forms has written since v0.11.0: a per-upload UUID directory before the name.
+const KEY = 'forms-assets/form-1/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c/logo.png';
 const BYTES = Buffer.from('PNGDATA');
 
 /**
@@ -309,7 +311,7 @@ describe('readStoredObject: remembering the account that served an object (#290)
   });
 
   it(`evicts the oldest object once more than MAX_REMEMBERED_READS (${MAX_REMEMBERED_READS}) are remembered`, async () => {
-    const fillers = Array.from({ length: MAX_REMEMBERED_READS }, (_, i) => `forms-assets/filler/${i}.png`);
+    const fillers = Array.from({ length: MAX_REMEMBERED_READS }, (_, i) => `forms-assets/filler/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c/${i}.png`);
     const { storage, driverCalls } = multiAccountEngine([A, B], {
       [A.ID]: { [KEY]: BYTES },
       [B.ID]: Object.fromEntries(fillers.map((key) => [key, BYTES])),
@@ -324,7 +326,7 @@ describe('readStoredObject: remembering the account that served an object (#290)
   });
 
   it('keeps a recently re-read object when the cap evicts, because a hit makes it the newest entry', async () => {
-    const fillers = Array.from({ length: MAX_REMEMBERED_READS }, (_, i) => `forms-assets/filler/${i}.png`);
+    const fillers = Array.from({ length: MAX_REMEMBERED_READS }, (_, i) => `forms-assets/filler/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c/${i}.png`);
     const { storage, driverCalls } = multiAccountEngine([A, B], {
       [A.ID]: { [KEY]: BYTES },
       [B.ID]: Object.fromEntries(fillers.map((key) => [key, BYTES])),
@@ -362,7 +364,7 @@ describe('describeReadFallback', () => {
 
   it('names the object, the account holding it, and each account tried first with its error', () => {
     const message = describeReadFallback('Download', 'file-1', KEY, fallback, PINS) ?? '';
-    expect(message).toMatch(/^\[Forms\] Download file-1 \(key forms-assets\/form-1\/uuid\/logo\.png\) is held by /);
+    expect(message.startsWith(`[Forms] Download file-1 (key ${KEY}) is held by `)).toBe(true);
     expect(message).toContain(`account "Account A" (${A.ID}) on provider "Provider P1" (P1)`);
     expect(message).toContain(`account "Account B" (${B.ID}) on provider "Provider P1" (P1): ENOENT ${KEY}`);
   });
@@ -527,5 +529,88 @@ describe('describeReadFallback without a key', () => {
     expect(message).not.toContain('(key');
     expect(message).toContain('Download file-1 is held by');
     expect(message).toContain(': boom');
+  });
+});
+
+describe('isUniqueStorageKey', () => {
+  it('is true when the name sits under a per-upload UUID directory, as Forms writes since v0.11.0', () => {
+    expect(isUniqueStorageKey('forms-uploads/2026-10-06/3f2b9c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e/resume.pdf')).toBe(true);
+    expect(isUniqueStorageKey(KEY)).toBe(true);
+  });
+
+  it('is false for a pre-v0.11.0 respondent key, which is only a date and a file name', () => {
+    expect(isUniqueStorageKey('forms-uploads/2026-08-01/signature.png')).toBe(false);
+    expect(isUniqueStorageKey('signature.png')).toBe(false);
+  });
+
+  it('is false when the only UUID belongs to a configured prefix, not to the upload', () => {
+    // FORMS_UPLOAD_PATH_PREFIX may name a tenant or bucket id; before v0.11.0 the name followed it directly.
+    expect(isUniqueStorageKey('tenants/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c/uploads/signature.png')).toBe(false);
+  });
+
+  it('is false for a name directly under the configured prefix, even when that prefix ends in a UUID', () => {
+    // Before v0.11.0 a configured FORMS_UPLOAD_PATH_PREFIX got the name appended directly.
+    expect(isUniqueStorageKey('tenants/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c/signature.png', 'tenants/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c')).toBe(false);
+    expect(isUniqueStorageKey('tenants/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c/signature.png', '/tenants/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c/')).toBe(false);
+  });
+
+  it('is true for a per-upload UUID directory under the configured prefix', () => {
+    expect(isUniqueStorageKey('tenants/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c/3f2b9c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e/signature.png', 'tenants/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c')).toBe(true);
+  });
+});
+
+describe('readStoredObject: a key that may not be unique across accounts (#290)', () => {
+  // Respondent uploads before v0.11.0 were stored at forms-uploads/<date>/<name>, so two accounts
+  // can each hold a DIFFERENT respondent's object at the same key. Bytes found under the key on some
+  // account prove nothing about whose file they are, so such a key is read exactly as before #290.
+  const LEGACY = 'forms-uploads/2026-08-01/signature.png';
+  const LEGACY_REF = { providerId: 'P1', providerKey: LEGACY };
+  const MINE = Buffer.from('MINE');
+  const THEIRS = Buffer.from('SOMEONE ELSE');
+
+  it('reads only the provider\'s first account, whatever the pins say', async () => {
+    const { storage, driverCalls } = multiAccountEngine([B, A], { [B.ID]: { [LEGACY]: MINE }, [A.ID]: { [LEGACY]: THEIRS } });
+    const read = await readStoredObject(storage, SYSTEM, LEGACY_REF, pins(A.ID));
+    expect(driverCalls).toEqual([B.ID]);
+    expect(read.content).toBe(MINE);
+  });
+
+  it('reads a key directly under the configured prefix through the first account only', async () => {
+    const key = 'tenants/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c/signature.png';
+    const { storage, driverCalls } = multiAccountEngine([B, A], { [B.ID]: { [key]: MINE }, [A.ID]: { [key]: THEIRS } });
+    const read = await readStoredObject(storage, SYSTEM, { providerId: 'P1', providerKey: key, uploadPathPrefix: 'tenants/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c' }, pins(A.ID));
+    expect(driverCalls).toEqual([B.ID]);
+    expect(read.content).toBe(MINE);
+  });
+
+  it('never falls through to another account that holds an object at the same key', async () => {
+    const { storage, driverCalls } = multiAccountEngine([B, A], { [A.ID]: { [LEGACY]: THEIRS } }, { throwOnDriver: [B.ID] });
+    const error = (await readStoredObject(storage, SYSTEM, LEGACY_REF, pins()).catch((e: unknown) => e)) as StoredObjectReadError;
+    expect(error).toBeInstanceOf(StoredObjectReadError);
+    expect(driverCalls).toEqual([B.ID]);
+  });
+
+  it('when the provider has no account, reads through the pin the route used before #290, not the first that resolves', async () => {
+    const upload: AccountRow = { ID: 'EEEEEEEE-0000-4000-8000-000000000005', Name: 'Upload', ProviderID: 'P8' };
+    const moved: AccountRow = { ID: 'DDDDDDDD-0000-4000-8000-000000000004', Name: 'Moved', ProviderID: 'P9' };
+    const { storage, driverCalls } = multiAccountEngine([upload, moved], { [moved.ID]: { [LEGACY]: MINE } }, { resolve: (id) => id ?? null });
+    const legacyPins: ReadPin[] = [
+      { envVar: 'FORMS_UPLOAD_STORAGE_ACCOUNT', value: upload.ID },
+      { envVar: 'FORMS_DOWNLOAD_STORAGE_ACCOUNT', value: moved.ID, legacyFallback: true },
+    ];
+    const read = await readStoredObject(storage, SYSTEM, LEGACY_REF, legacyPins);
+    expect(driverCalls).toEqual([moved.ID]);
+    expect(read.content).toBe(MINE);
+  });
+});
+
+describe('readStoredObject: a unique key whose provider has no account (#290)', () => {
+  it('tries every pin that resolves, in order, so a later pin still serves the file', async () => {
+    const upload: AccountRow = { ID: 'EEEEEEEE-0000-4000-8000-000000000005', Name: 'Upload', ProviderID: 'P8' };
+    const moved: AccountRow = { ID: 'DDDDDDDD-0000-4000-8000-000000000004', Name: 'Moved', ProviderID: 'P9' };
+    const { storage, driverCalls } = multiAccountEngine([upload, moved], { [moved.ID]: { [KEY]: BYTES } }, { resolve: (id) => id ?? null });
+    const read = await readStoredObject(storage, SYSTEM, REF, pins(upload.ID, moved.ID));
+    expect(driverCalls).toEqual([upload.ID, moved.ID]);
+    expect(read.servedBy.accountId).toBe(moved.ID);
   });
 });

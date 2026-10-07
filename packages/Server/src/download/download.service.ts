@@ -143,14 +143,15 @@ export async function loadResponseFile(ctx: DownloadContext, fileId: string): Pr
   try {
     // Respondent files are WRITTEN through the upload pin, so that is where they most likely are.
     // The download pin is a read hint, tried second; every other account on the provider follows.
+    // It is also the one pin a pre-v0.11.0 file is still read through (legacyFallback).
     const pins = [
       { envVar: 'FORMS_UPLOAD_STORAGE_ACCOUNT', value: getUploadConfig().storageAccountId },
-      { envVar: 'FORMS_DOWNLOAD_STORAGE_ACCOUNT', value: getDownloadConfig().storageAccountId },
+      { envVar: 'FORMS_DOWNLOAD_STORAGE_ACCOUNT', value: getDownloadConfig().storageAccountId, legacyFallback: true },
     ];
     const read = await readStoredObject(
       ctx.storage,
       ctx.elevatedUser,
-      { providerId: file.ProviderID, providerKey: file.ProviderKey },
+      { providerId: file.ProviderID, providerKey: file.ProviderKey, uploadPathPrefix: getUploadConfig().pathPrefix },
       pins,
     );
     // No key here, unlike the asset route: a respondent file's key ends in the uploader's filename,

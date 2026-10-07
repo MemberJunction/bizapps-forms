@@ -33,7 +33,7 @@ function fileRow(over: Partial<StoredFileRow> = {}): StoredFileRow {
     Name: 'resume.pdf',
     ContentType: 'application/pdf',
     ProviderID: 'provider-1',
-    ProviderKey: 'forms-uploads/2026-08-19/abc/resume.pdf',
+    ProviderKey: 'forms-uploads/2026-08-19/3f2b9c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e/resume.pdf',
     Status: 'Active',
     ...over,
   };
@@ -131,7 +131,7 @@ describe('loadResponseFile — the authorization', () => {
       FILE_ID,
     );
     expect(result.ok).toBe(true);
-    expect(getObject).toHaveBeenCalledWith({ fullPath: 'forms-uploads/2026-08-19/abc/resume.pdf' });
+    expect(getObject).toHaveBeenCalledWith({ fullPath: 'forms-uploads/2026-08-19/3f2b9c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e/resume.pdf' });
   });
 
   it('checks the provenance row AS THE CALLER, which is what makes it an authorization', async () => {
@@ -265,6 +265,48 @@ describe('loadResponseFile — the account the bytes are read from (#290)', () =
     resetDownloadConfigCache();
     resetUploadConfigForTests();
   }
+
+  // A respondent file written before v0.11.0 has no per-upload UUID in its key, so another account
+  // may hold someone else's file at the same key. Such a file is read as before #290: through the
+  // download pin when its provider has no account — never the upload pin, never a probe.
+  it('reads a pre-v0.11.0 file on a provider with no account through the download pin only', async () => {
+    pins();
+    const GetDriver = vi.fn(async (_accountId: string) => ({ GetObject: async () => Buffer.from('MINE') }));
+    const resolveCalls: Array<string | undefined> = [];
+    const result = await loadResponseFile(
+      context({
+        file: ok([fileRow({ ProviderKey: 'forms-uploads/2026-08-01/signature.png' })]),
+        storage: {
+          GetAccountsByProviderID: () => [],
+          ResolveStorageAccount: (id?: string) => {
+            resolveCalls.push(id);
+            return id
+              ? { account: { ID: id, Name: id }, provider: { ID: 'provider-9', Name: 'Provider 9' } }
+              : null;
+          },
+          GetDriver,
+        },
+      }),
+      FILE_ID,
+    );
+    expect(result.ok).toBe(true);
+    expect(GetDriver.mock.calls.map((c) => c[0])).toEqual([DOWNLOAD_ACCOUNT]);
+    expect(resolveCalls).toEqual([DOWNLOAD_ACCOUNT]);
+  });
+
+  it('reads a pre-v0.11.0 file under a configured prefix that ends in a UUID through one account only', async () => {
+    vi.stubEnv('FORMS_UPLOAD_PATH_PREFIX', 'tenants/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c');
+    pins();
+    const GetDriver = vi.fn(async (_accountId: string) => ({ GetObject: async () => Buffer.from('MINE') }));
+    await loadResponseFile(
+      context({
+        file: ok([fileRow({ ProviderKey: 'tenants/0b7e2c1a-9d4f-4e8b-a1c2-3d4e5f6a7b8c/signature.png' })]),
+        storage: { GetAccountsByProviderID: accounts, GetDriver },
+      }),
+      FILE_ID,
+    );
+    expect(GetDriver.mock.calls.map((c) => c[0])).toEqual([OTHER_ACCOUNT]);
+  });
 
   it('tries the upload pin before the download pin, then the rest of the provider', async () => {
     pins();

@@ -13,6 +13,11 @@
  * served an object is remembered in-process and tried first next time, so the fallback (and its
  * warning) happens once per object, not once per request.
  *
+ * Probing is only safe for a key that names one object across all accounts. Every key Forms has
+ * written since v0.11.0 does (a per-upload UUID directory); a respondent upload from before that does
+ * not, so another account may hold someone else's file at the same key. Such a key is read exactly
+ * as before #290 — one account, never probed, never remembered ({@link isUniqueStorageKey}).
+ *
  * The guards that decide WHETHER a caller may read a given object stay with their callers: the
  * asset route's guard is the storage prefix, the download route's is the caller's permissions.
  */
@@ -127,6 +132,40 @@ export interface ReadPin {
   envVar: string;
   /** The configured account id; `undefined` when unset. */
   value: string | undefined;
+  /**
+   * True for the pin this route read through before #290 when the file's provider had no account
+   * (asset: `FORMS_ASSET_STORAGE_ACCOUNT`; download: `FORMS_DOWNLOAD_STORAGE_ACCOUNT`). A key that
+   * may not be unique is still read that way — see {@link isUniqueStorageKey}.
+   */
+  legacyFallback?: boolean;
+}
+
+const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Pure. True when the object's name sits directly under a UUID directory, which Forms has written
+ * for every upload and asset since v0.11.0 (`uploadPathPrefix`, `assetPathPrefix`).
+ *
+ * Why it matters: probing several accounts is only safe when a key names ONE object across all of
+ * them. Respondent uploads before v0.11.0 were stored at `forms-uploads/<date>/<name>`, so two
+ * accounts can each hold a different respondent's `signature.png` at the same key, and bytes found
+ * under it on some account prove nothing about whose file they are. Asset uploads first shipped in
+ * v0.11.0, already with the UUID, so no released asset key fails this test.
+ *
+ * A configured `FORMS_UPLOAD_PATH_PREFIX` could itself end in a UUID (a tenant id), and before
+ * v0.11.0 the name followed it directly; pass it as `uploadPathPrefix` and a key straight under it
+ * is not unique. What this cannot see is a prefix an operator has CHANGED since then.
+ */
+export function isUniqueStorageKey(providerKey: string, uploadPathPrefix?: string): boolean {
+  const segments = providerKey.split('/');
+  if (segments.length < 2 || !UUID_SEGMENT.test(segments[segments.length - 2])) return false;
+  const prefix = normalizeStoragePrefix(uploadPathPrefix);
+  return prefix === '' || segments.slice(0, -1).join('/') !== prefix;
+}
+
+/** The prefix as MJ's UploadFile stores it: no leading, trailing or doubled slashes. */
+function normalizeStoragePrefix(prefix: string | undefined): string {
+  return (prefix ?? '').trim().replace(/\/+/g, '/').replace(/^\/|\/$/g, '');
 }
 
 /** Where an object lives, as `MJ: Files` records it. */
@@ -137,6 +176,12 @@ export interface StoredObjectRef {
    * provider-native id. Non-null because callers 404 a file without one before reading.
    */
   providerKey: string;
+  /**
+   * The configured `FORMS_UPLOAD_PATH_PREFIX`, for respondent files. Before v0.11.0 a configured
+   * prefix had the file name appended directly, so a key straight under it is never unique — even
+   * when the prefix itself ends in a UUID. See {@link isUniqueStorageKey}.
+   */
+  uploadPathPrefix?: string;
 }
 
 /** Raised when no storage account can be resolved to read through. */
@@ -271,9 +316,10 @@ export class StoredObjectReadError extends Error {
  * account on ANOTHER provider, or one the engine no longer has, cannot hold this file, so it does
  * not reorder anything.
  *
- * When the provider has no account at all (a legacy row whose provider was replaced) the closest
- * answer is the first preferred id the engine resolves, else the engine default; `[]` if nothing
- * resolves. The remembered account plays no part there: there is only ever one candidate.
+ * When the provider has no account at all (a row whose provider was replaced) the candidates are
+ * every preferred id the engine resolves, in order and deduped, else the engine default; `[]` if
+ * nothing resolves. The remembered account plays no part there. Only for keys that are unique across
+ * accounts — {@link readStoredObject} reads any other key through {@link findLegacyCandidate}.
  */
 export function findReadCandidates(
   storage: StorageReadEngine,
@@ -283,7 +329,7 @@ export function findReadCandidates(
 ): { candidates: ReadAccountRef[]; truncated: boolean } {
   const onProvider = storage.GetAccountsByProviderID(providerId);
   if (onProvider.length === 0) {
-    return { candidates: findFallbackCandidate(storage, preferredAccountIds), truncated: false };
+    return { candidates: findFallbackCandidates(storage, preferredAccountIds), truncated: false };
   }
   const preferred = [rememberedAccountId, ...preferredAccountIds]
     .filter((id): id is string => !!id)
@@ -301,26 +347,49 @@ export function findReadCandidates(
   };
 }
 
-function findFallbackCandidate(
+type ResolvedAccount = NonNullable<ReturnType<StorageReadEngine['ResolveStorageAccount']>>;
+
+function toReadAccountRef(resolved: ResolvedAccount): ReadAccountRef {
+  return {
+    accountId: resolved.account.ID,
+    accountName: resolved.account.Name,
+    providerId: resolved.provider.ID,
+    providerName: resolved.provider.Name,
+  };
+}
+
+function findFallbackCandidates(
   storage: StorageReadEngine,
   preferredAccountIds: ReadonlyArray<string | undefined>,
 ): ReadAccountRef[] {
-  let resolved: ReturnType<StorageReadEngine['ResolveStorageAccount']> = null;
-  for (const id of preferredAccountIds) {
-    if (!id) continue;
-    resolved = storage.ResolveStorageAccount(id);
-    if (resolved) break;
+  const resolved = preferredAccountIds
+    .filter((id): id is string => !!id)
+    .map((id) => storage.ResolveStorageAccount(id))
+    .filter((r): r is ResolvedAccount => r !== null)
+    .filter((r, index, all) => all.findIndex((other) => UUIDsEqual(other.account.ID, r.account.ID)) === index);
+  if (resolved.length > 0) return resolved.map(toReadAccountRef);
+  const fallback = storage.ResolveStorageAccount(undefined);
+  return fallback ? [toReadAccountRef(fallback)] : [];
+}
+
+/**
+ * Pure. The one account a key that may not be unique is read through: exactly the rule before #290,
+ * the provider's first account in engine order, else the route's {@link ReadPin.legacyFallback} pin
+ * (the engine default when it is unset). Never more than one: a second account could hold another
+ * respondent's object at the same key.
+ */
+export function findLegacyCandidate(
+  storage: StorageReadEngine,
+  providerId: string,
+  legacyFallbackAccountId: string | undefined,
+): ReadAccountRef[] {
+  const first = storage.GetAccountsByProviderID(providerId)[0];
+  if (first) {
+    const providerName = storage.GetProviderById(providerId)?.Name ?? UNKNOWN_PROVIDER_NAME;
+    return [{ accountId: first.ID, accountName: first.Name, providerId, providerName }];
   }
-  resolved ??= storage.ResolveStorageAccount(undefined);
-  if (!resolved) return [];
-  return [
-    {
-      accountId: resolved.account.ID,
-      accountName: resolved.account.Name,
-      providerId: resolved.provider.ID,
-      providerName: resolved.provider.Name,
-    },
-  ];
+  const resolved = storage.ResolveStorageAccount(legacyFallbackAccountId);
+  return resolved ? [toReadAccountRef(resolved)] : [];
 }
 
 /**
@@ -351,9 +420,12 @@ export async function readStoredObject(
   pins: ReadonlyArray<ReadPin>,
 ): Promise<StoredObjectRead> {
   await configureStorage(storage, systemUser);
-  const remembered = findRememberedAccountId(ref);
-  const pinnedIds = pins.map((p) => p.value);
-  const { candidates, truncated } = findReadCandidates(storage, ref.providerId, pinnedIds, remembered);
+  const unique = isUniqueStorageKey(ref.providerKey, ref.uploadPathPrefix);
+  // Only a unique key is remembered or probed; see isUniqueStorageKey for why.
+  const remembered = unique ? findRememberedAccountId(ref) : undefined;
+  const { candidates, truncated } = unique
+    ? findReadCandidates(storage, ref.providerId, pins.map((p) => p.value), remembered)
+    : { candidates: findLegacyCandidate(storage, ref.providerId, pins.find((p) => p.legacyFallback)?.value), truncated: false };
   if (candidates.length === 0) {
     throw new NoStorageAccountError(ref.providerId);
   }
@@ -366,7 +438,7 @@ export async function readStoredObject(
       // Dropbox / SharePoint); it only coincides with the path on Azure / S3 / GCS, so reading the
       // stored path as an id 404s on ID-keyed providers (#261). Every MJ driver resolves `fullPath`.
       const content = await driver.GetObject({ fullPath: ref.providerKey });
-      rememberServingAccount(ref, account.accountId);
+      if (unique) rememberServingAccount(ref, account.accountId);
       return { content, servedBy: account, failedAttempts, rememberedAccountFailed };
     } catch (error) {
       // Not swallowed: recorded, and surfaced in StoredObjectReadError if no later account serves it.

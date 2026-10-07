@@ -320,7 +320,7 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
   }
 
   try {
-    const pins = [{ envVar: 'FORMS_ASSET_STORAGE_ACCOUNT', value: getAssetConfig().storageAccountId }];
+    const pins = [{ envVar: 'FORMS_ASSET_STORAGE_ACCOUNT', value: getAssetConfig().storageAccountId, legacyFallback: true }];
     const read = await readStoredObject(
       ctx.storage,
       ctx.systemUser,
