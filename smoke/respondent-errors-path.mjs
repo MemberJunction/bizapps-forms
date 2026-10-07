@@ -16,6 +16,14 @@
  *       and NODE_ENV=production leaked it identically. Persistence now returns one authored
  *       sentence and logs the detail server-side.
  *
+ *   (c) The upload route's storage failure (issue #142). `POST /forms/upload` used to answer a
+ *       storage failure with the provider's own message — `File storage is not available:
+ *       Credential … not found`, an SDK error, a mount path — in an HTTP 500 JSON body, which
+ *       neither Apollo's plugin nor the GraphQL redaction ever sees. It now returns one authored
+ *       sentence and logs the detail. THE 5xx IS ONLY REACHABLE WITH BROKEN STORAGE, so a healthy
+ *       run proves the 400 path and the scan (and prints a skip saying the 5xx was not exercised);
+ *       a run against a host whose storage account is broken proves the 5xx path.
+ *
  * Every response body this script receives — error or not — is scanned for the fingerprints of a
  * leak: stack frames, filesystem paths, `pkg@version`, the database/schema/constraint vocabulary,
  * and the SQL provider's `Error executing SQL` prefix. A pass means none of them appeared anywhere.
@@ -49,6 +57,7 @@ const GHOST_QUESTION_ID = process.argv[3] || process.env.FORMS_SMOKE_GHOST_QUEST
 let failures = 0;
 let skipped = 0;
 let warnings = 0;
+let otherAuthoredUpload5xx = 0; // warns that are NOT MJ-core residuals, so the summary does not blame core
 const pass = (m) => console.log(`  ok    ${m}`);
 const fail = (m, detail) => { failures++; console.error(`  FAIL  ${m}${detail ? `\n          ${detail}` : ''}`); };
 const warn = (m, detail) => { warnings++; console.log(`  warn  ${m}${detail ? `\n          ${detail}` : ''}`); };
@@ -86,6 +95,8 @@ const LEAK_FINGERPRINTS = [
   [/FOREIGN KEY|PRIMARY KEY|UNIQUE KEY|CHECK constraint|FK_\w+|PK_\w+/i, 'a constraint name'],
   [/__mj\b|__mj_\w+|\bdbo\.|\bsp[A-Z]\w+\b|\bDECLARE @|\bEXEC \[/i, 'schema, table or procedure vocabulary'],
   [/conflict occurred in database|table "\w+/i, 'a database or table name'],
+  [/File storage is not available|FileStorageEngine|PutObject|\bE(?:NOTDIR|NOENT|ACCES)\b|\.blob\.core\.windows\.net|amazonaws\.com|storage\.googleapis\.com/i,
+    'storage provider vocabulary'],
 ];
 
 /** The fingerprints present in a response body, by name; an empty list is a clean body. */
@@ -128,6 +139,86 @@ async function probe(token, label, body, { extra, coreResidual = false } = {}) {
     extra(res);
   }
   return res;
+}
+
+/**
+ * POST one multipart upload as the respondent; return the raw text so nothing is lost to parsing.
+ * The 5-byte payload is the `%PDF-` magic number, which passes the content sniff, so a refusal here
+ * is about the question or the storage, never the file.
+ */
+async function postUpload(token, questionId) {
+  const form = new FormData();
+  form.append('file', new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d])], { type: 'application/pdf' }), 'smoke-errors.pdf');
+  form.append('distributionSlug', SLUG);
+  form.append('questionId', questionId);
+  form.append('responseId', randomUUID());
+  const res = await fetch(`${BASE}/forms/upload`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'x-session-id': sessionIdFor(token) },
+    body: form,
+  });
+  return { status: res.status, text: await res.text() };
+}
+
+/** One upload probe: fire it, assert its body carries no fingerprint, and hand the response back. */
+async function uploadProbe(token, label, questionId) {
+  const res = await postUpload(token, questionId);
+  const leaks = leaksIn(res.text);
+  const summary = `${label} (HTTP ${res.status}) says nothing about the host`;
+  if (leaks.length === 0) {
+    pass(summary);
+  } else {
+    fail(summary, `LEAKED ${leaks.join(', ')}: ${res.text.slice(0, 240)}`);
+  }
+  return res;
+}
+
+/**
+ * Kept as literals because a .mjs smoke cannot import the TypeScript constant; the first is
+ * asserted against `UPLOAD_FAILED_MESSAGE` in the upload service's spec, which fails if the two
+ * ever drift (the same arrangement as `SAVE_FAILED` above).
+ */
+const UPLOAD_FAILED = 'Your file could not be uploaded. Please try again.';
+/** The other authored 5xx sentences on the route: reachable, but not the storage-failure path. */
+const OTHER_AUTHORED_UPLOAD_5XX = [
+  'The upload service is busy right now. Please try again in a moment.',
+  'Upload could not be recorded; please try again.',
+  'Upload failed unexpectedly. Please try again later.',
+];
+
+/** Judge an upload against a real file question; see the header's (c) for what each outcome proves. */
+function judgeUpload(res) {
+  if (res.status === 200) {
+    skip('the upload route\'s storage-failure path (5xx)',
+      'storage is healthy on this host, so the upload succeeded and only the scan ran — it wrote ' +
+        'one `MJ: Files` row and one ledger row. To exercise the 5xx, start a private harness with ' +
+        'FORMS_UPLOAD_STORAGE_ACCOUNT set to an id that names no File Storage Account and point ' +
+        'FORMS_SMOKE_URL at it (uploads then fail inside storage with no database writes):\n' +
+        '          GRAPHQL_PORT=4131 MJAPI_PUBLIC_URL=http://localhost:4131 \\\n' +
+        '          FORMS_UPLOAD_STORAGE_ACCOUNT=00000000-0000-0000-0000-000000000000 node server.mjs   (from apps/MJAPI)');
+    return;
+  }
+  if (res.status < 500) {
+    fail(`the file-question upload was refused unexpectedly (HTTP ${res.status})`, res.text.slice(0, 240));
+    return;
+  }
+  let error;
+  try {
+    error = JSON.parse(res.text).error;
+  } catch {
+    fail(`the upload 5xx body is not JSON (HTTP ${res.status})`, res.text.slice(0, 240));
+    return;
+  }
+  // EQUALITY, not a loose match: the other authored 5xx sentences also say "try again".
+  if (error === UPLOAD_FAILED) {
+    pass('the failed upload shows the authored sentence — storage-failure path exercised');
+  } else if (OTHER_AUTHORED_UPLOAD_5XX.includes(error)) {
+    otherAuthoredUpload5xx++;
+    warn(`the upload failed with a different authored sentence (HTTP ${res.status}) — storage-failure path NOT exercised`,
+      `got: ${error}`);
+  } else {
+    fail(`the failed upload says something unauthored (HTTP ${res.status})`, res.text.slice(0, 240));
+  }
 }
 
 const SUBMIT = `mutation S($input: FormSubmissionInputType!) {
@@ -269,9 +360,22 @@ async function main() {
         "          FROM __mj_BizAppsForms.FormVersion v WHERE v.ID = '<published FormVersion.ID>';");
   }
 
+  // ── (c) The upload route. ───────────────────────────────────────────────────────────────────
+  // An unknown question is refused before storage is touched, so this writes nothing.
+  const unknownRes = await uploadProbe(token, 'an upload against an unknown question (refused)', randomUUID());
+  check(unknownRes.status === 400, 'the unknown-question upload is a 400', `got HTTP ${unknownRes.status}: ${unknownRes.text.slice(0, 200)}`);
+  const fileQuestion = questions.find((q) => q.type === 'FileUpload' || q.type === 'Doodle');
+  if (fileQuestion) {
+    judgeUpload(await uploadProbe(token, 'an upload against a file question', fileQuestion.id));
+  } else {
+    skip('the upload route\'s storage-failure path (5xx)', 'the published form has no FileUpload or Doodle question to upload against');
+  }
+
+  const coreResiduals = warnings - otherAuthoredUpload5xx;
   const notes = [
     skipped ? `${skipped} check(s) skipped` : '',
-    warnings ? `${warnings} MJ-core residual(s) — see the warn lines; clean under NODE_ENV=production` : '',
+    coreResiduals ? `${coreResiduals} MJ-core residual(s) — see the warn lines; clean under NODE_ENV=production` : '',
+    otherAuthoredUpload5xx ? 'the upload 5xx was a different authored sentence — storage-failure path not exercised' : '',
   ].filter(Boolean);
   console.log(
     failures === 0

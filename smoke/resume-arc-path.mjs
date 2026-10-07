@@ -206,8 +206,9 @@ if (!fileId) {
   // script reported the upload failure and then died on `fileId.toLowerCase()` several steps
   // later — a TypeError stack that buries the one line saying what actually went wrong. Seen for
   // real when the API had cached a storage credential that was saved after it booted: the
-  // message that mattered ("File storage is not available: Credential … not found") was already
-  // on screen, three lines above a crash that looked like the bug.
+  // cause ("File storage is not available: Credential … not found") was the one thing to read —
+  // three lines above a crash that looked like the bug. Since #142 the response body carries only
+  // an authored sentence and that provider message lives in the server log, so look there.
   console.log(`\nFAIL — ${failures} check(s) failed. Nothing downstream can run without an uploaded file.`);
   process.exit(1);
 }
