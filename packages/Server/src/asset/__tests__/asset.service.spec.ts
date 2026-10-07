@@ -11,6 +11,7 @@ import type { EntityInfo, RunViewParams, RunViewResult, UserInfo } from '@member
 import type { ParsedFile } from '../../upload/multipart';
 import { resetAssetConfigForTests } from '../config';
 import { resetRememberedReadsForTests } from '../../storage/read-object';
+import { ByteBudgetCache } from '../asset-byte-cache';
 import {
   checkAuthorScope,
   loadAssetBytes,
@@ -67,9 +68,14 @@ function uploadContext(overrides: Partial<AssetUploadContext> = {}): AssetUpload
     storage: {
       Config: vi.fn(async () => undefined),
       HasStorageAccounts: true,
-      UploadFile: vi.fn(async () => ({ FileID: FILE_ID, StoragePath: `forms-assets/${FORM_ID}/logo.png` })),
+      UploadFile: vi.fn(async () => ({
+        FileID: FILE_ID,
+        StoragePath: `forms-assets/${FORM_ID}/logo.png`,
+        Provider: { ID: 'provider-1', Name: 'Provider 1' },
+      })),
     },
     elevatedUser: SYSTEM,
+    cache: new ByteBudgetCache(1024 * 1024, 1024 * 1024),
     ...overrides,
   };
 }
@@ -260,6 +266,7 @@ function readContext(file: StoredAssetRecord | undefined, storage?: Partial<Asse
       ...storage,
     },
     loadFile: vi.fn(async () => file),
+    cache: new ByteBudgetCache(1024 * 1024, 1024 * 1024),
   };
 }
 
@@ -413,5 +420,131 @@ describe('loadAssetBytes — the account the bytes are read from (#290)', () => 
     expect(arg.message).toContain(`(key forms-assets/${FORM_ID}/logo.png)`); // public prefix: the operator's main clue
     expect(arg.message).toContain('(if any), then FORMS_ASSET_STORAGE_ACCOUNT, then');
     expect(arg.message).not.toMatch(/\bPin FORMS_/);
+  });
+});
+
+describe('loadAssetBytes — a repeat read of one asset (#291)', () => {
+  it('serves the second request for the same asset without reading storage again', async () => {
+    // #291: every request re-read the object from the provider, and on Box a path read lists one
+    // folder per path segment before downloading (~2.5–3 s), so every respondent's welcome image
+    // paid the full round trip. An asset's bytes never change under its id, so the second read
+    // has nothing new to fetch.
+    const getObject = vi.fn(async () => Buffer.from('PNGDATA'));
+    const file = fileRecord({ ProviderKey: `forms-assets/${FORM_ID}/0b6f3c1e-2d4a-4f5b-9c8d-7e6f5a4b3c2d/logo.png` });
+    const ctx = readContext(file, { GetDriver: vi.fn(async () => ({ GetObject: getObject })) });
+
+    const first = await loadAssetBytes(ctx, FILE_ID);
+    const second = await loadAssetBytes(ctx, FILE_ID);
+
+    expect(first.asset?.content.toString()).toBe('PNGDATA');
+    expect(second.asset?.content.toString()).toBe('PNGDATA');
+    expect(getObject).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('loadAssetBytes — kept bytes never bypass the guard (#291)', () => {
+  const KEY = `forms-assets/${FORM_ID}/0b6f3c1e-2d4a-4f5b-9c8d-7e6f5a4b3c2d/logo.png`;
+  const driverWith = (getObject: () => Promise<Buffer>) => ({ GetDriver: vi.fn(async () => ({ GetObject: getObject })) });
+
+  it('404s an asset deleted after its bytes were kept', async () => {
+    const ctx = readContext(fileRecord({ ProviderKey: KEY }));
+    expect((await loadAssetBytes(ctx, FILE_ID)).ok).toBe(true);
+    ctx.loadFile = vi.fn(async () => fileRecord({ ProviderKey: KEY, Status: 'Deleted' }));
+    expect((await loadAssetBytes(ctx, FILE_ID)).failure).toEqual({ status: 404, error: 'Not found.' });
+  });
+
+  it('404s a row whose key left the public prefix, though the old key is kept', async () => {
+    const ctx = readContext(fileRecord({ ProviderKey: KEY }));
+    await loadAssetBytes(ctx, FILE_ID);
+    ctx.loadFile = vi.fn(async () => fileRecord({ ProviderKey: 'forms-uploads/2026-08-18/resume.pdf' }));
+    expect((await loadAssetBytes(ctx, FILE_ID)).failure?.status).toBe(404);
+  });
+
+  it('reads storage again when the row now names a different key', async () => {
+    const getObject = vi.fn(async () => Buffer.from('PNGDATA'));
+    const ctx = readContext(fileRecord({ ProviderKey: KEY }), driverWith(getObject));
+    await loadAssetBytes(ctx, FILE_ID);
+    ctx.loadFile = vi.fn(async () => fileRecord({ ProviderKey: KEY.replace('logo.png', 'logo-2.png') }));
+    await loadAssetBytes(ctx, FILE_ID);
+    expect(getObject).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads storage again when the row now names a different provider', async () => {
+    const getObject = vi.fn(async () => Buffer.from('PNGDATA'));
+    const ctx = readContext(fileRecord({ ProviderKey: KEY }), driverWith(getObject));
+    await loadAssetBytes(ctx, FILE_ID);
+    ctx.loadFile = vi.fn(async () => fileRecord({ ProviderKey: KEY, ProviderID: 'provider-2' }));
+    await loadAssetBytes(ctx, FILE_ID);
+    expect(getObject).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not keep a failed read: the next request tries storage again', async () => {
+    const getObject = vi
+      .fn<() => Promise<Buffer>>()
+      .mockRejectedValueOnce(new Error('provider down'))
+      .mockResolvedValueOnce(Buffer.from('PNGDATA'));
+    const ctx = readContext(fileRecord({ ProviderKey: KEY }), driverWith(getObject));
+    expect((await loadAssetBytes(ctx, FILE_ID)).failure?.status).toBe(500);
+    expect((await loadAssetBytes(ctx, FILE_ID)).asset?.content.toString()).toBe('PNGDATA');
+  });
+
+  it('hits the cache when the same asset is read by a lower-case file id after an upper-case one', async () => {
+    const getObject = vi.fn(async () => Buffer.from('PNGDATA'));
+    const ctx = readContext(fileRecord({ ProviderKey: KEY }), driverWith(getObject));
+    await loadAssetBytes(ctx, FILE_ID.toUpperCase());
+    await loadAssetBytes(ctx, FILE_ID.toLowerCase());
+    expect(getObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares one storage read between concurrent first requests', async () => {
+    const getObject = vi.fn(async () => Buffer.from('PNGDATA'));
+    const ctx = readContext(fileRecord({ ProviderKey: KEY }), driverWith(getObject));
+    const results = await Promise.all([loadAssetBytes(ctx, FILE_ID), loadAssetBytes(ctx, FILE_ID)]);
+    expect(results.every((r) => r.ok)).toBe(true);
+    expect(getObject).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('runAssetUpload — warms the read cache (#291)', () => {
+  const KEY = `forms-assets/${FORM_ID}/logo.png`; // what uploadContext()'s UploadFile reports
+  const readingFrom = (cache: ByteBudgetCache, getObject: () => Promise<Buffer>) => ({
+    ...readContext(fileRecord({ ProviderKey: KEY }), { GetDriver: vi.fn(async () => ({ GetObject: getObject })) }),
+    cache,
+  });
+
+  it('a later read of the uploaded asset does not go to storage', async () => {
+    const up = uploadContext();
+    expect((await runAssetUpload(up, { file: png(32), formId: FORM_ID })).ok).toBe(true);
+    const getObject = vi.fn(async () => Buffer.from('FROM-STORAGE'));
+    const read = await loadAssetBytes(readingFrom(up.cache, getObject), FILE_ID);
+    expect(getObject).not.toHaveBeenCalled();
+    expect(read.asset?.content.equals(png(32).data)).toBe(true);
+  });
+
+  it('keeps a copy of the file, not a view into the request body', async () => {
+    const up = uploadContext();
+    const file = png(32);
+    await runAssetUpload(up, { file, formId: FORM_ID });
+    file.data.fill(0); // the multipart body is reused/freed by the caller; the kept copy must not move
+    const read = await loadAssetBytes(readingFrom(up.cache, vi.fn(async () => Buffer.from('X'))), FILE_ID);
+    expect(read.asset?.content.equals(png(32).data)).toBe(true);
+  });
+
+  it('does not warm when the engine reports no storage path', async () => {
+    const up = uploadContext();
+    up.storage.UploadFile = vi.fn(async () => ({ FileID: FILE_ID }));
+    await runAssetUpload(up, { file: png(32), formId: FORM_ID });
+    const getObject = vi.fn(async () => Buffer.from('FROM-STORAGE'));
+    await loadAssetBytes(readingFrom(up.cache, getObject), FILE_ID);
+    expect(getObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed upload warms nothing', async () => {
+    const up = uploadContext();
+    up.storage.UploadFile = vi.fn(async () => {
+      throw new Error('provider down');
+    });
+    await runAssetUpload(up, { file: png(32), formId: FORM_ID });
+    expect(up.cache.TotalBytes).toBe(0);
   });
 });
