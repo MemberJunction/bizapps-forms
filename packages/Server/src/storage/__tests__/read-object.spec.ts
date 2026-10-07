@@ -485,6 +485,33 @@ describe('redactStorageKey', () => {
   it('does not redact an empty final segment of a key ending in a slash', () => {
     expect(redactStorageKey('dir/ listing', 'dir/')).toBe('<storage key> listing');
   });
+
+  // A respondent may upload a file named `e` or `a`, and MJ stores a dot-only name as `file`, so
+  // the basename can be a fragment of ordinary words. Redacting it inside those words destroyed the
+  // account names, "provider" and the driver's error in the very line that diagnoses the read.
+  const LINE =
+    'Download read failed: account "Account B" on provider "Local Disk": ENOENT: no such file or directory';
+
+  it.each(['e', 'a'])('leaves words containing a short basename %j intact', (name) => {
+    expect(redactStorageKey(LINE, `forms-uploads/2026-10-06/u1/${name}`)).toBe(LINE);
+  });
+
+  it('redacts a basename that is itself a word only where it stands alone, keeping the accounts', () => {
+    // A standalone "file" cannot be told apart from a driver naming the object, so it goes.
+    expect(redactStorageKey(LINE, 'forms-uploads/2026-10-06/u1/file')).toBe(
+      'Download read failed: account "Account B" on provider "Local Disk": ENOENT: no such <storage key> or directory',
+    );
+  });
+
+  it('still redacts a short basename where it stands as its own name', () => {
+    expect(redactStorageKey("open '/r/x/e' failed; object e missing", 'forms-uploads/d/u1/e')).toBe(
+      "open '/r/x/<storage key>' failed; object <storage key> missing",
+    );
+  });
+
+  it('never rewrites the placeholder it has just inserted', () => {
+    expect(redactStorageKey("open '/r/forms-uploads/d/u1/e'", 'forms-uploads/d/u1/e')).toBe("open '/r/<storage key>'");
+  });
 });
 
 describe('describeReadFallback without a key', () => {
