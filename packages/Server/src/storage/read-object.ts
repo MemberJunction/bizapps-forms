@@ -220,35 +220,39 @@ export function describeReadAttempts(attempts: ReadonlyArray<ReadAttempt>): stri
 
 const REDACTED_KEY = '<storage key>';
 
-/** Characters a stored file name can carry; a basename flanked by one of these is part of a longer word. */
-const FILE_NAME_CHAR = '[A-Za-z0-9._-]';
+/** A letter or digit: a letters-only basename touching one is part of a longer word. */
+const WORD_CHAR = '[A-Za-z0-9]';
 
 function escapeRegExp(literal: string): string {
   return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
- * Pure. Replaces every occurrence of `providerKey`, and every standalone occurrence of its final
- * path segment, with `<storage key>`. Both are matched as literal strings, in ONE pass.
+ * Pure. Replaces every occurrence of `providerKey` and of its final path segment with
+ * `<storage key>`. Both are matched as literal strings, in ONE pass.
  *
  * Why the final segment too: a respondent upload's key ends in the uploader's filename, which is
  * personal data, and some drivers (and cloud SDK messages) report only the object's basename. The
  * full key wins where both match, so a path is replaced whole rather than leaving its directories
  * behind. An empty key, or an empty final segment (a key ending in `/`), redacts nothing for that part.
  *
- * Why standalone, and why one pass: a respondent may upload a file named `e` or `a`, and MJ stores a
+ * One exception, and why one pass: a respondent may upload a file named `e` or `a`, and MJ stores a
  * dot-only name as `file`. Matched anywhere, such a basename rewrote the inside of ordinary words —
  * the account names, "provider" and the driver's error in the line this redaction exists to keep
- * readable — and a second pass also rewrote the placeholder the first had just inserted. A
- * standalone word equal to the basename is still redacted: it cannot be told apart from a driver
- * naming the object.
+ * readable — and a second pass also rewrote the placeholder the first had just inserted. So a
+ * LETTERS-ONLY basename is not matched where a letter or digit touches it. Any other basename (one
+ * with a dot, digit, `_`, `-` or space, which ordinary words do not contain) is matched anywhere,
+ * because drivers report names with things attached (`.meta.json`, `.part`, `_1`, `copy-of-`). A
+ * standalone word equal to a letters-only basename is still redacted: it cannot be told apart from a
+ * driver naming the object.
  */
 export function redactStorageKey(text: string, providerKey: string): string {
   if (providerKey === '') return text;
   const baseName = providerKey.slice(providerKey.lastIndexOf('/') + 1);
   const alternatives = [escapeRegExp(providerKey)];
   if (baseName !== '') {
-    alternatives.push(`(?<!${FILE_NAME_CHAR})${escapeRegExp(baseName)}(?!${FILE_NAME_CHAR})`);
+    const name = escapeRegExp(baseName);
+    alternatives.push(/^[A-Za-z]+$/.test(baseName) ? `(?<!${WORD_CHAR})${name}(?!${WORD_CHAR})` : name);
   }
   return text.replace(new RegExp(alternatives.join('|'), 'g'), REDACTED_KEY);
 }

@@ -523,6 +523,25 @@ describe('redactStorageKey', () => {
     );
   });
 
+  // The guard above is for names that can hide inside words. A real file name a driver reports with
+  // something attached (a sidecar, a chunk, a copy) must still go: the line exists to keep it out.
+  it.each([
+    "ENOENT: open 'Jane_Doe_Resume.pdf.meta.json'",
+    'upload part Jane_Doe_Resume.pdf.part failed',
+    'object Jane_Doe_Resume.pdf_1 missing',
+    'copy-of-Jane_Doe_Resume.pdf not found',
+    'cached as 1Jane_Doe_Resume.pdf',
+  ])('redacts a file name with something attached: %s', (text) => {
+    expect(redactStorageKey(text, 'forms-uploads/d/u1/Jane_Doe_Resume.pdf')).not.toContain('Jane_Doe');
+  });
+
+  it('redacts a letters-only file name next to punctuation, but not inside a word', () => {
+    expect(redactStorageKey("open 'JaneDoe.part' and copy-of-JaneDoe", 'forms-uploads/d/u1/JaneDoe')).toBe(
+      "open '<storage key>.part' and copy-of-<storage key>",
+    );
+    expect(redactStorageKey('MaryJaneDoes', 'forms-uploads/d/u1/JaneDoe')).toBe('MaryJaneDoes');
+  });
+
   it('never rewrites the placeholder it has just inserted', () => {
     expect(redactStorageKey("open '/r/forms-uploads/d/u1/e'", 'forms-uploads/d/u1/e')).toBe("open '/r/<storage key>'");
   });
