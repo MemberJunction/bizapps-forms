@@ -501,6 +501,43 @@ export const MUTANTS = [
     suite: 'packages/Angular',
     killedBy: ['src/lib/form-panels/person-form-responses.model.spec.ts'],
   },
+  // --- #291: the asset byte cache and the welcome gate ---------------------------------------
+  {
+    name: 'asset-cache/key-ignores-where-the-row-points',
+    behaviour: 'kept bytes are found only under the id AND the provider and key the row names now',
+    file: 'packages/Server/src/asset/asset.service.ts',
+    find: '  return `${fileId.toUpperCase()}|${providerId.toUpperCase()}|${providerKey}`;',
+    replace: '  return `${fileId.toUpperCase()}`;',
+    suite: 'packages/Server',
+    killedBy: ['src/asset/__tests__/asset.service.spec.ts'],
+  },
+  {
+    name: 'asset-cache/no-single-flight',
+    behaviour: 'concurrent first requests for one asset share one storage read',
+    file: 'packages/Server/src/asset/asset-byte-cache.ts',
+    find: '    if (pending) return pending;',
+    replace: '    if (false && pending) return pending;',
+    suite: 'packages/Server',
+    killedBy: ['src/asset/__tests__/asset-byte-cache.spec.ts', 'src/asset/__tests__/asset.service.spec.ts'],
+  },
+  {
+    name: 'welcome-gate/stale-load-reveals',
+    behaviour: 'an earlier or destroyed load never reveals the welcome screen',
+    file: 'packages/Angular/src/lib/widget/core/welcome-gate.ts',
+    find: '    if (--waitingReady === 0 && hooks.isCurrent()) hooks.reveal();',
+    replace: '    if (--waitingReady === 0) hooks.reveal();',
+    suite: 'packages/Angular',
+    killedBy: ['src/lib/widget/core/welcome-gate.spec.ts'],
+  },
+  {
+    name: 'welcome-gate/first-image-reveals',
+    behaviour: 'the welcome screen waits for the LAST of its images, not the first',
+    file: 'packages/Angular/src/lib/widget/core/welcome-gate.ts',
+    find: '    if (--waitingReady === 0 && hooks.isCurrent()) hooks.reveal();',
+    replace: '    if (--waitingReady >= 0 && hooks.isCurrent()) hooks.reveal();',
+    suite: 'packages/Angular',
+    killedBy: ['src/lib/widget/core/welcome-gate.spec.ts'],
+  },
 ];
 
 /**
