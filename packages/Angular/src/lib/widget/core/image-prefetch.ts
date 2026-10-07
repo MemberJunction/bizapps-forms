@@ -14,8 +14,11 @@
  * prefetching cannot pay off on this link, and every later image would stall the same way. The
  * in-flight image is deliberately NOT aborted: assets are served with a weak ETag, so a partial
  * download cannot be resumed, and aborting would throw away bytes already fetched. Left alone, the
- * browser finishes it into the HTTP cache. Only `cancel()` aborts an in-flight image.
+ * browser finishes it into the HTTP cache. Only `cancel()` aborts an in-flight image. The
+ * time-out and no-abort rule itself lives in `image-load.ts`, shared with the welcome gate.
  */
+
+import { browserImageEnv, preloadImage, type ImageLoadEnv, type ImagePreload, type LoadableImage } from './image-load';
 
 /** Most images one form load will prefetch. */
 export const MAX_PREFETCH_IMAGES = 12;
@@ -23,19 +26,10 @@ export const MAX_PREFETCH_IMAGES = 12;
 export const PREFETCH_TIMEOUT_MS = 15_000;
 
 /** The slice of `HTMLImageElement` the queue uses; a real `Image` satisfies it. */
-export interface PrefetchImage {
-  src: string;
-  fetchPriority: 'high' | 'low' | 'auto';
-  decoding: 'async' | 'sync' | 'auto';
-  onload: ((ev: Event) => void) | null;
-  onerror: ((ev: Event) => void) | null;
-}
+export type PrefetchImage = LoadableImage;
 
 /** Everything browser-specific, injectable so the queue is testable in node. */
-export interface PrefetchEnv {
-  createImage(): PrefetchImage;
-  setTimeout(fn: () => void, ms: number): number;
-  clearTimeout(handle: number): void;
+export interface PrefetchEnv extends ImageLoadEnv {
   /** True when the respondent's browser asked sites to save data. */
   saveData(): boolean;
 }
@@ -49,37 +43,23 @@ export interface PrefetchHandle {
 type NavigatorWithConnection = Navigator & { connection?: { saveData?: boolean } };
 
 const browserEnv: PrefetchEnv = {
-  createImage: () => new Image(),
-  setTimeout: (fn, ms) => window.setTimeout(fn, ms),
-  clearTimeout: (handle) => window.clearTimeout(handle),
+  ...browserImageEnv,
   saveData: () => (navigator as NavigatorWithConnection).connection?.saveData === true,
 };
 
 /** Start prefetching `urls` in order. Returns a handle that stops it. */
 export function prefetchImages(urls: readonly string[], env: PrefetchEnv = browserEnv): PrefetchHandle {
   let cancelled = false;
-  let current: PrefetchImage | null = null;
-  let timer: number | null = null;
+  let current: ImagePreload | null = null;
 
-  const clearTimer = (): void => {
-    if (timer !== null) {
-      env.clearTimeout(timer);
-      timer = null;
-    }
-  };
   const handle: PrefetchHandle = {
     cancel: () => {
       if (cancelled) {
         return;
       }
       cancelled = true;
-      clearTimer();
-      if (current) {
-        current.onload = null;
-        current.onerror = null;
-        current.src = '';
-        current = null;
-      }
+      current?.cancel();
+      current = null;
     },
   };
 
@@ -102,36 +82,31 @@ export function prefetchImages(urls: readonly string[], env: PrefetchEnv = brows
       return;
     }
     const url = queue[index++];
-    const img = env.createImage();
-    current = img;
-    let settled = false;
-    const settle = (outcome: 'loaded' | 'failed' | 'timed out'): void => {
-      if (settled || cancelled) {
-        return;
-      }
-      settled = true;
-      clearTimer();
-      img.onload = null;
-      img.onerror = null;
-      if (outcome === 'failed') {
-        console.debug(`[Forms] Image prefetch failed: ${url}`);
-      } else if (outcome === 'timed out') {
-        // Stop the queue, but leave `src` alone so the browser finishes this image into the cache.
-        const skipped = queue.length - index;
-        current = null;
-        console.debug(
-          `[Forms] Image prefetch stopped: ${url} took longer than ${PREFETCH_TIMEOUT_MS} ms; skipped ${skipped} remaining`,
-        );
-        return;
-      }
-      startNext();
-    };
-    img.onload = () => settle('loaded');
-    img.onerror = () => settle('failed');
-    timer = env.setTimeout(() => settle('timed out'), PREFETCH_TIMEOUT_MS);
-    img.fetchPriority = 'low';
-    img.decoding = 'async';
-    img.src = url;
+    current = preloadImage(
+      url,
+      {
+        priority: 'low',
+        waitMs: PREFETCH_TIMEOUT_MS,
+        onReady: (outcome) => {
+          if (cancelled) {
+            return;
+          }
+          if (outcome === 'timed out') {
+            // Stop the queue, but leave the download running so it lands in the HTTP cache.
+            current = null;
+            console.debug(
+              `[Forms] Image prefetch stopped: ${url} took longer than ${PREFETCH_TIMEOUT_MS} ms; skipped ${queue.length - index} remaining`,
+            );
+            return;
+          }
+          if (outcome === 'failed') {
+            console.debug(`[Forms] Image prefetch failed: ${url}`);
+          }
+          startNext();
+        },
+      },
+      env,
+    );
   };
 
   startNext();
