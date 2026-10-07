@@ -212,7 +212,7 @@ function logStorageFailure(
 }
 ```
 
-- [ ] **Step 4: Run, expect green.** Same command → all tests pass (25 existing + 12 new, counting the two added after review; see Amendments). Then `cd packages/Server && npx vitest run` (whole package) and `pnpm run typecheck` in `packages/Server`.
+- [ ] **Step 4: Run, expect green.** Same command → all tests pass (25 existing + 14 new, counting those added after review; see Amendments). Then `cd packages/Server && npx vitest run` (whole package) and `pnpm run typecheck` in `packages/Server`.
 
 - [ ] **Step 5: Commit.** `fix(forms-server): tell a respondent one sentence when their upload cannot be stored (#142)`, with the changeset:
 
@@ -224,7 +224,7 @@ function logStorageFailure(
 The public upload endpoint no longer returns the storage provider's error text to the respondent (#142). When storing a file fails, the response is `Your file could not be uploaded. Please try again.`; the provider's message goes to the server log with the response, question and distribution ids, and with the uploaded file's name redacted. Size, type and other 4xx messages are unchanged.
 ```
 
-**Amendments after review (Task 1).** The helper snippet and Review Focus 3 above describe a dots-only strip. Commit 510a19b changed it to strip leading dots THEN trim, mirroring MJ's `cleanFileName` (a name like `. Jane Doe.png` is quoted trimmed), and added a test for it. The final-review fix wave then: reworded the `writeProvenanceRow` comment (a throw escapes to the middleware's generic catch, not a storage error), typed `stored` from `UploadStorageEngine['UploadFile']`, and logs `responseId` only when GUID-shaped (else `(invalid)`) so a raw multipart field cannot forge log lines, with a test for it. The `resp-142` fixture became a real GUID.
+**Amendments after review (Task 1).** The helper snippet and Review Focus 3 above describe a dots-only strip. Commit 510a19b changed it to strip leading dots THEN trim, mirroring MJ's `cleanFileName` (a name like `. Jane Doe.png` is quoted trimmed), and added a test for it. The final-review fix wave then: reworded the `writeProvenanceRow` comment (a throw escapes to the middleware's generic catch, not a storage error), typed `stored` from `UploadStorageEngine['UploadFile']`, and briefly logged `responseId` only when GUID-shaped (else `(invalid)`); the step-8 diff council replaced that with a boundary guard in `runUpload`: a `responseId` that is not exactly GUID-shaped (no trim) is refused 400 before the distribution resolves or anything is stored, because a non-GUID otherwise fails the provenance insert after the bytes are stored and the SQL layer echoes the whole batch, file name included, into the log. `loggableResponseId` was removed; tests: refused non-GUID (storage not called), upper-case accepted, whitespace refused. Fixtures `resp-142`/`resp-42` became real GUIDs.
 
 ### Task 2: `smoke:errors` probes the upload route
 

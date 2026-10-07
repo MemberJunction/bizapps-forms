@@ -143,6 +143,9 @@ export interface UploadResult {
   failure?: UploadFailure;
 }
 
+/** Anchored, no `m` flag: a trailing newline or surrounding whitespace is not a GUID. */
+const GUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function fail(status: number, error: string): UploadResult {
   return { ok: false, failure: { status, error } };
 }
@@ -177,6 +180,13 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   // 3. Context fields + the distribution must resolve to an OPEN published form.
   if (!req.questionId) {
     return fail(400, 'Missing required field "questionId".');
+  }
+  // `responseId` is attacker-controlled and exact-match on purpose (the widget sends
+  // `crypto.randomUUID()` verbatim or omits it). A non-GUID would only fail later, in the provenance
+  // insert AFTER the bytes are stored, and make the SQL layer echo the whole batch (the respondent's
+  // file name, and any line breaks in the id) into the log. Refuse it before anything is stored.
+  if (req.responseId !== undefined && !GUID_SHAPE.test(req.responseId)) {
+    return fail(400, 'Invalid "responseId": expected a GUID.');
   }
   const distCheck = await resolveOpenDistribution(ctx, req);
   if (!distCheck.ok) {
@@ -427,7 +437,7 @@ async function storeFile(
     // No storage account configured / provider misconfigured / upload failed: a 5xx, never a crash.
     // The respondent gets the authored sentence; the provider's own words go to the log (#142).
     logStorageFailure(error, {
-      responseId: loggableResponseId(req.responseId),
+      responseId: req.responseId,
       questionId,
       distributionId: resolved?.distributionId,
       storageKey: `${pathPrefix}/${fileName}`,
@@ -468,18 +478,6 @@ async function storeFile(
       contentType: bareContentType(file.contentType),
     },
   };
-}
-
-const GUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * `responseId` is a raw multipart field, so CR/LF in it could forge log lines. It reaches the log
- * only when GUID-shaped; absent stays absent (rendered `(none)`), anything else is `(invalid)`.
- */
-function loggableResponseId(responseId: string | undefined): string | undefined {
-  if (responseId === undefined) return undefined;
-  const trimmed = responseId.trim();
-  return GUID_SHAPE.test(trimmed) ? trimmed : '(invalid)';
 }
 
 /**

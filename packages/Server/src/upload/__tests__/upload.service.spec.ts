@@ -460,17 +460,36 @@ describe('runUpload — a storage failure tells the respondent nothing about the
     expect(line).not.toContain('Jane-Doe');
   });
 
-  it('does not let a response id with a line break forge a log line', async () => {
-    // responseId is a raw multipart field; it reaches the log only when it is GUID-shaped.
-    await runUpload(
-      context({ storage: failingStorage('UploadFile', new Error(PROVIDER_DETAIL)) }),
-      request({ responseId: 'resp\n[Forms] forged line' }),
+  it('refuses a non-GUID response id before storing anything', async () => {
+    // Attacker-controlled: a non-GUID only fails later, after the bytes are stored, and makes the SQL
+    // layer echo the whole batch (file name included) into the log. So it is refused at the boundary.
+    const { engine, upload } = storageEngine();
+
+    const result = await runUpload(
+      context({ storage: engine }),
+      request({ responseId: 'not-a-guid\n[Forms] forged' }),
     );
 
-    const line = logged.find((l) => l.includes(PROVIDER_DETAIL));
-    expect(line).toContain('response (invalid)');
-    expect(line).not.toContain('forged');
-    expect(line).not.toContain('\n[Forms] forged');
+    expect(result.failure).toEqual({ status: 400, error: 'Invalid "responseId": expected a GUID.' });
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('accepts an upper-case GUID response id', async () => {
+    const result = await runUpload(context({}), request({ responseId: '0A1B2C3D-0000-4000-8000-000000000142' }));
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('refuses a GUID with surrounding whitespace, since the widget sends the id verbatim', async () => {
+    const { engine, upload } = storageEngine();
+
+    const result = await runUpload(
+      context({ storage: engine }),
+      request({ responseId: ' 0a1b2c3d-0000-4000-8000-000000000142\n' }),
+    );
+
+    expect(result.failure?.status).toBe(400);
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it('logs (none) when the widget sent no response id', async () => {
@@ -504,11 +523,11 @@ describe('runUpload — a storage failure tells the respondent nothing about the
 
 describe('runUpload — provenance', () => {
   it('records the upload so the file can later be proved to be this respondent’s', async () => {
-    const result = await runUpload(context({}), request({ responseId: 'resp-42' }));
+    const result = await runUpload(context({}), request({ responseId: '0a1b2c3d-0000-4000-8000-000000000042' }));
 
     expect(result.ok).toBe(true);
     expect(recordedProvenance).toHaveLength(1);
-    expect(recordedProvenance[0]).toMatchObject({ responseId: 'resp-42' });
+    expect(recordedProvenance[0]).toMatchObject({ responseId: '0a1b2c3d-0000-4000-8000-000000000042' });
   });
 
   it('fails the upload when provenance cannot be recorded', async () => {
