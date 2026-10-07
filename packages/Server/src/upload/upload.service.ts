@@ -273,8 +273,9 @@ function validateFile(file: ParsedFile | undefined): UploadResult {
 /**
  * The default provenance writer: one row in the Forms upload ledger.
  *
- * Returns false rather than throwing so the caller can fail the upload cleanly; a thrown error
- * here would be reported to the respondent as a storage problem, which is not what happened.
+ * Returns false rather than throwing so the caller can fail closed with its own sentence; a throw
+ * would escape `storeFile` to the middleware's generic catch, which answers "Upload failed
+ * unexpectedly" and logs without the response/question context.
  */
 export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<boolean> {
   try {
@@ -411,7 +412,7 @@ async function storeFile(
   const writer = ctx.elevatedUser ?? ctx.contextUser;
   const fileName = safeFileName(file.filename);
   const pathPrefix = uploadPathPrefix(cfg.pathPrefix);
-  let stored: { FileID: string; StoragePath?: string };
+  let stored: Awaited<ReturnType<UploadStorageEngine['UploadFile']>>;
   try {
     await ctx.storage.Config(false, writer);
     stored = await ctx.storage.UploadFile({
@@ -426,7 +427,7 @@ async function storeFile(
     // No storage account configured / provider misconfigured / upload failed: a 5xx, never a crash.
     // The respondent gets the authored sentence; the provider's own words go to the log (#142).
     logStorageFailure(error, {
-      responseId: req.responseId,
+      responseId: loggableResponseId(req.responseId),
       questionId,
       distributionId: resolved?.distributionId,
       storageKey: `${pathPrefix}/${fileName}`,
@@ -467,6 +468,18 @@ async function storeFile(
       contentType: bareContentType(file.contentType),
     },
   };
+}
+
+const GUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `responseId` is a raw multipart field, so CR/LF in it could forge log lines. It reaches the log
+ * only when GUID-shaped; absent stays absent (rendered `(none)`), anything else is `(invalid)`.
+ */
+function loggableResponseId(responseId: string | undefined): string | undefined {
+  if (responseId === undefined) return undefined;
+  const trimmed = responseId.trim();
+  return GUID_SHAPE.test(trimmed) ? trimmed : '(invalid)';
 }
 
 /**

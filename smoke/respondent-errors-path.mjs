@@ -143,8 +143,8 @@ async function probe(token, label, body, { extra, coreResidual = false } = {}) {
 
 /**
  * POST one multipart upload as the respondent; return the raw text so nothing is lost to parsing.
- * The 5-byte payload is the `%PDF-` magic number, which passes the content sniff, so a refusal here
- * is about the question or the storage, never the file.
+ * The 5-byte payload is a `%PDF-` payload declared as application/pdf, which the default allow-list
+ * accepts, so a refusal here is about the question or the storage, never the file.
  */
 async function postUpload(token, questionId) {
   const form = new FormData();
@@ -176,7 +176,7 @@ async function uploadProbe(token, label, questionId) {
 /**
  * Kept as literals because a .mjs smoke cannot import the TypeScript constant; the first is
  * asserted against `UPLOAD_FAILED_MESSAGE` in the upload service's spec, which fails if the two
- * ever drift (the same arrangement as `SAVE_FAILED` above).
+ * ever drift (the same arrangement as `SAVE_FAILED` below, pinned by `persistence-failure-message.spec.ts`).
  */
 const UPLOAD_FAILED = 'Your file could not be uploaded. Please try again.';
 /** The other authored 5xx sentences on the route: reachable, but not the storage-failure path. */

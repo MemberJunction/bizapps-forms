@@ -392,12 +392,12 @@ describe('runUpload — a storage failure tells the respondent nothing about the
   it('logs the provider detail with the response, question and distribution it was for', async () => {
     await runUpload(
       context({ storage: failingStorage('UploadFile', new Error(PROVIDER_DETAIL)) }),
-      request({ responseId: 'resp-142', questionId: 'Q-FILE' }),
+      request({ responseId: '0a1b2c3d-0000-4000-8000-000000000142', questionId: 'Q-FILE' }),
     );
 
     const line = logged.find((l) => l.includes(PROVIDER_DETAIL));
     expect(line).toBeDefined();
-    expect(line).toContain('resp-142');
+    expect(line).toContain('0a1b2c3d-0000-4000-8000-000000000142');
     // The definition's spelling, the same id the provenance ledger records.
     expect(line).toContain('q-file');
     expect(line).toContain('dist-1');
@@ -458,6 +458,19 @@ describe('runUpload — a storage failure tells the respondent nothing about the
     const line = logged.find((l) => l.includes('PutObject returned false'));
     expect(line).toBeDefined();
     expect(line).not.toContain('Jane-Doe');
+  });
+
+  it('does not let a response id with a line break forge a log line', async () => {
+    // responseId is a raw multipart field; it reaches the log only when it is GUID-shaped.
+    await runUpload(
+      context({ storage: failingStorage('UploadFile', new Error(PROVIDER_DETAIL)) }),
+      request({ responseId: 'resp\n[Forms] forged line' }),
+    );
+
+    const line = logged.find((l) => l.includes(PROVIDER_DETAIL));
+    expect(line).toContain('response (invalid)');
+    expect(line).not.toContain('forged');
+    expect(line).not.toContain('\n[Forms] forged');
   });
 
   it('logs (none) when the widget sent no response id', async () => {
