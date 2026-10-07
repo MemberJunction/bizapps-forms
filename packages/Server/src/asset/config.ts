@@ -25,7 +25,12 @@
  *  - `FORMS_ASSET_MAX_BYTES`       Max accepted image size in bytes. Default 5242880 (5 MiB).
  *  - `FORMS_ASSET_ALLOWED_TYPES`   Comma-separated content-type allowlist. Default: PNG, JPEG,
  *                                  GIF and WebP. See the SVG note below before adding it.
- *  - `FORMS_ASSET_STORAGE_ACCOUNT` Optional FileStorageAccount ID; unset uses the first account.
+ *  - `FORMS_ASSET_STORAGE_ACCOUNT` Optional FileStorageAccount ID. Uploads go through it; reads try it
+ *                                  FIRST among the file's provider's accounts, then every other
+ *                                  account on that provider. Unset uses the first account (#290).
+ *                                  Once this process has read a file, the account that served it
+ *                                  is tried ahead of the pin. (A key without a per-upload UUID is
+ *                                  read through one account only; no released asset key lacks it.)
  *  - `MJAPI_PUBLIC_URL`            Origin the returned absolute asset URL is built against
  *                                  (shared with the respondent host page). That URL is a
  *                                  convenience; forms store `/forms/asset/<id>` (#270).
@@ -167,9 +172,20 @@ export function formatBytes(bytes: number): string {
   return mb >= 1 ? `${Number(mb.toFixed(mb % 1 === 0 ? 0 : 1))} MB` : `${Math.round(bytes / 1024)} KB`;
 }
 
-/** True when a stored object's provider key sits under the public asset prefix. */
+/**
+ * True when a stored object's provider key sits under the public asset prefix — and STAYS there.
+ *
+ * A prefix test alone passes `forms-assets/../uploads/resume.pdf`, which a path-resolving driver
+ * (local disk, for one) reads from outside the asset tree. Reads probe the same key on every
+ * account of the file's provider (#290), so one such driver anywhere is enough. Hence: no `.` or
+ * `..` segment, and no backslash at all, since some drivers treat it as a separator. Forms never
+ * writes such a key: the prefix is its own, and MJ's UploadFile strips leading dots from the file
+ * name and turns any slash or backslash in it into `_`.
+ */
 export function isPublicAssetKey(providerKey: string | null | undefined): providerKey is string {
-  return typeof providerKey === 'string' && providerKey.startsWith(`${ASSET_STORAGE_PREFIX}/`);
+  if (typeof providerKey !== 'string' || !providerKey.startsWith(`${ASSET_STORAGE_PREFIX}/`)) return false;
+  if (providerKey.includes('\\')) return false;
+  return !providerKey.split('/').some((segment) => segment === '.' || segment === '..');
 }
 
 /**

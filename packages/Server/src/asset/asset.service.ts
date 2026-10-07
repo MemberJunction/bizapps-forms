@@ -18,7 +18,7 @@
  * else: a file whose `ProviderKey` is not under `forms-assets/` is a 404 here, so the route
  * cannot be turned into a reader for the résumés the respondent-upload endpoint stores.
  */
-import { LogError } from '@memberjunction/core';
+import { LogError, LogErrorEx } from '@memberjunction/core';
 import type { EntityInfo, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 
 import { FORM_ENTITY } from '../public-submit/entity-names.js';
@@ -30,7 +30,7 @@ import {
   isPublicAssetKey,
 } from './config.js';
 import type { ParsedFile } from '../upload/multipart.js';
-import { readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
+import { describeReadFallback, readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
 
 /** Entity-definition lookup — satisfied by a global `Metadata` and by a per-request provider. */
 export interface AssetMetadataProvider {
@@ -320,23 +320,33 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
   }
 
   try {
-    const content = await readStoredObject(
+    const pins = [{ envVar: 'FORMS_ASSET_STORAGE_ACCOUNT', value: getAssetConfig().storageAccountId, legacyFallback: true }];
+    const read = await readStoredObject(
       ctx.storage,
       ctx.systemUser,
       { providerId: file.ProviderID, providerKey: file.ProviderKey },
-      getAssetConfig().storageAccountId,
+      pins,
     );
+    // Set only when an account other than the first one tried served the bytes. A warning, not an
+    // error: the image went out.
+    // The key stays in the asset route's lines, unlike the download route's: asset keys sit under the
+    // public `forms-assets/` prefix and are not respondent data, and they are the operator's main clue.
+    const fallback = describeReadFallback('Asset', wanted, file.ProviderKey, read, pins);
+    if (fallback) LogErrorEx({ severity: 'warning', message: fallback });
     return {
       ok: true,
       asset: {
-        content,
+        content: read.content,
         contentType: file.ContentType?.trim() || 'application/octet-stream',
         fileName: file.Name?.trim() || 'image',
       },
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    LogError(`[Forms] Asset read failed for ${wanted}: ${detail}`);
+    // Key kept on purpose; see the fallback warning above.
+    LogError(
+      `[Forms] Asset read failed for ${wanted} (key ${file.ProviderKey}, provider ${file.ProviderID}): ${detail}`,
+    );
     return failRead(500, 'Could not read the image.');
   }
 }
@@ -353,5 +363,8 @@ function safeFileName(filename: string): string {
     .replace(/[^A-Za-z0-9._ -]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  return cleaned || 'image';
+  // `.` and `..` survive the character filter. MJ's UploadFile would store either as `file` (it
+  // strips leading dots), so no dot-only segment ever reaches a key; mapping them here as well keeps
+  // the name this returns to the author the same as the name that is stored.
+  return cleaned === '' || cleaned === '.' || cleaned === '..' ? 'image' : cleaned;
 }

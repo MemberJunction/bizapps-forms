@@ -1,7 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+const { logError, logErrorEx } = vi.hoisted(() => ({ logError: vi.fn(), logErrorEx: vi.fn() }));
+vi.mock('@memberjunction/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memberjunction/core')>()),
+  LogError: logError,
+  LogErrorEx: logErrorEx,
+}));
+
 import type { EntityInfo, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import type { ParsedFile } from '../../upload/multipart';
 import { resetAssetConfigForTests } from '../config';
+import { resetRememberedReadsForTests } from '../../storage/read-object';
 import {
   checkAuthorScope,
   loadAssetBytes,
@@ -65,8 +74,14 @@ function uploadContext(overrides: Partial<AssetUploadContext> = {}): AssetUpload
   };
 }
 
-beforeEach(() => resetAssetConfigForTests());
+beforeEach(() => {
+  resetAssetConfigForTests();
+  resetRememberedReadsForTests();
+  logError.mockClear();
+  logErrorEx.mockClear();
+});
 afterEach(() => {
+  delete process.env.FORMS_ASSET_STORAGE_ACCOUNT;
   delete process.env.FORMS_ASSET_MAX_BYTES;
   resetAssetConfigForTests();
 });
@@ -177,6 +192,14 @@ describe('runAssetUpload', () => {
     expect(ctx.storage.UploadFile).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'pawd.png' }));
   });
 
+  it('never stores a dot-segment filename, which the read guard would refuse to serve', async () => {
+    for (const filename of ['..', '.']) {
+      const ctx = uploadContext();
+      await runAssetUpload(ctx, { file: { ...png(), filename }, formId: FORM_ID });
+      expect(ctx.storage.UploadFile).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'image' }));
+    }
+  });
+
   it('turns a storage failure into a 500 instead of throwing out of the route', async () => {
     const ctx = uploadContext({
       storage: {
@@ -226,8 +249,13 @@ function readContext(file: StoredAssetRecord | undefined, storage?: Partial<Asse
     systemUser: SYSTEM,
     storage: {
       Config: vi.fn(async () => undefined),
-      GetAccountsByProviderID: () => [{ ID: 'account-1' }],
-      ResolveStorageAccount: () => ({ account: { ID: 'fallback-account' } }),
+      Loaded: true,
+      GetAccountsByProviderID: () => [{ ID: 'account-1', Name: 'Account 1' }],
+      GetProviderById: () => ({ ID: 'provider-1', Name: 'Provider 1' }),
+      ResolveStorageAccount: () => ({
+        account: { ID: 'fallback-account', Name: 'Fallback' },
+        provider: { ID: 'provider-1', Name: 'Provider 1' },
+      }),
       GetDriver: vi.fn(async () => ({ GetObject: getObject })),
       ...storage,
     },
@@ -322,5 +350,68 @@ describe('loadAssetBytes — the anonymous read guard', () => {
     const result = await loadAssetBytes(readContext(fileRecord({ ContentType: null, Name: null })), FILE_ID);
     expect(result.asset?.contentType).toBe('application/octet-stream');
     expect(result.asset?.fileName).toBe('image');
+  });
+});
+
+describe('loadAssetBytes — the account the bytes are read from (#290)', () => {
+  const ACCOUNT_A = 'AAAAAAAA-0000-4000-8000-00000000000A';
+  const ACCOUNT_B = 'BBBBBBBB-0000-4000-8000-00000000000B';
+  const twoAccounts = () => [
+    { ID: ACCOUNT_A, Name: 'Account A' },
+    { ID: ACCOUNT_B, Name: 'Account B' },
+  ];
+
+  /** A driver factory whose accounts hold bytes only when listed in `holders`. */
+  function driversHolding(holders: string[]) {
+    return vi.fn(async (accountId: string) => ({
+      GetObject: async () => {
+        if (!holders.includes(accountId)) throw new Error(`ENOENT in ${accountId}`);
+        return Buffer.from('PNGDATA');
+      },
+    }));
+  }
+
+  it('reads a pinned host’s own upload even though the engine lists another account first', async () => {
+    process.env.FORMS_ASSET_STORAGE_ACCOUNT = ACCOUNT_B.toLowerCase();
+    resetAssetConfigForTests();
+    const GetDriver = driversHolding([ACCOUNT_B]);
+    const result = await loadAssetBytes(
+      readContext(fileRecord(), { GetAccountsByProviderID: twoAccounts, GetDriver }),
+      FILE_ID,
+    );
+    expect(result.ok).toBe(true);
+    expect(GetDriver).toHaveBeenCalledTimes(1);
+    expect(GetDriver).toHaveBeenNthCalledWith(1, ACCOUNT_B, SYSTEM);
+    expect(logErrorEx).not.toHaveBeenCalled();
+  });
+
+  it('answers a generic 500 and logs every account tried, the key and the provider when none holds the bytes', async () => {
+    const result = await loadAssetBytes(
+      readContext(fileRecord(), { GetAccountsByProviderID: twoAccounts, GetDriver: driversHolding([]) }),
+      FILE_ID,
+    );
+    expect(result.failure).toEqual({ status: 500, error: 'Could not read the image.' });
+    expect(logError).toHaveBeenCalledTimes(1);
+    const line = String(logError.mock.calls[0][0]);
+    expect(line).toContain(ACCOUNT_A);
+    expect(line).toContain(ACCOUNT_B);
+    expect(line).toContain('Provider 1');
+    expect(line).toContain(`key forms-assets/${FORM_ID}/logo.png`);
+    expect(line).toContain('provider provider-1');
+  });
+
+  it('warns, naming the serving account, when a fallback account served the bytes', async () => {
+    const result = await loadAssetBytes(
+      readContext(fileRecord(), { GetAccountsByProviderID: twoAccounts, GetDriver: driversHolding([ACCOUNT_B]) }),
+      FILE_ID,
+    );
+    expect(result.ok).toBe(true);
+    expect(logErrorEx).toHaveBeenCalledTimes(1);
+    const arg = logErrorEx.mock.calls[0][0] as { severity: string; message: string };
+    expect(arg.severity).toBe('warning');
+    expect(arg.message).toContain(`"Account B" (${ACCOUNT_B})`);
+    expect(arg.message).toContain(`(key forms-assets/${FORM_ID}/logo.png)`); // public prefix: the operator's main clue
+    expect(arg.message).toContain('(if any), then FORMS_ASSET_STORAGE_ACCOUNT, then');
+    expect(arg.message).not.toMatch(/\bPin FORMS_/);
   });
 });
