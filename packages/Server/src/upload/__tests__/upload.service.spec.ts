@@ -3,8 +3,10 @@
  * and storage) with the storage provider + auth mocked.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { EntityInfo, EntityUserPermissionInfo, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
-import { runUpload, type UploadContext, type UploadRequest, type UploadStorageEngine } from '../upload.service';
+import { runUpload, UPLOAD_FAILED_MESSAGE, type UploadContext, type UploadRequest, type UploadStorageEngine } from '../upload.service';
 import { resetUploadConfigForTests } from '../config';
 import { FOREIGN_ORIGIN_MESSAGE } from '../../http/embed-origin';
 import type { ParsedFile } from '../multipart';
@@ -331,17 +333,216 @@ describe('runUpload', () => {
     const result = await runUpload(context({ storage: throwing }), request());
     expect(result.ok).toBe(false);
     expect(result.failure?.status).toBe(500);
-    expect(result.failure?.error).toMatch(/storage/i);
+    expect(result.failure?.error).toBe(UPLOAD_FAILED_MESSAGE);
+  });
+});
+
+/**
+ * Issue #142. This endpoint is reachable with the anonymous session a public form link mints, and the
+ * widget shows the body's `error` verbatim (`uploadErrorMessage` → `serverErrorText`). Its storage
+ * catch used to interpolate the provider's exception into that body — an account name, an endpoint
+ * host, a bucket, a credentials failure, and, from MJ's own `UploadFile`, the object path ending in
+ * the respondent's file name. The respondent now reads one authored sentence and the operator reads
+ * the detail, tied to the response and question, with that file name taken out of it.
+ */
+describe('runUpload — a storage failure tells the respondent nothing about the host (#142)', () => {
+  /** Kept as a literal: the smoke suite and the widget see this exact text, not the constant. */
+  const AUTHORED = 'Your file could not be uploaded. Please try again.';
+  const PROVIDER_DETAIL = 'AuthorizationFailure: account acme-prod at https://acme-prod.blob.core.windows.net/forms rejected the SAS';
+
+  let logged: string[];
+  beforeEach(() => {
+    logged = [];
+    // `LogError` reaches console.error in production too, which is what the operator relies on.
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function failingStorage(where: 'UploadFile' | 'Config', thrown: unknown): UploadStorageEngine {
+    const throws = vi.fn(async () => {
+      throw thrown;
+    });
+    return where === 'UploadFile'
+      ? storageEngine({ UploadFile: throws as unknown as UploadStorageEngine['UploadFile'] }).engine
+      : storageEngine({ Config: throws as unknown as UploadStorageEngine['Config'] }).engine;
+  }
+
+  it('exports the authored sentence the smoke suite and widget depend on', () => {
+    expect(UPLOAD_FAILED_MESSAGE).toBe(AUTHORED);
+  });
+
+  it('source-text pin: smoke:errors compares the upload 5xx against this same sentence', () => {
+    // The smoke keeps its own copy because a .mjs cannot import this TypeScript constant, and its
+    // comment points here as what catches the two drifting apart. Nothing else reads the smoke file.
+    const smoke = readFileSync(
+      fileURLToPath(new URL('../../../../../smoke/respondent-errors-path.mjs', import.meta.url)),
+      'utf8',
+    );
+    const literal = smoke.match(/^const UPLOAD_FAILED = '([^']*)';$/m)?.[1];
+
+    expect(literal, 'smoke/respondent-errors-path.mjs no longer declares UPLOAD_FAILED').toBeDefined();
+    expect(literal).toBe(UPLOAD_FAILED_MESSAGE);
+  });
+
+  it.each([
+    ['the upload throws', 'UploadFile' as const],
+    ['configuring the engine throws', 'Config' as const],
+  ])('returns the authored sentence, not the provider text, when %s', async (_what, where) => {
+    const result = await runUpload(context({ storage: failingStorage(where, new Error(PROVIDER_DETAIL)) }), request());
+
+    expect(result.ok).toBe(false);
+    expect(result.failure).toEqual({ status: 500, error: AUTHORED });
+  });
+
+  it('does not echo a thrown non-Error value either', async () => {
+    const result = await runUpload(context({ storage: failingStorage('UploadFile', PROVIDER_DETAIL) }), request());
+
+    expect(result.failure).toEqual({ status: 500, error: AUTHORED });
+  });
+
+  it('logs the provider detail with the response, question and distribution it was for', async () => {
+    await runUpload(
+      context({ storage: failingStorage('UploadFile', new Error(PROVIDER_DETAIL)) }),
+      request({ responseId: '0a1b2c3d-0000-4000-8000-000000000142', questionId: 'Q-FILE' }),
+    );
+
+    const line = logged.find((l) => l.includes(PROVIDER_DETAIL));
+    expect(line).toBeDefined();
+    expect(line).toContain('0a1b2c3d-0000-4000-8000-000000000142');
+    // The definition's spelling, the same id the provenance ledger records.
+    expect(line).toContain('q-file');
+    expect(line).toContain('dist-1');
+  });
+
+  it("keeps the respondent's file name out of the logged detail", async () => {
+    // MJ's own UploadFile names the object path in its errors, and the path ends in the file name.
+    const file: ParsedFile = { ...pngFile(), filename: 'Jane Doe passport.png' };
+    const upload = vi.fn(async (options: { fileName: string; pathPrefix?: string }) => {
+      throw new Error(`FileStorageEngine.UploadFile: PutObject returned false for path '${options.pathPrefix}/${options.fileName}'`);
+    });
+    const storage = storageEngine({ UploadFile: upload as unknown as UploadStorageEngine['UploadFile'] }).engine;
+
+    const result = await runUpload(context({ storage }), request({ file }));
+
+    expect(result.failure).toEqual({ status: 500, error: AUTHORED });
+    const line = logged.find((l) => l.includes('PutObject returned false'));
+    expect(line).toBeDefined();
+    expect(line).not.toContain('Jane Doe');
+    expect(line).toContain('<storage key>');
+  });
+
+  it('keeps a dot-prefixed file name out of the logged detail, in either spelling MJ quotes', async () => {
+    // MJ strips leading dots before it builds the key, so `PutObject` quotes the stripped name, while
+    // its `MJ: Files` save failure quotes the name exactly as it was passed. Both in one message.
+    const file: ParsedFile = { ...pngFile(), filename: '.Jane-Doe-resume.png' };
+    const upload = vi.fn(async (options: { fileName: string; pathPrefix?: string }) => {
+      const cleaned = options.fileName.replace(/^\.+/, '');
+      throw new Error(
+        `PutObject returned false for path '${options.pathPrefix}/${cleaned}'; `
+          + `failed to save MJ: Files record for '${options.fileName}'`,
+      );
+    });
+    const storage = storageEngine({ UploadFile: upload as unknown as UploadStorageEngine['UploadFile'] }).engine;
+
+    await runUpload(context({ storage }), request({ file }));
+
+    const line = logged.find((l) => l.includes('PutObject returned false'));
+    expect(line).toBeDefined();
+    expect(line).not.toContain('Jane-Doe');
+  });
+
+  it('keeps a dots-then-space file name out of the logged detail, as MJ trims it after stripping the dots', async () => {
+    // MJ cleans the name as strip-leading-dots THEN trim, so `. Jane-Doe.png` is quoted as
+    // `Jane-Doe.png` in the PutObject path but as the raw `. Jane-Doe.png` in the Files-record clause.
+    const file: ParsedFile = { ...pngFile(), filename: '. Jane-Doe.png' };
+    const upload = vi.fn(async (options: { fileName: string; pathPrefix?: string }) => {
+      const cleaned = options.fileName.replace(/^\.+/, '').trim();
+      throw new Error(
+        `PutObject returned false for path '${options.pathPrefix}/${cleaned}'; `
+          + `failed to save MJ: Files record for '${options.fileName}'`,
+      );
+    });
+    const storage = storageEngine({ UploadFile: upload as unknown as UploadStorageEngine['UploadFile'] }).engine;
+
+    await runUpload(context({ storage }), request({ file }));
+
+    const line = logged.find((l) => l.includes('PutObject returned false'));
+    expect(line).toBeDefined();
+    expect(line).not.toContain('Jane-Doe');
+  });
+
+  it('refuses a non-GUID response id before storing anything', async () => {
+    // Attacker-controlled: a non-GUID only fails later, after the bytes are stored, and makes the SQL
+    // layer echo the whole batch (file name included) into the log. So it is refused at the boundary.
+    const { engine, upload } = storageEngine();
+
+    const result = await runUpload(
+      context({ storage: engine }),
+      request({ responseId: 'not-a-guid\n[Forms] forged' }),
+    );
+
+    expect(result.failure).toEqual({ status: 400, error: 'Invalid "responseId": expected a GUID.' });
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('accepts an upper-case GUID response id', async () => {
+    const result = await runUpload(context({}), request({ responseId: '0A1B2C3D-0000-4000-8000-000000000142' }));
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('refuses a GUID with surrounding whitespace, since the widget sends the id verbatim', async () => {
+    const { engine, upload } = storageEngine();
+
+    const result = await runUpload(
+      context({ storage: engine }),
+      request({ responseId: ' 0a1b2c3d-0000-4000-8000-000000000142\n' }),
+    );
+
+    expect(result.failure?.status).toBe(400);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('logs (none) when the widget sent no response id', async () => {
+    await runUpload(context({ storage: failingStorage('UploadFile', new Error(PROVIDER_DETAIL)) }), request());
+
+    const line = logged.find((l) => l.includes(PROVIDER_DETAIL));
+    expect(line).toContain('response (none)');
+    expect(line).not.toContain('undefined');
+  });
+
+  it('keeps the fields of a thrown non-Error object in the log', async () => {
+    await runUpload(
+      context({ storage: failingStorage('UploadFile', { code: 'AccountNotFound', detail: 'acme-prod' }) }),
+      request(),
+    );
+
+    const line = logged.find((l) => l.includes('[Forms] upload storage failed'));
+    expect(line).toContain('AccountNotFound');
+    expect(line).toContain('acme-prod');
+  });
+
+  it('does not report a provenance writer that throws as a storage failure', async () => {
+    // The writer's contract is to return false (see writeProvenanceRow). One that throws instead
+    // propagates to the middleware's outer catch, which logs it and answers with its own sentence.
+    const ctx = { ...context({}), recordProvenance: async (): Promise<boolean> => { throw new Error('ledger exploded'); } };
+
+    await expect(runUpload(ctx, request())).rejects.toThrow('ledger exploded');
+    expect(logged.some((l) => l.includes('upload storage failed'))).toBe(false);
   });
 });
 
 describe('runUpload — provenance', () => {
   it('records the upload so the file can later be proved to be this respondent’s', async () => {
-    const result = await runUpload(context({}), request({ responseId: 'resp-42' }));
+    const result = await runUpload(context({}), request({ responseId: '0a1b2c3d-0000-4000-8000-000000000042' }));
 
     expect(result.ok).toBe(true);
     expect(recordedProvenance).toHaveLength(1);
-    expect(recordedProvenance[0]).toMatchObject({ responseId: 'resp-42' });
+    expect(recordedProvenance[0]).toMatchObject({ responseId: '0a1b2c3d-0000-4000-8000-000000000042' });
   });
 
   it('fails the upload when provenance cannot be recorded', async () => {

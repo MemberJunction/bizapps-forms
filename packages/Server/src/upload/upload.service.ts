@@ -21,12 +21,15 @@ import { LogError, Metadata } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import { answerColumnFor, isFormQuestionType } from '@mj-biz-apps/forms-entities';
 import { randomUUID } from 'node:crypto';
+import { inspect } from 'node:util';
 
 
 import type { mjBizAppsFormsFormUploadEntity } from '@mj-biz-apps/forms-entities';
 import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names';
 import { checkRespondentScope, type ScopeMetadataProvider } from '../public-submit/scope-check.service';
 import { resolvePublishedDefinition, type DefinitionRunViewProvider } from '../public-submit/definition-loader.service';
+import { withoutQueryEcho } from '../public-submit/persistence.service';
+import { redactStorageKey } from '../storage/read-object';
 import { checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE } from '../http/embed-origin';
 import { contentTypeAllowed, getUploadConfig, uploadTooLargeMessage } from './config';
 import type { ParsedFile } from './multipart';
@@ -141,9 +144,21 @@ export interface UploadResult {
   failure?: UploadFailure;
 }
 
+/** Anchored, no `m` flag: a trailing newline or surrounding whitespace is not a GUID. */
+const GUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function fail(status: number, error: string): UploadResult {
   return { ok: false, failure: { status, error } };
 }
+
+/**
+ * The one sentence a respondent reads when their file could not be stored (#142). Authored here,
+ * never derived from the failure: the route is reachable with the session a public form link mints,
+ * the widget shows a body's `error` verbatim, and what storage throws is OPERATOR text — an account,
+ * an endpoint, a bucket, a credential error, and from MJ's own `UploadFile` the object path ending in
+ * the respondent's file name. That text goes to the log, with the file name redacted, instead.
+ */
+export const UPLOAD_FAILED_MESSAGE = 'Your file could not be uploaded. Please try again.';
 
 /**
  * Run the full upload flow. Pure of Express — the middleware supplies the parsed request +
@@ -166,6 +181,15 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   // 3. Context fields + the distribution must resolve to an OPEN published form.
   if (!req.questionId) {
     return fail(400, 'Missing required field "questionId".');
+  }
+  // `responseId` is attacker-controlled and exact-match on purpose: the widget sends a canonical GUID
+  // verbatim or omits it — its own minted id (`core/client-id.ts`), or after a resume the server's
+  // FormResponse ID, which arrives upper-case (`mj-form.component.ts` `adoptResume`), hence the `i`
+  // flag and no other leniency. A non-GUID would only fail later, in the provenance
+  // insert AFTER the bytes are stored, and make the SQL layer echo the whole batch (the respondent's
+  // file name, and any line breaks in the id) into the log. Refuse it before anything is stored.
+  if (req.responseId !== undefined && !GUID_SHAPE.test(req.responseId)) {
+    return fail(400, 'Invalid "responseId": expected a GUID.');
   }
   const distCheck = await resolveOpenDistribution(ctx, req);
   if (!distCheck.ok) {
@@ -262,8 +286,9 @@ function validateFile(file: ParsedFile | undefined): UploadResult {
 /**
  * The default provenance writer: one row in the Forms upload ledger.
  *
- * Returns false rather than throwing so the caller can fail the upload cleanly; a thrown error
- * here would be reported to the respondent as a storage problem, which is not what happened.
+ * Returns false rather than throwing so the caller can fail closed with its own sentence; a throw
+ * would escape `storeFile` to the middleware's generic catch, which answers "Upload failed
+ * unexpectedly" and logs without the response/question context.
  */
 export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<boolean> {
   try {
@@ -292,12 +317,13 @@ export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<
     if (await row.Save()) {
       return true;
     }
-    LogError(`Forms upload: provenance row save failed: ${row.LatestResult?.CompleteMessage ?? 'unknown'}`);
+    // `withoutQueryEcho`, as on the submit path: a SQL failure's diagnostic ends with the batch it ran,
+    // and that batch assigns the respondent's file name to `@FileName` (kept out of logs since #290).
+    LogError(`Forms upload: provenance row save failed: ${withoutQueryEcho(row.LatestResult?.CompleteMessage ?? '')}`);
     return false;
   } catch (error) {
-    LogError(
-      `Forms upload: provenance row could not be written: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    const detail = error instanceof Error ? error.message : String(error);
+    LogError(`Forms upload: provenance row could not be written: ${withoutQueryEcho(detail)}`);
     return false;
   }
 }
@@ -398,56 +424,93 @@ async function storeFile(
   // IncludeInAPI entity has a generated CreateRecord mutation gated on the caller's own roles.
   // Eligibility was already checked against the caller above — only the WORK runs elevated.
   const writer = ctx.elevatedUser ?? ctx.contextUser;
+  const fileName = safeFileName(file.filename);
+  const pathPrefix = uploadPathPrefix(cfg.pathPrefix);
+  let stored: Awaited<ReturnType<UploadStorageEngine['UploadFile']>>;
   try {
     await ctx.storage.Config(false, writer);
-    const result = await ctx.storage.UploadFile({
+    stored = await ctx.storage.UploadFile({
       content: file.data,
-      fileName: safeFileName(file.filename),
+      fileName,
       mimeType: bareContentType(file.contentType),
       contextUser: writer,
       storageAccountId: cfg.storageAccountId,
-      pathPrefix: uploadPathPrefix(cfg.pathPrefix),
+      pathPrefix,
     });
-
-    if (resolved) {
-      const record = ctx.recordProvenance ?? writeProvenanceRow;
-      const recorded = await record({
-        writer,
-        fileId: result.FileID,
-        providerKey: result.StoragePath,
-        distributionId: resolved.distributionId,
-        formId: resolved.formId,
-        questionId,
-        responseId: req.responseId,
-        sessionId: ctx.sessionId,
-        uploadedByUserId: ctx.contextUser?.ID,
-        fileName: safeFileName(file.filename),
-        contentType: bareContentType(file.contentType),
-        sizeBytes: file.data.length,
-      });
-      if (!recorded) {
-        // Fail closed. A file with no provenance row is unusable downstream — submit will reject
-        // it — so returning its id would hand the respondent something that looks like a
-        // successful upload and then silently fails their submission.
-        return fail(500, 'Upload could not be recorded; please try again.');
-      }
-    }
-
-    return {
-      ok: true,
-      success: {
-        fileId: result.FileID,
-        name: safeFileName(file.filename),
-        size: file.data.length,
-        contentType: bareContentType(file.contentType),
-      },
-    };
   } catch (error) {
-    // No storage account configured / provider misconfigured / upload failed. This is a
-    // 5xx (server problem), never a crash — the caller returns a clean JSON error body.
-    const detail = error instanceof Error ? error.message : String(error);
-    return fail(500, `File storage is not available: ${detail}`);
+    // No storage account configured / provider misconfigured / upload failed: a 5xx, never a crash.
+    // The respondent gets the authored sentence; the provider's own words go to the log (#142).
+    logStorageFailure(error, {
+      responseId: req.responseId,
+      questionId,
+      distributionId: resolved?.distributionId,
+      storageKey: `${pathPrefix}/${fileName}`,
+    });
+    return fail(500, UPLOAD_FAILED_MESSAGE);
   }
+
+  if (resolved) {
+    const record = ctx.recordProvenance ?? writeProvenanceRow;
+    const recorded = await record({
+      writer,
+      fileId: stored.FileID,
+      providerKey: stored.StoragePath,
+      distributionId: resolved.distributionId,
+      formId: resolved.formId,
+      questionId,
+      responseId: req.responseId,
+      sessionId: ctx.sessionId,
+      uploadedByUserId: ctx.contextUser?.ID,
+      fileName,
+      contentType: bareContentType(file.contentType),
+      sizeBytes: file.data.length,
+    });
+    if (!recorded) {
+      // Fail closed. A file with no provenance row is unusable downstream — submit will reject
+      // it — so returning its id would hand the respondent something that looks like a
+      // successful upload and then silently fails their submission.
+      return fail(500, 'Upload could not be recorded; please try again.');
+    }
+  }
+
+  return {
+    ok: true,
+    success: {
+      fileId: stored.FileID,
+      name: fileName,
+      size: file.data.length,
+      contentType: bareContentType(file.contentType),
+    },
+  };
+}
+
+/**
+ * Where an operator reads why storage failed, tied to the response and question it was for.
+ *
+ * `LogError`, not `LogStatus`: MJ silences `LogStatus` under NODE_ENV=production. The detail is run
+ * through {@link redactStorageKey} because MJ's `UploadFile` quotes the object path, which ends in the
+ * respondent's file name (personal data, kept out of logs since #290). MJ strips leading dots from
+ * that name before building the path (strip leading dots, then trim), so the key is redacted in that
+ * cleaned spelling. It is a contiguous substring of the raw name `safeFileName` returned (which
+ * already has no separators or control characters), so one redaction covers whichever spelling
+ * the error quotes. This intentionally DUPLICATES MJ's `cleanFileName` rule in `@memberjunction/storage`
+ * `FileStorageEngine.UploadFile`; it can drift on an MJ upgrade and must be revisited if MJ changes it.
+ */
+function logStorageFailure(
+  error: unknown,
+  at: { responseId?: string; questionId?: string; distributionId?: string; storageKey: string },
+): void {
+  const detail = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : inspect(error, { depth: 3, breakLength: Infinity });
+  const slash = at.storageKey.lastIndexOf('/');
+  const key = at.storageKey.slice(0, slash + 1) + at.storageKey.slice(slash + 1).replace(/^\.+/, '').trim();
+  LogError(
+    `[Forms] upload storage failed for response ${at.responseId ?? '(none)'}, question ${at.questionId ?? '(none)'}, `
+      + `distribution ${at.distributionId ?? '(unresolved)'}: ${redactStorageKey(detail, key)}`,
+  );
 }
 
 /** Strip any `; charset=` parameter from the content type before storing. */
