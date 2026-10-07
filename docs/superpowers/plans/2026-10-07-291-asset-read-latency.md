@@ -118,6 +118,8 @@ export class AssetByteCache extends BaseSingleton<AssetByteCache> {
 
 - [ ] **Step 1: Write the failing tests**
 
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `asset-byte-cache.spec.ts` is the authority: its `Clear()` race test makes the stale load FAIL (`failOld(new Error('stale load failed'))`, `rejects.toThrow`). Resolving it, as below, cannot see the `.finally` ownership guard the test exists for (final review of #291, `21c4245`).
+
 ```ts
 import { describe, it, expect, vi } from 'vitest';
 import { ByteBudgetCache } from '../asset-byte-cache';
@@ -217,6 +219,8 @@ describe('ByteBudgetCache', () => {
 - [ ] **Step 2: Run** `cd packages/Server && npx vitest run src/asset/__tests__/asset-byte-cache.spec.ts` → FAIL (module missing).
 
 - [ ] **Step 3: Implement**
+
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `asset-byte-cache.ts` is the authority; its `GetOrLoad` doc comment also says the returned Buffer is the kept copy and must not be mutated.
 
 ```ts
 /**
@@ -474,6 +478,8 @@ export function assetCacheKey(fileId: string, providerId: string, providerKey: s
 - `AssetUploadStorage.UploadFile` return type: `Promise<{ FileID: string; StoragePath?: string; Provider?: { ID: string; Name: string } }>`.
 - `loadAssetBytes`: guard block unchanged. Replace the storage `try` body:
 
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `loadAssetBytes` is the authority; its catch comment now points at `readAssetFromStorage` for why the key stays in the log line.
+
 ```ts
   try {
     const providerKey = file.ProviderKey;
@@ -495,6 +501,8 @@ export function assetCacheKey(fileId: string, providerId: string, providerKey: s
 
 - New function (the existing pins / `readStoredObject` / fallback-warning code moved, its two comments kept):
 
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `readAssetFromStorage` is the authority; only its doc comment's wording differs.
+
 ```ts
 /** One provider read, warning when an account other than the first tried served it. */
 async function readAssetFromStorage(
@@ -512,6 +520,8 @@ async function readAssetFromStorage(
 ```
 
 - `storeAsset`, after `stored` and before `return`:
+
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `storeAsset` is the authority: it also skips the copy when `file.data.length > MAX_CACHED_ASSET_ENTRY_BYTES` (the cache would refuse it anyway), and its comment says so (`21c4245`).
 
 ```ts
     // Warm the read cache with bytes already in hand, so the author's preview and the first
@@ -743,6 +753,8 @@ export function preloadImage(url: string, options: PreloadOptions, env: ImageLoa
 - [ ] **Step 5: Commit** `feat(forms-ng): preloadImage, one off-DOM image load with a bounded wait (#291)`
 - [ ] **Step 6: Refactor `prefetchImages` onto it (no behaviour change).** Keep the cancelled flag, empty/Save-Data/cap logic and every log line verbatim. Replace `startNext`'s per-image block with:
 
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `image-prefetch.ts` is the authority; it keeps braced, multi-line `if` blocks. Behaviour is as below — `image-prefetch.spec.ts` is unmodified.
+
 ```ts
     const url = queue[index++];
     current = preloadImage(
@@ -781,6 +793,8 @@ export function preloadImage(url: string, options: PreloadOptions, env: ImageLoa
 **Interfaces:**
 - Consumes: `preloadImage`, `ImageLoadEnv`, `browserImageEnv` (Task 3).
 - Produces:
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `welcome-gate.ts` is the authority: `reveal` takes `failed: ReadonlySet<string>`, the images the gate saw fail, so the shell does not render a logo it already saw fail and then drop it (PR #296 review).
+
 ```ts
 export const WELCOME_IMAGE_WAIT_MS = 3000;
 export interface WelcomeGateHooks {
@@ -795,6 +809,8 @@ export function gateWelcomeScreen(urls: readonly string[], hooks: WelcomeGateHoo
 ```
 
 - [ ] **Step 1: Write the failing tests**
+
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `welcome-gate.spec.ts` is the authority: the stale-load test is named "…reveals nothing and starts no prefetch", and two tests pin `reveal(failed)` (PR #296 review).
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
@@ -887,6 +903,8 @@ describe('gateWelcomeScreen', () => {
 - [ ] **Step 2: Run** `npx vitest run src/lib/widget/core/welcome-gate.spec.ts` → FAIL.
 
 - [ ] **Step 3: Implement**
+
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `welcome-gate.ts` is the authority: each URL's `onReady` records a `'failed'` outcome and `reveal(failed)` receives the set; a timed-out image is not reported (PR #296 review).
 
 ```ts
 /**
@@ -983,6 +1001,8 @@ describe('mjf-mj-loader — source smoke', () => {
 
 `image-prefetch.wiring.spec.ts` — remove the `mediaSettled` assertions (lines 33-37) and the `(mediaSettled)="onWelcomeMediaSettled()"` test (41-43); change `:48` to `load.indexOf('this.planPrefetch(def, opening)')` and `:63` to the signature `private planPrefetch(def: PublishedFormDefinition, opening: WidgetPhase): void` with the check `opening !== 'welcome' && opening !== 'ready'`; add:
 
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `image-prefetch.wiring.spec.ts` is the authority: it pins `const generation = ++this.loadGeneration`, `holdForWelcomeImages(welcomeImage, generation)`, planning before holding, and that a logo the gate saw fail is marked broken before the reveal.
+
 ```ts
 describe('welcome gate wiring — source smoke (#291)', () => {
   it('gates only a load that opens on a welcome screen with an image', () => {
@@ -1016,6 +1036,8 @@ describe('welcome gate wiring — source smoke (#291)', () => {
 
 `mj-loader.component.ts` — copy the two `<path>` elements of the MJ mark verbatim **including their `transform` attributes** from `@memberjunction/ng-shared-generic@6.1.5` `dist/lib/loading/loading.component.js` (the `<svg viewBox="0 0 230 128">` in its template); drop only the gradient `@if` block, Angular bindings and `class`/`[attr.fill]` attributes. Both packages are BUSL-1.1 from the same owner.
 
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `mj-loader.component.ts` is the authority; only its doc comment's wording differs.
+
 ```ts
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 
@@ -1047,6 +1069,8 @@ export class MjLoaderComponent {}
 
 `mj-form.component.ts`:
 
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `mj-form.component.ts` is the authority; the import carries no trailing comment.
+
 ```ts
 import { gateWelcomeScreen } from './core/welcome-gate';
 import { MjLoaderComponent } from './components/mj-loader.component';   // add to `imports`
@@ -1068,6 +1092,8 @@ In `load()`: as the first lines after `this.cancelPrefetch();` add `this.loadGen
 
 with
 
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `load()` is the authority: it captures `const generation = ++this.loadGeneration` at the start of `load()`, calls `planPrefetch(def, opening, gated)` BEFORE holding, and passes `generation` to `holdForWelcomeImages` (`2ec3f8c`, `21c4245`).
+
 ```ts
       const opening = this.adoptResume(loaded.resume, def, runtime) ?? initialPhaseFor(def);
       const welcomeImage = opening === 'welcome' ? def.welcomeScreen?.mediaURL?.trim() : undefined;
@@ -1080,6 +1106,8 @@ with
 ```
 
 New method (after `startIntake`), replacing `onWelcomeMediaSettled`:
+
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `holdForWelcomeImages(welcomeImage, generation)` is the authority: the generation is a parameter, `planPrefetch` takes `(def, opening, gated)`, and the gate's `reveal(failed)` first marks a logo the gate saw fail as broken (PR #296 review).
 
 ```ts
   /**
@@ -1101,6 +1129,8 @@ New method (after `startIntake`), replacing `onWelcomeMediaSettled`:
     });
   }
 ```
+
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `planPrefetch` takes a third parameter, `gated: boolean`: the caller decides whether the welcome gate holds, and `planPrefetch` only returns early when it does.
 
 `planPrefetch(def: PublishedFormDefinition, opening: WidgetPhase)`: use `opening` instead of `this.phase()` in both checks; the welcome-with-image early return's comment now says *the welcome gate's `imagesSettled` starts it*. Update the `prefetch` field comment the same way. `startIntake()` keeps `this.startPrefetch()` (a respondent can tap Start while a timed-out image still downloads); update its comment — the trigger it backs up is now the gate, not `(mediaSettled)`.
 
@@ -1131,6 +1161,8 @@ New method (after `startIntake`), replacing `onWelcomeMediaSettled`:
 **Files:** Modify `scripts/check-guard-mutants.mjs`; Create `.changeset/asset-cache-and-welcome-gate.md`
 
 - [ ] **Step 1: Add four mutants** to `MUTANTS` (same shape as the existing entries):
+
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `check-guard-mutants.mjs` is the authority: the welcome-gate `find` strings read `hooks.reveal(failed)`, and two more mutants pin the PR #296 review fix (`welcome-gate/failure-not-reported`, `welcome-gate/known-broken-logo-rendered`).
 
 ```js
   // --- #291: the asset byte cache and the welcome gate ---------------------------------------
@@ -1175,6 +1207,8 @@ New method (after `startIntake`), replacing `onWelcomeMediaSettled`:
 (Check `scripts/check-guard-mutants.spec.mjs` for any count or name assertion that needs updating, and keep it green: `npm run lint:guard-mutants:test`.)
 
 - [ ] **Step 2: Changeset**
+
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `.changeset/asset-cache-and-welcome-gate.md` is the authority: it also says a logo that fails to load is left out rather than shown and then removed (PR #296 review).
 
 ```md
 ---
