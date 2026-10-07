@@ -31,6 +31,7 @@ import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-bo
 import { getRequestOrigin } from '../http/request-origin.js';
 import { matchSingleSegmentRoute } from '../http/route-match.js';
 import { parseMultipart } from '../upload/multipart.js';
+import { AssetByteCache } from './asset-byte-cache.js';
 import {
   ASSET_RESPONSE_HEADERS,
   ASSET_ROUTE,
@@ -170,6 +171,7 @@ export class AssetMiddleware extends BaseServerMiddleware {
       // an ordinary author role carries no Files grant on a clean install. Eligibility was
       // already decided against the caller.
       elevatedUser: UserCache.Instance.GetSystemUser(),
+      cache: AssetByteCache.Instance.Bytes,
     };
 
     const result = await runAssetUpload(ctx, { file: parsed.file, formId: parsed.fields.formId });
@@ -197,6 +199,7 @@ export class AssetMiddleware extends BaseServerMiddleware {
       systemUser,
       storage: FileStorageEngine.Instance as AssetReadStorage,
       loadFile: loadFileRecord,
+      cache: AssetByteCache.Instance.Bytes,
     };
     const result = await loadAssetBytes(ctx, fileId);
     if (!result.ok || !result.asset) {
