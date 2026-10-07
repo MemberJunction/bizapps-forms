@@ -44,6 +44,7 @@ import { FORMS_API_CONFIG } from './api/forms-api.config';
 import { submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
 import { collectLaterImageUrls, resolveDefinitionForRender, resolveStyleTokensForRender } from './core/asset-ref';
+import { gateWelcomeScreen } from './core/welcome-gate';
 import { prefetchImages, type PrefetchHandle } from './core/image-prefetch';
 import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, type AutosaveStatus } from './core/autosave-controller';
@@ -65,6 +66,7 @@ import { FormScrollComponent } from './components/form-scroll.component';
 import { FormOneQuestionComponent } from './components/form-one-question.component';
 import { TurnstileChallengeComponent } from './components/turnstile-challenge.component';
 import { IconComponent } from './components/icon.component';
+import { MjLoaderComponent } from './components/mj-loader.component';
 import type { WidgetPhase } from './core/submit-phase';
 import { judgeRedirect, redirectRefusalMessage } from './core/safe-redirect';
 
@@ -78,6 +80,7 @@ import { judgeRedirect, redirectRefusalMessage } from './core/safe-redirect';
     FormOneQuestionComponent,
     TurnstileChallengeComponent,
     IconComponent,
+    MjLoaderComponent,
   ],
   templateUrl: './mj-form.component.html',
   styleUrls: ['./mj-form.component.css'],
@@ -194,6 +197,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
     return tokens?.logoURL?.trim() || undefined;
   });
 
+  /** True while a welcome screen waits for its images (core/welcome-gate.ts): the MJ loader shows. */
+  protected readonly waitingForWelcomeImage = signal(false);
+  /** The logo, held back while the welcome gate waits so it arrives with the welcome screen. */
+  protected readonly shownLogoUrl = computed(() => (this.waitingForWelcomeImage() ? undefined : this.logoUrl()));
+  /** Bumped by every load(): the welcome gate of an earlier load must not reveal this one. */
+  private loadGeneration = 0;
+
   protected onLogoError(): void {
     this.logoBroken.set(true);
   }
@@ -307,7 +317,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /**
    * Prefetch of later screens' images (core/image-prefetch.ts). One queue per load: `load()`
    * cancels it first, and `prefetchGeneration` makes an idle callback scheduled by an EARLIER load
-   * a no-op.
+   * a no-op. A welcome screen with an image starts it from the welcome gate's
+   * `imagesSettled` (core/welcome-gate.ts); every other opening starts it when the browser is idle.
    */
   private prefetch: PrefetchHandle | undefined;
   private prefetchUrls: string[] = [];
@@ -345,6 +356,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /** Fetch (or accept) the form definition, theme the host, and build the runtime. */
   private async load(): Promise<void> {
     this.cancelPrefetch();
+    this.loadGeneration++;
+    this.waitingForWelcomeImage.set(false);
     this.phase.set('loading');
     // Fresh load == fresh response identity: mint a new client id and drop any stale
     // server echo so a retry never upserts a previously-abandoned row.
@@ -382,8 +395,14 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.logoBroken.set(false);
       this.bankedSubmitPoints = new Set<string>();
       this.endingEarly = false;
-      this.phase.set(this.adoptResume(loaded.resume, def, runtime) ?? initialPhaseFor(def));
-      this.planPrefetch(def);
+      const opening = this.adoptResume(loaded.resume, def, runtime) ?? initialPhaseFor(def);
+      const welcomeImage = opening === 'welcome' ? def.welcomeScreen?.mediaURL?.trim() : undefined;
+      if (welcomeImage) {
+        this.holdForWelcomeImages(welcomeImage); // phase stays 'loading' until the gate reveals
+      } else {
+        this.phase.set(opening);
+      }
+      this.planPrefetch(def, opening);
     } catch (err) {
       // A load can meet an expired session too — the error page's "Try again" re-fetches with
       // the same token, and after eight hours that is a 401 with a retry button that loops.
@@ -477,33 +496,46 @@ export class MjFormComponent implements OnInit, OnDestroy {
   protected startIntake(): void {
     if (this.phase() === 'welcome') {
       this.phase.set('ready');
-      // Leaving the welcome screen before its image settled destroys the screen, so its
-      // (mediaSettled) will never fire. Start here instead; startPrefetch() runs once per load.
+      // The welcome gate (core/welcome-gate.ts) normally starts the prefetch, but a respondent can
+      // tap Start while a timed-out image still downloads. startPrefetch() runs once per load.
       this.startPrefetch();
     }
   }
 
-  /** The welcome image loaded or failed: later screens' images may now use the network. */
-  protected onWelcomeMediaSettled(): void {
-    this.startPrefetch();
+  /**
+   * Keep the loader up until the welcome screen's image (and the form's logo, which sits above it)
+   * is ready, or WELCOME_IMAGE_WAIT_MS passes — see core/welcome-gate.ts. A preview's showScreen()
+   * during the wait moves the phase itself; the reveal then leaves that choice alone.
+   */
+  private holdForWelcomeImages(welcomeImage: string): void {
+    const generation = this.loadGeneration;
+    this.waitingForWelcomeImage.set(true);
+    const logo = this.logoUrl();
+    gateWelcomeScreen(logo ? [welcomeImage, logo] : [welcomeImage], {
+      isCurrent: () => !this.destroyed && generation === this.loadGeneration,
+      reveal: () => {
+        this.waitingForWelcomeImage.set(false);
+        if (this.phase() === 'loading') this.phase.set('welcome');
+      },
+      imagesSettled: () => this.startPrefetch(),
+    });
   }
 
   /**
    * Decide when this load's prefetch starts. A welcome screen with an image gets the network to
-   * itself until that image settles (or the respondent leaves it). In every other case (no welcome
+   * itself until the welcome gate's `imagesSettled` fires (or the respondent leaves it). In every other case (no welcome
    * screen, no welcome image, resumed past it), start when the browser is idle.
    *
    * Only while intake is still ahead. A resumed, already-submitted response opens on `done` (and a
    * failed or expired load on `error`/`expired`): the respondent can never see an option or an
    * ending image there, so downloading up to 12 of them would only compete with what is on screen.
    */
-  private planPrefetch(def: PublishedFormDefinition): void {
-    const phase = this.phase();
-    if (phase !== 'welcome' && phase !== 'ready') {
+  private planPrefetch(def: PublishedFormDefinition, opening: WidgetPhase): void {
+    if (opening !== 'welcome' && opening !== 'ready') {
       return;
     }
     this.prefetchUrls = collectLaterImageUrls(def);
-    if (phase === 'welcome' && def.welcomeScreen?.mediaURL) {
+    if (opening === 'welcome' && def.welcomeScreen?.mediaURL) {
       return;
     }
     this.schedulePrefetchWhenIdle();

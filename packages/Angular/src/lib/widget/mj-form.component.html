@@ -53,7 +53,7 @@
     alt is empty on purpose: the form's name sits right beneath it, and a screen reader
     announcing the brand twice is worse than not announcing the picture.
   -->
-  @if (logoUrl(); as logo) {
+  @if (shownLogoUrl(); as logo) {
     <div class="mjf-logo-bar">
       <img class="mjf-logo" [src]="logo" alt="" decoding="async" (error)="onLogoError()" />
     </div>
@@ -93,7 +93,11 @@
   @switch (phase()) {
     @case ('loading') {
       <div class="mjf-state" role="status" aria-live="polite">
-        <span class="mjf-spinner" aria-hidden="true"></span>
+        @if (waitingForWelcomeImage()) {
+          <mjf-mj-loader />
+        } @else {
+          <span class="mjf-spinner" aria-hidden="true"></span>
+        }
         <span>Loading form…</span>
       </div>
     }
@@ -108,7 +112,7 @@
            shell, so while it shows there is no runtime rendered, no question in the DOM and
            nothing for a respondent (or a scraper) to fill in. -->
       @if (welcomeScreen(); as ws) {
-        <mjf-form-screen [screen]="ws" (activated)="startIntake()" (mediaSettled)="onWelcomeMediaSettled()" />
+        <mjf-form-screen [screen]="ws" (activated)="startIntake()" />
       }
     }
     @case ('done') {
