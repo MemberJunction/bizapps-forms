@@ -22,6 +22,8 @@ import {
 
 const UNKNOWN_APP = 'unknown';
 const MAX_LABEL_LENGTH = 200;
+/** An unasked slug is echoed to the author and the log; a provider must not be able to flood either. */
+const MAX_ECHOED_SLUG_LENGTH = 100;
 
 /**
  * What the author sees when a provider threw. The provider's own error text may carry SQL or other
@@ -47,6 +49,10 @@ class FailureLog {
 
 function describeError(error: unknown): string {
   return error instanceof Error ? (error.stack ?? error.message) : String(error);
+}
+
+function capForEcho(value: string): string {
+  return value.length > MAX_ECHOED_SLUG_LENGTH ? `${value.slice(0, MAX_ECHOED_SLUG_LENGTH)}…` : value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -75,8 +81,8 @@ function describeBadEntry(entry: unknown): ClaimFailure {
 }
 
 /**
- * Read the registered providers from the global object store. A pure read: it reports what it
- * rejects rather than repairing the slot, which belongs to the consumers.
+ * Read the registered providers from the global object store. A read: it reports and logs what it
+ * rejects, but never repairs the slot, which belongs to the consumers.
  */
 export function readClaimProviders(store: GlobalObjectStore | null): { providers: DistributionClaimProvider[]; failures: ClaimFailure[] } {
   const slot: unknown = store?.[DISTRIBUTION_CLAIM_PROVIDERS_KEY]; // unknown: any app may have written this slot
@@ -132,7 +138,7 @@ function acceptClaim(raw: unknown, appName: string, asked: ReadonlySet<string>, 
     return null;
   }
   if (!asked.has(raw.slug)) {
-    log.record(appName, `claimed slug "${raw.slug}" that was not asked about`);
+    log.record(appName, `claimed slug "${capForEcho(raw.slug)}" that was not asked about`);
     return null;
   }
   if (!isUsableName(raw.ownerLabel)) {
@@ -175,6 +181,26 @@ async function askOne(
 }
 
 /**
+ * Keep the first claim per (app, slug); report each further one against its app. Two providers
+ * can share an AppName (a package loaded twice), and the builder keys its rows by app name, so a
+ * duplicate would render two identical rows.
+ */
+function dropDuplicateClaims(claims: readonly AttributedClaim[], log: FailureLog): AttributedClaim[] {
+  const seen = new Set<string>();
+  const kept: AttributedClaim[] = [];
+  for (const claim of claims) {
+    const key = JSON.stringify([claim.appName, claim.slug]);
+    if (seen.has(key)) {
+      log.record(claim.appName, `claimed slug "${capForEcho(claim.slug)}" more than once`);
+    } else {
+      seen.add(key);
+      kept.push(claim);
+    }
+  }
+  return kept;
+}
+
+/**
  * Ask every provider, in parallel, which of `slugs` it owns. Never rejects: a provider's failure
  * becomes a `failures` entry and the other providers' answers still count.
  */
@@ -188,5 +214,5 @@ export async function findDistributionClaims(
   const asked: ReadonlySet<string> = new Set(slugs); // built before any provider runs, so none can widen it
   const log = new FailureLog(slugs);
   const answers = await Promise.all(providers.map((p) => askOne(p, slugs, asked, contextUser, timeoutMs, log)));
-  return { claims: answers.flat(), failures: log.failures };
+  return { claims: dropDuplicateClaims(answers.flat(), log), failures: log.failures };
 }

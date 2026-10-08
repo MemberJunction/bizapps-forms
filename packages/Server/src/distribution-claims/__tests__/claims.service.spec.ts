@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntityInfo, UserInfo } from '@memberjunction/core';
 import type { DistributionClaimProvider } from '../claim-contract';
 import { LogError } from '@memberjunction/core';
 import { defaultClaimsServiceDeps, loadFormDistributionClaims, toClaimsResultType, type ClaimsProvider, type ClaimsServiceDeps } from '../claims.service';
 
 vi.mock('@memberjunction/core', async (orig) => ({ ...(await orig<typeof import('@memberjunction/core')>()), LogError: vi.fn() }));
+
+beforeEach(() => vi.mocked(LogError).mockClear());
 
 const user = { ID: 'u1' } as UserInfo;
 const F1 = '11111111-1111-4111-8111-111111111111';
@@ -48,6 +50,12 @@ describe('loadFormDistributionClaims', () => {
     const readSlugs = vi.fn<ClaimsServiceDeps['readSlugs']>(async () => ({ ok: true, slugs: [] }));
     await loadFormDistributionClaims(makeDeps(makeCaliber(), { canUpdateDistributions, readSlugs }), F1, user);
     expect(canUpdateDistributions).toHaveBeenCalledWith(user);
+    expect(readSlugs).toHaveBeenCalledWith(F1, user);
+  });
+
+  it('trims a padded form id once, so the slug read receives the bare GUID', async () => {
+    const readSlugs = vi.fn<ClaimsServiceDeps['readSlugs']>(async () => ({ ok: true, slugs: [] }));
+    await loadFormDistributionClaims(makeDeps(makeCaliber(), { readSlugs }), `  ${F1}  `, user);
     expect(readSlugs).toHaveBeenCalledWith(F1, user);
   });
 

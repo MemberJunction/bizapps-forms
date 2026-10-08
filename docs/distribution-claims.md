@@ -33,12 +33,15 @@ const provider: ClaimProvider = {
 };
 
 const slot = ((globalThis as Record<string, unknown>)[KEY] ??= []) as ClaimProvider[];
-slot.push(provider);
+if (!slot.some((p) => p.AppName === provider.AppName)) slot.push(provider);
 ```
 
 The slot is an array. If it is somehow not one, Forms reports that to the author as a failure.
 
-- **Create if absent, then push. Never replace.** The slot is shared by every consumer; assigning a
+- **Create if absent, then push once. Never replace.** Guard the push by `AppName`, as in the
+  snippet: a package can be loaded twice in one process, and a second copy would answer every
+  query twice (Forms keeps the first claim per app and slug and reports the repeats as failures).
+  The slot is shared by every consumer; assigning a
   new array silently evicts the others.
 - Forms reads the slot **lazily, on each query**, so it does not matter whether your package or
   Forms loads first.
@@ -56,6 +59,10 @@ The slot is an array. If it is somehow not one, Forms reports that to the author
 
 `FindClaims` is a **read**. Do not write, create or send anything from it. `contextUser` is the
 author viewing the builder; you decide what that user may learn. The `slugs` array is frozen.
+
+`FindClaims` receives only `contextUser`, not the request's data provider, so do not rely on a
+transaction-bound provider: do your own reads under `contextUser`. A provider argument may be
+added later as a compatible third parameter.
 
 A provider with a missing, blank or over-200-character `AppName`, or without a `FindClaims`
 function, is rejected and reported to the author.

@@ -1,9 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LogError, type UserInfo } from '@memberjunction/core';
 import { DISTRIBUTION_CLAIM_PROVIDERS_KEY, type DistributionClaimProvider } from '../claim-contract';
 import { findDistributionClaims, readClaimProviders } from '../find-claims';
 
 vi.mock('@memberjunction/core', async (orig) => ({ ...(await orig<typeof import('@memberjunction/core')>()), LogError: vi.fn() }));
+
+beforeEach(() => vi.mocked(LogError).mockClear());
 
 const user = { ID: 'u1' } as UserInfo;
 const provider = (over: Partial<DistributionClaimProvider> = {}): DistributionClaimProvider => ({
@@ -99,6 +101,40 @@ describe('findDistributionClaims', () => {
   it('trims the app name on the claim and on a failure', async () => {
     const out = await findDistributionClaims(['intake'], user, [provider({ AppName: '  Caliber  ' })]);
     expect(out.claims[0].appName).toBe('Caliber');
+    const hung = provider({ AppName: '  Hung  ', FindClaims: () => new Promise(() => undefined) });
+    const timedOut = await findDistributionClaims(['intake'], user, [hung], 20);
+    expect(timedOut.failures[0].appName).toBe('Hung');
+  });
+  it('keeps the first claim per app and slug and reports each further duplicate against that app', async () => {
+    const twice = provider({
+      FindClaims: async () => [
+        { slug: 'intake', ownerLabel: 'First', respondentUrl: null },
+        { slug: 'intake', ownerLabel: 'Second', respondentUrl: null },
+      ],
+    });
+    const out = await findDistributionClaims(['intake'], user, [twice]);
+    expect(out.claims.map((c) => c.ownerLabel)).toEqual(['First']);
+    expect(out.failures).toEqual([{ appName: 'Caliber', message: 'claimed slug "intake" more than once' }]);
+  });
+  it('dedupes across two providers sharing an AppName', async () => {
+    const out = await findDistributionClaims(['intake'], user, [provider(), provider()]);
+    expect(out.claims).toHaveLength(1);
+    expect(out.failures).toEqual([{ appName: 'Caliber', message: 'claimed slug "intake" more than once' }]);
+  });
+  it('does not treat the same slug from two different apps as a duplicate', async () => {
+    const out = await findDistributionClaims(['intake'], user, [provider(), provider({ AppName: 'Other' })]);
+    expect(out.claims.map((c) => c.appName)).toEqual(['Caliber', 'Other']);
+    expect(out.failures).toEqual([]);
+  });
+  it('caps an echoed unasked slug at 100 characters in the failure and the log', async () => {
+    const long = 'z'.repeat(300);
+    const greedy = provider({ FindClaims: async () => [{ slug: long, ownerLabel: 'x', respondentUrl: null }] });
+    const out = await findDistributionClaims(['intake'], user, [greedy]);
+    const capped = `${'z'.repeat(100)}…`;
+    expect(out.failures[0].message).toContain(capped);
+    expect(out.failures[0].message).not.toContain('z'.repeat(101));
+    expect(LogError).toHaveBeenCalledWith(expect.stringContaining(capped));
+    expect(vi.mocked(LogError).mock.calls[0][0]).not.toContain('z'.repeat(101));
   });
   it('rejects a provider whose AppName is blank', () => {
     expect(readClaimProviders({ [DISTRIBUTION_CLAIM_PROVIDERS_KEY]: [provider({ AppName: '  ' })] }).failures).toEqual([{ appName: 'unknown', message: expect.stringContaining('AppName') }]);

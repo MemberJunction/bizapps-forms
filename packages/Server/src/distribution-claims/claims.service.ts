@@ -40,30 +40,35 @@ const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
  * Throws on any of those; provider trouble is reported in the result instead.
  */
 export async function loadFormDistributionClaims(deps: ClaimsServiceDeps, formId: string, user: UserInfo): Promise<ClaimLookup> {
-  if (formId.trim().length === 0) {
+  const id = formId.trim();
+  if (id.length === 0) {
     throw new Error('formId is required to look up share-link claims.');
   }
-  if (!GUID_PATTERN.test(formId.trim())) {
+  if (!GUID_PATTERN.test(id)) {
     throw new Error('formId must be a form ID.');
   }
   if (!deps.canUpdateDistributions(user)) {
-    LogError(`[Forms] share-link claims refused for user ${user.ID} on form ${formId}: no Update right on Form Distributions`);
-    throw new Error(`Not allowed to read share-link claims for form ${formId}.`);
+    LogError(`[Forms] share-link claims refused for user ${user.ID} on form ${id}: no Update right on Form Distributions`);
+    throw new Error(`Not allowed to read share-link claims for form ${id}.`);
   }
-  const read = await deps.readSlugs(formId, user);
+  const read = await deps.readSlugs(id, user);
   // `'error' in read` rather than `!read.ok`: with strictNullChecks off (this build) a boolean-literal
   // discriminant does not narrow, but `in` does.
   if ('error' in read) {
     // The view error can carry the SQL statement; it goes to the log, never to the caller.
-    LogError(`[Forms] could not read share links for form ${formId} (user ${user.ID}): ${read.error}`);
-    throw new Error(`Could not read share links for form ${formId}.`);
+    LogError(`[Forms] could not read share links for form ${id} (user ${user.ID}): ${read.error}`);
+    throw new Error(`Could not read share links for form ${id}.`);
   }
   const registry = deps.providers();
   const found = await findDistributionClaims(read.slugs, user, registry.providers);
   return { claims: found.claims, failures: [...registry.failures, ...found.failures] };
 }
 
-/** The default slug reader: the form's own non-null slugs, read under the CALLER's permissions. */
+/**
+ * The default slug reader: the form's own non-null slugs, read under the CALLER's permissions.
+ * Exported, so it must be safe on its own: it quotes `formId` even though the service already
+ * GUID-checks it. That double guard is intentional.
+ */
 export function createSlugReader(runView: SlugRunView): ClaimsServiceDeps['readSlugs'] {
   return async (formId, user) => {
     const result = await runView.RunView<{ Slug: string }>(
