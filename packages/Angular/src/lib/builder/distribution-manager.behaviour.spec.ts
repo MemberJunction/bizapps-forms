@@ -10,13 +10,14 @@
 import '@angular/compiler';
 import { ChangeDetectorRef, Injector, runInInjectionContext } from '@angular/core';
 import { DomSanitizer } from '@angular/platform-browser';
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import type {
   mjBizAppsFormsFormDistributionEntity,
   mjBizAppsFormsFormDistributionEntityType,
 } from '@mj-biz-apps/forms-entities';
 import { DistributionManagerComponent } from './distribution-manager.component';
 import { DistributionService, type MutationOutcome } from './distribution.service';
+import type { ClaimsResult, ShareLinkClaim } from './distribution-claims';
 
 /**
  * The part of a link the component reads.
@@ -61,7 +62,7 @@ function link(overrides: Partial<LinkShape> = {}): mjBizAppsFormsFormDistributio
 
 type ServiceSurface = Pick<
   DistributionService,
-  'list' | 'open' | 'close' | 'issueLink' | 'reissueLink' | 'setSchedule' | 'setMaxResponses'
+  'list' | 'claims' | 'open' | 'close' | 'issueLink' | 'reissueLink' | 'setSchedule' | 'setMaxResponses'
 >;
 
 /**
@@ -71,8 +72,12 @@ type ServiceSurface = Pick<
  */
 interface ServiceDouble {
   calls: string[];
+  /** Form ids `claims()` was asked about; kept apart so the mutation call orders stay exact. */
+  claimAsks: string[];
   initial: mjBizAppsFormsFormDistributionEntity[];
   reloads: mjBizAppsFormsFormDistributionEntity[][];
+  /** What `claims()` answers; swap it to script a slow, failing or reordered check. */
+  claimsImpl: (formId: string) => Promise<ClaimsResult>;
   service: ServiceSurface;
 }
 
@@ -81,16 +86,23 @@ function serviceDouble(
   outcome: MutationOutcome = { ok: true },
 ): ServiceDouble {
   const calls: string[] = [];
+  const claimAsks: string[] = [];
   const listResults: mjBizAppsFormsFormDistributionEntity[][] = [initial];
   const record = (name: string) => async () => {
     calls.push(name);
     return outcome;
   };
-  return {
+  const double: ServiceDouble = {
     calls,
+    claimAsks,
     initial,
     reloads: listResults,
+    claimsImpl: async () => ({ ok: true, claims: [], failures: [] }),
     service: {
+      claims: (formId: string) => {
+        claimAsks.push(formId);
+        return double.claimsImpl(formId);
+      },
       list: async () => {
         calls.push('list');
         const nth = calls.filter((c) => c === 'list').length - 1;
@@ -104,6 +116,7 @@ function serviceDouble(
       setMaxResponses: record('setMaxResponses'),
     },
   };
+  return double;
 }
 
 /** The protected surface a test drives. Kept to the members these tests touch. */
@@ -112,6 +125,16 @@ interface Driver {
   selectedId: string | null;
   busy: boolean;
   actionError: string | null;
+  loadError: string | null;
+  claimCheckNote: string | null;
+  claimsPending: boolean;
+  formId: string;
+  reload(quiet?: boolean): Promise<void>;
+  ngOnInit(): Promise<void>;
+  claimsFor(link: mjBizAppsFormsFormDistributionEntity): readonly ShareLinkClaim[];
+  copied: string | null;
+  consumerCopyTarget(appName: string): string;
+  copy(target: string, text: string): Promise<void>;
   applyFix(): Promise<void>;
   toggleOpen(): Promise<void>;
 }
@@ -129,6 +152,7 @@ function construct(double: ServiceDouble): Driver {
   });
   const c = runInInjectionContext(injector, () => new DistributionManagerComponent());
   const d = c as unknown as Driver;
+  d.formId = 'form-1';
   d.links = double.initial;
   d.selectedId = d.links[0]?.ID ?? null;
   return d;
@@ -185,5 +209,122 @@ describe('DistributionManagerComponent — a real save error is not overwritten 
     const d = construct(double);
     await d.applyFix();
     expect(d.actionError).toMatch(/not switched on/);
+  });
+});
+
+const theClaim: ShareLinkClaim = {
+  appName: 'Caliber',
+  slug: 'summer-survey',
+  ownerLabel: 'Intake step',
+  respondentUrl: 'https://caliber.example/intake',
+};
+
+/** Let the fire-and-forget claims check settle. */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe('DistributionManagerComponent — share-link claims', () => {
+  it('asks for the claims of this form after loading its links', async () => {
+    const double = serviceDouble([link()]);
+    const d = construct(double);
+    await d.ngOnInit();
+    await flush();
+    expect(double.claimAsks).toEqual(['form-1']);
+  });
+
+  it('returns the claim for a claimed slug and nothing for the others', async () => {
+    const double = serviceDouble([link(), link({ ID: 'dist-2', Slug: 'other' })]);
+    double.claimsImpl = async () => ({ ok: true, claims: [theClaim], failures: [] });
+    const d = construct(double);
+    await d.reload();
+    await flush();
+    expect(d.claimsFor(double.initial[0])).toEqual([theClaim]);
+    expect(d.claimsFor(double.initial[1])).toEqual([]);
+  });
+
+  it('hands every unclaimed link the same empty array, so change detection sees no new value', async () => {
+    const double = serviceDouble([link(), link({ ID: 'dist-2', Slug: 'other' })]);
+    const d = construct(double);
+    await d.reload();
+    await flush();
+    expect(d.claimsFor(double.initial[0])).toBe(d.claimsFor(double.initial[1]));
+  });
+
+  it('reports a failed check in claimCheckNote and leaves the links rendered', async () => {
+    const double = serviceDouble([link()]);
+    double.claimsImpl = async () => ({ ok: false, error: 'boom' });
+    const d = construct(double);
+    await d.reload();
+    await flush();
+    expect(d.claimCheckNote).toContain('boom');
+    expect(d.links).toHaveLength(1);
+    expect(d.claimsFor(double.initial[0])).toEqual([]);
+  });
+
+  it('never turns a claims failure into a links load error', async () => {
+    const double = serviceDouble([link()]);
+    double.claimsImpl = async () => ({ ok: false, error: 'boom' });
+    const d = construct(double);
+    await d.reload();
+    await flush();
+    expect(d.loadError).toBeNull();
+  });
+
+  // #297 review F2: before the answer arrives, "no claims yet" must not read as "nobody claims this".
+  it('is pending while the claims answer is outstanding, and not after it arrives', async () => {
+    const double = serviceDouble([link()]);
+    let answer: (r: ClaimsResult) => void = () => undefined;
+    double.claimsImpl = () => new Promise<ClaimsResult>((resolve) => (answer = resolve));
+    const d = construct(double);
+    await d.reload();
+    expect(d.claimsPending).toBe(true);
+    answer({ ok: true, claims: [theClaim], failures: [] });
+    await flush();
+    expect(d.claimsPending).toBe(false);
+  });
+
+  it('stays pending when only a superseded check answers', async () => {
+    const double = serviceDouble([link()]);
+    const resolvers: Array<(r: ClaimsResult) => void> = [];
+    double.claimsImpl = () => new Promise<ClaimsResult>((resolve) => resolvers.push(resolve));
+    const d = construct(double);
+    await d.reload();
+    await d.reload(true);
+    resolvers[0]({ ok: true, claims: [], failures: [] });
+    await flush();
+    expect(d.claimsPending).toBe(true);
+  });
+
+  it('ignores a claims answer that arrives after a newer reload', async () => {
+    const double = serviceDouble([link()]);
+    const resolvers: Array<(r: ClaimsResult) => void> = [];
+    double.claimsImpl = () => new Promise<ClaimsResult>((resolve) => resolvers.push(resolve));
+    const d = construct(double);
+    await d.reload();
+    await d.reload(true);
+    expect(resolvers).toHaveLength(2);
+    resolvers[1]({ ok: true, claims: [], failures: [] });
+    await flush();
+    resolvers[0]({ ok: true, claims: [theClaim], failures: [] });
+    await flush();
+    expect(d.claimsFor(double.initial[0])).toEqual([]);
+  });
+});
+
+describe('DistributionManagerComponent: copying another app\'s link', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('confirms only the app whose link was copied', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const d = construct(serviceDouble([link()]));
+    await d.copy(d.consumerCopyTarget('App A'), 'https://a.example/x');
+    expect(writeText).toHaveBeenCalledWith('https://a.example/x');
+    expect(d.copied).toBe(d.consumerCopyTarget('App A'));
+    expect(d.copied === d.consumerCopyTarget('App A')).toBe(true);
+    expect(d.copied === d.consumerCopyTarget('App B')).toBe(false);
   });
 });

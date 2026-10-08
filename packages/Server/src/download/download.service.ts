@@ -43,12 +43,13 @@
  * requiring one would deny the very readers this exists for. Eligibility is the caller's; the
  * privileged read is the system's.
  */
-import { LogError } from '@memberjunction/core';
+import { LogError, LogErrorEx } from '@memberjunction/core';
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import { escapeSqlString } from '@mj-biz-apps/forms-entities';
 
 import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names.js';
-import { readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
+import { describeReadFallback, readStoredObject, redactStorageKey, type StorageReadEngine } from '../storage/read-object.js';
+import { getUploadConfig } from '../upload/config.js';
 import { getDownloadConfig } from './config.js';
 
 /** MJ core's file registry, read only after the provenance row has authorized the caller. */
@@ -140,16 +141,28 @@ export async function loadResponseFile(ctx: DownloadContext, fileId: string): Pr
   }
 
   try {
-    const content = await readStoredObject(
+    // Respondent files are WRITTEN through the upload pin, so that is where they most likely are.
+    // The download pin is a read hint, tried second; every other account on the provider follows.
+    // It is also the one pin a pre-v0.11.0 file is still read through (legacyFallback).
+    const pins = [
+      { envVar: 'FORMS_UPLOAD_STORAGE_ACCOUNT', value: getUploadConfig().storageAccountId },
+      { envVar: 'FORMS_DOWNLOAD_STORAGE_ACCOUNT', value: getDownloadConfig().storageAccountId, legacyFallback: true },
+    ];
+    const read = await readStoredObject(
       ctx.storage,
       ctx.elevatedUser,
-      { providerId: file.ProviderID, providerKey: file.ProviderKey },
-      getDownloadConfig().storageAccountId,
+      { providerId: file.ProviderID, providerKey: file.ProviderKey, uploadPathPrefix: getUploadConfig().pathPrefix },
+      pins,
     );
+    // No key here, unlike the asset route: a respondent file's key ends in the uploader's filename,
+    // which is personal data. The file id is enough to look the key up in `MJ: Files`. The attempt
+    // errors can repeat the key, so the whole line is redacted as well.
+    const fallback = describeReadFallback('Download', wanted, undefined, read, pins);
+    if (fallback) LogErrorEx({ severity: 'warning', message: redactStorageKey(fallback, file.ProviderKey) });
     return {
       ok: true,
       payload: {
-        content,
+        content: read.content,
         // The provenance row's copy wins: it is what the Responses tab displayed, and a download
         // whose name differs from the name that was clicked reads as the wrong file.
         contentType: (upload.ContentType || file.ContentType || '').trim() || 'application/octet-stream',
@@ -158,7 +171,10 @@ export async function loadResponseFile(ctx: DownloadContext, fileId: string): Pr
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    LogError(`[Forms] Download failed for file ${wanted}: ${detail}`);
+    // Key withheld and `detail` redacted, for the reason given at the fallback warning above.
+    LogError(
+      `[Forms] Download read failed for ${wanted} (provider ${file.ProviderID}): ${redactStorageKey(detail, file.ProviderKey)}`,
+    );
     return fail(500, 'That file could not be read from storage.');
   }
 }

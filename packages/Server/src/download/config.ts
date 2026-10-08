@@ -9,8 +9,17 @@
  *
  * Env vars:
  *  - `FORMS_DOWNLOAD_ENABLED`         `false` to turn the route off. Default on.
- *  - `FORMS_DOWNLOAD_STORAGE_ACCOUNT` Optional FileStorageAccount ID used only when the file's
- *                                     own provider has no account; unset uses the first account.
+ *  - `FORMS_DOWNLOAD_STORAGE_ACCOUNT` Optional FileStorageAccount ID, a read HINT rather than an
+ *                                     override. Reads try `FORMS_UPLOAD_STORAGE_ACCOUNT` (where
+ *                                     respondent files are written), then this, then every other
+ *                                     account on the file's provider (#290). A pin on another
+ *                                     provider than the file's is skipped, unless the file's
+ *                                     provider has no account at all: then every pin that
+ *                                     resolves is tried in that order, whatever its provider.
+ *                                     Once this process has read a file, the account that served
+ *                                     it is tried first. A file uploaded before v0.11.0 (no
+ *                                     per-upload UUID in its key) is read as before #290: the
+ *                                     provider's first account, else this pin, and nothing else.
  */
 
 /** Base path the download route hangs off; the file id is the next path segment. */

@@ -30,22 +30,17 @@ describe('welcome image priority — source smoke', () => {
     expect(screen).toContain(`[attr.fetchpriority]="isWelcome() ? 'high' : null"`);
   });
 
-  it('reports the image settling on load AND on error, so a broken image still releases the queue', () => {
-    expect(screen).toContain('(load)="mediaSettled.emit()"');
-    expect(screen).toContain('(error)="mediaSettled.emit()"');
-    expect(screen).toContain('public readonly mediaSettled = output<void>()');
+  it('the screen image no longer reports load/error — the welcome gate owns that (#291)', () => {
+    expect(screen).not.toContain('(load)=');
+    expect(screen).not.toContain('(error)=');
   });
 });
 
 describe('prefetch lifecycle — source smoke', () => {
-  it('the welcome case starts the prefetch when its image settles', () => {
-    expect(html).toContain('(mediaSettled)="onWelcomeMediaSettled()"');
-  });
-
   it('load() cancels the previous queue before anything else can start one', () => {
     const load = body(form, 'private async load(): Promise<void>');
     expect(load).toContain('this.cancelPrefetch()');
-    expect(load.indexOf('this.cancelPrefetch()')).toBeLessThan(load.indexOf('this.planPrefetch(def)'));
+    expect(load.indexOf('this.cancelPrefetch()')).toBeLessThan(load.indexOf('this.planPrefetch(def, opening, gated)'));
   });
 
   it('ngOnDestroy cancels the queue', () => {
@@ -60,9 +55,9 @@ describe('prefetch lifecycle — source smoke', () => {
   });
 
   it('plans nothing unless intake is still ahead (welcome or ready)', () => {
-    const plan = body(form, 'private planPrefetch(def: PublishedFormDefinition): void');
-    expect(plan).toContain(`phase !== 'welcome' && phase !== 'ready'`);
-    expect(plan.indexOf(`phase !== 'welcome' && phase !== 'ready'`)).toBeLessThan(
+    const plan = body(form, 'private planPrefetch(def: PublishedFormDefinition, opening: WidgetPhase, gated: boolean): void');
+    expect(plan).toContain(`opening !== 'welcome' && opening !== 'ready'`);
+    expect(plan.indexOf(`opening !== 'welcome' && opening !== 'ready'`)).toBeLessThan(
       plan.indexOf('this.schedulePrefetchWhenIdle()'),
     );
   });
@@ -82,5 +77,46 @@ describe('prefetch lifecycle — source smoke', () => {
     expect(schedule).toContain('const generation = this.prefetchGeneration');
     expect(schedule).toContain('generation === this.prefetchGeneration');
     expect(body(form, 'private cancelPrefetch(): void')).toContain('this.prefetchGeneration++');
+  });
+});
+
+describe('welcome gate wiring — source smoke (#291)', () => {
+  it('an author command ends the gate wait, so the logo is not hidden above the chosen screen', () => {
+    const show = body(form, 'public showScreen(selection: ShownScreen): void');
+    expect(show).toContain('this.waitingForWelcomeImage.set(false)');
+  });
+  it('plans the prefetch before holding, so prefetchUrls is set before anything can start the queue', () => {
+    const load = body(form, 'private async load(): Promise<void>');
+    expect(load.indexOf('this.planPrefetch(')).toBeLessThan(load.indexOf('this.holdForWelcomeImages('));
+  });
+  it('gates only a load that opens on a welcome screen with an image', () => {
+    const load = body(form, 'private async load(): Promise<void>');
+    expect(load).toMatch(/opening === 'welcome' \? def\.welcomeScreen\?\.mediaURL/);
+    expect(load).toContain('this.holdForWelcomeImages(welcomeImage, generation)');
+  });
+  it('every load starts a new generation and clears the wait', () => {
+    const load = body(form, 'private async load(): Promise<void>');
+    expect(load).toContain('const generation = ++this.loadGeneration');
+    expect(load).toContain('this.waitingForWelcomeImage.set(false)');
+  });
+  it('the gate is current only for this load and a live widget, and never overrides an author command', () => {
+    const hold = body(form, 'private holdForWelcomeImages(welcomeImage: string, generation: number): void');
+    expect(hold).toContain('!this.destroyed && generation === this.loadGeneration');
+    expect(hold).toContain("if (this.phase() === 'loading') this.phase.set('welcome')");
+    expect(hold).toContain('imagesSettled: () => this.startPrefetch()');
+  });
+  it('a logo the gate saw fail is marked broken before the reveal, so its bar never paints and then vanishes', () => {
+    const hold = body(form, 'private holdForWelcomeImages(welcomeImage: string, generation: number): void');
+    const reveal = hold.slice(hold.indexOf('reveal:'), hold.indexOf('imagesSettled:'));
+    expect(reveal.length).toBeGreaterThan(0);
+    // Only the logo the gate actually loaded: a preview may have swapped it during the wait.
+    expect(reveal).toMatch(/failed\.has\(logo\) && this\.logoUrl\(\) === logo\) this\.logoBroken\.set\(true\)/);
+    expect(reveal.indexOf('this.logoBroken.set(true)')).toBeLessThan(reveal.indexOf('this.waitingForWelcomeImage.set(false)'));
+  });
+  it('the MJ loader shows only while waiting for the welcome images; the neutral spinner otherwise', () => {
+    expect(html).toMatch(/@if \(waitingForWelcomeImage\(\)\) \{\s*<mjf-mj-loader \/>\s*\} @else \{\s*<span class="mjf-spinner"/);
+  });
+  it('the logo bar stays hidden while the gate waits, so it arrives with the welcome screen', () => {
+    expect(html).toContain('@if (shownLogoUrl(); as logo)');
   });
 });
