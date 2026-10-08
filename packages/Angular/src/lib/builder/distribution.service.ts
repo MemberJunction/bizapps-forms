@@ -101,7 +101,11 @@ export class DistributionService {
   public async claims(formId: string): Promise<ClaimsResult> {
     try {
       const data = await GraphQLDataProvider.Instance.ExecuteGQL(FORM_DISTRIBUTION_CLAIMS_QUERY, { formId });
-      return parseClaimsPayload(data);
+      const parsed = parseClaimsPayload(data);
+      if (!parsed.ok) {
+        LogError(`Share-link claims for form ${formId} could not be read: ${parsed.error}`);
+      }
+      return parsed;
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
       LogError(`Failed to read share-link claims for form ${formId}: ${error}`);

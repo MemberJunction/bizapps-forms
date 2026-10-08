@@ -148,4 +148,11 @@ describe('DistributionService.claims', () => {
     expect(logged.join('\n')).toContain('form-9');
     expect(logged.join('\n')).toContain('network down');
   });
+
+  it('logs the form id when the server sends an answer the builder cannot read', async () => {
+    executeGQL = async () => ({ FormDistributionClaims: { claims: 'nope' } });
+    const result = await new DistributionService().claims('form-9');
+    expect(result.ok).toBe(false);
+    expect(logged.join('\n')).toContain('form-9');
+  });
 });

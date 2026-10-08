@@ -36,6 +36,9 @@
     </div>
     </div>
   } @else {
+    @if (claimCheckNote) {
+      <p class="dm-note dm-claim-check">{{ claimCheckNote }}</p>
+    }
     <div class="dm-shell">
       <!-- LEFT: every link for this form. -->
       <aside class="dm-rail" aria-label="Share links">
@@ -69,7 +72,7 @@
                   <!-- The state in words, not only as a coloured dot. -->
                   <span class="dm-rail-meta">
                     {{ state.label }} ·
-                    {{ link.ResponseCount }} {{ link.ResponseCount === 1 ? 'response' : 'responses' }}
+                    {{ link.ResponseCount }} {{ link.ResponseCount === 1 ? 'response' : 'responses' }}{{ usedBy(link) }}
                   </span>
                 </span>
               </button>
@@ -136,6 +139,43 @@
             </div>
           }
 
+          <!-- Another Open App owns this slug: submissions on the plain Forms link reach Forms
+               only. role="note", not "alert" — this must not announce on every selection. -->
+          @if (noticeFor(link); as notice) {
+            @if (claimsFor(link).length) {
+              <div class="dm-warn dm-claim" role="note">
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                <div class="dm-claim-body">
+                  <p class="dm-claim-headline">{{ notice.headline }}</p>
+                  @for (line of notice.lines; track line.appName) {
+                    @if (line.respondentUrl) {
+                      <p class="dm-claim-label">Send people to {{ line.appName }}'s link instead:</p>
+                      <div class="dm-linkbar">
+                        <input
+                          type="text"
+                          class="mjf-input dm-linkfield"
+                          readonly
+                          [attr.aria-label]="line.appName + ' link'"
+                          [value]="line.respondentUrl"
+                          (focus)="selectAll($event)"
+                        />
+                        <button type="button" class="mjf-btn mjf-btn--ghost dm-copy" (click)="copy(`consumer:${line.appName}`, line.respondentUrl)">
+                          @if (copied === 'consumer:' + line.appName) {
+                            <i class="fa-solid fa-check" aria-hidden="true"></i> Copied
+                          } @else {
+                            <i class="fa-regular fa-copy" aria-hidden="true"></i> Copy link
+                          }
+                        </button>
+                      </div>
+                    } @else {
+                      <p class="dm-claim-label">Share the link {{ line.appName }} gives you instead.</p>
+                    }
+                  }
+                </div>
+              </div>
+            }
+          }
+
           <!-- Three renderings of ONE link. Every link has all three; picking between them
                is a view, not a property of the link, and never has to be decided up front. -->
           <div class="mjf-seg dm-views" role="group" aria-label="Ways to share this link">
@@ -170,7 +210,11 @@
                     }
                   </button>
                 </div>
-                <p class="dm-note">Send this to anyone. They open the form without signing in.</p>
+                @if (claimsFor(link).length) {
+                  <p class="dm-note">This link stores responses only.</p>
+                } @else {
+                  <p class="dm-note">Send this to anyone. They open the form without signing in.</p>
+                }
                 <div class="dm-sub">
                   <a
                     class="mjf-btn mjf-btn--ghost mjf-btn--sm"
