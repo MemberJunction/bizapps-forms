@@ -10,7 +10,9 @@ import type {
   mjBizAppsFormsFormDistributionEntity,
   mjBizAppsFormsFormDistributionEntityType,
 } from '@mj-biz-apps/forms-entities';
+import { GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
 import { FORMS_ENTITY } from '../shared/entity-names';
+import { FORM_DISTRIBUTION_CLAIMS_QUERY, parseClaimsPayload, type ClaimsResult } from './distribution-claims';
 import {
   shareUrl as buildShareUrl,
   embedSnippet as buildEmbedSnippet,
@@ -90,6 +92,21 @@ export class DistributionService {
 
   private get user(): UserInfo {
     return this.md.CurrentUser;
+  }
+
+  /**
+   * Which other apps claim this form's share-link slugs. A failed check is reported as
+   * `{ ok: false }`, never as "no claims" — see {@link ClaimsResult}.
+   */
+  public async claims(formId: string): Promise<ClaimsResult> {
+    try {
+      const data = await GraphQLDataProvider.Instance.ExecuteGQL(FORM_DISTRIBUTION_CLAIMS_QUERY, { formId });
+      return parseClaimsPayload(data);
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      LogError(`Failed to read share-link claims for form ${formId}: ${error}`);
+      return { ok: false, error };
+    }
   }
 
   /** List all distributions for a form, newest first. */
