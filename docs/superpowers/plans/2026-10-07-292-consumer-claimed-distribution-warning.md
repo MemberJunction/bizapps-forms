@@ -139,6 +139,8 @@ interface DistributionClaim {
   - If two apps claim one slug, it shows one line per claim.
 - **Claimed link:** the "Send this to anyone…" note is replaced with "This link stores responses only."
 - **Rail row of a claimed link:** "· used by Caliber" is added to the meta line.
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `failureNotice` (`packages/Angular/src/lib/builder/distribution-claims.ts`) is the authority: a provider failure or partly refused answer reads "Some apps' answers about these links had problems: <app>: <message>", and "Couldn't check whether another app uses these links: <error>" is reserved for a failed query (`c59de77`). While a check is in flight the link's note reads "Checking whether another app uses this link…" (#297 review).
+
 - **Provider failures:** one muted note above the panes: "Couldn't check whether Caliber uses these links: <message>." The links still render, because a failed check must not hide them.
 - **The claims request itself fails** (network, permission): the same muted note, with the error. Never silence.
 
@@ -188,6 +190,8 @@ interface DistributionClaim {
 - Create: `packages/Server/src/distribution-claims/claim-contract.ts`
 - Create: `packages/Server/src/distribution-claims/find-claims.ts`
 - Test: `packages/Server/src/distribution-claims/__tests__/find-claims.spec.ts`
+
+> **Superseded during implementation (do not build from this snippet as written).** The shipped `find-claims.ts` is the authority: `readClaimProviders` returns `{ providers: ClaimProviderSnapshot[]; failures }` (each entry read once into a snapshot, `15f6940`), and `findDistributionClaims` takes `readonly ClaimProviderSnapshot[]`.
 
 **Interfaces:**
 - Produces: `DISTRIBUTION_CLAIM_PROVIDERS_KEY: string`, `CLAIM_PROVIDER_TIMEOUT_MS: number`, `DistributionClaim`, `DistributionClaimProvider`, `ClaimFailure { appName: string; message: string }`, `ClaimLookup { claims: AttributedClaim[]; failures: ClaimFailure[] }`, `AttributedClaim = DistributionClaim & { appName: string }`, `readClaimProviders(store: GlobalObjectStore | null): { providers: DistributionClaimProvider[]; failures: ClaimFailure[] }`, `findDistributionClaims(slugs: readonly string[], contextUser: UserInfo, providers: readonly DistributionClaimProvider[], timeoutMs?: number): Promise<ClaimLookup>`.
@@ -336,6 +340,7 @@ The TSDoc on the key must say: versioned, an array that consumers create if abse
   - `ClaimsServiceDeps { canUpdateDistributions(user: UserInfo): boolean; readSlugs(formId: string, user: UserInfo): Promise<{ ok: true; slugs: string[] } | { ok: false; error: string }>; providers(): { providers: DistributionClaimProvider[]; failures: ClaimFailure[] } }`
   - `loadFormDistributionClaims(deps, formId, user): Promise<ClaimLookup>`. It throws `Error` on refusal or a failed read; the resolver lets that reach the caller, which is an authenticated author, not a respondent.
   - `createSlugReader(runView: SlugRunView): ClaimsServiceDeps['readSlugs']` and `toClaimsResultType(lookup: ClaimLookup): DistributionClaimsResultType` (exported for tests)
+  - > **Superseded during implementation (do not build from this snippet as written).** The shipped `claims.service.ts` is the authority: `defaultClaimsServiceDeps(provider: ClaimsProvider)` is wired to the REQUEST's provider (`GetReadOnlyProvider(providers, …)` in the resolver), never the global `Metadata`/`RunView` (transaction-capture hazard #260/#265, `980da03`); the resolver also checks the API key's `view:run` scope on Form Distributions first (#297 review).
   - `defaultClaimsServiceDeps(): ClaimsServiceDeps` wires `Metadata.EntityByName(FORM_DISTRIBUTION_ENTITY)?.GetUserPermisions(user).CanUpdate`, the `RunView`, and `readClaimProviders(GetGlobalObjectStore())`.
   - GraphQL: `FormDistributionClaims(formId: String!): DistributionClaimsResult!` with `claims { appName slug ownerLabel respondentUrl }` and `failures { appName message }`.
 
@@ -406,6 +411,7 @@ Additional Task 2 tests:
 - [ ] **Step 2: Run, expect FAIL.**
 - [ ] **Step 3: Implement.**
   - Every `@Field` takes an explicit type function, and `respondentUrl` is `@Field(() => String, { nullable: true })`. `strictNullChecks` is off in the build, while `emitDecoratorMetadata` is on.
+  - > **Superseded during implementation (do not build from this snippet as written).** The shipped `claims.service.ts` is the authority: after the blank check it also refuses a non-GUID `formId` ("formId must be a form ID."), and a read failure throws "Could not read share links for form <id>." with the view error in the server log only, never appended to the thrown message (`980da03`).
   - The service guards the blank `formId` first, then the permission (`'Not allowed to read share-link claims for form <id>'`), then `readSlugs`. On a read failure it throws `Error('Could not read share links for form <id>: <error>')`.
   - It finds claims and merges the registry failures first.
   - The resolver mirrors `PublicFormResolver`: `@Resolver() extends ResolverBase`, `this.GetUserFromPayload(userPayload)` (throw when absent), and maps to the GraphQL types with `Object.assign`.
@@ -436,6 +442,7 @@ Additional Task 2 tests:
   - The parse turns a missing or garbled payload into `{ ok: false }` with a message, never into `{ ok: true, claims: [] }`.
   - `claimsBySlug` groups two apps on one slug.
   - `claimNotice` names the app and the owner, with a single headline for one claim and one line per claim for two.
+  - > **Superseded during implementation (do not build from this snippet as written).** See the marker under *What the builder shows*: a non-empty `failures` list reads "Some apps' answers about these links had problems: …" (`c59de77`).
   - `failureNotice` returns `null` when nothing failed, and otherwise `Couldn't check whether Caliber uses these links: db down`.
   - `failureNotice` on `{ ok: false, error }` returns `Couldn't check whether another app uses these links: <error>`.
 - [ ] **Step 2: Run, expect FAIL.**
@@ -456,6 +463,7 @@ Additional Task 2 tests:
 - Produces (component, protected):
   - `claimsFor(link): ShareLinkClaim[]`
   - `claimCheckNote: string | null`
+  - > **Superseded during implementation (do not build from this snippet as written).** The shipped component is the authority: `CopyTarget` is `'link' | 'embed' | \`consumer:${string}\``, keyed per app through `consumerCopyTarget(appName)`, and the template calls `copy(consumerCopyTarget(line.appName), line.respondentUrl)`; there is no bare `'consumer'` target. The component also exposes `claimsPending` (#297 review).
   - `CopyTarget` gains `'consumer'`
 
 - [ ] **Step 1: Write the failing tests.**
@@ -468,7 +476,7 @@ Additional Task 2 tests:
   - Template:
     - The warning block is inside `@if (claimsFor(link).length)` and sits before `dm-views`.
     - It shows the app name and owner label.
-    - It binds the consumer link in a readonly input with a copy button using `copy('consumer', …)`.
+    - It binds the consumer link in a readonly input with a copy button using `copy('consumer', …)` (superseded: `copy(consumerCopyTarget(line.appName), …)`, see the marker under this task's *Interfaces* above).
     - The "Send this to anyone" note is conditional on no claims.
     - The rail meta shows "used by".
 - [ ] **Step 2: Run, expect FAIL.**

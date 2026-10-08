@@ -109,11 +109,15 @@ On the **Distribute** tab, for each share link your app claims:
 - ` · used by <your app's name>` in the left rail, next to the link's response count, and a note
   that the link stores responses only.
 
-If a provider fails, the tab shows a line saying it could not check whether that app uses these
-links. A failed check is never shown as "nobody claims this".
+While the check is running, the link's note reads "Checking whether another app uses this link…"
+rather than the usual "Send this to anyone…". If your provider fails, or part of its answer is
+refused, the tab shows "Some apps' answers about these links had problems:" followed by your app's
+name and the reason; if the whole check fails, it shows "Couldn't check whether another app uses
+these links:" and the error. A failed check is never shown as "nobody claims this".
 
-Only users with Update rights on Form Distributions can ask; the query is the authenticated
-GraphQL `FormDistributionClaims(formId)`.
+Only users with Update rights on Form Distributions can ask, and a call made with an API key also
+needs that key's `view:run` scope on Form Distributions; the query is the authenticated GraphQL
+`FormDistributionClaims(formId)`.
 
 ## Things to know
 
