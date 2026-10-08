@@ -202,6 +202,11 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     return this.claimIndex.get(link.Slug ?? '') ?? NO_CLAIMS;
   }
 
+  /** The one place a consumer app's copy button is keyed, so the click and the "Copied" check cannot drift apart. */
+  protected consumerCopyTarget(appName: string): CopyTarget {
+    return `consumer:${appName}`;
+  }
+
   /** The warning copy for a claimed link, or null. Pure: `claimNotice` needs a non-empty list. */
   protected noticeFor(link: mjBizAppsFormsFormDistributionEntity): ReturnType<typeof claimNotice> | null {
     const claims = this.claimsFor(link);

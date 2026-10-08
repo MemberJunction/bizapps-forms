@@ -283,16 +283,16 @@ describe('the "Open to responses" switch asks the whole question', () => {
 });
 
 describe('the share-link claim warning', () => {
-  const claimBlock = template.slice(template.indexOf('claimsFor(link)'));
+  const claimBlock = template.slice(template.indexOf('noticeFor(link)'));
 
   it('sits inside a claims guard, after the header and before the view switcher', () => {
-    const guard = template.indexOf('@if (claimsFor(link).length)');
+    const guard = template.indexOf('@if (noticeFor(link); as notice)');
     expect(guard).toBeGreaterThan(template.indexOf('</header>'));
     expect(guard).toBeLessThan(template.indexOf('class="mjf-seg dm-views"'));
   });
 
   it('is a note, not an alert, so selecting a link does not announce it', () => {
-    const block = template.slice(template.indexOf('@if (claimsFor(link).length)'), template.indexOf('class="mjf-seg dm-views"'));
+    const block = template.slice(template.indexOf('@if (noticeFor(link); as notice)'), template.indexOf('class="mjf-seg dm-views"'));
     expect(block).toContain('role="note"');
     expect(block).not.toContain('role="alert"');
     expect(block).toContain('fa-triangle-exclamation');
@@ -302,16 +302,33 @@ describe('the share-link claim warning', () => {
   });
 
   it('shows the other app link in a readonly field with its own copy button and no href', () => {
-    const block = template.slice(template.indexOf('@if (claimsFor(link).length)'), template.indexOf('class="mjf-seg dm-views"'));
+    const block = template.slice(template.indexOf('@if (noticeFor(link); as notice)'), template.indexOf('class="mjf-seg dm-views"'));
     expect(block).toContain('readonly');
     expect(block).toContain('[value]="line.respondentUrl"');
-    expect(block).toMatch(/copy\(`consumer:\$\{line\.appName\}`, line\.respondentUrl\)/);
+    expect(block).toContain("copy(consumerCopyTarget(line.appName), line.respondentUrl)");
     expect(block).not.toMatch(/\[?href\]?=/);
   });
 
   it('replaces the send-to-anyone note on a claimed link', () => {
     expect(claimBlock).toContain('This link stores responses only.');
     expect(template).toContain('Send this to anyone. They open the form without signing in.');
+  });
+
+  it('has no redundant claimsFor guard around the notice', () => {
+    const start = template.indexOf('@if (noticeFor(link); as notice)');
+    expect(template.slice(start, template.indexOf('class="mjf-seg dm-views"'))).not.toContain('claimsFor(link)');
+  });
+
+  it('gives the consumer copy button the app name as a visually hidden suffix, not an aria-label', () => {
+    const block = template.slice(template.indexOf('@if (noticeFor(link); as notice)'), template.indexOf('class="mjf-seg dm-views"'));
+    expect(block.match(/<span class="dm-visually-hidden"> for \{\{ line\.appName \}\}<\/span>/g)).toHaveLength(2);
+    expect(block).not.toMatch(/dm-copy[^>]*aria-label/);
+    expect(block).toContain("copied === consumerCopyTarget(line.appName)");
+    expect(block).toContain('copy(consumerCopyTarget(line.appName), line.respondentUrl)');
+  });
+
+  it('defines the visually-hidden helper in the component styles', () => {
+    expect(source('distribution-manager.styles.ts')).toContain('.dm-visually-hidden');
   });
 
   it('says which app uses a link in the rail', () => {

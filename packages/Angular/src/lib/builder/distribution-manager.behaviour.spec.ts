@@ -10,7 +10,7 @@
 import '@angular/compiler';
 import { ChangeDetectorRef, Injector, runInInjectionContext } from '@angular/core';
 import { DomSanitizer } from '@angular/platform-browser';
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import type {
   mjBizAppsFormsFormDistributionEntity,
   mjBizAppsFormsFormDistributionEntityType,
@@ -131,6 +131,9 @@ interface Driver {
   reload(quiet?: boolean): Promise<void>;
   ngOnInit(): Promise<void>;
   claimsFor(link: mjBizAppsFormsFormDistributionEntity): readonly ShareLinkClaim[];
+  copied: string | null;
+  consumerCopyTarget(appName: string): string;
+  copy(target: string, text: string): Promise<void>;
   applyFix(): Promise<void>;
   toggleOpen(): Promise<void>;
 }
@@ -278,5 +281,24 @@ describe('DistributionManagerComponent — share-link claims', () => {
     resolvers[0]({ ok: true, claims: [theClaim], failures: [] });
     await flush();
     expect(d.claimsFor(double.initial[0])).toEqual([]);
+  });
+});
+
+describe('DistributionManagerComponent: copying another app\'s link', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('confirms only the app whose link was copied', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const d = construct(serviceDouble([link()]));
+    await d.copy(d.consumerCopyTarget('App A'), 'https://a.example/x');
+    expect(writeText).toHaveBeenCalledWith('https://a.example/x');
+    expect(d.copied).toBe(d.consumerCopyTarget('App A'));
+    expect(d.copied === d.consumerCopyTarget('App A')).toBe(true);
+    expect(d.copied === d.consumerCopyTarget('App B')).toBe(false);
   });
 });

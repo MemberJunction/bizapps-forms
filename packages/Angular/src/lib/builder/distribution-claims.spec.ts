@@ -104,13 +104,13 @@ describe('failureNotice', () => {
     expect(failureNotice({ ok: true, claims: [], failures: [] })).toBeNull();
   });
 
-  it('names the app and the reason', () => {
+  it('leads neutrally and names the app and the reason', () => {
     expect(failureNotice({ ok: true, claims: [], failures: [{ appName: 'Caliber', message: 'db down' }] })).toBe(
-      "Couldn't check whether Caliber uses these links: db down",
+      "Some apps' answers about these links had problems: Caliber: db down",
     );
   });
 
-  it('joins several failures', () => {
+  it('lists one entry per app, so a partial refusal is not called a failed check', () => {
     const notice = failureNotice({
       ok: true,
       claims: [],
@@ -119,7 +119,13 @@ describe('failureNotice', () => {
         { appName: 'B', message: 'm2' },
       ],
     });
-    expect(notice).toBe("Couldn't check whether A or B uses these links: m1; m2");
+    expect(notice).toBe("Some apps' answers about these links had problems: A: m1; B: m2");
+  });
+
+  it("renders the placeholder app name 'unknown' as 'an unnamed app'", () => {
+    expect(failureNotice({ ok: true, claims: [], failures: [{ appName: 'unknown', message: 'no AppName' }] })).toBe(
+      "Some apps' answers about these links had problems: an unnamed app: no AppName",
+    );
   });
 
   it('reports a failed check as another app possibly using the links', () => {

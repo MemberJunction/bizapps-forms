@@ -86,7 +86,10 @@ export function claimsBySlug(claims: ShareLinkClaim[]): Map<string, ShareLinkCla
   return grouped;
 }
 
-/** The warning for one slug's claims: a headline, plus one line per claiming app. */
+/**
+ * The warning for one slug's claims: a headline, plus one line per claiming app.
+ * Precondition: `claims` is non-empty (the single-claim branch reads `claims[0]`); callers gate on that.
+ */
 export function claimNotice(claims: ShareLinkClaim[]): {
   headline: string;
   lines: { appName: string; ownerLabel: string; respondentUrl: string | null }[];
@@ -106,11 +109,18 @@ export function claimNotice(claims: ShareLinkClaim[]): {
   };
 }
 
-/** Text for a check that did not fully succeed, or null when every app answered. */
+/** `FailureLog` in the server reports a nameless provider as this; it is not a real app name. */
+const UNNAMED_APP_SENTINEL = 'unknown';
+
+/**
+ * Text for a check that did not fully succeed, or null when every app answered.
+ *
+ * `failures` mixes two things: an app that could not be asked at all, and an app whose answer was
+ * partly refused (a nulled URL, an unasked slug, a bad label). The lead therefore claims neither.
+ */
 export function failureNotice(result: ClaimsResult): string | null {
   if (!result.ok) return `Couldn't check whether another app uses these links: ${result.error}`;
   if (result.failures.length === 0) return null;
-  const apps = result.failures.map((f) => f.appName).join(' or ');
-  const reasons = result.failures.map((f) => f.message).join('; ');
-  return `Couldn't check whether ${apps} uses these links: ${reasons}`;
+  const entries = result.failures.map((f) => `${f.appName === UNNAMED_APP_SENTINEL ? 'an unnamed app' : f.appName}: ${f.message}`);
+  return `Some apps' answers about these links had problems: ${entries.join('; ')}`;
 }

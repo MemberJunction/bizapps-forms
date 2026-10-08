@@ -168,6 +168,7 @@ export const DISTRIBUTION_STYLES = /* css */ `
 .dm-claim-body { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); min-width: 0; flex: 1; }
 .dm-claim-body p { margin: 0; }
 .dm-claim-label { color: var(--mj-text-secondary); }
+.dm-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .dm-claim-check { padding: var(--mjf-gap-sm) 0; }
 .dm-warn code { font-family: var(--mj-font-family-mono, monospace); }
 
