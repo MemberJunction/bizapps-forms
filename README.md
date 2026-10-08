@@ -106,6 +106,9 @@ read it.
 
 > What runs after Submit, how to configure or decline each hook, and which record owns
 > respondent identity → **[docs/on-submit-automations.md](docs/on-submit-automations.md)**
+>
+> Other apps that use a form's share link as their own intake (claim providers) →
+> **[docs/distribution-claims.md](docs/distribution-claims.md)**
 
 ---
 
