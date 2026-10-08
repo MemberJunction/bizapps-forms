@@ -6,7 +6,7 @@
  * Discovered through the `*Resolver.{js,ts}` glob registered in `RESOLVER_PATHS` (`../index.ts`).
  */
 import { Arg, Ctx, Query, Resolver } from 'type-graphql';
-import { AppContext, ResolverBase } from '@memberjunction/server';
+import { AppContext, GetReadOnlyProvider, ResolverBase } from '@memberjunction/server';
 import type { UserInfo } from '@memberjunction/core';
 
 import { defaultClaimsServiceDeps, loadFormDistributionClaims, toClaimsResultType } from './claims.service.js';
@@ -17,9 +17,11 @@ export class DistributionClaimsResolver extends ResolverBase {
   @Query(() => DistributionClaimsResultType)
   async FormDistributionClaims(
     @Arg('formId', () => String) formId: string,
-    @Ctx() { userPayload }: AppContext,
+    @Ctx() { providers, userPayload }: AppContext,
   ): Promise<DistributionClaimsResultType> {
-    const lookup = await loadFormDistributionClaims(defaultClaimsServiceDeps(), formId, this.requireUser(userPayload));
+    const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+    const deps = defaultClaimsServiceDeps(provider);
+    const lookup = await loadFormDistributionClaims(deps, formId, this.requireUser(userPayload));
     return toClaimsResultType(lookup);
   }
 

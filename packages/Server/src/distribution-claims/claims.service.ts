@@ -7,7 +7,7 @@
  * An empty `claims` list must only ever mean "nobody owns these slugs".
  */
 import { GetGlobalObjectStore } from '@memberjunction/global';
-import { Metadata, RunView, type RunViewParams, type RunViewResult, type UserInfo } from '@memberjunction/core';
+import { LogError, type EntityInfo, type RunViewParams, type RunViewResult, type UserInfo } from '@memberjunction/core';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 
 import { FORM_DISTRIBUTION_ENTITY } from '../public-submit/entity-names.js';
@@ -31,6 +31,9 @@ export interface SlugRunView {
   RunView<T = unknown>(params: RunViewParams, contextUser?: UserInfo): Promise<RunViewResult<T>>;
 }
 
+/** Same shape as the other services' GUID checks; the id goes into a SQL filter, so it must be one. */
+const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Resolve the claims for one form's own share-link slugs.
  * Checks, in order: formId present, caller may update share links, slugs readable.
@@ -40,14 +43,20 @@ export async function loadFormDistributionClaims(deps: ClaimsServiceDeps, formId
   if (formId.trim().length === 0) {
     throw new Error('formId is required to look up share-link claims.');
   }
+  if (!GUID_PATTERN.test(formId.trim())) {
+    throw new Error('formId must be a form ID.');
+  }
   if (!deps.canUpdateDistributions(user)) {
+    LogError(`[Forms] share-link claims refused for user ${user.ID} on form ${formId}: no Update right on Form Distributions`);
     throw new Error(`Not allowed to read share-link claims for form ${formId}.`);
   }
   const read = await deps.readSlugs(formId, user);
   // `'error' in read` rather than `!read.ok`: with strictNullChecks off (this build) a boolean-literal
   // discriminant does not narrow, but `in` does.
   if ('error' in read) {
-    throw new Error(`Could not read share links for form ${formId}: ${read.error}`);
+    // The view error can carry the SQL statement; it goes to the log, never to the caller.
+    LogError(`[Forms] could not read share links for form ${formId} (user ${user.ID}): ${read.error}`);
+    throw new Error(`Could not read share links for form ${formId}.`);
   }
   const registry = deps.providers();
   const found = await findDistributionClaims(read.slugs, user, registry.providers);
@@ -73,10 +82,17 @@ export function createSlugReader(runView: SlugRunView): ClaimsServiceDeps['readS
   };
 }
 
-export function defaultClaimsServiceDeps(): ClaimsServiceDeps {
+/** The request's provider, narrowed to what the claims lookup uses. */
+export interface ClaimsProvider extends SlugRunView {
+  EntityByName(entityName: string): EntityInfo | undefined;
+}
+
+/** Wired to the REQUEST's provider, never the process-global one (transaction-capture hazard, #260/#265). */
+export function defaultClaimsServiceDeps(provider: ClaimsProvider): ClaimsServiceDeps {
   return {
-    canUpdateDistributions: (user) => new Metadata().EntityByName(FORM_DISTRIBUTION_ENTITY)?.GetUserPermisions(user).CanUpdate ?? false,
-    readSlugs: createSlugReader(new RunView()),
+    // Fail closed: a missing entity means no right.
+    canUpdateDistributions: (user) => provider.EntityByName(FORM_DISTRIBUTION_ENTITY)?.GetUserPermisions(user).CanUpdate ?? false,
+    readSlugs: createSlugReader(provider),
     providers: () => readClaimProviders(GetGlobalObjectStore()),
   };
 }
