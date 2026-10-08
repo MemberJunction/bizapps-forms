@@ -1,5 +1,29 @@
 # @mj-biz-apps/forms-server
 
+## 0.15.1
+
+### Patch Changes
+
+- 4bc23bb: Uploaded form images load faster and the welcome screen no longer jumps (#291). `GET /forms/asset/<id>` now keeps a copy of each image it serves in memory (up to 50 MB in total, images up to 8 MB), so only the first request for an image on a server process reads it from the storage provider; on Box that read took about 3 seconds. An image an author uploads is kept from the upload itself. Concurrent first requests share one read, a failed read is not kept, and the check that the file is a live public asset still runs on every request. On a published form whose welcome screen has an image, the widget now keeps its loading screen — showing the MemberJunction logo — until that image and the form's logo have loaded, or 3 seconds have passed, and then shows the welcome screen whole; a logo that fails to load is left out rather than shown and then removed. Every other loading state keeps the existing spinner.
+- 3daecc6: The Distribute tab now warns when another app owns a share link (#292). If a co-installed app (for example a hiring app that hosts the form on its own page) claims a link's slug, the author sees that responses sent to the plain Forms link are saved as form responses only and that app never sees them, with the app's own link and a copy button, plus "used by" in the link list. While the check runs the link says it is being checked, and a check that fails is shown as a failed check, never as "no claims". Warnings appear only once the consuming app registers a claim provider; see `docs/distribution-claims.md`. The check is a new authenticated GraphQL query, `FormDistributionClaims(formId)`, available to users who can update Form Distributions (and, for an API key, only with its `view:run` scope on Form Distributions).
+- 9eecfd0: Asset images and respondent-file downloads now read through the account that holds the file (#290). `MJ: Files` records a provider but not an account, and reads used to go through whichever account the engine listed first. Now they probe every account on the file's provider, so two or more accounts on one provider no longer break reads, and a host can read back what it uploaded. The order is: the account that last served that file (once this process has read it), then the pins (`FORMS_ASSET_STORAGE_ACCOUNT` for assets; `FORMS_UPLOAD_STORAGE_ACCOUNT` then `FORMS_DOWNLOAD_STORAGE_ACCOUNT` for downloads), then the provider's other accounts. A respondent file uploaded before v0.11.0 is the exception: its storage key has no per-upload id, so another account could hold someone else's file under the same key, and it is still read exactly as before (the provider's first account, else `FORMS_DOWNLOAD_STORAGE_ACCOUNT`). A file served by a later account logs one warning, not one per request, once this process has read it; requests that overlap that first read each log one. A read that fails on every account logs the account(s) tried, the provider, the storage key and each cause; respondent-file downloads log the file id rather than the storage key, because that key ends in the uploader's filename. The response a respondent sees is unchanged.
+
+  If the File Storage metadata failed to load, a read now retries the load once. If it still has not loaded, the log says so; it no longer reports "No storage account resolves".
+
+  The public asset route now refuses storage keys that contain a `.` or `..` path segment or a backslash.
+
+  **New at startup.** Forms logs a warning when several active accounts exist and `FORMS_ASSET_STORAGE_ACCOUNT` / `FORMS_UPLOAD_STORAGE_ACCOUNT` are unset. In that case uploads go to whichever account the engine resolves first, which can differ between hosts sharing a database, so every such host should pin the same account. Forms logs `[Forms] Storage is NOT ready` when a pin names no account, and a separate error when a pin names an account whose provider is inactive. Forms still uses that account, but MJ treats its provider as switched off.
+
+  This does not fix the reported case of a single Box account failing. It makes that case easier to diagnose: the failure log line now names the account and the provider, and carries the driver's error message. Box does not always pass the cause through: when a driver that is already running fails to refresh its token, Box reports only `Failed to get object: <path>`, and the refused refresh appears in the Box driver's own log lines just before it.
+
+- beab937: The public upload endpoint no longer returns the storage provider's error text to the respondent (#142). When storing a file fails, the response is `Your file could not be uploaded. Please try again.`; the provider's message goes to the server log with the response, question and distribution ids, and with the uploaded file's name redacted. An upload whose `responseId` is not a GUID is now refused with a 400 before anything is stored. When the upload ledger row cannot be written, the server log keeps the database's error but no longer repeats the statement it ran, which carried the uploaded file's name. Size, type and other 4xx messages are unchanged.
+- Updated dependencies [4bc23bb]
+- Updated dependencies [3daecc6]
+  - @mj-biz-apps/forms-ng@0.15.1
+  - @mj-biz-apps/forms-actions@0.15.1
+  - @mj-biz-apps/forms-core-entities-server@0.15.1
+  - @mj-biz-apps/forms-entities@0.15.1
+
 ## 0.15.0
 
 ### Patch Changes
