@@ -14,6 +14,8 @@ import type { GlobalObjectStore } from '@memberjunction/global';
 import {
   CLAIM_PROVIDER_TIMEOUT_MS,
   DISTRIBUTION_CLAIM_PROVIDERS_KEY,
+  MAX_CLAIMS_PER_PROVIDER,
+  MAX_FAILURES_PER_PROVIDER,
   type AttributedClaim,
   type ClaimFailure,
   type ClaimLookup,
@@ -34,14 +36,36 @@ const GENERIC_NO_ANSWER = 'did not answer (details in the server log)';
 /** Thrown by the timer so a timeout can be told apart from the provider's own failure. */
 class ClaimTimeoutError extends Error {}
 
-/** Collects one lookup's failures and mirrors each to the server log with its context. */
+/**
+ * Collects one lookup's failures and mirrors each to the server log with its context. Each app may
+ * report {@link MAX_FAILURES_PER_PROVIDER} failures; {@link finish} adds one summary per app that
+ * went over, so a provider cannot flood the response or the log.
+ */
 class FailureLog {
   readonly failures: ClaimFailure[] = [];
+  private readonly reported = new Map<string, number>();
+  private readonly suppressed = new Map<string, number>();
 
   constructor(private readonly slugs: readonly string[]) {}
 
   /** `logDetail` carries the full cause when it is unsafe to show the author in `message`. */
   record(appName: string, message: string, logDetail: string = message): void {
+    const count = this.reported.get(appName) ?? 0;
+    if (count >= MAX_FAILURES_PER_PROVIDER) {
+      this.suppressed.set(appName, (this.suppressed.get(appName) ?? 0) + 1);
+      return;
+    }
+    this.reported.set(appName, count + 1);
+    this.emit(appName, message, logDetail);
+  }
+
+  /** Emit one summary per app that exceeded its cap; call exactly once, after the last `record`. */
+  finish(): void {
+    for (const [appName, extra] of this.suppressed) this.emit(appName, `and ${extra} more problems (suppressed)`);
+    this.suppressed.clear();
+  }
+
+  private emit(appName: string, message: string, logDetail: string = message): void {
     this.failures.push({ appName, message });
     LogError(`[Forms] distribution claims: ${appName} for slugs ${this.slugs.join(', ')}: ${logDetail}`);
   }
@@ -63,37 +87,60 @@ function isUsableName(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= MAX_LABEL_LENGTH;
 }
 
+type EntryRead = { provider: DistributionClaimProvider } | { failure: ClaimFailure };
+
 /**
- * `entry` is `unknown` because the store's index type is `any` and any app may have pushed
- * anything; the guard narrows it before a single member is used.
+ * Snapshot one slot entry. `entry` is `unknown` because the store's index type is `any` and any
+ * app may have pushed anything; every member is read exactly once, inside the caller's try, so a
+ * throwing getter is a reported failure and later reads cannot differ from the validated ones.
  */
-function isProvider(entry: unknown): entry is DistributionClaimProvider {
-  return isRecord(entry) && isUsableName(entry.AppName) && typeof entry.FindClaims === 'function';
+function snapshotEntry(entry: unknown): EntryRead {
+  if (!isRecord(entry)) return { failure: { appName: UNKNOWN_APP, message: 'registered a claim provider with no AppName' } };
+  const rawName: unknown = entry.AppName;
+  const findClaims: unknown = entry.FindClaims;
+  if (!isUsableName(rawName)) {
+    const tooLong = typeof rawName === 'string' && rawName.trim().length > MAX_LABEL_LENGTH;
+    const what = tooLong ? `an AppName over ${MAX_LABEL_LENGTH} characters` : 'no AppName';
+    return { failure: { appName: UNKNOWN_APP, message: `registered a claim provider with ${what}` } };
+  }
+  const appName = rawName.trim();
+  if (typeof findClaims !== 'function') {
+    return { failure: { appName, message: 'registered a claim provider without a FindClaims function' } };
+  }
+  // Called with the original entry as `this`, as a method call would, so providers may use `this`.
+  return { provider: { AppName: appName, FindClaims: (slugs, user) => findClaims.call(entry, slugs, user) } };
 }
 
-function describeBadEntry(entry: unknown): ClaimFailure {
-  if (isRecord(entry) && isUsableName(entry.AppName)) {
-    return { appName: entry.AppName.trim(), message: 'registered a claim provider without a FindClaims function' };
+/** Snapshot one entry; a refusal of any kind (including a throwing getter) is logged here with its cause. */
+function readEntry(entry: unknown): EntryRead {
+  try {
+    const read = snapshotEntry(entry);
+    if ('failure' in read) LogError(`[Forms] distribution claims: ${read.failure.appName}: ${read.failure.message}`);
+    return read;
+  } catch (error) {
+    LogError(`[Forms] distribution claims: a claim provider entry could not be read: ${describeError(error)}`);
+    return { failure: { appName: UNKNOWN_APP, message: 'registered a claim provider that could not be read' } };
   }
-  const tooLong = isRecord(entry) && typeof entry.AppName === 'string' && entry.AppName.trim().length > MAX_LABEL_LENGTH;
-  const what = tooLong ? `an AppName over ${MAX_LABEL_LENGTH} characters` : 'no AppName';
-  return { appName: UNKNOWN_APP, message: `registered a claim provider with ${what}` };
 }
 
 /**
  * Read the registered providers from the global object store. A read: it reports and logs what it
- * rejects, but never repairs the slot, which belongs to the consumers.
+ * rejects, but never repairs the slot, which belongs to the consumers. Providers come back as
+ * plain snapshots, so a getter on the consumer's object cannot misbehave later in the lookup.
  */
 export function readClaimProviders(store: GlobalObjectStore | null): { providers: DistributionClaimProvider[]; failures: ClaimFailure[] } {
   const slot: unknown = store?.[DISTRIBUTION_CLAIM_PROVIDERS_KEY]; // unknown: any app may have written this slot
   if (slot === undefined || slot === null) return { providers: [], failures: [] };
-  const entries: unknown[] = Array.isArray(slot) ? slot : [];
-  const providers = entries.filter(isProvider);
-  const failures = Array.isArray(slot)
-    ? entries.filter((e) => !isProvider(e)).map(describeBadEntry)
-    : [{ appName: UNKNOWN_APP, message: 'registered a claim provider slot that is not an array' }];
-  failures.forEach((f) => LogError(`[Forms] distribution claims: ${f.appName}: ${f.message}`));
-  return { providers, failures };
+  if (!Array.isArray(slot)) {
+    const failure = { appName: UNKNOWN_APP, message: 'registered a claim provider slot that is not an array' };
+    LogError(`[Forms] distribution claims: ${failure.appName}: ${failure.message}`);
+    return { providers: [], failures: [failure] };
+  }
+  const reads = (slot as unknown[]).map(readEntry);
+  return {
+    providers: reads.flatMap((r) => ('provider' in r ? [r.provider] : [])),
+    failures: reads.flatMap((r) => ('failure' in r ? [r.failure] : [])),
+  };
 }
 
 /** True only for an absolute http(s) URL; the builder renders it as a link, so `javascript:` must not pass. */
@@ -153,8 +200,11 @@ function validateAnswer(answer: unknown, appName: string, asked: ReadonlySet<str
     log.record(appName, 'returned something other than an array of claims');
     return [];
   }
+  if (answer.length > MAX_CLAIMS_PER_PROVIDER) {
+    log.record(appName, `returned ${answer.length} claims; only the first ${MAX_CLAIMS_PER_PROVIDER} were checked`);
+  }
   const accepted: AttributedClaim[] = [];
-  for (const raw of answer as unknown[]) {
+  for (const raw of (answer as unknown[]).slice(0, MAX_CLAIMS_PER_PROVIDER)) {
     const claim = acceptClaim(raw, appName, asked, log);
     if (claim) accepted.push(claim);
   }
@@ -169,8 +219,9 @@ async function askOne(
   timeoutMs: number,
   log: FailureLog,
 ): Promise<AttributedClaim[]> {
-  const appName = provider.AppName.trim();
+  let appName = UNKNOWN_APP; // the read below can throw on a raw provider, and the catch still needs a name
   try {
+    appName = provider.AppName.trim(); // readClaimProviders hands over a snapshot, but callers may pass raw providers
     const answer = await askWithTimeout(provider, Object.freeze([...slugs]), user, timeoutMs);
     return validateAnswer(answer, appName, asked, log);
   } catch (error) {
@@ -214,5 +265,7 @@ export async function findDistributionClaims(
   const asked: ReadonlySet<string> = new Set(slugs); // built before any provider runs, so none can widen it
   const log = new FailureLog(slugs);
   const answers = await Promise.all(providers.map((p) => askOne(p, slugs, asked, contextUser, timeoutMs, log)));
-  return { claims: dropDuplicateClaims(answers.flat(), log), failures: log.failures };
+  const claims = dropDuplicateClaims(answers.flat(), log);
+  log.finish();
+  return { claims, failures: log.failures };
 }

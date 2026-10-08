@@ -81,6 +81,22 @@ the URL; each case is reported:
 - A thrown error or rejected promise shows the author `did not answer (details in the server log)`;
   the full error goes to the server log, never to the browser. No answer within **5 seconds**
   shows `did not answer within 5000ms`.
+- **The 5 second limit bounds an asynchronous answer, nothing more.** `FindClaims` runs in the
+  MJAPI process, on the builder's request path. It must not block: no synchronous loops, no
+  synchronous I/O (`fs.readFileSync`, a CPU-bound scan). A timer cannot fire while your code holds
+  the event loop, so a blocking provider stalls every request on that process, and Forms cannot
+  stop it. After a timeout Forms stops waiting, but work you started keeps running; cancel it
+  yourself if it matters.
+- **Only the first 500 elements of your answer are checked** (`MAX_CLAIMS_PER_PROVIDER`); a longer
+  answer is reported as `returned <n> claims; only the first 500 were checked`. You can only claim
+  slugs you were asked about, so there is no reason to return more.
+- **At most 20 failures per app are reported per lookup** (`MAX_FAILURES_PER_PROVIDER`), to the
+  author and to the server log. The rest are counted into one line, `and <k> more problems
+  (suppressed)`, so a misbehaving provider cannot flood either.
+- **Forms reads your registration once per lookup**, taking a snapshot of `AppName` and
+  `FindClaims`. A getter that throws gets your entry reported as `registered a claim provider that
+  could not be read`, and the other providers are unaffected. `FindClaims` is still called with
+  your registered object as `this`.
 
 ## What the author sees
 

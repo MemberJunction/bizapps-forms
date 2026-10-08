@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LogError, type UserInfo } from '@memberjunction/core';
-import { DISTRIBUTION_CLAIM_PROVIDERS_KEY, type DistributionClaimProvider } from '../claim-contract';
+import { DISTRIBUTION_CLAIM_PROVIDERS_KEY, MAX_CLAIMS_PER_PROVIDER, MAX_FAILURES_PER_PROVIDER, type DistributionClaimProvider } from '../claim-contract';
 import { findDistributionClaims, readClaimProviders } from '../find-claims';
 
 vi.mock('@memberjunction/core', async (orig) => ({ ...(await orig<typeof import('@memberjunction/core')>()), LogError: vi.fn() }));
@@ -20,8 +20,10 @@ describe('readClaimProviders', () => {
     expect(readClaimProviders(null)).toEqual({ providers: [], failures: [] });
   });
   it('returns well-formed providers from the slot', () => {
-    const p = provider();
-    expect(readClaimProviders({ [DISTRIBUTION_CLAIM_PROVIDERS_KEY]: [p] }).providers).toEqual([p]);
+    const p = provider({ AppName: '  Caliber  ' });
+    const out = readClaimProviders({ [DISTRIBUTION_CLAIM_PROVIDERS_KEY]: [p] });
+    expect(out.failures).toEqual([]);
+    expect(out.providers.map((x) => x.AppName)).toEqual(['Caliber']); // a trimmed snapshot, not the live entry
   });
   it('reports a malformed entry instead of skipping it silently', () => {
     const out = readClaimProviders({ [DISTRIBUTION_CLAIM_PROVIDERS_KEY]: [{ AppName: 'X' }, 42] });
@@ -138,5 +140,65 @@ describe('findDistributionClaims', () => {
   });
   it('rejects a provider whose AppName is blank', () => {
     expect(readClaimProviders({ [DISTRIBUTION_CLAIM_PROVIDERS_KEY]: [provider({ AppName: '  ' })] }).failures).toEqual([{ appName: 'unknown', message: expect.stringContaining('AppName') }]);
+  });
+
+  describe('a provider whose members throw', () => {
+    const throwingName = (): DistributionClaimProvider => ({
+      get AppName(): string { throw new Error('getter boom'); },
+      FindClaims: async () => [],
+    });
+    it('is reported as unreadable by readClaimProviders while the other providers are still read', () => {
+      const out = readClaimProviders({ [DISTRIBUTION_CLAIM_PROVIDERS_KEY]: [throwingName(), provider()] });
+      expect(out.providers.map((p) => p.AppName)).toEqual(['Caliber']);
+      expect(out.failures).toEqual([{ appName: 'unknown', message: 'registered a claim provider that could not be read' }]);
+      expect(LogError).toHaveBeenCalledWith(expect.stringContaining('getter boom'));
+    });
+    it('cannot reject the lookup when AppName only throws after the first read', async () => {
+      let reads = 0;
+      const flaky: DistributionClaimProvider = {
+        get AppName(): string { if (++reads > 1) throw new Error('second read'); return 'Flaky'; },
+        FindClaims: async () => [],
+      };
+      const { providers } = readClaimProviders({ [DISTRIBUTION_CLAIM_PROVIDERS_KEY]: [flaky, provider()] });
+      const out = await findDistributionClaims(['intake'], user, providers);
+      expect(out.claims.map((c) => c.appName)).toEqual(['Caliber']);
+    });
+    it('still runs FindClaims with the original entry as this', async () => {
+      const owner = { slug: 'intake', AppName: 'Self', FindClaims(this: { slug: string }) { return Promise.resolve([{ slug: this.slug, ownerLabel: 'Mine', respondentUrl: null }]); } };
+      const { providers } = readClaimProviders({ [DISTRIBUTION_CLAIM_PROVIDERS_KEY]: [owner] });
+      const out = await findDistributionClaims(['intake'], user, providers);
+      expect(out.claims).toEqual([{ appName: 'Self', slug: 'intake', ownerLabel: 'Mine', respondentUrl: null }]);
+    });
+  });
+
+  describe('unbounded answers', () => {
+    it('checks only the first MAX_CLAIMS_PER_PROVIDER elements and says so once', async () => {
+      const seen = vi.fn();
+      const huge = Array.from({ length: 1000 }, (_, i) => ({ get slug(): string { seen(i); return 'intake'; }, ownerLabel: 'S', respondentUrl: null }));
+      const out = await findDistributionClaims(['intake'], user, [provider({ FindClaims: async () => huge })]);
+      expect(MAX_CLAIMS_PER_PROVIDER).toBe(500);
+      expect(Math.max(...seen.mock.calls.map((c) => c[0] as number))).toBeLessThan(500);
+      expect(out.claims).toHaveLength(1); // dedupe still applies
+      expect(out.failures.filter((f) => f.message === 'returned 1000 claims; only the first 500 were checked')).toHaveLength(1);
+    });
+    it('reports at most MAX_FAILURES_PER_PROVIDER details then exactly one suppression summary', async () => {
+      const slugs = Array.from({ length: 50 }, (_, i) => `s${i}`);
+      const bad = provider({ FindClaims: async () => slugs.map((slug) => ({ slug, ownerLabel: 'S', respondentUrl: 'nope' })) });
+      const out = await findDistributionClaims(slugs, user, [bad]);
+      expect(MAX_FAILURES_PER_PROVIDER).toBe(20);
+      expect(out.failures).toHaveLength(21);
+      expect(out.failures[20]).toEqual({ appName: 'Caliber', message: 'and 30 more problems (suppressed)' });
+      expect(out.failures.filter((f) => f.message.includes('more problems'))).toHaveLength(1);
+      expect(vi.mocked(LogError).mock.calls.length).toBeLessThanOrEqual(21);
+      expect(out.claims).toHaveLength(50);
+    });
+    it('counts the cap per app, so a noisy app does not silence another', async () => {
+      const slugs = Array.from({ length: 30 }, (_, i) => `s${i}`);
+      const noisy = provider({ FindClaims: async () => slugs.map((slug) => ({ slug, ownerLabel: 'S', respondentUrl: 'nope' })) });
+      const other = provider({ AppName: 'Other', FindClaims: async () => [{ slug: 's0', ownerLabel: 'S', respondentUrl: 'nope' }] });
+      const out = await findDistributionClaims(slugs, user, [noisy, other]);
+      expect(out.failures.filter((f) => f.appName === 'Other')).toHaveLength(1);
+      expect(out.failures.filter((f) => f.appName === 'Caliber')).toHaveLength(21);
+    });
   });
 });

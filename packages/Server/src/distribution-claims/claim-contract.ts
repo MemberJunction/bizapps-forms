@@ -24,8 +24,26 @@ export const DISTRIBUTION_CLAIM_PROVIDERS_KEY = '__mjBizAppsForms.distributionCl
 /**
  * How long one provider gets to answer. A provider is foreign code answering a builder-facing
  * query, so a hung one must cost the author five seconds and a failure line, never an open spinner.
+ *
+ * This bounds an ASYNCHRONOUS answer only: `FindClaims` runs in-process on the request path, so a
+ * provider that blocks the event loop synchronously is beyond any timer, and work a provider
+ * started keeps running after the timeout fires.
  */
 export const CLAIM_PROVIDER_TIMEOUT_MS = 5000;
+
+/**
+ * How many elements of one provider's answer are examined. Only the slugs asked about can be
+ * claimed, so a longer answer is padding or a bug; checking all of it would let one provider spend
+ * unbounded CPU and flood the log and the GraphQL response with rejections.
+ */
+export const MAX_CLAIMS_PER_PROVIDER = 500;
+
+/**
+ * How many individual failures one provider may report per lookup. Beyond it the rest are counted
+ * into a single summary line: the author learns the app is misbehaving without the response and
+ * the server log growing with the provider's output.
+ */
+export const MAX_FAILURES_PER_PROVIDER = 20;
 
 /** One slug a consumer app owns. */
 export interface DistributionClaim {
