@@ -16,17 +16,27 @@ object store, so there is no dependency, no peer range and no release coupling.
 Run this once at server start-up, in your app's server package. It needs no Forms import:
 
 ```ts
-const KEY = '__mjBizAppsForms.distributionClaimProviders.v1';
+import type { UserInfo } from '@memberjunction/core';
 
-const slot = ((globalThis as Record<string, unknown>)[KEY] ??= []) as unknown[];
-slot.push({
+type Claim = { slug: string; ownerLabel: string; respondentUrl: string | null };
+type ClaimProvider = {
+  AppName: string;
+  FindClaims(slugs: readonly string[], contextUser: UserInfo): Promise<Claim[]>;
+};
+
+const KEY = '__mjBizAppsForms.distributionClaimProviders.v1';
+const provider: ClaimProvider = {
   AppName: 'Caliber',
   async FindClaims(slugs, contextUser) {
-    // return [{ slug, ownerLabel, respondentUrl }, ...] for the asked slugs you own
-    return [];
+    return []; // a Claim for each asked slug you own
   },
-});
+};
+
+const slot = ((globalThis as Record<string, unknown>)[KEY] ??= []) as ClaimProvider[];
+slot.push(provider);
 ```
+
+The slot is an array. If it is somehow not one, Forms reports that to the author as a failure.
 
 - **Create if absent, then push. Never replace.** The slot is shared by every consumer; assigning a
   new array silently evicts the others.
@@ -47,7 +57,12 @@ slot.push({
 `FindClaims` is a **read**. Do not write, create or send anything from it. `contextUser` is the
 author viewing the builder; you decide what that user may learn. The `slugs` array is frozen.
 
-Forms validates every answer and drops whatever fails, so a provider can lose only its own claims:
+A provider with a missing, blank or over-200-character `AppName`, or without a `FindClaims`
+function, is rejected and reported to the author.
+
+Forms validates every answer, so a provider can lose only its own claims. It drops a claim for an
+unasked slug or with a bad `ownerLabel`, and keeps a claim whose `respondentUrl` is bad but nulls
+the URL; each case is reported:
 
 - `slug` must be one of the slugs asked about. Anything else is rejected.
 - `ownerLabel` says what inside your app owns the slug (an interview step's name). Trimmed;
@@ -56,9 +71,9 @@ Forms validates every answer and drops whatever fails, so a provider can lose on
   Anything else (a relative path, `javascript:`) is nulled and reported as a failure.
   **Return `null` when your front door must not be published**; the author is then told to use the
   link your app hands out.
-- A thrown error, a rejected promise, or no answer within **5 seconds** counts as "did not answer".
-  The author sees that your app could not be checked, with generic text; the full error goes to the
-  server log, never to the browser.
+- A thrown error or rejected promise shows the author `did not answer (details in the server log)`;
+  the full error goes to the server log, never to the browser. No answer within **5 seconds**
+  shows `did not answer within 5000ms`.
 
 ## What the author sees
 
@@ -68,7 +83,8 @@ On the **Distribute** tab, for each share link your app claims:
   responses only, and your app never sees them;
 - your `respondentUrl` in a read-only field with a copy button ("Send people to your app's link
   instead"), or, when it is `null`, "Share the link your app gives you instead";
-- "used by your app" on that link in the left rail, and a note that the link stores responses only.
+- ` · used by <your app's name>` in the left rail, next to the link's response count, and a note
+  that the link stores responses only.
 
 If a provider fails, the tab shows a line saying it could not check whether that app uses these
 links. A failed check is never shown as "nobody claims this".
