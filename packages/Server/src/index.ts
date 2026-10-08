@@ -43,6 +43,9 @@ import './http/StacktraceRedactionMiddleware.js';
 // WP-B: import the custom public-submit resolver so its TypeGraphQL metadata is registered.
 import './public-submit/PublicFormResolver.js';
 
+// #292: same for the authenticated author query that reports consumer-owned share-link slugs.
+import './distribution-claims/DistributionClaimsResolver.js';
+
 // TASK 2: import the respondent host-page middleware so its @RegisterClass fires and MJ
 // server bootstrap discovers the public /f/:slug route (anonymous, shell-free host page).
 import './respondent-host/RespondentHostMiddleware.js';
@@ -102,6 +105,8 @@ MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());
 export const RESOLVER_PATHS = [resolve(__dirname, 'generated/generated.{js,ts}')];
 // WP-B (public submit endpoint): custom anonymous resolvers, discovered via the *Resolver glob.
 RESOLVER_PATHS.push(resolve(__dirname, 'public-submit/*Resolver.{js,ts}'));
+// #292: the FormDistributionClaims query. An authenticated AUTHOR query (builder), not a respondent one.
+RESOLVER_PATHS.push(resolve(__dirname, 'distribution-claims/*Resolver.{js,ts}'));
 
 /**
  * Bootstrap function called by DynamicPackageLoader during MJAPI startup.
