@@ -161,6 +161,18 @@ jobs:
       - name: Validate repository.url in packages
         run: ./.github/scripts/validate-package-repository.sh
 
+      # A host installs ONE copy of MemberJunction and one copy of each Open App. A published package
+      # that brings its own — `@memberjunction/*` or another app's `@mj-biz-apps/*` (common, tasks) in
+      # `dependencies`, or a `~`/exact peer that rejects the host's next minor (`~6.1.5` refuses every
+      # 6.2 host) — splits MJ's class-factory registry, and registrations miss silently. The Peer-range
+      # gate below asks whether a peer is WRITTEN exact; this asks the one-copy question across both
+      # blocks. Shared verbatim across the BizApps family; stdlib only, so it runs before the install.
+      # Its own spec (`--self-test`) runs first, so a broken checker cannot pass.
+      - name: One-copy dependency-model gate
+        run: |
+          node .github/scripts/check-dependency-model.mjs --self-test
+          node .github/scripts/check-dependency-model.mjs
+
       # A gate whose own test is not wired into CI is a gate nobody is checking — and this one
       # spent its whole life unable to detect the mis-casing it exists for.
       - name: CI guard script tests
