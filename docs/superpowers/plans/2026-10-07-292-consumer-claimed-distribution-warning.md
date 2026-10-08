@@ -27,6 +27,69 @@
 - **Respondent behaviour unchanged.** `/f/<slug>` keeps accepting responses. Refusing or redirecting is a later decision, and the warning ships first.
 - **Scope:** this Forms PR, plus a bizapps-caliber issue describing the provider Caliber should register. No Caliber code in this PR.
 
+## Plan review (`/council --full`, 2026-10-07: gpt-5.5 and gemini-3.1-pro answered; grok-4.7 timed out at 600 s)
+
+The council received the plan, `packages/Server/src/index.ts`, `distribution.service.ts`, and `distribution-manager.component.{ts,html}`. Each accepted finding was confirmed in code before it was folded into the tasks below.
+
+**Accepted**
+
+1. **The slug read's filter was unspecified, so an implementation could leave out `FormID` or interpolate it raw** (both members).
+   - Evidence: the server already has `quoteSqlString` (`packages/Entities/src/contracts/sql-literal.ts:49`, used at `respondent-host/resume-deps.ts:126`).
+   - Change (Task 2): the read is exactly ``ExtraFilter: `FormID=${quoteSqlString(formId)} AND Slug IS NOT NULL` ``, and a test asserts the filter the fake receives.
+2. **`respondentUrl` must be a nullable GraphQL field.**
+   - Evidence: `PublicFormResolver`'s types use `{ nullable: true }` (`public-submit/graphql-types.ts:33`).
+   - Extra constraint: `strictNullChecks` is off in the Server *build* while `emitDecoratorMetadata` is on (`packages/Server/tsconfig.typecheck.json` header comment), so every `@Field` gets an **explicit** type function.
+   - Change (Task 2): `@Field(() => String, { nullable: true })`, and a mapping test with a null URL.
+3. **Pin that the slug read runs as the caller.**
+   - Change (Task 2): a test asserts `readSlugs` receives the caller's `UserInfo`, and the default dependencies pass `user`, never the system user.
+4. **A provider could mutate the shared `slugs` array before the next provider is called.**
+   - Evidence: `Promise.all(providers.map(...))` calls each `FindClaims` synchronously, in order.
+   - Change (Task 1): build the asked `Set` first, give each provider its own frozen copy, and add a test.
+5. **A provider's raw `Error.message` reached the author.**
+   - That text belongs to another app's internals, and the author cannot act on it.
+   - Change (Task 1): a thrown or rejected provider is reported as `"did not answer (details in the server log)"`, with the full error in `LogError`. Messages Forms writes itself (timeout, malformed answer) stay specific.
+6. **`ExecuteGQL` returns the root data object, so the parser must read `payload.FormDistributionClaims`.**
+   - Evidence: `MJ/packages/GraphQLDataProvider/src/graphQLDataProvider.ts:2870-2873` returns `this._client.request(...)`, and its own caller reads `d.CurrentUser` (`:513-516`).
+   - Change (Task 3): the exact query text and a parser test on that shape.
+7. **`vi.fn()` mocks must be typed.**
+   - Evidence: `tsconfig.typecheck.json` type-checks specs (Server with `strictNullChecks`).
+   - Change (Tasks 1 and 2): `vi.fn<DistributionClaimProvider['FindClaims']>()`.
+8. **A module-scoped mock leaks call history between tests.**
+   - Change (Task 2): build a fresh provider per test.
+9. **The registration test was only textual.**
+   - Change (Task 2): keep it, and add a test of the resolver's pure mapping function `toClaimsResultType`.
+10. **App and owner labels are display text from another app.**
+    - Change (Task 1): trim them, and reject over 200 characters as a reported failure.
+11. **The docs must state that the registry is per process.**
+    - Change (Task 5): every MJAPI process must load the consumer, and "no provider" is indistinguishable from "consumer not loaded".
+12. **The component is `OnPush`, so the async claims answer must call `cdr.markForCheck()`.**
+    - Evidence: `distribution-manager.component.ts:72`.
+    - Change (Task 4).
+13. **`claimsFor` returns a shared frozen `NO_CLAIMS` constant for unclaimed links.**
+14. **A provider that returns `respondentUrl: null` is not a failure.**
+    - Change (Task 1): pass a null URL through silently, and add a test.
+15. **Two claims on one slug would share one "Copied" state.**
+    - Evidence: `CopyTarget = 'link' | 'embed'` (`distribution-manager.component.ts:38`).
+    - Change (Task 4): `CopyTarget` gains `` `consumer:${string}` ``, keyed by app name.
+
+**Rejected**
+
+- **"Late provider rejection after a timeout is an unhandled rejection that crashes Node"** (gemini).
+  - `Promise.race` subscribes to every input, so a late rejection is already handled. The other member's peer review says the same.
+  - Kept instead: a test for a provider that throws *synchronously*. `askOne` is `async`, so that throw becomes a rejection too.
+- **"Revalidate `respondentUrl` on the client too"** (gpt-5.5).
+  - It would be a second copy of the server's rule, the duplicated decision the design principles forbid.
+  - The server is the single authority. The tab renders the URL in a readonly input and a copy button, with no `href`.
+- **"Add `ngOnChanges` for a `formId` that changes while the tab is open"** (gpt-5.5).
+  - The tab is created inside `@else if (activeTab === 'distribute')` for one record (`form-builder.component.html:719-722`), and the existing link load is init-only.
+  - A record change recreates the component. This change introduces no new exposure.
+- **"Invalidate the claims request in `ngOnDestroy`"** (gpt-5.5).
+  - `markForCheck()` on a destroyed view is a no-op, and `reload()` already has the same shape.
+  - A guard here would be special-case code for no observable failure.
+- **"Clear the claim map before every reload"** (gpt-5.5).
+  - Quiet reloads follow credential writes, which never change a slug, so clearing would flicker the warning off and on.
+  - Claims are keyed by slug, so a stale entry can attach only to the same slug, which is still claimed.
+
 ## Design
 
 ### The protocol (what a consumer implements)
@@ -60,7 +123,9 @@ interface DistributionClaim {
   - A `respondentUrl` that is not absolute `http:`/`https:` is nulled and reported. The tab renders it as a link, so a `javascript:` URL must never reach it.
 - **`loadFormDistributionClaims(deps, formId, contextUser)`** is the authorization and data boundary:
   1. It requires `CanUpdate` on `MJ_BizApps_Forms: Form Distributions`. This is the same eligibility rule as `asset/asset.service.ts:203`. The anonymous "Form Respondent" role has scope-filtered **read** on distributions (`migrations/V202608131600…:180`) but no update, so a magic-link session is refused. A second "is anonymous" check would be a second definition of the same fact (`download/download.service.ts:34-39`).
-  2. It reads the form's slugs itself (`RunView`, `simple`, `Fields: ['Slug']`, `Slug IS NOT NULL`, under `contextUser`). A caller therefore cannot use the query to probe arbitrary slugs.
+  2. It reads the form's slugs itself, so a caller cannot use the query to probe arbitrary slugs:
+     - `RunView`, `ResultType: 'simple'`, `Fields: ['Slug']`, run under the **caller's** `contextUser`;
+     - ``ExtraFilter: `FormID=${quoteSqlString(formId)} AND Slug IS NOT NULL` ``.
   3. It returns `{ claims, failures }`. No slugs means no provider calls.
 - **`FormDistributionClaims(formId: String!)`** is the GraphQL query: a thin TypeGraphQL resolver over the service. It gets its own `RESOLVER_PATHS` glob entry.
 
@@ -68,7 +133,7 @@ interface DistributionClaim {
 
 - After every successful `reload()`, the tab calls `DistributionService.claims(formId)`. It never raises `loading`, and a stale answer is discarded by a generation counter.
 - **Selected link, when claimed:** a warning between the header and the Link / QR / Embed switcher, so it covers all three. The text is built by the pure helper `claimNotice(claims)`:
-  - Line 1: "**Caliber** uses this link for **Technology Fellow screen**. Responses sent here are saved as form responses only. Caliber never sees them."
+  - Line 1: "**Caliber** uses this link for **Applicant screen**. Responses sent here are saved as form responses only. Caliber never sees them."
   - Line 2 with a URL: "Send people to Caliber's link instead:", then a readonly field and a "Copy link" button.
   - Line 2 without a URL: "Share the link Caliber gives you instead."
   - If two apps claim one slug, it shows one line per claim.
@@ -113,7 +178,7 @@ interface DistributionClaim {
 2. **An anonymous magic-link session calls the query.** It must be refused. The respondent role can read distributions, so a check on *read* permission would let it through. → Task 2 test "refuses a caller who cannot update share links".
 3. **A provider returns a `javascript:` or relative `respondentUrl`.** It must never be rendered as a link. → Task 1 test "nulls a respondentUrl that is not absolute http(s)".
 4. **A provider claims a slug it was not asked about**, such as another form's link. It must not appear. → Task 1 test "drops a claim for a slug that was not asked".
-5. **The author switches forms or reloads while claims are in flight.** A stale answer must not paint the wrong form's links. → Task 4 test "ignores a claims answer that arrives after a newer reload".
+5. **The tab reloads while a claims answer is in flight.** The older answer must not overwrite the newer one. → Task 4 test "ignores a claims answer that arrives after a newer reload".
 
 ---
 
@@ -171,15 +236,35 @@ describe('findDistributionClaims', () => {
     expect(out).toEqual({ claims: [{ appName: 'Caliber', slug: 'intake', ownerLabel: 'Screen step', respondentUrl: 'https://host.example/interview?blueprint=1' }], failures: [] });
   });
   it('asks nobody when there are no slugs', async () => {
-    const FindClaims = vi.fn();
+    const FindClaims = vi.fn<DistributionClaimProvider['FindClaims']>();
     expect(await findDistributionClaims([], user, [provider({ FindClaims })])).toEqual({ claims: [], failures: [] });
     expect(FindClaims).not.toHaveBeenCalled();
   });
-  it('turns a throwing provider into a failure and keeps the other answers', async () => {
-    const bad = provider({ AppName: 'Broken', FindClaims: async () => { throw new Error('db down'); } });
+  it('turns a throwing provider into a failure without echoing its internals, and keeps the other answers', async () => {
+    const bad = provider({ AppName: 'Broken', FindClaims: async () => { throw new Error('select from secret_table failed'); } });
     const out = await findDistributionClaims(['intake'], user, [bad, provider()]);
     expect(out.claims).toHaveLength(1);
-    expect(out.failures).toEqual([{ appName: 'Broken', message: 'db down' }]);
+    expect(out.failures).toEqual([{ appName: 'Broken', message: 'did not answer (details in the server log)' }]);
+  });
+  it('treats a synchronous throw like a rejection', async () => {
+    const sync = provider({ AppName: 'Sync', FindClaims: () => { throw new Error('boom'); } });
+    expect((await findDistributionClaims(['intake'], user, [sync])).failures).toEqual([{ appName: 'Sync', message: 'did not answer (details in the server log)' }]);
+  });
+  it('gives each provider its own copy of the slugs, so one cannot widen what the next is asked', async () => {
+    const mutator = provider({ AppName: 'Mutator', FindClaims: (slugs) => { (slugs as string[]).push('other-form'); return Promise.resolve([]); } });
+    const seen = vi.fn<DistributionClaimProvider['FindClaims']>(async () => []);
+    await findDistributionClaims(['intake'], user, [mutator, provider({ FindClaims: seen })]);
+    expect(seen).toHaveBeenCalledWith(['intake'], user);
+  });
+  it('passes a deliberate null respondentUrl through without reporting it', async () => {
+    const p = provider({ FindClaims: async () => [{ slug: 'intake', ownerLabel: 'S', respondentUrl: null }] });
+    expect(await findDistributionClaims(['intake'], user, [p])).toEqual({ claims: [{ appName: 'Caliber', slug: 'intake', ownerLabel: 'S', respondentUrl: null }], failures: [] });
+  });
+  it('trims labels and rejects one over 200 characters', async () => {
+    const p = provider({ FindClaims: async () => [{ slug: 'intake', ownerLabel: '  Step  ', respondentUrl: null }, { slug: 'intake', ownerLabel: 'x'.repeat(201), respondentUrl: null }] });
+    const out = await findDistributionClaims(['intake'], user, [p]);
+    expect(out.claims.map((c) => c.ownerLabel)).toEqual(['Step']);
+    expect(out.failures).toHaveLength(1);
   });
   it('times out a provider that never answers', async () => {
     const hung = provider({ AppName: 'Hung', FindClaims: () => new Promise(() => undefined) });
@@ -250,6 +335,7 @@ The TSDoc on the key must say: versioned, an array that consumers create if abse
 - Produces:
   - `ClaimsServiceDeps { canUpdateDistributions(user: UserInfo): boolean; readSlugs(formId: string, user: UserInfo): Promise<{ ok: true; slugs: string[] } | { ok: false; error: string }>; providers(): { providers: DistributionClaimProvider[]; failures: ClaimFailure[] } }`
   - `loadFormDistributionClaims(deps, formId, user): Promise<ClaimLookup>`. It throws `Error` on refusal or a failed read; the resolver lets that reach the caller, which is an authenticated author, not a respondent.
+  - `createSlugReader(runView: SlugRunView): ClaimsServiceDeps['readSlugs']` and `toClaimsResultType(lookup: ClaimLookup): DistributionClaimsResultType` (exported for tests)
   - `defaultClaimsServiceDeps(): ClaimsServiceDeps` wires `Metadata.EntityByName(FORM_DISTRIBUTION_ENTITY)?.GetUserPermisions(user).CanUpdate`, the `RunView`, and `readClaimProviders(GetGlobalObjectStore())`.
   - GraphQL: `FormDistributionClaims(formId: String!): DistributionClaimsResult!` with `claims { appName slug ownerLabel respondentUrl }` and `failures { appName message }`.
 
@@ -308,8 +394,18 @@ describe('FormDistributionClaims registration', () => {
 });
 ```
 
+Additional Task 2 tests:
+- **`slug-reader.spec.ts`.** `createSlugReader(runView)` is the default `readSlugs`, taking a narrow `RunView` surface as `download.service.ts:76` does.
+  - It passes ``ExtraFilter: `FormID='f''1' AND Slug IS NOT NULL` `` for `formId` `f'1`.
+  - It passes `ResultType: 'simple'` and `Fields: ['Slug']`.
+  - It passes the **caller's** user as `RunView`'s second argument.
+  - It maps `Success: false` to `{ ok: false, error }`.
+- **`toClaimsResultType` mapping.** It keeps a `null` `respondentUrl` as `null`, and copies `failures`.
+- **Fresh mocks.** `claims.service.spec.ts` builds the provider inside each test (`makeCaliber()`), not at module scope, and types it with `vi.fn<DistributionClaimProvider['FindClaims']>`.
+
 - [ ] **Step 2: Run, expect FAIL.**
 - [ ] **Step 3: Implement.**
+  - Every `@Field` takes an explicit type function, and `respondentUrl` is `@Field(() => String, { nullable: true })`. `strictNullChecks` is off in the build, while `emitDecoratorMetadata` is on.
   - The service guards the blank `formId` first, then the permission (`'Not allowed to read share-link claims for form <id>'`), then `readSlugs`. On a read failure it throws `Error('Could not read share links for form <id>: <error>')`.
   - It finds claims and merges the registry failures first.
   - The resolver mirrors `PublicFormResolver`: `@Resolver() extends ResolverBase`, `this.GetUserFromPayload(userPayload)` (throw when absent), and maps to the GraphQL types with `Object.assign`.
@@ -379,7 +475,9 @@ describe('FormDistributionClaims registration', () => {
 - [ ] **Step 3: Implement.**
   - `private claimsGeneration = 0`.
   - At the end of a successful `reload()`: `void this.loadClaims()`.
-  - `loadClaims` increments the generation, awaits `service.claims(formId)`, drops the answer if the generation moved, and sets `claimIndex` and `claimCheckNote`.
+  - `loadClaims` increments the generation and awaits `service.claims(formId)`. It drops the answer if the generation moved; otherwise it sets `claimIndex` and `claimCheckNote` and calls `this.cdr.markForCheck()`, which is needed because the component is `OnPush` (`:72`).
+  - `claimsFor(link)` returns `this.claimIndex.get(link.Slug ?? '') ?? NO_CLAIMS`, where `NO_CLAIMS` is a module-level frozen `[]`.
+  - `type CopyTarget = 'link' | 'embed' | `consumer:${string}``. Each claim's button calls ``copy(`consumer:${claim.appName}`, claim.respondentUrl)`` and shows "Copied" when `copied === 'consumer:' + claim.appName`.
   - The template uses `mjf-alert mjf-alert--warn` if that modifier exists in `FORMS_UI_CSS`, else a new `.dm-claim` with `--mj-status-warning*` tokens. Run `npm run lint:ui`.
 - [ ] **Step 4: Run tests, then `pnpm run typecheck` and `pnpm run build` (ngc) in `packages/Angular`.**
 - [ ] **Step 5: Commit** `feat(forms-ng): warn on a share link another app owns (#292)`
@@ -387,7 +485,12 @@ describe('FormDistributionClaims registration', () => {
 ### Task 5: Consumer documentation and changeset
 
 **Files:**
-- Create: `docs/distribution-claims.md`. It covers: the slot key; an example provider written without importing Forms; the rules (read-only, answer only for asked slugs, `respondentUrl` absolute http(s) or null, 5 s cap); and what Forms shows.
+- Create: `docs/distribution-claims.md`. It covers:
+  - the slot key;
+  - an example provider written without importing Forms;
+  - the rules: read-only, answer only for asked slugs, `respondentUrl` absolute http(s) or null, labels ≤ 200 characters, 5 s cap;
+  - what Forms shows;
+  - that the registry is **per process**: every MJAPI process serving Forms must load the consumer's server package, and Forms cannot tell "no claims" from "consumer not loaded".
 - Create: `.changeset/distribution-claims-warning.md`. Bump `'@mj-biz-apps/forms-server': patch` and `'@mj-biz-apps/forms-ng': patch`. The prose says what an author now sees, and that it needs the consumer to register a provider.
 - [ ] Commit `docs: the distribution claim protocol for consumer apps (#292)`
 
