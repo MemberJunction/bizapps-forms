@@ -131,6 +131,12 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
    * check must not hide them, but it must not read as "nobody claims these" either.
    */
   protected claimCheckNote: string | null = null;
+  /**
+   * True from the start of a check until its answer is accepted. An empty `claimIndex` is also what
+   * "nobody claims these links" looks like, so without this a claimed link reads as unclaimed — and
+   * invites "Send this to anyone" — for as long as a slow app takes to answer (up to 5 s).
+   */
+  protected claimsPending = false;
 
   private copyTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly qrCache = new Map<string, SafeHtml>();
@@ -188,12 +194,14 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
    */
   private async loadClaims(): Promise<void> {
     const generation = ++this.claimsGeneration;
+    this.claimsPending = true;
     const result = await this.service.claims(this.formId);
     if (generation !== this.claimsGeneration) {
       return;
     }
     this.claimIndex = result.ok ? claimsBySlug(result.claims) : new Map();
     this.claimCheckNote = failureNotice(result);
+    this.claimsPending = false;
     this.cdr.markForCheck();
   }
 

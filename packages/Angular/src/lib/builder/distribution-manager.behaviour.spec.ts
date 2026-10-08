@@ -127,6 +127,7 @@ interface Driver {
   actionError: string | null;
   loadError: string | null;
   claimCheckNote: string | null;
+  claimsPending: boolean;
   formId: string;
   reload(quiet?: boolean): Promise<void>;
   ngOnInit(): Promise<void>;
@@ -266,6 +267,31 @@ describe('DistributionManagerComponent — share-link claims', () => {
     await d.reload();
     await flush();
     expect(d.loadError).toBeNull();
+  });
+
+  // #297 review F2: before the answer arrives, "no claims yet" must not read as "nobody claims this".
+  it('is pending while the claims answer is outstanding, and not after it arrives', async () => {
+    const double = serviceDouble([link()]);
+    let answer: (r: ClaimsResult) => void = () => undefined;
+    double.claimsImpl = () => new Promise<ClaimsResult>((resolve) => (answer = resolve));
+    const d = construct(double);
+    await d.reload();
+    expect(d.claimsPending).toBe(true);
+    answer({ ok: true, claims: [theClaim], failures: [] });
+    await flush();
+    expect(d.claimsPending).toBe(false);
+  });
+
+  it('stays pending when only a superseded check answers', async () => {
+    const double = serviceDouble([link()]);
+    const resolvers: Array<(r: ClaimsResult) => void> = [];
+    double.claimsImpl = () => new Promise<ClaimsResult>((resolve) => resolvers.push(resolve));
+    const d = construct(double);
+    await d.reload();
+    await d.reload(true);
+    resolvers[0]({ ok: true, claims: [], failures: [] });
+    await flush();
+    expect(d.claimsPending).toBe(true);
   });
 
   it('ignores a claims answer that arrives after a newer reload', async () => {

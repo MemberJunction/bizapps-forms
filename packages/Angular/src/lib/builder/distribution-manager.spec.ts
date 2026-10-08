@@ -338,4 +338,13 @@ describe('the share-link claim warning', () => {
   it('shows a muted note when the check could not complete', () => {
     expect(template).toContain('claimCheckNote');
   });
+
+  // Template text only (presence and order); the pending state itself is driven in the behaviour spec.
+  it('says the link is being checked, not "Send this to anyone", while claims are pending', () => {
+    const pending = template.indexOf('@if (claimsPending)');
+    const sendAnyone = template.indexOf('Send this to anyone. They open the form without signing in.');
+    expect(pending).toBeGreaterThanOrEqual(0);
+    expect(sendAnyone).toBeGreaterThan(pending);
+    expect(template.slice(pending, sendAnyone)).toContain('Checking whether another app uses this link');
+  });
 });

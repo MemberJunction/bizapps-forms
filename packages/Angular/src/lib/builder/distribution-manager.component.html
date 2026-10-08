@@ -208,7 +208,9 @@
                     }
                   </button>
                 </div>
-                @if (claimsFor(link).length) {
+                @if (claimsPending) {
+                  <p class="dm-note" role="status">Checking whether another app uses this link…</p>
+                } @else if (claimsFor(link).length) {
                   <p class="dm-note">This link stores responses only.</p>
                 } @else {
                   <p class="dm-note">Send this to anyone. They open the form without signing in.</p>
