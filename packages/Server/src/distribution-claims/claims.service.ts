@@ -11,8 +11,8 @@ import { LogError, type EntityInfo, type RunViewParams, type RunViewResult, type
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 
 import { FORM_DISTRIBUTION_ENTITY } from '../public-submit/entity-names.js';
-import type { ClaimFailure, ClaimLookup, DistributionClaimProvider } from './claim-contract.js';
-import { findDistributionClaims, readClaimProviders } from './find-claims.js';
+import type { ClaimFailure, ClaimLookup } from './claim-contract.js';
+import { findDistributionClaims, readClaimProviders, type ClaimProviderSnapshot } from './find-claims.js';
 // Type-only on purpose: the class carries type-graphql decorators that need reflect-metadata at load,
 // which only the server (and not this service's unit tests) provides. Plain objects satisfy it structurally.
 import type { DistributionClaimsResultType } from './graphql-types.js';
@@ -23,7 +23,7 @@ export type SlugReadResult = { ok: true; slugs: string[] } | { ok: false; error:
 export interface ClaimsServiceDeps {
   canUpdateDistributions(user: UserInfo): boolean;
   readSlugs(formId: string, user: UserInfo): Promise<SlugReadResult>;
-  providers(): { providers: DistributionClaimProvider[]; failures: ClaimFailure[] };
+  providers(): { providers: ClaimProviderSnapshot[]; failures: ClaimFailure[] };
 }
 
 /** The narrow RunView surface the slug read needs. */

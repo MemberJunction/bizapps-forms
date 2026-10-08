@@ -201,4 +201,27 @@ describe('findDistributionClaims', () => {
       expect(out.failures.filter((f) => f.appName === 'Caliber')).toHaveLength(21);
     });
   });
+
+  describe('round 2', () => {
+    it('still logs the cause of a thrown error whose failure line is suppressed by the cap', async () => {
+      const noisy = provider({ FindClaims: async () => Array.from({ length: 50 }, () => ({ slug: 'intake', ownerLabel: '', respondentUrl: null })) });
+      const late = provider({ FindClaims: async () => { await new Promise((r) => setTimeout(r, 10)); throw new Error('late secret cause'); } });
+      const out = await findDistributionClaims(['intake'], user, [noisy, late]);
+      expect(out.failures.filter((f) => f.message === 'did not answer (details in the server log)')).toHaveLength(0);
+      expect(LogError).toHaveBeenCalledWith(expect.stringContaining('late secret cause'));
+    });
+    it('survives a raw provider whose AppName getter throws, keeping the others', async () => {
+      const raw = { get AppName(): string { throw new Error('raw boom'); }, FindClaims: async () => [] } as DistributionClaimProvider;
+      const out = await findDistributionClaims(['intake'], user, [raw, provider()]);
+      expect(out.claims.map((c) => c.appName)).toEqual(['Caliber']);
+      expect(out.failures).toEqual([{ appName: 'unknown', message: 'did not answer (details in the server log)' }]);
+    });
+    it('reads each claim field once, so a getter cannot change its slug after validation', async () => {
+      let reads = 0;
+      const shifty = { get slug(): string { return ++reads === 1 ? 'intake' : 'unasked'; }, ownerLabel: 'S', respondentUrl: null };
+      const out = await findDistributionClaims(['intake'], user, [provider({ FindClaims: async () => [shifty] })]);
+      expect(out.claims).toEqual([{ appName: 'Caliber', slug: 'intake', ownerLabel: 'S', respondentUrl: null }]);
+      expect(reads).toBe(1);
+    });
+  });
 });

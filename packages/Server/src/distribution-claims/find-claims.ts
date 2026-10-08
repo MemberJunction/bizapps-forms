@@ -53,6 +53,9 @@ class FailureLog {
     const count = this.reported.get(appName) ?? 0;
     if (count >= MAX_FAILURES_PER_PROVIDER) {
       this.suppressed.set(appName, (this.suppressed.get(appName) ?? 0) + 1);
+      // The author-facing line is dropped, but a cause that differs from it (a thrown error the
+      // author was told is "in the server log") must still get there.
+      if (logDetail !== message) this.logOnly(appName, logDetail);
       return;
     }
     this.reported.set(appName, count + 1);
@@ -67,6 +70,10 @@ class FailureLog {
 
   private emit(appName: string, message: string, logDetail: string = message): void {
     this.failures.push({ appName, message });
+    this.logOnly(appName, logDetail);
+  }
+
+  private logOnly(appName: string, logDetail: string): void {
     LogError(`[Forms] distribution claims: ${appName} for slugs ${this.slugs.join(', ')}: ${logDetail}`);
   }
 }
@@ -79,6 +86,10 @@ function capForEcho(value: string): string {
   return value.length > MAX_ECHOED_SLUG_LENGTH ? `${value.slice(0, MAX_ECHOED_SLUG_LENGTH)}…` : value;
 }
 
+function isCallable(value: unknown): value is (...args: unknown[]) => unknown {
+  return typeof value === 'function';
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -87,7 +98,16 @@ function isUsableName(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= MAX_LABEL_LENGTH;
 }
 
-type EntryRead = { provider: DistributionClaimProvider } | { failure: ClaimFailure };
+/**
+ * What the lookup needs from a provider. Looser than {@link DistributionClaimProvider} on purpose:
+ * a registered provider can return anything, so its answer is `unknown` until validated.
+ */
+export interface ClaimProviderSnapshot {
+  readonly AppName: string;
+  FindClaims(slugs: readonly string[], contextUser: UserInfo): unknown;
+}
+
+type EntryRead = { provider: ClaimProviderSnapshot } | { failure: ClaimFailure };
 
 /**
  * Snapshot one slot entry. `entry` is `unknown` because the store's index type is `any` and any
@@ -104,7 +124,7 @@ function snapshotEntry(entry: unknown): EntryRead {
     return { failure: { appName: UNKNOWN_APP, message: `registered a claim provider with ${what}` } };
   }
   const appName = rawName.trim();
-  if (typeof findClaims !== 'function') {
+  if (!isCallable(findClaims)) {
     return { failure: { appName, message: 'registered a claim provider without a FindClaims function' } };
   }
   // Called with the original entry as `this`, as a method call would, so providers may use `this`.
@@ -128,7 +148,7 @@ function readEntry(entry: unknown): EntryRead {
  * rejects, but never repairs the slot, which belongs to the consumers. Providers come back as
  * plain snapshots, so a getter on the consumer's object cannot misbehave later in the lookup.
  */
-export function readClaimProviders(store: GlobalObjectStore | null): { providers: DistributionClaimProvider[]; failures: ClaimFailure[] } {
+export function readClaimProviders(store: GlobalObjectStore | null): { providers: ClaimProviderSnapshot[]; failures: ClaimFailure[] } {
   const slot: unknown = store?.[DISTRIBUTION_CLAIM_PROVIDERS_KEY]; // unknown: any app may have written this slot
   if (slot === undefined || slot === null) return { providers: [], failures: [] };
   if (!Array.isArray(slot)) {
@@ -159,7 +179,7 @@ function isPublicHttpUrl(value: string): boolean {
  * throw becomes a rejection like any other. The result is `unknown` because a provider can return
  * anything regardless of its declared type; {@link validateAnswer} checks it.
  */
-async function askWithTimeout(provider: DistributionClaimProvider, slugs: readonly string[], user: UserInfo, timeoutMs: number): Promise<unknown> {
+async function askWithTimeout(provider: ClaimProviderSnapshot, slugs: readonly string[], user: UserInfo, timeoutMs: number): Promise<unknown> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new ClaimTimeoutError(`did not answer within ${timeoutMs}ms`)), timeoutMs);
@@ -180,19 +200,25 @@ function acceptUrl(url: unknown, appName: string, slug: string, log: FailureLog)
 
 /** Validate one raw claim; returns it attributed (URL nulled if unsafe) or null when rejected. */
 function acceptClaim(raw: unknown, appName: string, asked: ReadonlySet<string>, log: FailureLog): AttributedClaim | null {
-  if (!isRecord(raw) || typeof raw.slug !== 'string') {
+  if (!isRecord(raw)) {
     log.record(appName, 'returned a claim without a slug');
     return null;
   }
-  if (!asked.has(raw.slug)) {
-    log.record(appName, `claimed slug "${capForEcho(raw.slug)}" that was not asked about`);
+  // Each field is read exactly once: a getter must not pass validation and then return something else.
+  const { slug, ownerLabel, respondentUrl } = raw;
+  if (typeof slug !== 'string') {
+    log.record(appName, 'returned a claim without a slug');
     return null;
   }
-  if (!isUsableName(raw.ownerLabel)) {
-    log.record(appName, `returned a claim for "${raw.slug}" with a blank or over-long ownerLabel`);
+  if (!asked.has(slug)) {
+    log.record(appName, `claimed slug "${capForEcho(slug)}" that was not asked about`);
     return null;
   }
-  return { appName, slug: raw.slug, ownerLabel: raw.ownerLabel.trim(), respondentUrl: acceptUrl(raw.respondentUrl, appName, raw.slug, log) };
+  if (!isUsableName(ownerLabel)) {
+    log.record(appName, `returned a claim for "${slug}" with a blank or over-long ownerLabel`);
+    return null;
+  }
+  return { appName, slug, ownerLabel: ownerLabel.trim(), respondentUrl: acceptUrl(respondentUrl, appName, slug, log) };
 }
 
 function validateAnswer(answer: unknown, appName: string, asked: ReadonlySet<string>, log: FailureLog): AttributedClaim[] {
@@ -212,7 +238,7 @@ function validateAnswer(answer: unknown, appName: string, asked: ReadonlySet<str
 }
 
 async function askOne(
-  provider: DistributionClaimProvider,
+  provider: ClaimProviderSnapshot,
   slugs: readonly string[],
   asked: ReadonlySet<string>,
   user: UserInfo,
@@ -258,7 +284,7 @@ function dropDuplicateClaims(claims: readonly AttributedClaim[], log: FailureLog
 export async function findDistributionClaims(
   slugs: readonly string[],
   contextUser: UserInfo,
-  providers: readonly DistributionClaimProvider[],
+  providers: readonly ClaimProviderSnapshot[],
   timeoutMs: number = CLAIM_PROVIDER_TIMEOUT_MS,
 ): Promise<ClaimLookup> {
   if (slugs.length === 0) return { claims: [], failures: [] };
