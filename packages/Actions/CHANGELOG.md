@@ -1,5 +1,11 @@
 # @mj-biz-apps/forms-actions
 
+## 0.15.1
+
+### Patch Changes
+
+- @mj-biz-apps/forms-entities@0.15.1
+
 ## 0.15.0
 
 ### Patch Changes

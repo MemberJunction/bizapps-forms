@@ -1,5 +1,13 @@
 # @mj-biz-apps/forms-ng
 
+## 0.15.1
+
+### Patch Changes
+
+- 4bc23bb: Uploaded form images load faster and the welcome screen no longer jumps (#291). `GET /forms/asset/<id>` now keeps a copy of each image it serves in memory (up to 50 MB in total, images up to 8 MB), so only the first request for an image on a server process reads it from the storage provider; on Box that read took about 3 seconds. An image an author uploads is kept from the upload itself. Concurrent first requests share one read, a failed read is not kept, and the check that the file is a live public asset still runs on every request. On a published form whose welcome screen has an image, the widget now keeps its loading screen — showing the MemberJunction logo — until that image and the form's logo have loaded, or 3 seconds have passed, and then shows the welcome screen whole; a logo that fails to load is left out rather than shown and then removed. Every other loading state keeps the existing spinner.
+- 3daecc6: The Distribute tab now warns when another app owns a share link (#292). If a co-installed app (for example a hiring app that hosts the form on its own page) claims a link's slug, the author sees that responses sent to the plain Forms link are saved as form responses only and that app never sees them, with the app's own link and a copy button, plus "used by" in the link list. While the check runs the link says it is being checked, and a check that fails is shown as a failed check, never as "no claims". Warnings appear only once the consuming app registers a claim provider; see `docs/distribution-claims.md`. The check is a new authenticated GraphQL query, `FormDistributionClaims(formId)`, available to users who can update Form Distributions (and, for an API key, only with its `view:run` scope on Form Distributions).
+  - @mj-biz-apps/forms-entities@0.15.1
+
 ## 0.15.0
 
 ### Patch Changes
