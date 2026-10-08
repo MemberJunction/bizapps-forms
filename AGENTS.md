@@ -177,6 +177,7 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
   `migration-order-gate`, `ui-token-gate` — with "branch must be up to date with base" on, so a stale
   branch must be updated before it can merge. **Nobody can bypass it, including repo admins**
   (`current_user_can_bypass: never`, `bypass_actors: []`).
+  `build-and-test` also runs the family-shared one-copy guard, `.github/scripts/check-dependency-model.mjs`: MJ and other apps' `@mj-biz-apps/*` packages are caret peers, never `dependencies`.
 - **Every gate reports on every PR, by design.** Path filtering lives in a job- or step-level `if:`
   fed by `scripts/check-paths-touched.mjs` — **never** in `on: paths:` (`distribution-gate.yml` is
   the one gate that filters at the step level rather than the job level, since only its 7-minute
