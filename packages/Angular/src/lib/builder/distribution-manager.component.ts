@@ -19,6 +19,7 @@ import { LogError } from '@memberjunction/core';
 import { FORMS_UI_CSS } from '../shared';
 import { DISTRIBUTION_STYLES } from './distribution-manager.styles';
 import { DistributionService, type MutationOutcome } from './distribution.service';
+import { claimNotice, claimsBySlug, failureNotice, type ShareLinkClaim } from './distribution-claims';
 import { fromLocalInputValue, toLocalInputValue } from './local-datetime';
 import { resolveApiOrigin } from '../shared/mj-api-origin';
 import { textToQrSvg } from './qr-code';
@@ -34,8 +35,14 @@ import {
 /** The three renderings of one link. Not three kinds of link — see the class comment. */
 type ShareView = 'link' | 'qr' | 'embed';
 
-/** Which artifact the "Copied" confirmation is currently attached to. */
-type CopyTarget = 'link' | 'embed';
+/**
+ * Which artifact the "Copied" confirmation is currently attached to. `consumer:<app>` is another
+ * app's link for the same form, keyed by app name so two claiming apps confirm independently.
+ */
+type CopyTarget = 'link' | 'embed' | `consumer:${string}`;
+
+/** Shared answer for every unclaimed link, so a binding on it never sees a "new" value. */
+const NO_CLAIMS: readonly ShareLinkClaim[] = Object.freeze([]);
 
 /** How long the copy button stays in its confirmed state, in ms. */
 const COPY_FEEDBACK_MS = 2000;
@@ -115,6 +122,22 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     ref?.nativeElement.select();
   }
 
+  /** Slug to the apps that own it. Replaced wholesale by each accepted claims answer. */
+  private claimIndex = new Map<string, ShareLinkClaim[]>();
+  /** Bumped per check so a slow answer for an earlier reload cannot overwrite a newer one. */
+  private claimsGeneration = 0;
+  /**
+   * Set when the claims check failed or an app did not answer. The links still render: a failed
+   * check must not hide them, but it must not read as "nobody claims these" either.
+   */
+  protected claimCheckNote: string | null = null;
+  /**
+   * True from the start of a check until its answer is accepted. An empty `claimIndex` is also what
+   * "nobody claims these links" looks like, so without this a claimed link reads as unclaimed — and
+   * invites "Send this to anyone" — for as long as a slow app takes to answer (up to 5 s).
+   */
+  protected claimsPending = false;
+
   private copyTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly qrCache = new Map<string, SafeHtml>();
 
@@ -159,6 +182,49 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
       this.selectLink(this.links[0]?.ID ?? null);
     }
     this.cdr.markForCheck();
+    void this.loadClaims();
+  }
+
+  /**
+   * Ask which other apps own these links' slugs (#292).
+   *
+   * Deliberately not awaited by {@link reload}: the claims check fans out to other apps (up to
+   * 5 s each), and the author's own links must not wait on it. Touches neither `loading` nor
+   * `loadError` — a failed check is a note, never a failed load.
+   */
+  private async loadClaims(): Promise<void> {
+    const generation = ++this.claimsGeneration;
+    this.claimsPending = true;
+    const result = await this.service.claims(this.formId);
+    if (generation !== this.claimsGeneration) {
+      return;
+    }
+    this.claimIndex = result.ok ? claimsBySlug(result.claims) : new Map();
+    this.claimCheckNote = failureNotice(result);
+    this.claimsPending = false;
+    this.cdr.markForCheck();
+  }
+
+  /** The apps that own this link's slug; the same frozen empty array when none do. */
+  protected claimsFor(link: mjBizAppsFormsFormDistributionEntity): readonly ShareLinkClaim[] {
+    return this.claimIndex.get(link.Slug ?? '') ?? NO_CLAIMS;
+  }
+
+  /** The one place a consumer app's copy button is keyed, so the click and the "Copied" check cannot drift apart. */
+  protected consumerCopyTarget(appName: string): CopyTarget {
+    return `consumer:${appName}`;
+  }
+
+  /** The warning copy for a claimed link, or null. Pure: `claimNotice` needs a non-empty list. */
+  protected noticeFor(link: mjBizAppsFormsFormDistributionEntity): ReturnType<typeof claimNotice> | null {
+    const claims = this.claimsFor(link);
+    return claims.length ? claimNotice([...claims]) : null;
+  }
+
+  /** Rail suffix naming the apps that use a link, or '' when none do. */
+  protected usedBy(link: mjBizAppsFormsFormDistributionEntity): string {
+    const claims = this.claimsFor(link);
+    return claims.length ? ` · used by ${claims.map((c) => c.appName).join(', ')}` : '';
   }
 
   /**
