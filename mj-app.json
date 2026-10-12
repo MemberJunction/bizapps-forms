@@ -41,6 +41,10 @@
         "name": "@mj-biz-apps/forms-server",
         "role": "bootstrap",
         "startupExport": "LoadBizAppsFormsServer"
+      },
+      {
+        "name": "@mj-biz-apps/forms-actions",
+        "role": "library"
       }
     ],
     "client": [
@@ -53,10 +57,6 @@
     "shared": [
       {
         "name": "@mj-biz-apps/forms-entities",
-        "role": "library"
-      },
-      {
-        "name": "@mj-biz-apps/forms-actions",
         "role": "library"
       }
     ]
