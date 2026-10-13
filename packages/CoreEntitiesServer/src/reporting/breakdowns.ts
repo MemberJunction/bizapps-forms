@@ -25,6 +25,7 @@
 import {
   foldQuestionId,
   isAnswerableQuestionType,
+  OFF_LIST_LABEL,
   parseJsonObject,
   type FormQuestionType,
   type FormsAnswerBucket,
@@ -38,9 +39,6 @@ import { insightRoleFor, isChartedRole, type ChartedRole } from './insight-roles
 import type { InsightAnswerRow } from './insight-answers.js';
 import type { ValueCountRow } from './report-queries.js';
 import { temporalBuckets } from './temporal.js';
-
-/** The one label every value outside a question's options is counted under. */
-export const OFF_LIST_LABEL = 'Other (not an option)';
 
 /** The scale NPS is defined on. A rating outside it did not come from an NPS control. */
 const NPS_MIN = 0;

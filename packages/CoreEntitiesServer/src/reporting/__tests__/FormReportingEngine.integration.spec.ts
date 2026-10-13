@@ -2,8 +2,8 @@
  * `FormReportingEngine` against a REAL SQL Server provider — what the fake-provider specs cannot prove,
  * because each is a claim about the database or about MJ:
  *  - DW16 on real SQL: the three Approved reporting queries (`metadata/queries/SQL/*.sql`), run through
- *    MJ's `RunQuery` as the system user, produce the same summary as the old browser aggregation over
- *    the same rows read back from the database;
+ *    MJ's `RunQuery` as the system user, produce the same summary the old browser aggregation computed
+ *    over the same rows (recorded in `browser-golden.ts` when those functions were deleted);
  *  - the queries' run permissions admit the system user, and their Nunjucks parameters bind;
  *  - the list's and the detail's field lists, filters and `ORDER BY … , ID` are valid against the real
  *    views (including `FormAutomationRun.WorkQueueMessageID`), and paging neither repeats nor skips.
@@ -14,10 +14,8 @@
  *   cd packages/CoreEntitiesServer && FORMS_INTEGRATION_DB=1 npx vitest run src/reporting/__tests__/FormReportingEngine.integration.spec.ts
  *
  * It builds its own published form from the parity fixture's pages, inserts the fixture's responses
- * and answers under fresh ids, and deletes every row it wrote in `afterAll`, pass or fail. Two fixture
- * answers are left out here, both covered by the fake-provider parity spec: the file upload (its
- * `FileID` is a foreign key to an `MJ: Files` row the fixture does not create) and the answer to a
- * deleted question (a foreign key to a question row the fixture does not have).
+ * and answers (`REAL_DB_RESPONSES` / `REAL_DB_ANSWERS`, which say which two fixture answers a real
+ * database cannot hold) under fresh ids, and deletes every row it wrote in `afterAll`, pass or fail.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
@@ -31,8 +29,8 @@ import type { FormBlueprint, PublishedFormDefinition } from '@mj-biz-apps/forms-
 import { FormAuthoringEngine } from '../../engines/FormAuthoringEngine.js';
 import { FormReportingEngine } from '../../engines/FormReportingEngine.js';
 import { FORMS_ENTITY } from '../../shared/entity-names.js';
-import { browserReport, expectedFromBrowser, FIXTURE_MATRIX_CELLS } from './browser-parity.js';
-import { ANSWERS, DEFINITION, DELETED_QUESTION, FORM_ID, Q, RESPONSES, VERSION_ID, gid, type FixtureAnswer, type FixtureResponse } from './parity-fixture.js';
+import { BROWSER_SUMMARY_REAL_DB_ROWS } from './browser-golden.js';
+import { DEFINITION, REAL_DB_ANSWERS, REAL_DB_RESPONSES, type FixtureAnswer, type FixtureResponse } from './parity-fixture.js';
 
 const ENABLED = Boolean(process.env.FORMS_INTEGRATION_DB);
 
@@ -115,35 +113,14 @@ async function openWorld(): Promise<World> {
   };
 }
 
-/**
- * Two more Complete responses, here only, whose colour answers differ from the option value `g` by
- * case (`G`) and by a trailing space (`g `). The database's collation is case- and trailing-space-
- * insensitive, so a value-counts query grouping on the TEXT would merge them with `g` — and report
- * whichever spelling came first. The browser compared exactly, and so must the server.
- */
-const CASE_VARIANT_RESPONSES: FixtureResponse[] = [9, 10].map((n) => ({
-  ...RESPONSES[0],
-  ID: gid(1000 + n),
-  StartedAt: new Date('2026-09-09T10:00:00Z'),
-  SubmittedAt: new Date('2026-09-09T10:02:00Z'),
-  AnonymousSessionID: `session-${n}`,
-  FormID: FORM_ID,
-  FormVersionID: VERSION_ID,
-}));
-const CASE_VARIANT_ANSWERS: FixtureAnswer[] = [
-  { ...ANSWERS[0], ID: gid(6001), ResponseID: gid(1009), QuestionID: Q.colour, TextValue: 'G' },
-  { ...ANSWERS[0], ID: gid(6002), ResponseID: gid(1010), QuestionID: Q.colour, TextValue: 'g ' },
-];
-
 /** The fixture's rows under this database's ids: questions by prompt, responses and answers fresh. */
 function remapFixture(w: World): { responses: FixtureResponse[]; answers: FixtureAnswer[] } {
   const realByPrompt = new Map(w.definition.pages.flatMap((p) => p.questions).map((q) => [q.prompt, q.id]));
   const fixtureQuestions = DEFINITION.pages.flatMap((p) => p.questions);
   const questionId = new Map(fixtureQuestions.map((q) => [q.id, realByPrompt.get(q.prompt) ?? '']));
-  const allResponses = [...RESPONSES, ...CASE_VARIANT_RESPONSES];
-  const responseId = new Map(allResponses.map((r) => [r.ID, randomUUID().toUpperCase()]));
-  const responses = allResponses.map((r) => ({ ...r, ID: responseId.get(r.ID) ?? '', FormID: w.formId, FormVersionID: w.versionId }));
-  const answers = [...ANSWERS, ...CASE_VARIANT_ANSWERS].filter((a) => a.QuestionID !== DELETED_QUESTION && a.QuestionID !== Q.upload).map((a) => ({
+  const responseId = new Map(REAL_DB_RESPONSES.map((r) => [r.ID, randomUUID().toUpperCase()]));
+  const responses = REAL_DB_RESPONSES.map((r) => ({ ...r, ID: responseId.get(r.ID) ?? '', FormID: w.formId, FormVersionID: w.versionId }));
+  const answers = REAL_DB_ANSWERS.map((a) => ({
     ...a,
     ID: randomUUID().toUpperCase(),
     ResponseID: responseId.get(a.ResponseID) ?? '',
@@ -174,21 +151,24 @@ async function insertFixture(w: World, responses: FixtureResponse[], answers: Fi
   }
 }
 
-/** The rows as the browser read them: `simple` RunViews over the form's responses and answers. */
-async function readBack(w: World): Promise<{ responses: FixtureResponse[]; answers: FixtureAnswer[] }> {
-  const [responses, answers] = await w.provider.RunViews(
-    [
-      { EntityName: FORMS_ENTITY.FormResponse, ExtraFilter: `FormID='${w.formId}'`, ResultType: 'simple', IgnoreMaxRows: true },
-      {
-        EntityName: FORMS_ENTITY.FormResponseAnswer,
-        ExtraFilter: `ResponseID IN (SELECT ID FROM __mj_BizAppsForms.vwFormResponses WHERE FormID='${w.formId}')`,
-        ResultType: 'simple',
-        IgnoreMaxRows: true,
-      },
-    ],
-    w.system,
-  );
-  return { responses: responses.Results as FixtureResponse[], answers: answers.Results as FixtureAnswer[] };
+/**
+ * The recorded browser summary of these rows, under this database's ids. The golden snapshot holds the
+ * fixture's question and page ids; the published form was given fresh ones, matched here by prompt
+ * (questions) and by position (pages) — the blueprint keeps both.
+ */
+function goldenUnderTheseIds(w: World): unknown {
+  const ids = new Map<string, string>();
+  const realQuestions = new Map(w.definition.pages.flatMap((p) => p.questions).map((q) => [q.prompt, q.id]));
+  for (const q of DEFINITION.pages.flatMap((p) => p.questions)) {
+    ids.set(q.id.toLowerCase(), (realQuestions.get(q.prompt) ?? '').toLowerCase());
+  }
+  DEFINITION.pages.forEach((p, i) => ids.set(p.id.toLowerCase(), (w.definition.pages[i]?.id ?? '').toLowerCase()));
+  let text = JSON.stringify(BROWSER_SUMMARY_REAL_DB_ROWS);
+  for (const [fixtureId, realId] of ids) {
+    // Fixture ids are GUIDs: hex and dashes, nothing a pattern would read as syntax.
+    text = text.replace(new RegExp(fixtureId, 'gi'), realId);
+  }
+  return JSON.parse(text);
 }
 
 async function deleteEverything(w: World): Promise<void> {
@@ -227,15 +207,14 @@ describe.skipIf(!ENABLED)('FormReportingEngine on SQL Server', () => {
     }
   }, 60_000);
 
-  it('DW16 on real SQL: the summary equals the old browser aggregation over the same rows, section by section', async () => {
+  it('DW16 on real SQL: the summary equals the recorded browser aggregation of the same rows, section by section', async () => {
     const w = world!;
-    const rows = await readBack(w);
-    const expected = expectedFromBrowser(browserReport(w.definition, rows.responses, rows.answers), FIXTURE_MATRIX_CELLS);
+    const expected = goldenUnderTheseIds(w) as typeof BROWSER_SUMMARY_REAL_DB_ROWS;
 
     const summary = await FormReportingEngine.Instance.GetResponseSummary({ formId: w.formId }, w.provider, w.system);
 
-    const { PartialPlusDisqualified, ...headline } = expected.Summary;
-    expect(summary.Summary).toMatchObject(headline);
+    const { PartialPlusDisqualified, LastSubmittedAt, ...headline } = BROWSER_SUMMARY_REAL_DB_ROWS.Summary;
+    expect(summary.Summary).toMatchObject({ ...headline, LastSubmittedAt });
     expect(summary.Summary.PartialResponses + summary.Summary.DisqualifiedResponses).toBe(PartialPlusDisqualified);
     // The real SQL's GUIDs come back upper case; the snapshot's are whatever publish wrote. Compare folded.
     const folded = <T>(value: T): unknown => JSON.parse(JSON.stringify(value).toLowerCase());

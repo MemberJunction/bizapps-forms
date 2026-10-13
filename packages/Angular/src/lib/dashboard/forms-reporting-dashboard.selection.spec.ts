@@ -17,12 +17,11 @@ import { NavigationService } from '@memberjunction/ng-shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FormsReportingDashboardComponent } from './forms-reporting-dashboard.component';
-import { FormsReportingService } from './services/forms-reporting.service';
-import { FormsReportingExportService } from './services/forms-reporting-export.service';
-import { mockReport, mockResponseDetail } from './services/forms-reporting-mock';
+import { FormsReportingService, type ReportLoad } from './services/forms-reporting.service';
+import { FormsReportingExportService, type ExportOutcome } from './services/forms-reporting-export.service';
+import { toFormReport } from './services/report-view';
+import { summaryOutput } from './testing/summary-fixture';
 import type { FormReportData, ReportableForm } from './models/reporting.model';
-import { ResponsesDataService } from '../responses/responses-data.service';
-import type { ResponseDetail } from '../responses/response-models';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -44,34 +43,36 @@ const FORM_A: ReportableForm = { formId: 'form-a', formVersionId: 'ver-a', name:
 const FORM_B: ReportableForm = { formId: 'form-b', formVersionId: 'ver-b', name: 'Form B', responseCount: 22 };
 
 /** A real report shape, told apart from the others by its response total (and, optionally, its form). */
-function reportWithTotal(totalResponses: number, form?: ReportableForm): FormReportData {
-  const report = mockReport();
-  return { ...report, form: form ?? report.form, summary: { ...report.summary, totalResponses } };
+function reportWithTotal(totalResponses: number, form: ReportableForm = FORM_A): ReportLoad {
+  const report: FormReportData = toFormReport(form, summaryOutput());
+  return { status: 'ready', report: { ...report, summary: { ...report.summary, totalResponses } } };
+}
+
+/** The report a `ReportLoad` carries, for asserting which one is on screen. */
+function reportOf(load: ReportLoad): FormReportData | null {
+  return load.status === 'ready' ? load.report : null;
 }
 
 type ReportingSurface = Pick<FormsReportingService, 'loadReport' | 'loadReportableForms'>;
-type ResponsesSurface = Pick<ResponsesDataService, 'loadResponseDetail'>;
 type ExportSurface = Pick<FormsReportingExportService, 'exportResponses'>;
 
 /** Every `loadReport` call, in call order, each with the deferred the test settles by hand. */
 interface ReportCall {
   form: ReportableForm;
-  load: Deferred<FormReportData>;
+  load: Deferred<ReportLoad>;
 }
 
 interface Harness {
   c: FormsReportingDashboardComponent;
   formLists: Deferred<ReportableForm[]>[];
   reportCalls: ReportCall[];
-  detailLoads: Deferred<ResponseDetail>[];
-  exports: Deferred<void>[];
+  exports: Deferred<ExportOutcome>[];
   errors: Error[];
 }
 
 function construct(): Harness {
   const formLists: Deferred<ReportableForm[]>[] = [];
   const reportCalls: ReportCall[] = [];
-  const detailLoads: Deferred<ResponseDetail>[] = [];
   const reporting: ReportingSurface = {
     loadReportableForms: () => {
       const load = deferred<ReportableForm[]>();
@@ -79,22 +80,15 @@ function construct(): Harness {
       return load.promise;
     },
     loadReport: (form) => {
-      const load = deferred<FormReportData>();
+      const load = deferred<ReportLoad>();
       reportCalls.push({ form, load });
       return load.promise;
     },
   };
-  const responses: ResponsesSurface = {
-    loadResponseDetail: () => {
-      const load = deferred<ResponseDetail>();
-      detailLoads.push(load);
-      return load.promise;
-    },
-  };
-  const exports: Deferred<void>[] = [];
+  const exports: Deferred<ExportOutcome>[] = [];
   const exporter: ExportSurface = {
     exportResponses: () => {
-      const run = deferred<void>();
+      const run = deferred<ExportOutcome>();
       exports.push(run);
       return run.promise;
     },
@@ -103,7 +97,6 @@ function construct(): Harness {
     providers: [
       { provide: FormsReportingService, useValue: reporting },
       { provide: FormsReportingExportService, useValue: exporter },
-      { provide: ResponsesDataService, useValue: responses },
       { provide: NavigationService, useValue: {} },
       { provide: ChangeDetectorRef, useValue: { markForCheck: () => undefined, detectChanges: () => undefined } },
     ],
@@ -111,7 +104,7 @@ function construct(): Harness {
   const c = runInInjectionContext(injector, () => new FormsReportingDashboardComponent());
   const errors: Error[] = [];
   c.Error.subscribe((e: Error) => errors.push(e));
-  return { c, formLists, reportCalls, detailLoads, exports, errors };
+  return { c, formLists, reportCalls, exports, errors };
 }
 
 describe('FormsReportingDashboardComponent — only the latest selection applies its report (#252)', () => {
@@ -134,7 +127,7 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
     await a;
 
     expect(c.selectedForm).toBe(FORM_B);
-    expect(c.report).toBe(reportB);
+    expect(c.report).toBe(reportOf(reportB));
     expect(c.loadingReport).toBe(false);
   });
 
@@ -151,7 +144,7 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
     const reportB = reportWithTotal(222);
     reportCalls[1].load.resolve(reportB);
     await b;
-    expect(c.report).toBe(reportB);
+    expect(c.report).toBe(reportOf(reportB));
     expect(c.loadingReport).toBe(false);
   });
 
@@ -165,7 +158,7 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
     reportCalls[0].load.reject(new Error('A timed out'));
     await a;
 
-    expect(c.report).toBe(reportB);
+    expect(c.report).toBe(reportOf(reportB));
     expect(c.errorMessage).toBeNull();
     expect(errors).toEqual([]);
     // Not shown, but never swallowed: the failure is still logged against the form it belongs to.
@@ -207,7 +200,7 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
     await refresh1;
 
     expect(reportCalls.map((call) => call.form)).toEqual([FORM_A, FORM_A, FORM_A]);
-    expect(c.report).toBe(latest);
+    expect(c.report).toBe(reportOf(latest));
     expect(c.loadingReport).toBe(false);
   });
 
@@ -222,25 +215,6 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
     // Synchronously, before B's load settles: the header line and the Export buttons read
     // `report`, so A's must not sit under B's name while B loads.
     expect(c.report).toBeNull();
-
-    reportCalls[1].load.resolve(reportWithTotal(222));
-    await b;
-  });
-
-  it('drops a response detail that arrives after the reader moved to another form', async () => {
-    const { c, reportCalls, detailLoads } = construct();
-    const a = c.selectForm(FORM_A);
-    const reportA = reportWithTotal(111);
-    reportCalls[0].load.resolve(reportA);
-    await a;
-
-    const open = c.openResponse('resp-1');
-    const b = c.selectForm(FORM_B);
-    detailLoads[0].resolve(mockResponseDetail('resp-1', reportA.questions));
-    await open;
-
-    expect(c.responseDetail).toBeNull();
-    expect(c.busy).toBe(false);
 
     reportCalls[1].load.resolve(reportWithTotal(222));
     await b;
@@ -321,12 +295,120 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
     reportCalls[1].load.resolve(pickedReport);
     await pick;
 
-    expect(c.report).toBe(pickedReport);
+    expect(c.report).toBe(reportOf(pickedReport));
     expect(c.loadingForms).toBe(false);
     expect(c.railState).toBe('ready');
 
     reportCalls[0].load.resolve(reportWithTotal(999, first));
     await vi.waitFor(() => expect(c.loadingForms).toBe(false));
-    expect(c.report).toBe(pickedReport);
+    expect(c.report).toBe(reportOf(pickedReport));
+  });
+});
+
+describe('FormsReportingDashboardComponent — a summary refused to this reader, and a partial export', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shows "not available to you" rather than an error, keeping the mode switch and the export', async () => {
+    const { c, reportCalls, errors } = construct();
+    const a = c.selectForm(FORM_A);
+    reportCalls[0].load.resolve({ status: 'unavailable', message: 'Not yours to see.' });
+    await a;
+
+    expect(c.report).toBeNull();
+    expect(c.summaryUnavailable).toBe('Not yours to see.');
+    expect(c.errorMessage).toBeNull();
+    expect(errors).toEqual([]);
+    expect(c.hasSelection).toBe(true);
+
+    c.setMode('responses');
+    expect(c.mode).toBe('responses');
+  });
+
+  it('clears the refusal when the reader moves to a form they can see', async () => {
+    const { c, reportCalls } = construct();
+    const a = c.selectForm(FORM_A);
+    reportCalls[0].load.resolve({ status: 'unavailable', message: 'Not yours to see.' });
+    await a;
+
+    const b = c.selectForm(FORM_B);
+    expect(c.summaryUnavailable).toBeNull();
+    const reportB = reportWithTotal(5, FORM_B);
+    reportCalls[1].load.resolve(reportB);
+    await b;
+
+    expect(c.report).toBe(reportOf(reportB));
+    expect(c.summaryUnavailable).toBeNull();
+  });
+
+  it('tells the reader an export holds only part of the form', async () => {
+    const { c, reportCalls, exports } = construct();
+    const a = c.selectForm(FORM_A);
+    reportCalls[0].load.resolve(reportWithTotal(11));
+    await a;
+
+    const run = c.export('csv');
+    exports[0].resolve({ exported: 50_000, total: 50_005, notice: 'The file holds the earliest 50,000.' });
+    await run;
+
+    expect(c.exportNotice).toBe('The file holds the earliest 50,000.');
+    expect(c.errorMessage).toBeNull();
+  });
+
+  it('does not put one form\'s export notice on another form\'s screen', async () => {
+    const { c, reportCalls, exports } = construct();
+    const a = c.selectForm(FORM_A);
+    reportCalls[0].load.resolve(reportWithTotal(11));
+    await a;
+
+    const run = c.export('csv');
+    const b = c.selectForm(FORM_B);
+    reportCalls[1].load.resolve(reportWithTotal(22, FORM_B));
+    await b;
+    exports[0].resolve({ exported: 50_000, total: 50_005, notice: 'The file holds the earliest 50,000.' });
+    await run;
+
+    expect(c.exportNotice).toBeNull();
+  });
+
+  it('keeps the Responses view mounted across mode switches, and drops it when another form is selected', async () => {
+    const { c, reportCalls } = construct();
+    const a = c.selectForm(FORM_A);
+    reportCalls[0].load.resolve(reportWithTotal(11));
+    await a;
+    expect(c.showResponsesView).toBe(false);
+
+    c.setMode('responses');
+    c.setMode('insights');
+    // Hidden under Insights, not destroyed: going back shows the same list without a re-read.
+    expect(c.showResponsesView).toBe(true);
+
+    const b = c.selectForm(FORM_B);
+    expect(c.responsesMounted).toBe(false);
+    reportCalls[1].load.resolve(reportWithTotal(22, FORM_B));
+    await b;
+    expect(c.showResponsesView).toBe(false);
+  });
+
+  it('holds its own refresh and export while the Responses view opens a response, and drops the hold on a new form', async () => {
+    const { c, reportCalls } = construct();
+    const a = c.selectForm(FORM_A);
+    reportCalls[0].load.resolve(reportWithTotal(11));
+    await a;
+
+    c.setResponsesBusy(true);
+    expect(c.responsesBusy).toBe(true);
+    c.setResponsesBusy(false);
+    expect(c.responsesBusy).toBe(false);
+
+    c.setResponsesBusy(true);
+    const b = c.selectForm(FORM_B);
+    expect(c.responsesBusy).toBe(false);
+    reportCalls[1].load.resolve(reportWithTotal(22, FORM_B));
+    await b;
   });
 });

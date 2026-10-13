@@ -1,14 +1,11 @@
 /**
  * DW16 (spec #303): `Forms.GetResponseSummary` matches the old browser aggregation on a fixture.
  *
- * The SAME fixture (`parity-fixture.ts`) goes through both:
- *  - the OLD path — forms-ng's own aggregation functions, imported from the Angular package's source
- *    and driven exactly as `FormsReportingService.loadReport` drives them (insights over the Complete
- *    responses' answers, the funnel over every answer);
- *  - the NEW path — `FormReportingEngine.GetResponseSummary` against the emulated database, its three
- *    queries answered by `reporting-world.ts`.
- * and every section is compared. The browser output is mapped to the server's shape by
- * `expectedFromBrowser`, which applies ONLY the documented differences, each named where it is applied:
+ * The SAME fixture (`parity-fixture.ts`) is held against both:
+ *  - the OLD path — what forms-ng's own aggregation functions computed on it, driven exactly as
+ *    `FormsReportingService.loadReport` drove them. Those functions were deleted with the browser
+ *    aggregation (#303 Task 10); their output is recorded in `browser-golden.ts`, mapped to the
+ *    server's shape with ONLY these documented differences:
  *   D1  status split — the browser's `partialResponses` is every non-Complete row; the server reports
  *       Partial and Disqualified apart (their sum is the browser figure);
  *   D2  off-list choice values fold into one "Other (not an option)" bucket (a PII rule);
@@ -16,16 +13,16 @@
  *       counts — compared to the counts this fixture's Matrix answers hold;
  *   D4  shape only: PascalCase, ISO instants, `null` where the browser left a field out, the type key
  *       where the browser had a display label.
- * One more difference — `AnsweredCount` counts responses that stored a value, where the browser
- * counted rows, blank ones too — needs a blank row to show, so it has its own test below.
- *
- * Task 10 deletes the browser functions this imports; when it does, it must turn this into a golden
- * snapshot of `expectedFromBrowser`'s output rather than delete the comparison.
+ *  - the NEW path — `FormReportingEngine.GetResponseSummary` against the emulated database, its three
+ *    queries answered by `reporting-world.ts`;
+ * and every section is compared. One more difference — `AnsweredCount` counts responses that stored a
+ * value, where the browser counted rows, blank ones too — needs a blank row to show, so it has its own
+ * test below.
  */
 import { describe, expect, it, vi } from 'vitest';
 import type { FormsGetResponseSummaryOutput, PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
 import { FormReportingEngine } from '../../engines/FormReportingEngine.js';
-import { browserReport, expectedFromBrowser, FIXTURE_MATRIX_CELLS } from './browser-parity.js';
+import { BROWSER_COLOUR_LABELS, BROWSER_SUMMARY, BROWSER_YESNO_WITH_A_BLANK_ROW } from './browser-golden.js';
 import { makeVersion } from '../../testing/index.js';
 import { ANSWERS, DEFINITION, FORM_ID, Q, RESPONSES, VERSION_ID, gid, type FixtureAnswer, type FixtureResponse } from './parity-fixture.js';
 import { READER, SYSTEM, reportingWorld } from './reporting-world.js';
@@ -51,7 +48,7 @@ async function serverSummary(responses: FixtureResponse[], answers: FixtureAnswe
 }
 
 describe('GetResponseSummary matches the old browser aggregation on a fixture (DW16)', () => {
-  const expected = expectedFromBrowser(browserReport(DEFINITION, RESPONSES, ANSWERS), FIXTURE_MATRIX_CELLS);
+  const expected = BROWSER_SUMMARY;
 
   it('summary: the same headline, with Partial and Disqualified reported apart (D1)', async () => {
     const { Summary } = await serverSummary(RESPONSES, ANSWERS);
@@ -73,8 +70,7 @@ describe('GetResponseSummary matches the old browser aggregation on a fixture (D
 
     expect(Questions).toEqual(expected.Questions);
     // D2 is exercised, not vacuous: the browser had a bucket labelled with the raw value.
-    const browserColour = browserReport(DEFINITION, RESPONSES, ANSWERS).breakdowns.find((c) => c.questionId === Q.colour);
-    expect(browserColour?.buckets.map((b) => b.label)).toContain('mauve');
+    expect(BROWSER_COLOUR_LABELS).toContain('mauve');
     expect(JSON.stringify(Questions)).not.toContain('mauve');
   });
 
@@ -119,12 +115,11 @@ describe('AnsweredCount counts responses that stored a value (the one difference
   it('a blank YesNo row counted as an answer by the browser is not counted by the server', async () => {
     const blankRow: FixtureAnswer = { ...ANSWERS[0], ID: gid(7777), ResponseID: gid(1005), QuestionID: Q.yesno, TextValue: null };
     const answers = [...ANSWERS, blankRow];
-    const browser = browserReport(DEFINITION, RESPONSES, answers).breakdowns.find((c) => c.questionId === Q.yesno);
     const server = (await serverSummary(RESPONSES, answers)).Questions.find((c) => c.QuestionID === Q.yesno);
 
-    expect(browser?.answeredCount).toBe(4);
+    expect(BROWSER_YESNO_WITH_A_BLANK_ROW.AnsweredCount).toBe(4);
     expect(server?.AnsweredCount).toBe(3);
     // Everything else on the card is unchanged: a blank row contributed to no bucket either way.
-    expect(server?.Buckets).toEqual(browser?.buckets.map((b) => ({ Label: b.label, Count: b.count, Fraction: b.fraction })));
+    expect(server?.Buckets).toEqual(BROWSER_YESNO_WITH_A_BLANK_ROW.Buckets);
   });
 });

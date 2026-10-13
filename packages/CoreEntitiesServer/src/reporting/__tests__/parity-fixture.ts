@@ -235,3 +235,33 @@ export const ANSWERS: FixtureAnswer[] = [
   answer(8, Q.colour, { TextValue: 'b' }),
   answer(8, Q.yesno, { BooleanValue: false }),
 ];
+
+/**
+ * Two more Complete responses, used only on a real database, whose colour answers differ from the
+ * option value `g` by case (`G`) and by a trailing space (`g `). SQL Server's collation is case- and
+ * trailing-space-insensitive, so a value-counts query grouping on the TEXT would merge them with `g`
+ * and report whichever spelling came first. The browser compared exactly, and so must the server.
+ */
+export const CASE_VARIANT_RESPONSES: FixtureResponse[] = [9, 10].map((n) => ({
+  ...RESPONSES[0],
+  ID: gid(1000 + n),
+  StartedAt: new Date('2026-09-09T10:00:00Z'),
+  SubmittedAt: new Date('2026-09-09T10:02:00Z'),
+  AnonymousSessionID: `session-${n}`,
+}));
+
+export const CASE_VARIANT_ANSWERS: FixtureAnswer[] = [
+  { ...ANSWERS[0], ID: gid(6001), ResponseID: gid(1009), QuestionID: Q.colour, TextValue: 'G' },
+  { ...ANSWERS[0], ID: gid(6002), ResponseID: gid(1010), QuestionID: Q.colour, TextValue: 'g ' },
+];
+
+/**
+ * The rows the opt-in real-database spec inserts, under the fixture's own ids (it maps them to fresh
+ * ones). Two fixture answers are left out there: the file upload (its `FileID` is a foreign key to an
+ * `MJ: Files` row the fixture does not create) and the answer to a deleted question (a foreign key to
+ * a question row the fixture does not have). Both are covered by the fake-provider parity spec.
+ */
+export const REAL_DB_RESPONSES: FixtureResponse[] = [...RESPONSES, ...CASE_VARIANT_RESPONSES];
+export const REAL_DB_ANSWERS: FixtureAnswer[] = [...ANSWERS, ...CASE_VARIANT_ANSWERS].filter(
+  (a) => a.QuestionID !== DELETED_QUESTION && a.QuestionID !== Q.upload,
+);

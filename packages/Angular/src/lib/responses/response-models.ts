@@ -4,23 +4,24 @@
  * Shared by all three mounts (reporting dashboard tab, builder tab, Form Response
  * entity-form override) — moved out of the dashboard's `reporting.model.ts` so that
  * nothing outside `lib/dashboard/` has to depend on the dashboard to render a response.
- * Nothing here is persisted; it is purely a read-model.
+ * Built from what `Forms.ListResponses` and `Forms.GetResponseDetail` return; nothing here is
+ * persisted.
  */
 import type {
   FormQuestionType,
-  mjBizAppsFormsFormAutomationRunEntityType,
-  mjBizAppsFormsFormEntityBindingRecordEntityType,
-  mjBizAppsFormsFormResponseEntityType,
+  FormsResponseAutomationRun,
+  FormsResponseBindingRecord,
+  FormsResponseListRow,
 } from '@mj-biz-apps/forms-entities';
 
 /**
- * A response's status, derived from the entity rather than re-typed.
+ * A response's status, derived from the operation's output type rather than re-typed.
  *
- * The union is CodeGen output from the column's CHECK constraint, so a hand-copied
- * `'Complete' | 'Partial'` silently stops tracking it the moment a migration widens the
- * constraint (`.claude/rules/typescript-style.md`).
+ * The union is the `FormResponse.Status` CHECK values as `Forms.ListResponses` declares them, so a
+ * hand-copied `'Complete' | 'Partial'` cannot silently stop tracking it
+ * (`.claude/rules/typescript-style.md`).
  */
-export type ResponseStatus = mjBizAppsFormsFormResponseEntityType['Status'];
+export type ResponseStatus = FormsResponseListRow['Status'];
 
 /** A row in the individual-response list/grid. */
 export interface ResponseListRow {
@@ -68,13 +69,27 @@ export interface ResponseAnswerView {
   file: ResponseFileView | null;
 }
 
-/** One on-submit automation attempt triggered by this submission. */
-export interface ResponseAutomationRunView {
+/**
+ * One on-submit automation step triggered by this submission.
+ *
+ * Not named "…Run View": DW3 of #303 greps this surface for MJ's read-API class name to prove it does
+ * no reads of its own, and a type spelled like it would match.
+ */
+export interface ResponseAutomationAttempt {
   runId: string;
   /** The automation's name, from the run view's denormalised field. */
   automationName: string;
-  status: mjBizAppsFormsFormAutomationRunEntityType['Status'];
-  attemptCount: number;
+  status: FormsResponseAutomationRun['Status'];
+  /**
+   * Which delivery of the submit message last ran this step, 1-based — NOT how many times it ran.
+   * A Work Queue redelivery raises it; an operator's replay starts a new count at 1 (#303 Task 7).
+   */
+  deliveryAttempt: number;
+  /**
+   * The Work Queue message whose delivery ran this step: what an operator searches the queue for.
+   * Null for steps written before the column existed and for steps no delivery ran.
+   */
+  workQueueMessageId: string | null;
   startedAt: Date | null;
   completedAt: Date | null;
   /** Wall-clock seconds; null while the run is still in flight or never started. */
@@ -100,7 +115,7 @@ export interface ResponseBindingRecordView {
    */
   targetEntityName: string | null;
   targetRecordId: string | null;
-  outcome: mjBizAppsFormsFormEntityBindingRecordEntityType['Outcome'];
+  outcome: FormsResponseBindingRecord['Outcome'];
   /** Field names actually written by this execution; empty when none or unparseable. */
   writtenFields: string[];
 }
@@ -124,13 +139,18 @@ export interface ResponseDetail {
    */
   unlabelledAnswerCount: number;
   /**
+   * True when the version labelling the answers has no readable definition, so NO answer could be
+   * labelled. The view says so: an empty transcript would otherwise read as "they answered nothing".
+   */
+  labelsMissing: boolean;
+  /**
    * Human-readable names of the sections that could not be read (e.g. because the user's
    * role lacks Read on that entity), so the view can say a section is MISSING rather than
    * EMPTY. Those are opposite claims and the reader cannot tell them apart otherwise.
    */
   unavailableSections: string[];
   /** What the submission triggered. Empty when it triggered nothing. */
-  automationRuns: ResponseAutomationRunView[];
+  automationRuns: ResponseAutomationAttempt[];
   /** What business records it wrote. Empty when it wrote none. */
   bindingRecords: ResponseBindingRecordView[];
 }

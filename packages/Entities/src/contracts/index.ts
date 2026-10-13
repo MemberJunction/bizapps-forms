@@ -45,3 +45,4 @@ export * from './respondent-definition';
 export * from './response-outcome';
 export * from './rule-sources';
 export * from './answer-values';
+export * from './response-reporting';

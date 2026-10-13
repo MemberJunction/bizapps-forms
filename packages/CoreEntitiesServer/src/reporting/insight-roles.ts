@@ -1,7 +1,8 @@
 /**
  * What kind of INSIGHT each question type yields — which section of the reporting summary a
- * question lands in, and which card renders it (#303 Task 9; moved from forms-ng's
- * `question-insight-roles.ts`, which Task 10 deletes).
+ * question lands in, and which card renders it (#303 Task 9). Moved here from forms-ng's
+ * `question-insight-roles.ts`, deleted in Task 10; the dashboard now receives each question's role
+ * in the summary rather than deciding it.
  *
  * The contract's `analysisKindFor` says what an answer IS; this says what a reader can learn from a
  * thousand of them, and the two diverge on purpose:

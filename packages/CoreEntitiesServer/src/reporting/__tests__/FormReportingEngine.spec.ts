@@ -5,7 +5,8 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { LogError } from '@memberjunction/core';
-import { FormReportingEngine, MAX_RESPONSE_PAGE_SIZE, ROW_RESTRICTED_SUMMARY_MESSAGE, SUMMARY_NOT_AVAILABLE_MESSAGE } from '../../engines/FormReportingEngine.js';
+import { MAX_RESPONSE_PAGE_SIZE } from '@mj-biz-apps/forms-entities';
+import { FormReportingEngine, ROW_RESTRICTED_SUMMARY_MESSAGE, SUMMARY_NOT_AVAILABLE_MESSAGE } from '../../engines/FormReportingEngine.js';
 import { FormReportingError } from '../reporting-errors.js';
 import { REPORT_QUERY } from '../report-queries.js';
 import { fakeEntityId, makeDefinition, makeVersion, type FakeProvider } from '../../testing/index.js';
@@ -385,6 +386,34 @@ describe('GetResponseDetail', () => {
     const db = reportingWorld(detailFixture());
 
     expect(await refusal(engine.GetResponseDetail(request, db.provider, READER))).toMatchObject({ message, fault: false });
+  });
+
+  it('reports the pinned label version as unavailable when it cannot be read, and still returns the runs and records', async () => {
+    const db = reportingWorld(detailFixture(), { failRunViewFor: VERSIONS });
+
+    const detail = await engine.GetResponseDetail({ responseId: R1 }, db.provider, READER);
+
+    expect(detail).toMatchObject({ LabelFormVersionID: VERSION_ID, DefinitionJSON: null, UnavailableSections: ['question labels'] });
+    expect(detail.AutomationRuns).toHaveLength(1);
+    expect(detail.BindingRecords).toHaveLength(2);
+    expect(vi.mocked(LogError).mock.calls.some(([line]) => String(line).includes(`question labels for response ${R1}`))).toBe(true);
+  });
+
+  it('reports the pinned label version as unavailable when its row is gone', async () => {
+    const world = detailFixture();
+    const db = reportingWorld({ ...world, versions: (world.versions ?? []).filter((v) => v.ID !== VERSION_ID) });
+
+    const detail = await engine.GetResponseDetail({ responseId: R1 }, db.provider, READER);
+
+    expect(detail).toMatchObject({ DefinitionJSON: null, UnavailableSections: ['question labels'] });
+  });
+
+  it('still refuses a NAMED label version it cannot read: that is the caller asking for the wrong thing', async () => {
+    const db = reportingWorld(detailFixture(), { failRunViewFor: VERSIONS });
+
+    expect(await refusal(engine.GetResponseDetail({ responseId: R1, labelFormVersionId: RETIRED_VERSION }, db.provider, READER))).toMatchObject({
+      message: `Form version ${RETIRED_VERSION} could not be read.`,
+    });
   });
 
   it('fails with a fixed message when the answers cannot be read', async () => {

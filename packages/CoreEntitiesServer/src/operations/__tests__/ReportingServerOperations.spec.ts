@@ -135,14 +135,27 @@ describe('Forms.GetResponseSummary', () => {
     expect(db.queryCalls.map((c) => c.user)).toEqual([SYSTEM, SYSTEM, SYSTEM]);
   });
 
-  it('refuses a caller whose reads of responses are row-filtered (an API key row filter, a filtered role), before any query', async () => {
+  it.each([['MJ_BizApps_Forms: Form Responses'], ['MJ_BizApps_Forms: Form Response Answers']])(
+    'refuses a caller whose reads of %s are row-filtered as FORBIDDEN, in Authorize, before any read',
+    async (entityName) => {
+      const db = world({}, { [entityName]: "FormID = 'x'" });
+
+      const result = await run(op(), db, { FormID: FORM_ID });
+
+      // FORBIDDEN, like any other caller the operation will not serve: the dashboard reads "not
+      // available to you" from the result code alone.
+      expect(result.ResultCode).toBe('FORBIDDEN');
+      expect(db.queryCalls).toEqual([]);
+      expect(db.viewCalls).toEqual([]);
+    },
+  );
+
+  it('still lists and details for a row-filtered caller: those read as the caller, so the filter applies', async () => {
     const db = world({}, { 'MJ_BizApps_Forms: Form Responses': "FormID = 'x'" });
 
-    const result = await run(op(), db, { FormID: FORM_ID });
+    const result = await run(new ListResponsesServerOperation(), db, { FormID: FORM_ID, StartRow: 0, MaxRows: 10, IncludeAnswers: false });
 
-    expect(result.ResultCode).toBe('EXECUTION_ERROR');
-    expect(result.ErrorMessage).toBe('The response summary is not available to a user whose access to responses is row-restricted.');
-    expect(db.queryCalls).toEqual([]);
+    expect(result.ResultCode).toBe('SUCCESS');
   });
 
   it.each([

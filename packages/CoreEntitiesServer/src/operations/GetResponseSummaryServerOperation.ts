@@ -4,11 +4,12 @@
  * on the server as aggregates (`FormReportingEngine.GetResponseSummary`). Read-only. Shape: see
  * `PublishFormServerOperation`.
  *
- * `Authorize` is the response-reading rule: no anonymous or magic-link session, and Read on the form,
- * its versions, its responses and their answers. It matters more here than anywhere: the engine runs
- * the reporting queries as the SYSTEM user. The engine applies the same rule again (an in-process
- * caller skips `Authorize`) and also refuses a caller whose reads of responses or answers carry a row
- * filter, which the system user would otherwise drop. An API key additionally needs `forms:read`.
+ * `Authorize` is the response-reading rule — no anonymous or magic-link session, and Read on the form,
+ * its versions, its responses and their answers — plus a refusal of any caller whose reads of
+ * responses or answers carry a row filter, which the system user would otherwise drop. It matters
+ * more here than anywhere: the engine runs the reporting queries as the SYSTEM user. Both refusals
+ * are `FORBIDDEN`. The engine applies both again (an in-process caller skips `Authorize`). An API key
+ * additionally needs `forms:read`.
  */
 import { BaseRemotableOperation, type IMetadataProvider, type UserInfo } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
@@ -19,13 +20,13 @@ import {
 } from '@mj-biz-apps/forms-entities';
 import { FormReportingEngine } from '../engines/FormReportingEngine.js';
 import { requireDatabaseProvider } from '../shared/database-provider.js';
-import { authorizeResponseReading } from './form-authoring-authorization.js';
+import { authorizeResponseSummary } from './form-authoring-authorization.js';
 import { optionalTextInput, requireTextInput } from './operation-input.js';
 
 @RegisterClass(BaseRemotableOperation, 'Forms.GetResponseSummary')
 export class GetResponseSummaryServerOperation extends FormsGetResponseSummaryOperation {
   protected override async Authorize(_input: FormsGetResponseSummaryInput, user: UserInfo): Promise<boolean> {
-    return authorizeResponseReading(this.OperationKey, user);
+    return authorizeResponseSummary(this.OperationKey, user);
   }
 
   protected override async InternalExecute(

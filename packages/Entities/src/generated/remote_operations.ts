@@ -400,11 +400,18 @@ export interface FormsGetResponseDetailOutput {
     AutomationRuns: FormsResponseAutomationRun[];
     /** Binding ledger rows, oldest first. */
     BindingRecords: FormsResponseBindingRecord[];
-    /** The version that labelled the answers. */
+    /** The version that labelled the answers. When none was named, this is the version the response was submitted against, even if it could not be read. */
     LabelFormVersionID: string;
-    /** JSON text of that version's `PublishedFormDefinition` snapshot; `null` when it has none. */
+    /**
+     * JSON text of the labelling version's `PublishedFormDefinition` snapshot, or `null`.
+     * It is `null` when that version has no snapshot, and also when no label version was named and the
+     * version the response was submitted against could not be read: a missing row, no Read on Form
+     * Versions, or a version of another form. That case is reported in `UnavailableSections` as
+     * "question labels", and the rest of the detail is still returned. A label version the caller
+     * NAMES that cannot be read refuses the call instead.
+     */
     DefinitionJSON: string | null;
-    /** Sections the caller may not read (for example "automation runs"): reported as missing, never as empty. */
+    /** Sections the caller may not read, for example "automation runs" or "question labels": reported as missing, never as empty. */
     UnavailableSections: string[];
 }
 

@@ -9,7 +9,8 @@
  * row x column cell counts, never as rendered answers.
  */
 import { describe, expect, it } from 'vitest';
-import { buildQuestionBreakdowns, OFF_LIST_LABEL } from '../breakdowns.js';
+import { OFF_LIST_LABEL } from '@mj-biz-apps/forms-entities';
+import { buildQuestionBreakdowns } from '../breakdowns.js';
 import { insightAnswer, question, valueRow } from './reporting-fixtures.js';
 
 const colour = question('q-colour', 'SingleChoice', 'Favourite colour', [

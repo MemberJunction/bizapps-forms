@@ -10,14 +10,8 @@ import { FORMS_UI_CSS, FORMS_VIZ_CSS, failureMessage } from '../shared';
 import { FORMS_REPORTING_CSS } from './forms-reporting-dashboard.styles';
 import { FormsReportingService } from './services/forms-reporting.service';
 import { FormsReportingExportService } from './services/forms-reporting-export.service';
-import {
-  mockReport,
-  mockReportableForms,
-  mockResponseDetail,
-} from './services/forms-reporting-mock';
 import type { FormReportData, ReportableForm } from './models/reporting.model';
-import type { ResponseDetail, ResponseRecordLink } from '../responses/response-models';
-import { ResponsesDataService } from '../responses/responses-data.service';
+import type { ResponseRecordLink } from '../responses/response-models';
 import {
   filterForms,
   percent,
@@ -34,8 +28,7 @@ import { FormsRespondentProfileComponent } from './components/respondent-profile
 import { FormsOpenTextPanelComponent } from './components/open-text-panel.component';
 import { FormsQuestionBreakdownComponent } from './components/question-breakdown.component';
 import { FormsFunnelChartComponent } from './components/funnel-chart.component';
-import { FormsResponseListComponent } from '../responses/response-list.component';
-import { FormsResponseDetailComponent } from '../responses/response-detail.component';
+import { ResponsesTabComponent } from '../responses/responses-tab.component';
 
 /**
  * The two things a reader comes here to do. Not four tabs.
@@ -63,16 +56,17 @@ type DashboardMode = 'insights' | 'responses';
  * portfolio visible (recognition, not recall), lets forms be compared by volume without
  * choosing between them, and gives the reader an obvious place to go next.
  *
- * Standalone so the Explorer can instantiate it directly via `createComponent`. All data
- * comes through RunView/RunViews (FormsReportingService); a seeded mock mode renders the
- * UI before any real responses exist (toggle is a one-flag swap).
+ * Standalone so the Explorer can instantiate it directly via `createComponent`. The report is
+ * one Remote Operation (`Forms.GetResponseSummary`, computed on the server); the Responses view is
+ * the same paged list and detail the builder's Responses tab is (`ResponsesTabComponent`); the
+ * export pages through `Forms.ListResponses`.
  */
 @RegisterClass(BaseDashboard, 'FormsReportingDashboard')
 @Component({
   selector: 'mj-forms-reporting-dashboard',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [ResponsesDataService, FormsReportingService, FormsReportingExportService],
+  providers: [FormsReportingService, FormsReportingExportService],
   imports: [
     FormsModule,
     FormsSummaryStatsComponent,
@@ -80,24 +74,15 @@ type DashboardMode = 'insights' | 'responses';
     FormsOpenTextPanelComponent,
     FormsQuestionBreakdownComponent,
     FormsFunnelChartComponent,
-    FormsResponseListComponent,
-    FormsResponseDetailComponent,
+    ResponsesTabComponent,
   ],
   templateUrl: './forms-reporting-dashboard.component.html',
   styles: [FORMS_UI_CSS, FORMS_VIZ_CSS, FORMS_REPORTING_CSS],
 })
 export class FormsReportingDashboardComponent extends BaseDashboard {
   private readonly data = inject(FormsReportingService);
-  private readonly responses = inject(ResponsesDataService);
   private readonly exporter = inject(FormsReportingExportService);
   private readonly cdr = inject(ChangeDetectorRef);
-
-  /**
-   * Live RunView/RunQuery data path is the default. Set to `true` only as an explicit
-   * dev aid (e.g. to preview the dashboard UI before any real responses exist) — the
-   * seeded mock renders the identical UI with fabricated data. Never ship `true`.
-   */
-  public useMock = false;
 
   /**
    * Three flags, not one, because they blank three different things.
@@ -107,12 +92,22 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
    * the rail is the navigation, and unmounting it mid-switch throws away the reader's
    * place and makes the click feel like a page load. The rail also stays clickable: a
    * newer selection supersedes the one loading (`selectionStamp`), so nothing needs
-   * locking. `busy` blanks nothing at all; it disables controls while a response opens or
-   * an export runs, so the list the reader clicked stays under their cursor.
+   * locking. `busy` blanks nothing at all; it disables controls while an export runs.
    */
   public loadingForms = false;
   public loadingReport = false;
   public busy = false;
+  /**
+   * While the Responses view is opening a response: the refresh and export controls are held, as
+   * they were when this dashboard opened responses itself (`busy`).
+   */
+  public responsesBusy = false;
+  /**
+   * Whether the Responses view has been visited for the selected form. It is mounted on the first
+   * visit and kept (hidden under Insights) until another form is selected, so going back and forth
+   * keeps its list instead of re-reading the first page each time.
+   */
+  public responsesMounted = false;
   public errorMessage: string | null = null;
   /**
    * Why the form list itself failed to load, kept apart from `errorMessage` (which any later
@@ -127,6 +122,14 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   public railQuery = '';
   public selectedForm: ReportableForm | null = null;
   public report: FormReportData | null = null;
+  /**
+   * Set instead of `report` when the server will not compute this form's summary for this reader
+   * (row-restricted or no read access). Shown as "not available to you", not as an error; the
+   * Responses view still lists whatever responses the reader may read.
+   */
+  public summaryUnavailable: string | null = null;
+  /** What the last export needs the reader to know (it holds only part of the form), or null. */
+  public exportNotice: string | null = null;
 
   public mode: DashboardMode = 'insights';
   public readonly modes: { key: DashboardMode; label: string; icon: string }[] = [
@@ -140,9 +143,6 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
    * instead of drifting away from them between change-detection passes.
    */
   public loadedAt = new Date();
-
-  /** Selected response for the detail view; null shows the list. */
-  public responseDetail: ResponseDetail | null = null;
 
   /** Stamp of the latest selection; a load holding an older stamp was superseded and applies nothing. */
   private selectionStamp = 0;
@@ -171,7 +171,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     this.formsLoadError = null;
     this.cdr.markForCheck();
     try {
-      const loaded = this.useMock ? mockReportableForms() : await this.data.loadReportableForms();
+      const loaded = await this.data.loadReportableForms();
       this.forms = sortFormsForRail(loaded);
       this.applyRailFilter();
       // The rail exists now, so the page-wide state ends here rather than when the first report
@@ -230,20 +230,25 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     // the report, the error or the loading flag (#252).
     const stamp = ++this.selectionStamp;
     this.selectedForm = form;
-    this.responseDetail = null;
     this.mode = 'insights';
+    this.responsesMounted = false;
+    this.responsesBusy = false;
     this.loadingReport = true;
     this.errorMessage = null;
+    this.exportNotice = null;
     // The previous form's report must not sit under the new form's name while this one
     // loads: the header line and the Export buttons both read it.
     this.report = null;
+    this.summaryUnavailable = null;
     this.cdr.markForCheck();
     try {
-      // The report carries its own answer rows for the export; reading them again here is
-      // what doubled every selection's payload (#246).
-      const report = this.useMock ? mockReport() : await this.data.loadReport(form);
+      const load = await this.data.loadReport(form);
       if (stamp !== this.selectionStamp) return;
-      this.report = report;
+      if (load.status === 'ready') {
+        this.report = load.report;
+      } else {
+        this.summaryUnavailable = load.message;
+      }
       this.loadedAt = new Date();
     } catch (err) {
       if (stamp !== this.selectionStamp) {
@@ -277,8 +282,27 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
 
   public setMode(mode: DashboardMode): void {
     this.mode = mode;
-    this.responseDetail = null;
+    if (mode === 'responses') {
+      this.responsesMounted = true;
+    }
     this.cdr.markForCheck();
+  }
+
+  /** The Responses view says when it is opening a response (its `BusyChange`). */
+  public setResponsesBusy(busy: boolean): void {
+    this.responsesBusy = busy;
+    this.cdr.markForCheck();
+  }
+
+  /** Whether the (kept-mounted) Responses view belongs on the page for the selected form. */
+  public get showResponsesView(): boolean {
+    if (!this.responsesMounted || this.loadingReport) return false;
+    return this.summaryUnavailable !== null || (this.report !== null && this.hasResponses);
+  }
+
+  /** Whether the selected form has anything to show under the mode switch: a report, or a refusal. */
+  public get hasSelection(): boolean {
+    return this.report !== null || this.summaryUnavailable !== null;
   }
 
   /** "48 responses · last 2 hours ago" — the header line under the form's name. */
@@ -294,7 +318,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   /** Whether the selected form has collected anything at all. */
   public get hasResponses(): boolean {
     const summary = this.report?.summary;
-    return !!summary && summary.completeResponses + summary.partialResponses > 0;
+    return !!summary && summary.completeResponses + summary.partialResponses + summary.disqualifiedResponses > 0;
   }
 
   /**
@@ -321,43 +345,6 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     return !!profile && !profile.isEmpty && profile.metrics.length > 0;
   }
 
-  public async openResponse(responseId: string): Promise<void> {
-    // Ignore a click while a detail load is already in flight. The list stays mounted
-    // during the load, and the read is now two round trips whose count depends on whether
-    // the response has file answers — so without this, two fast clicks resolve in
-    // data-dependent order and the user can land on the response they did not pick.
-    if (!this.report || this.busy) return;
-    // A selection made while the detail loads makes it belong to a form no longer on screen.
-    const stamp = this.selectionStamp;
-    this.busy = true;
-    this.errorMessage = null;
-    this.cdr.markForCheck();
-    try {
-      const detail = this.useMock
-        ? this.mockDetail(responseId)
-        : await this.responses.loadResponseDetail(responseId, this.report.questions);
-      if (stamp !== this.selectionStamp) return;
-      this.responseDetail = detail;
-    } catch (err) {
-      if (stamp !== this.selectionStamp) {
-        LogError(
-          `Superseded response load for response ${responseId}: ${failureMessage(err, 'Failed to load the response.')}`,
-        );
-        return;
-      }
-      this.fail(err, 'Failed to load the response.');
-    } finally {
-      // Per-operation, not per-selection: whichever load set it clears it.
-      this.busy = false;
-      this.cdr.markForCheck();
-    }
-  }
-
-  public closeResponse(): void {
-    this.responseDetail = null;
-    this.cdr.markForCheck();
-  }
-
   /**
    * Relays a deep link from the response detail (a stored file, an action log, an agent
    * run, a bound business record) to the container, which owns tab/routing behaviour.
@@ -370,16 +357,20 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   }
 
   public async export(format: ExportFormat): Promise<void> {
-    // A report is only ever on screen under a selected form; both are read here so the failure
-    // below can be told apart from one belonging to a form the reader has since left.
-    if (!this.report || !this.selectedForm) return;
-    const report = this.report;
+    // Read here so the failure below can be told apart from one belonging to a form the reader
+    // has since left.
+    if (!this.hasSelection || !this.selectedForm) return;
     const exportedForm = this.selectedForm;
     this.busy = true;
     this.errorMessage = null;
+    this.exportNotice = null;
     this.cdr.markForCheck();
     try {
-      await this.exporter.exportResponses(report, format);
+      const outcome = await this.exporter.exportResponses(exportedForm, format);
+      // The notice belongs to the form it describes; a reader who moved on does not get it.
+      if (this.selectedForm?.formId === exportedForm.formId) {
+        this.exportNotice = outcome.notice;
+      }
     } catch (err) {
       // The rail is not locked by `busy`, so the reader can move to another form mid-export.
       // Ask whether the export's form is still the one on screen, not whether a selection
@@ -402,10 +393,9 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     this.cdr.markForCheck();
   }
 
-  /** Builds a detail view from the mock report (no extra fetch). */
-  private mockDetail(responseId: string): ResponseDetail {
-    const row = this.report?.responses.find((r) => r.responseId === responseId);
-    return mockResponseDetail(responseId, this.report?.questions ?? [], row);
+  public dismissExportNotice(): void {
+    this.exportNotice = null;
+    this.cdr.markForCheck();
   }
 
   private fail(err: unknown, action: string): void {

@@ -6,6 +6,8 @@ import {
   booleanSegments,
   consentRate,
   consentSegments,
+  isOffListLabel,
+  matrixGrid,
   npsSegments,
   percent,
   plural,
@@ -14,9 +16,6 @@ import {
 import type { QuestionBreakdown } from '../models/reporting.model';
 import { FormsDistributionChartComponent } from './distribution-chart.component';
 import { FormsProportionBarComponent } from './proportion-bar.component';
-
-/** Free-text answers shown before the card offers the rest. */
-const VERBATIM_PREVIEW = 3;
 
 /**
  * One question's answers, however that question is best summarised.
@@ -29,12 +28,20 @@ const VERBATIM_PREVIEW = 3;
  * question, nothing in the chart can tell you, and the healthy-looking split is measuring a
  * self-selected third.
  *
- * ONE CARD PER ROLE, NOT PER TYPE. What renders is chosen by `insightRoleFor`, so a Checkbox
+ * ONE CARD PER ROLE, NOT PER TYPE. What renders is chosen by the server's insight role, so a Checkbox
  * shows an acceptance rate rather than the fifty-fifty split its YesNo-shaped storage would
  * suggest, and a Date shows months rather than a column of formatted dates. Identity,
  * attachment and written-answer questions never reach this component at all — they have their
  * own panels, because a bar chart cannot say anything true about any of them.
+ *
+ * A MATRIX IS A GRID OF COUNTS. Each cell is how many answers chose that column for that row,
+ * shaded by its share of the row. It used to list rendered answers ("Venue: Good; Food: Poor"),
+ * which were three arbitrary respondents' answers rather than a summary, and which the server no
+ * longer sends.
  */
+/** The opacity of a Matrix cell that holds its whole row's answers. */
+const MAX_CELL_TINT = 0.35;
+
 @Component({
   selector: 'mj-forms-question-breakdown',
   standalone: true,
@@ -112,19 +119,36 @@ const VERBATIM_PREVIEW = 3;
             }
           }
           @case ('composite') {
-            @if (breakdown.textAnswers.length === 0) {
+            @if (matrix().rows.length === 0 || breakdown.answeredCount === 0) {
               <p class="qb-none">No answers yet.</p>
             } @else {
-              <ul class="qb-verbatims">
-                @for (t of visibleText(); track $index) {
-                  <li>{{ t }}</li>
-                }
-              </ul>
-              @if (hiddenTextCount() > 0 || expanded()) {
-                <button type="button" class="qb-more" (click)="toggle()">
-                  <i class="fa-solid" [class.fa-chevron-down]="!expanded()" [class.fa-chevron-up]="expanded()" aria-hidden="true"></i>
-                  {{ expanded() ? 'Show fewer' : 'Show all ' + breakdown.textAnswers.length }}
-                </button>
+              <div class="qb-matrix-wrap">
+                <table class="qb-matrix">
+                  <thead>
+                    <tr>
+                      <th scope="col"><span class="qb-sr">Row</span></th>
+                      @for (c of matrix().columns; track c) {
+                        <th scope="col" [class.is-off]="isOffList(c)">{{ c }}</th>
+                      }
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (row of matrix().rows; track row.label) {
+                      <tr>
+                        <th scope="row" [class.is-off]="isOffList(row.label)">{{ row.label }}</th>
+                        @for (n of row.counts; track $index) {
+                          <td>
+                            <span class="qb-cell-fill" [style.opacity]="cellTint(n, row.total)" aria-hidden="true"></span>
+                            <span class="qb-cell-count">{{ n }}</span>
+                          </td>
+                        }
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+              @if (matrixHasOffList()) {
+                <p class="qb-note">“Other (not an option)” counts answers naming a row or column this question does not offer.</p>
               }
             }
           }
@@ -209,36 +233,28 @@ const VERBATIM_PREVIEW = 3;
         font-variant-numeric: tabular-nums;
       }
 
-      .qb-verbatims { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); margin: 0; padding: 0; list-style: none; }
-      /* A quoted answer, marked as one by a rule down its left edge rather than by
-         quotation marks the respondent did not write. */
-      .qb-verbatims li {
-        padding: 8px 12px;
-        font-size: var(--mjf-meta);
-        line-height: 1.5;
-        color: var(--mj-text-primary);
-        background: var(--mj-bg-surface-sunken);
-        border-left: 2px solid var(--mjf-viz-series);
-        border-radius: 0 var(--mjf-radius-sm) var(--mjf-radius-sm) 0;
-        overflow-wrap: anywhere;
+      /* The grid scrolls inside its card rather than widening the page on a phone. */
+      .qb-matrix-wrap { overflow-x: auto; }
+      .qb-matrix { width: 100%; border-collapse: collapse; font-size: var(--mjf-meta); }
+      .qb-matrix th,
+      .qb-matrix td { padding: 8px 10px; text-align: center; border-bottom: 1px solid var(--mjf-rule); }
+      .qb-matrix thead th { font-size: var(--mjf-label); font-weight: 600; color: var(--mj-text-muted); }
+      .qb-matrix tbody th { text-align: left; font-weight: 600; color: var(--mj-text-primary); overflow-wrap: anywhere; }
+      .qb-matrix .is-off { font-style: italic; color: var(--mj-text-muted); }
+      /* The count sits on a tint whose strength is the cell's share of its row, so where each
+         row's answers concentrate is visible before a single number is read. */
+      .qb-matrix td { position: relative; color: var(--mj-text-primary); font-variant-numeric: tabular-nums; }
+      .qb-cell-fill { position: absolute; inset: 3px; border-radius: var(--mjf-radius-sm); background: var(--mjf-viz-series); }
+      .qb-cell-count { position: relative; font-weight: 600; }
+      .qb-note { margin: var(--mjf-gap-sm) 0 0; font-size: var(--mjf-label); color: var(--mj-text-muted); }
+      .qb-sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
       }
-
-      .qb-more {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        margin-top: var(--mjf-gap-sm);
-        padding: 6px 0;
-        font: inherit;
-        font-size: var(--mjf-label);
-        font-weight: 600;
-        color: var(--mj-brand-primary);
-        background: none;
-        border: none;
-        cursor: pointer;
-      }
-      .qb-more:hover { text-decoration: underline; }
-      .qb-more:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; border-radius: var(--mjf-radius-sm); }
     `,
   ],
 })
@@ -248,9 +264,6 @@ export class FormsQuestionBreakdownComponent {
   @Input({ required: true })
   set breakdown(value: QuestionBreakdown) {
     this._breakdown.set(value);
-    // A card reused for a different question must not inherit the previous one's
-    // disclosure state and open on a wall of somebody else's answers.
-    this.expanded.set(false);
   }
   get breakdown(): QuestionBreakdown {
     const value = this._breakdown();
@@ -265,8 +278,6 @@ export class FormsQuestionBreakdownComponent {
    * Zero means "not known", and the skip line is omitted rather than guessed at.
    */
   @Input() totalResponses = 0;
-
-  public readonly expanded = signal(false);
 
   public get typeLabel(): string {
     return questionTypeMeta(this.breakdown.type).label;
@@ -311,17 +322,25 @@ export class FormsQuestionBreakdownComponent {
     return segments ? npsSegments(segments) : [];
   }
 
-  public readonly visibleText = computed(() => {
-    const all = this._breakdown()?.textAnswers ?? [];
-    return this.expanded() ? all : all.slice(0, VERBATIM_PREVIEW);
+  /** A Matrix question's cell counts as a grid. Empty for every other role. */
+  public readonly matrix = computed(() => matrixGrid(this._breakdown()?.matrixCells ?? []));
+
+  /** Whether the grid shows the off-list fold (and so a footnote explains it). */
+  public readonly matrixHasOffList = computed(() => {
+    const grid = this.matrix();
+    return grid.columns.some(isOffListLabel) || grid.rows.some((r) => isOffListLabel(r.label));
   });
 
-  public readonly hiddenTextCount = computed(() =>
-    Math.max(0, (this._breakdown()?.textAnswers.length ?? 0) - VERBATIM_PREVIEW),
-  );
+  /**
+   * A cell's tint: its share of the row, scaled so the strongest cell stays light enough for the
+   * count printed on it to keep its contrast in both themes.
+   */
+  public cellTint(count: number, rowTotal: number): number {
+    return rowTotal > 0 ? (count / rowTotal) * MAX_CELL_TINT : 0;
+  }
 
-  public toggle(): void {
-    this.expanded.update((v) => !v);
+  public isOffList(label: string): boolean {
+    return isOffListLabel(label);
   }
 
   public fmt(value: number | null): string {

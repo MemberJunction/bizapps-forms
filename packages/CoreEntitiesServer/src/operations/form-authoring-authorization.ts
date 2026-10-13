@@ -220,6 +220,25 @@ export function authorizeDistributionAuthoring(
  * {@link refuseFormAuthoring}, as a yes/no. `metadata` defaults to the process-global provider for
  * the reason given there.
  */
+/**
+ * `Authorize` for `Forms.GetResponseSummary`: the response-reading rule, then the row-filter check
+ * ({@link responseRowFilterRefusal}). The summary runs its queries as the system user, so a caller
+ * whose reads of responses or answers are row-filtered is refused HERE — as `FORBIDDEN`, the code
+ * every client reads as "not yours" — and not only by the engine (which keeps its own copy for an
+ * in-process caller that skips `Authorize`).
+ */
+export function authorizeResponseSummary(
+  operationKey: string,
+  user: UserInfo,
+  metadata: FormPermissionSource = Metadata.Provider,
+): boolean {
+  const refusal = responseReadingRefusal(user, metadata) ?? (user ? responseRowFilterRefusal(user, metadata) : null);
+  if (refusal) {
+    LogStatus(`[Forms] ${operationKey} refused for user ${user?.ID ?? '(none)'}: ${refusal}.`);
+  }
+  return refusal === null;
+}
+
 export function authorizeResponseReading(
   operationKey: string,
   user: UserInfo,

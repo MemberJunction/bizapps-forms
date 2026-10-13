@@ -164,7 +164,6 @@ export {
 export type { AutomationRunResult, AutomationRunStatus } from './automation/automation-runner.js';
 export {
   FormReportingEngine,
-  MAX_RESPONSE_PAGE_SIZE,
   RESPONSE_LIST_ORDERS,
   ROW_RESTRICTED_SUMMARY_MESSAGE,
   SUMMARY_NOT_AVAILABLE_MESSAGE,
@@ -179,7 +178,6 @@ export {
 export { FormReportingError } from './reporting/reporting-errors.js';
 export { REPORT_QUERY } from './reporting/report-queries.js';
 export { MAX_INSIGHT_ANSWER_ROWS } from './reporting/insight-answers.js';
-export { OFF_LIST_LABEL } from './reporting/breakdowns.js';
 export { EngineTransactionFailure } from './engines/engine-guards.js';
 export { FormAuthoringError } from './engines/authoring-errors.js';
 export type { ClonedForm } from './engines/form-clone.js';
@@ -288,6 +286,7 @@ export {
   authorizeDistributionAuthoring,
   authorizeFormAuthoring,
   authorizeResponseReading,
+  authorizeResponseSummary,
   distributionAuthoringRefusal,
   formAuthoringRefusal,
   refuseFormAuthoring,

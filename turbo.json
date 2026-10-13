@@ -21,37 +21,6 @@
       "dependsOn": ["^build"],
       "persistent": false
     },
-    // TEMPORARY (#303 Task 9; Task 10 removes both entries with the import): the core-entities-server
-    // suite and typecheck read forms-ng SOURCE — `src/reporting/__tests__/browser-parity.ts` holds
-    // the server summary to the dashboard's own aggregation functions. That package does not depend
-    // on forms-ng, so without these inputs an edit to those functions would replay a cached green
-    // parity run (FULL TURBO) instead of re-running it.
-    "@mj-biz-apps/forms-core-entities-server#test": {
-      "outputs": [],
-      "cache": true,
-      "dependsOn": ["^build"],
-      "persistent": false,
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/packages/Angular/src/lib/dashboard/services/*.ts",
-        "$TURBO_ROOT$/packages/Angular/src/lib/dashboard/models/*.ts",
-        "$TURBO_ROOT$/packages/Angular/src/lib/shared/*.ts",
-        "$TURBO_ROOT$/packages/Angular/src/lib/responses/response-models.ts"
-      ]
-    },
-    "@mj-biz-apps/forms-core-entities-server#typecheck": {
-      "outputs": [],
-      "cache": true,
-      "dependsOn": ["^build"],
-      "persistent": false,
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/packages/Angular/src/lib/dashboard/services/*.ts",
-        "$TURBO_ROOT$/packages/Angular/src/lib/dashboard/models/*.ts",
-        "$TURBO_ROOT$/packages/Angular/src/lib/shared/*.ts",
-        "$TURBO_ROOT$/packages/Angular/src/lib/responses/response-models.ts"
-      ]
-    },
     "start": {
       "cache": false,
       "persistent": true,

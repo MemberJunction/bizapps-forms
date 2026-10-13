@@ -30,6 +30,7 @@ import { UserCache } from '@memberjunction/generic-database-provider';
 import {
   answerHoldsValue,
   deriveRespondentLabel,
+  MAX_RESPONSE_PAGE_SIZE,
   quoteSqlString,
   type FormsGetResponseDetailOutput,
   type FormsGetResponseSummaryOutput,
@@ -64,11 +65,12 @@ import { runEngineCall } from './engine-guards.js';
 /** What a caller the summary may not be computed for is told — the same for every reason; the reason is logged. */
 export const SUMMARY_NOT_AVAILABLE_MESSAGE = 'The response summary is not available to this user.';
 
-/** What a caller whose access to responses is row-filtered is told (see `responseRowFilterRefusal`). */
+/**
+ * What a caller whose access to responses is row-filtered is told (see `responseRowFilterRefusal`).
+ * Through the operation such a caller never gets this far — `Authorize` refuses it as `FORBIDDEN` —
+ * so this reaches only an in-process caller of the engine.
+ */
 export const ROW_RESTRICTED_SUMMARY_MESSAGE = 'The response summary is not available to a user whose access to responses is row-restricted.';
-
-/** The most responses one `ListResponses` page returns; a larger `maxRows` is lowered to it. */
-export const MAX_RESPONSE_PAGE_SIZE = 200;
 
 /** A response's status (the `FormResponse.Status` CHECK values). */
 export type ResponseStatus = mjBizAppsFormsFormResponseEntityType['Status'];
@@ -243,7 +245,9 @@ export class FormReportingEngine extends BaseSingleton<FormReportingEngine> {
    * One response with everything its detail view shows, read as the caller: the response, its stored
    * answers, the files behind them, the automation runs it triggered and the records those wrote, and
    * the definition that labels the answers. A satellite section the caller may not read is reported
-   * in `UnavailableSections`, never as empty.
+   * in `UnavailableSections`, never as empty — and so is the response's own version when it labels
+   * the answers and cannot be read (`question labels`, `DefinitionJSON: null`). A label version the
+   * caller names is refused instead.
    */
   public async GetResponseDetail(request: ResponseDetailRequest, provider: DatabaseProviderBase, user: UserInfo): Promise<FormsGetResponseDetailOutput> {
     const responseId = requireGuid(request?.responseId, 'response');
@@ -262,7 +266,7 @@ export class FormReportingEngine extends BaseSingleton<FormReportingEngine> {
         const bindings = rowsOrDegrade<mjBizAppsFormsFormEntityBindingRecordEntityType>(bindingsResult, 'created records', responseId, unavailable);
         const [uploads, label] = await Promise.all([
           readUploadsOf(provider, answers, user, responseId, unavailable),
-          readResponseLabel(provider, response, labelVersionId ?? response.FormVersionID, user),
+          labelVersionId ? readResponseLabel(provider, response, labelVersionId, user) : readPinnedLabel(provider, response, user, unavailable),
         ]);
         return {
           Response: {
@@ -482,6 +486,31 @@ async function readResponseLabel(provider: DatabaseProviderBase, response: Respo
     throw new FormReportingError(`Form version ${versionId} is not a version of the form response ${response.ID} was submitted to.`);
   }
   return { id: version.ID, formId: version.FormID, snapshot: version.DefinitionSnapshot ?? null };
+}
+
+/**
+ * The version a response was submitted against, as its labels — degraded rather than refused.
+ *
+ * Nobody ASKED for this version (the record view passes none), so a version the caller cannot read,
+ * or whose row is gone, is a missing section like the runs or the ledger: the answers, runs and
+ * records are still the caller's to see, and the view says the labels are unavailable. A version
+ * the caller NAMES goes through {@link readResponseLabel} and is refused instead.
+ */
+async function readPinnedLabel(provider: DatabaseProviderBase, response: ResponseRow, user: UserInfo, unavailable: string[]): Promise<LabelVersion> {
+  const result = await provider.RunView<{ ID: string; FormID: string; DefinitionSnapshot: string | null }>(
+    { EntityName: FORMS_ENTITY.FormVersion, ExtraFilter: `ID=${quoteSqlString(response.FormVersionID)}`, Fields: ['ID', 'FormID', 'DefinitionSnapshot'], ResultType: 'simple' },
+    user,
+  );
+  const [version] = rowsOrDegrade(result, 'question labels', response.ID, unavailable);
+  if (version && UUIDsEqual(version.FormID, response.FormID)) {
+    return { id: version.ID, formId: version.FormID, snapshot: version.DefinitionSnapshot ?? null };
+  }
+  if (result?.Success) {
+    // Read, but no row of the response's own form: deleted, or pointing elsewhere. Same degrade.
+    unavailable.push('question labels');
+    LogError(`[FormReportingEngine] could not read question labels for response ${response.ID}: its version ${response.FormVersionID} is not a version of form ${response.FormID}. Returning the response without them.`);
+  }
+  return { id: response.FormVersionID, formId: response.FormID, snapshot: null };
 }
 
 /**

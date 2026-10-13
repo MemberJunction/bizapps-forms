@@ -4,10 +4,9 @@
  *
  * A contract because both sides read stored answers the same way (#303 Task 9): the server derives
  * a response list row's respondent label and counts its answers (`FormReportingEngine`), and the
- * dashboard labels one response's answers in its detail view. Two copies of "how is a MultiChoice
- * answer read" is the duplication that drifts. Until the dashboard switches to these (Task 10), forms-ng
- * keeps its own copy in `lib/shared/answer-values.ts`, which these were taken from unchanged; Task 10
- * deletes it.
+ * dashboard labels one response's answers in its detail view and its export. Two copies of "how is a
+ * MultiChoice answer read" is the duplication that drifts, so forms-ng's own copy was deleted when the
+ * dashboard moved onto the operations (#303 Task 10).
  *
  * Pure and I/O-free: the rows are `answer-canonical.ts`'s structural column bags, so a RunView row,
  * an entity object and a Remote Operation's stored-answer shape all fit.
