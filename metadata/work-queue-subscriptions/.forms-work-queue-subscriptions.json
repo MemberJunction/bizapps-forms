@@ -1,0 +1,33 @@
+[
+  {
+    "_comments": [
+      "Runs a submitted response's on-submit automations. The handler registers under HandlerKey",
+      "'Forms.RunAutomations' (BaseWorkHandler, forms-core-entities-server) on hosts of type MJWorker;",
+      "a host opts in through workQueue.subscriptions in its mj.config.cjs.",
+      "",
+      "Delivery is at-least-once: retries back off with jitter between BackoffBaseSeconds and",
+      "BackoffMaxSeconds and dead-letter after MaxAttempts, so the handler must be idempotent. It",
+      "is, in the handler rather than in the schema: a (FormAutomationID, FormResponseID) pair is",
+      "NOT unique by design (an OnPartial step writes one run row per partial save), so a",
+      "redelivery skips a step already Succeeded for the submission it was enqueued for instead of",
+      "relying on an index. PartitionMode None: no ordering is promised between responses."
+    ],
+    "fields": {
+      "Name": "forms.run-automations",
+      "Description": "MJ Forms: runs the on-submit automations of each submitted response (HandlerKey Forms.RunAutomations).",
+      "TopicID": "@lookup:MJ: Work Queue Topics.Name=forms.response-submitted",
+      "PartitionMode": "None",
+      "MaxAttempts": 5,
+      "BackoffBaseSeconds": 2,
+      "BackoffMaxSeconds": 300,
+      "LeaseSeconds": 120,
+      "HeartbeatMode": "Auto",
+      "HostType": "MJWorker",
+      "HandlerKey": "Forms.RunAutomations",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "2CED079E-FA0A-4813-8A1B-10B9AA1ABFC4"
+    }
+  }
+]

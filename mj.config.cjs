@@ -28,6 +28,18 @@ module.exports = {
     { type: 'GraphQLServer', directory: './packages/Server/src/generated' },
     { type: 'ActionSubclasses', directory: './packages/Actions/src/generated' },
     { type: 'EntitySubclasses', directory: './packages/Entities/src/generated' },
+    /**
+     * Remote Operation typed bases, emitted from the `MJ: Remote Operations` rows in
+     * metadata/remote-operations/. Into the Entities package because it is the one browser-safe
+     * package every other Forms package (and the widget, via `import type`) already depends on:
+     * the generated bases ARE the operation contract, so a client calls `.Execute()` without
+     * pulling in the server engine.
+     *
+     * Scope: CodeGen resolves an operation's schema from its key's namespace (`Forms.` matches the
+     * `MJ_BizApps_Forms: Forms` entity, so `__mj_BizAppsForms`) and filters by `includeSchemas`
+     * below, so core's own operations are not emitted here.
+     */
+    { type: 'RemoteOperations', directory: './packages/Entities/src/generated' },
     { type: 'DBSchemaJSON', directory: './Schema Files' },
   ],
 

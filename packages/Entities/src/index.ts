@@ -1,4 +1,5 @@
 export * from './generated/entity_subclasses'
+export * from './generated/remote_operations'
 export * from './contracts'
 
 /**

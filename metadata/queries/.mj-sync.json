@@ -1,0 +1,21 @@
+{
+  "entity": "MJ: Queries",
+  "filePattern": "**/.*.json",
+  "defaults": {
+    "Status": "Pending"
+  },
+  "pull": {
+    "createNewFileIfNotFound": true,
+    "newFileName": ".forms-reporting-queries.json",
+    "appendRecordsToExistingFile": true,
+    "updateExistingRecords": true,
+    "ignoreNullFields": true,
+    "ignoreVirtualFields": true,
+    "relatedEntities": {
+      "MJ: Query Parameters": {
+        "entity": "MJ: Query Parameters",
+        "foreignKey": "QueryID"
+      }
+    }
+  }
+}

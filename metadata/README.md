@@ -58,6 +58,10 @@ whatever it looks up. `users` and `user-roles` come last because the grant looks
 | `ai-prompts`, `templates`, `ai-prompt-categories` | yes | AI authoring and response analysis |
 | `form-styles`, `form-categories` | yes | the only two that live in `__mj_BizAppsForms`, not `__mj` |
 | `applications`, `application-roles`, `dashboards`, `user-views` | yes | the Explorer surface |
+| `remote-operations`, `remote-operation-categories` | yes | the Forms API surface (#303): one row per `Forms.*` operation; CodeGen emits its typed base into `packages/Entities/src/generated/remote_operations.ts`, and `types/` holds the I/O contracts (no imports — pasted verbatim) |
+| `queries`, `query-categories` | yes | the reporting read models `FormReportingEngine` runs through `RunQuery` |
+| `work-queue-topics`, `work-queue-subscriptions` | yes | the submit outbox: `forms.response-submitted` and the `forms.run-automations` handler subscription |
+| `entity-relationships` | yes | fills `RelatedRecordCollection` on CodeGen-minted relationship rows (Form.Pages/Screens, FormPage.Questions, FormQuestion.Options); creates nothing — see its `.mj-sync.json` |
 | `users`, `user-roles` | yes | the automation service principal **and** its role grant — see [`users/README.md`](users/README.md); the two are useless apart |
 
 Grants on **binding target entities** deliberately do not ship. That set is the ceiling on what a

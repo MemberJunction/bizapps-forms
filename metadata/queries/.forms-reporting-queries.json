@@ -1,0 +1,163 @@
+[
+  {
+    "_comments": [
+      "The three reporting read models FormReportingEngine runs through RunQuery for",
+      "Forms.GetResponseSummary (#303). Each takes FormID (required) and FormVersionID (optional) as",
+      "Nunjucks parameters, always through the sqlString filter. Parameters and fields are not",
+      "declared here: MJQueryEntityServer extracts them from the SQL on save.",
+      "",
+      "Status Approved: RunQuery refuses an unapproved query, and these are app-owned SQL reviewed in",
+      "the PR, not user-authored. Names carry the 'Forms: ' prefix, as bizapps-common's do, so a",
+      "name lookup cannot collide with another app's query.",
+      "",
+      "Run permission: Developer, Integration and UI only, the roles that already read answer rows",
+      "unfiltered. A query with NO permission rows is open to every role (QueryInfo.UserHasRunPermissions),",
+      "and RunQuery bypasses row-level security, so without these the value-counts query would hand",
+      "raw answer values for any FormID to the Form Respondent and Forms Automation Runner roles,",
+      "whose entity reads are filtered or narrower. The engine runs these under the System user (which",
+      "holds all three) after its own Authorize()."
+    ],
+    "fields": {
+      "Name": "Forms: Response Completion Stats",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Forms",
+      "UserQuestion": "How many responses did this form get, how many were completed, and how long does it typically take to fill in?",
+      "Description": "One row of headline figures for a form's responses: Complete, Partial and Disqualified counts, every started response, the median completion time over credible sittings, and the latest submission.",
+      "SQL": "@file:SQL/forms-response-completion-stats.sql",
+      "TechnicalDescription": "Nunjucks-parameterized. FormID (required) and FormVersionID (optional; absent means every version) filter __mj_BizAppsForms.vwFormResponses. MedianCompletionSeconds is PERCENTILE_CONT(0.5) over Complete rows whose SubmittedAt - StartedAt is 0 to 86400 s. Always returns exactly one row.",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 2,
+      "UsesTemplate": true
+    },
+    "relatedEntities": {
+      "MJ: Query Permissions": [
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "RoleID": "@lookup:MJ: Roles.Name=Developer"
+          },
+          "primaryKey": {
+            "ID": "0F071145-C1C6-4C63-BBE3-44F3A74C39DA"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "RoleID": "@lookup:MJ: Roles.Name=Integration"
+          },
+          "primaryKey": {
+            "ID": "67760AF4-07FC-4CC8-8B51-AE3A3F1AF725"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "RoleID": "@lookup:MJ: Roles.Name=UI"
+          },
+          "primaryKey": {
+            "ID": "C8768CAF-4613-46D6-B0F8-0624EE8D5B79"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "B51015E9-0EE4-4F44-B4CB-F9948D6394EC"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Forms: Question Answer Value Counts",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Forms",
+      "UserQuestion": "For each question on this form, how many completed responses chose each answer?",
+      "Description": "Per question, per stored value, the number of Complete responses' answers carrying it: choice values (multi-select arrays expanded), numbers, yes/no and dates, plus the exact count of responses that answered the question. Unbounded; read server-side by FormReportingEngine, which returns aggregates only.",
+      "SQL": "@file:SQL/forms-question-answer-value-counts.sql",
+      "TechnicalDescription": "Nunjucks-parameterized. FormID (required) and FormVersionID (optional) scope Complete rows of vwFormResponses; answers from vwFormResponseAnswers. A JSON-array JSONValue yields one Text value per non-blank element and suppresses TextValue (answer-values.ts extractChoiceValues); JSON objects contribute nothing; NumericValue, BooleanValue and DateValue yield Numeric, Boolean and Date kinds. Columns: QuestionID, AnsweredResponses, ValueKind, Value, NumericValue, ValueCount.",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 4,
+      "UsesTemplate": true
+    },
+    "relatedEntities": {
+      "MJ: Query Permissions": [
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "RoleID": "@lookup:MJ: Roles.Name=Developer"
+          },
+          "primaryKey": {
+            "ID": "5C571EC4-F923-4A11-B975-1DDA08F87E2D"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "RoleID": "@lookup:MJ: Roles.Name=Integration"
+          },
+          "primaryKey": {
+            "ID": "F4C56BD9-FC37-4C66-8F22-2B467B53E550"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "RoleID": "@lookup:MJ: Roles.Name=UI"
+          },
+          "primaryKey": {
+            "ID": "7633BEFC-1941-43A6-84BA-D4F14FB19AF8"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "2D37244B-05F6-4B7C-8A33-B3537C2F0851"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Forms: Page Funnel Reach",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Forms",
+      "UserQuestion": "How far through this form do respondents get, page by page?",
+      "Description": "Per page of the form's published layout, how many responses (any status) answered at least one of its questions, with the page's question types so pages that ask nothing can be dropped from the funnel.",
+      "SQL": "@file:SQL/forms-page-funnel-reach.sql",
+      "TechnicalDescription": "Nunjucks-parameterized. The page layout is read from FormVersion.DefinitionSnapshot (pages[].questions[]) of FormVersionID, or of the form's highest-numbered Published version when it is absent; FormVersionID also narrows the responses. Every response status counts. Columns: PageID, Title, DisplayOrder, ReachedCount, QuestionTypes (comma-separated snapshot types).",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 3,
+      "UsesTemplate": true
+    },
+    "relatedEntities": {
+      "MJ: Query Permissions": [
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "RoleID": "@lookup:MJ: Roles.Name=Developer"
+          },
+          "primaryKey": {
+            "ID": "2DD55B24-4082-417A-A4A9-3A36CB9FEE23"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "RoleID": "@lookup:MJ: Roles.Name=Integration"
+          },
+          "primaryKey": {
+            "ID": "3BDE1A93-2798-4962-A1D1-DEF5E373BA6D"
+          }
+        },
+        {
+          "fields": {
+            "QueryID": "@parent:ID",
+            "RoleID": "@lookup:MJ: Roles.Name=UI"
+          },
+          "primaryKey": {
+            "ID": "94B1BFDB-6521-48D3-A5F1-A786FBCF15C2"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "A49D124C-056D-422E-B2FD-95131B546E84"
+    }
+  }
+]
