@@ -26,10 +26,10 @@
     "@mj-biz-apps/forms-entities": "0.15.1"
   },
   "peerDependencies": {
-    "@memberjunction/core": "^6.1.0-edge.6",
-    "@memberjunction/core-entities": "^6.1.0-edge.6",
-    "@memberjunction/global": "^6.1.0-edge.6",
-    "@memberjunction/sqlserver-dataprovider": "^6.1.0-edge.6"
+    "@memberjunction/core": "^6.2.0-edge.3",
+    "@memberjunction/core-entities": "^6.2.0-edge.3",
+    "@memberjunction/global": "^6.2.0-edge.3",
+    "@memberjunction/sqlserver-dataprovider": "^6.2.0-edge.3"
   },
   "repository": {
     "type": "git",
