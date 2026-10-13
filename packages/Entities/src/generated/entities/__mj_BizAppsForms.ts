@@ -84,6 +84,11 @@ export const mjBizAppsFormsFormAutomationRunSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    WorkQueueMessageID: z.string().nullable().describe(`
+        * * Field Name: WorkQueueMessageID
+        * * Display Name: Work Queue Message ID
+        * * SQL Data Type: uniqueidentifier
+        * * Description: The Work Queue message (MessageID) whose delivery ran this step: the run's identity for at-least-once delivery. A redelivery of the same message re-runs only the steps with no terminal run carrying that id, and reuses a step's open row; a run with a different id belongs to another save of the response. NULL on runs written before this column and on runs the submit path makes inline, which belong to no message. Deliberately not a foreign key: the work queue purges its messages on a retention schedule and this history outlives them.`),
     FormAutomation: z.string().describe(`
         * * Field Name: FormAutomation
         * * Display Name: Form Automation Name
@@ -1608,6 +1613,19 @@ export class mjBizAppsFormsFormAutomationRunEntity extends BaseEntity<mjBizAppsF
     */
     get __mj_UpdatedAt(): Date {
         return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: WorkQueueMessageID
+    * * Display Name: Work Queue Message ID
+    * * SQL Data Type: uniqueidentifier
+    * * Description: The Work Queue message (MessageID) whose delivery ran this step: the run's identity for at-least-once delivery. A redelivery of the same message re-runs only the steps with no terminal run carrying that id, and reuses a step's open row; a run with a different id belongs to another save of the response. NULL on runs written before this column and on runs the submit path makes inline, which belong to no message. Deliberately not a foreign key: the work queue purges its messages on a retention schedule and this history outlives them.
+    */
+    get WorkQueueMessageID(): string | null {
+        return this.Get('WorkQueueMessageID');
+    }
+    set WorkQueueMessageID(value: string | null) {
+        this.Set('WorkQueueMessageID', value);
     }
 
     /**

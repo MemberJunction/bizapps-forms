@@ -25,9 +25,14 @@ import {
   LoadGetDistributionClaimsOperation,
   LoadIssueDistributionLinkOperation,
   LoadOpenDistributionOperation,
+  LoadFormsWorkQueue,
   LoadPublishFormOperation,
   LoadReissueDistributionLinkOperation,
+  LoadRemoveAutomationOperation,
+  LoadReorderAutomationsOperation,
   LoadRestoreFormOperation,
+  LoadRunAutomationsHandler,
+  LoadSaveAutomationOperation,
   MagicLinkMinterRegistry,
 } from '@mj-biz-apps/forms-core-entities-server';
 
@@ -141,6 +146,16 @@ export function LoadBizAppsFormsServer(): void {
     LoadOpenDistributionOperation();
     LoadCloseDistributionOperation();
     LoadGetDistributionClaimsOperation();
+    LoadSaveAutomationOperation();
+    LoadReorderAutomationsOperation();
+    LoadRemoveAutomationOperation();
+    // The work-queue outbox (#303 §5): the `Forms.RunAutomations` handler a host with
+    // `workQueue.enabled` resolves by HandlerKey, and the startup sink that configures
+    // `WorkQueueEngine` for publishing. The configuring cannot happen HERE: the host calls this while
+    // still loading packages, before it has a database connection or a user, so it runs from the sink
+    // once the provider is up (and logs, never crashes, on a host without the work-queue tables).
+    LoadRunAutomationsHandler();
+    LoadFormsWorkQueue();
     // Register the concrete magic-link minter so the FormDistribution hook can provision anonymous
     // links. Idempotent: re-registering simply replaces the instance.
     MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());

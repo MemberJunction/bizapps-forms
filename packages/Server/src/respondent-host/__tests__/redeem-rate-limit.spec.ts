@@ -48,6 +48,12 @@ vi.mock('@memberjunction/generic-database-provider', () => ({
 }));
 vi.mock('@mj-biz-apps/forms-core-entities-server', () => ({
   getMagicLinkProvisioningConfig: () => ({ roleName: 'Form Respondent' }),
+  // The middleware's isolated-provider helpers and the automation principal moved into this package
+  // (#303); pass-throughs, because provider isolation is not what this file is about.
+  withLazyIsolatedProvider: async <T>(_purpose: string, work: (acquire: () => Promise<Record<string, never>>) => Promise<T>): Promise<T> =>
+    work(async () => ({})),
+  withIsolatedProvider: async <T>(_purpose: string, work: (provider: Record<string, never>) => Promise<T>): Promise<T> => work({}),
+  resolveAutomationPrincipal: () => null,
 }));
 vi.mock('../captcha-demand', () => ({ readCaptchaDemand: async () => ({ ok: true, demand: undefined }) }));
 vi.mock('../host-readiness', () => ({ assessRespondentReadiness: () => [] }));

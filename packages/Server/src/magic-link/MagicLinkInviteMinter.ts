@@ -289,7 +289,7 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     }
     // Last resort: the caller's own rights, which is what this did before it did anything. The
     // fail-safe direction is toward LESS privilege, so the fallback narrows rather than widens —
-    // deliberately the opposite conclusion from `automation/service-principal.ts`, which refuses to
+    // deliberately the opposite conclusion from forms-core-entities-server's `automation/service-principal.ts`, which refuses to
     // fall back at all, and for the same reason: there the fallback would have been the system user.
     LogError(
       `[MagicLinkInviteMinter] No provisioning identity resolved (no configured user and no Owner in ` +

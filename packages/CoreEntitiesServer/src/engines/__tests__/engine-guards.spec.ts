@@ -102,6 +102,67 @@ describe('runEngineUnitOfWork — one transaction, one log line', () => {
 });
 
 /**
+ * The transaction's OWN failures — a refused BEGIN, a failed COMMIT — are not the work's, and they
+ * speak in driver text: login names, server names, the statement. An operation hands a thrown
+ * message to its caller as `ErrorMessage`, so that text must reach the log and never the caller
+ * (Task 6 review: a verb's work was caller-safe, its transaction was not).
+ */
+describe('runEngineUnitOfWork — a failed BEGIN or COMMIT never reaches the caller in driver words', () => {
+  const DRIVER_TEXT = "Login failed for user 'sa' on SQL-PROD-07; statement: SELECT * FROM [__mj].[User]";
+
+  function failing(stage: 'begin' | 'commit') {
+    const db = makeFakeProvider({});
+    const begin = db.provider.BeginEntityTransaction.bind(db.provider);
+    Object.assign(db.provider, {
+      BeginEntityTransaction: async () => {
+        if (stage === 'begin') {
+          throw new Error(DRIVER_TEXT);
+        }
+        const scope = await begin();
+        return {
+          ...scope,
+          Commit: async () => {
+            await scope.Rollback();
+            throw new Error(DRIVER_TEXT);
+          },
+        };
+      },
+    });
+    return db;
+  }
+
+  for (const stage of ['begin', 'commit'] as const) {
+    it(`a failed ${stage.toUpperCase()}: a fixed message to the caller, the driver text to the log once`, async () => {
+      const db = failing(stage);
+      const work = vi.fn(async () => 42);
+
+      const failure = await runEngineUnitOfWork(db.provider, 'opening share link d1 (user u1)', work).then(
+        () => {
+          throw new Error('expected a rejection');
+        },
+        (err: unknown) => err as Error & { fault?: boolean },
+      );
+
+      expect(failure.message).not.toContain('Login');
+      expect(failure.message).not.toContain('SELECT');
+      expect(failure.message).toMatch(/nothing was saved/i);
+      expect(failure.fault).toBe(true);
+      expect(logged.errors).toHaveLength(1);
+      expect(logged.errors[0]).toContain('opening share link d1 (user u1)');
+      expect(logged.errors[0]).toContain(DRIVER_TEXT);
+      expect(work).toHaveBeenCalledTimes(stage === 'begin' ? 0 : 1);
+    });
+  }
+
+  it("passes the WORK's own error through untouched — it is the engine's to word", async () => {
+    const db = makeFakeProvider({});
+    const own = Object.assign(new Error('Form f1 does not exist.'), { fault: false });
+
+    await expect(runEngineUnitOfWork(db.provider, 'ctx', async () => Promise.reject(own))).rejects.toBe(own);
+  });
+});
+
+/**
  * The same one-log-line rule for an engine verb that must NOT run as one transaction (issuing a share
  * link: its slug retry depends on a failed insert leaving the connection usable).
  */

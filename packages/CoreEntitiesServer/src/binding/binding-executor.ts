@@ -51,6 +51,10 @@ export type BindingOutcomeKind = 'Created' | 'Merged' | 'Unchanged' | 'Skipped';
 
 export interface BindingOutcome {
   kind: BindingOutcomeKind;
+  /**
+   * The record written or matched. On a `Skipped` outcome it is set only when a record MATCHED but
+   * was deliberately not written (an unverified respondent; see `respondentVerified`).
+   */
   targetRecordId: string | null;
   writtenFields: string[];
   /** Why nothing was written, when kind is `Skipped`. */
@@ -59,7 +63,7 @@ export interface BindingOutcome {
 
 export interface BindingFailure {
   scope: BindingFailureScope;
-  /** Only retryable failures are re-driven by the recovery sweep. */
+  /** Only a retryable failure is worth another delivery of the work-queue message that ran it. */
   retryable: boolean;
   message: string;
 }
@@ -191,6 +195,16 @@ export interface ExecuteBindingInput {
    * Action holds `AnswerWithType`.
    */
   questionTypes?: ReadonlyMap<string, FormQuestionType>;
+  /**
+   * Whether the person who answered is proven to be who their answers say (#303 §6).
+   *
+   * Required, so every caller states it rather than inheriting a default. `false` means a match may
+   * be FOUND — so no duplicate is created — but never WRITTEN: the outcome is `Skipped` with the
+   * matched record's id, and the caller's ledger row records that match. Typing someone's email
+   * into a public link must not be a way to overwrite their record. Nothing can be `true` until a
+   * verified-recipient session exists (#137).
+   */
+  respondentVerified: boolean;
 }
 
 /** Target fields whose value came from a file answer. */
@@ -200,6 +214,23 @@ function fileAnswerTargets(values: ReadonlyMap<string, CanonicalAnswerValue>): s
 
 function fail(scope: BindingFailureScope, retryable: boolean, message: string): BindingResult {
   return { ok: false, failure: { scope, retryable, message } };
+}
+
+/**
+ * A record matched, and nothing was written to it because the respondent is not verified. `Skipped`
+ * (the ledger's Outcome has no fourth value, and this adds no schema) WITH the matched id, which is
+ * what distinguishes it from every other skip: those matched nothing.
+ */
+function matchedNotWritten(recordId: string): BindingResult {
+  return {
+    ok: true,
+    outcome: {
+      kind: 'Skipped',
+      targetRecordId: recordId,
+      writtenFields: [],
+      skipReason: `Matched record ${recordId}, but the respondent's identity is not verified, so nothing was written to it.`,
+    },
+  };
 }
 
 function skipped(reason: string): BindingResult {
@@ -221,7 +252,7 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<Bindin
   // Already done. The unique index on (BindingID, FormResponseID) means a second execution cannot
   // produce a second record, and identity matching means it would converge on the same row anyway
   // — so this is not what makes re-running safe. It makes re-running CHEAP, and it makes the
-  // reported outcome stable: without it the recovery sweep re-drives a succeeded binding and
+  // reported outcome stable: without it a redelivered work-queue message re-drives a succeeded binding and
   // reports `Unchanged` where the ledger says `Created`, which reads like the record was lost.
   if (input.responseId && !input.force && gateway.findPriorOutcome) {
     try {
@@ -303,6 +334,12 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<Bindin
   const match = await resolveIdentity(config, resolved.values, gateway);
   if ('failure' in match) {
     return match.result;
+  }
+  if (match.existing && !input.respondentVerified) {
+    // Before the merge plan, not after it: an unverified match writes NOTHING to the record —
+    // neither a merge nor the "Unchanged" that would still let a caller attach this response's
+    // files to it.
+    return matchedNotWritten(match.existing.recordId);
   }
 
   // Scope fields identify the record every bit as much as the match fields do — they are what

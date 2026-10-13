@@ -5,7 +5,10 @@
  *  - entity server subclasses — invariants that hold for every writer (builder, AI action, engine,
  *    import, `MJ.SaveEntityGraph`, direct API), registered over the generated classes;
  *  - engines (`engines/`) — the domain operations, each one transaction: publishing, authoring
- *    (build, clone, create from template, archive, restore);
+ *    (build, clone, create from template, archive, restore), share links, and automations (editing
+ *    the steps; running them for a response);
+ *  - the `Forms.RunAutomations` work-queue handler (`work-queue/`) and the `forms.response-submitted`
+ *    message contract its publisher shares;
  *  - Remote Operation server subclasses (`operations/`) — thin typed wrappers over one engine call
  *    each, registered under their `Forms.<Name>` keys;
  *  - the helpers both `forms-actions` and `forms-server` run: the per-response context loader, the
@@ -13,8 +16,9 @@
  *
  * Import this package from the server bootstrap AFTER `@mj-biz-apps/forms-entities`, so these
  * subclasses register after the generated ones they extend; call
- * {@link LoadFormsEntityServerSubclasses} and each operation's `Load…Operation()` anchor from the
- * startup export so a bundler cannot drop them.
+ * {@link LoadFormsEntityServerSubclasses}, each operation's `Load…Operation()` anchor,
+ * `LoadRunAutomationsHandler()` and `LoadFormsWorkQueue()` from the startup export so a bundler
+ * cannot drop them.
  *
  * Test support is at `@mj-biz-apps/forms-core-entities-server/testing` and is deliberately NOT
  * reachable from this entry.
@@ -96,8 +100,16 @@ export {
 } from './entities/form-version-rules.js';
 export type { RuleViolation } from './entities/entity-refusal.js';
 
-// Shared action/server helpers (moved from forms-actions, spec #303 §1).
+// Shared action/server helpers (moved from forms-actions and forms-server, spec #303 §1).
 export * from './shared/action-provider.js';
+export * from './shared/isolated-provider.js';
+export { parsePublishedDefinition } from './shared/snapshot-parser.js';
+export * from './uploads/upload-provenance.js';
+export * from './file-links/file-links.js';
+export * from './file-links/mj-file-link-gateway.js';
+export { AUTOMATION_PRINCIPAL_ENV, DEFAULT_AUTOMATION_PRINCIPAL, resolveAutomationPrincipal } from './automation/service-principal.js';
+export { ALLOWED_BINDING_ENTITIES_ENV, allowedBindingEntities } from './automation/allowed-entities.js';
+export { runLegacyOnSubmitHooks, type LegacyHookContext, type LegacyHookResult } from './automation/legacy-hooks.js';
 export * from './shared/form-response-context.js';
 export * from './shared/save-entity.js';
 export * from './binding/binding-executor.js';
@@ -137,6 +149,14 @@ export {
   type DistributionClaim,
   type DistributionClaimProvider,
 } from './distribution-claims/claim-contract.js';
+export {
+  FormAutomationEngine,
+  FormAutomationError,
+  type ResponseAutomationReport,
+  type ResponseAutomationRequest,
+} from './engines/FormAutomationEngine.js';
+export type { AutomationRunResult, AutomationRunStatus } from './automation/automation-runner.js';
+export { EngineTransactionFailure } from './engines/engine-guards.js';
 export { FormAuthoringError } from './engines/authoring-errors.js';
 export type { ClonedForm } from './engines/form-clone.js';
 export { STARTER_TEMPLATES, getStarterTemplate, type StarterTemplate } from './engines/starter-templates.js';
@@ -166,6 +186,19 @@ export {
   GetDistributionClaimsServerOperation,
   LoadGetDistributionClaimsOperation,
 } from './operations/GetDistributionClaimsServerOperation.js';
+export { SaveAutomationServerOperation, LoadSaveAutomationOperation } from './operations/SaveAutomationServerOperation.js';
+export {
+  ReorderAutomationsServerOperation,
+  LoadReorderAutomationsOperation,
+} from './operations/ReorderAutomationsServerOperation.js';
+export { RemoveAutomationServerOperation, LoadRemoveAutomationOperation } from './operations/RemoveAutomationServerOperation.js';
+
+// The work-queue outbox (spec #303 §5): the message contract both ends share, the handler, and the
+// engine configuration a publishing host needs.
+export * from './work-queue/response-submitted.js';
+export { RunAutomationsHandler, LoadRunAutomationsHandler } from './work-queue/RunAutomationsHandler.js';
+export { configureFormsWorkQueue, FormsWorkQueueStartup, LoadFormsWorkQueue } from './work-queue/forms-work-queue.js';
+
 export {
   authorizeDistributionAuthoring,
   authorizeFormAuthoring,

@@ -97,8 +97,12 @@ const goodAnswers = answersOf([
   { QuestionID: 'q-first', TextValue: 'Ada' },
 ]);
 
+/**
+ * Run as a VERIFIED respondent: the cases below are about matching and merging, which only a
+ * verified identity may do. What an unverified one may do is its own describe block.
+ */
 async function run(gateway: BindingTargetGateway, config = configOf(), answers = goodAnswers, allowed = null) {
-  return executeBinding({ config, answers, gateway, allowedEntities: allowed });
+  return executeBinding({ config, answers, gateway, allowedEntities: allowed, respondentVerified: true });
 }
 
 describe('executeBinding', () => {
@@ -247,6 +251,7 @@ describe('executeBinding', () => {
   describe('configuration failures are reported as config, not candidate', () => {
     it('refuses an entity that is not on the allow-list', async () => {
       const result = await executeBinding({
+      respondentVerified: true,
         config: configOf(),
         answers: goodAnswers,
         gateway: new FakeGateway(),
@@ -406,7 +411,7 @@ describe('executeBinding — regressions found in adversarial review', () => {
       { QuestionID: 'q-file', FileID: 'file-guid-1' },
     ]);
 
-    await executeBinding({ config, answers, gateway, allowedEntities: null, allowFileAnswers: true });
+    await executeBinding({ config, answers, gateway, allowedEntities: null, allowFileAnswers: true, respondentVerified: true });
 
     // Passed through, the wrapper reaches Set() as an object and stringifies to "[object Object]" —
     // a write that succeeds, corrupts the column and reports success.
@@ -435,6 +440,7 @@ describe('executeBinding — idempotent short-circuit', () => {
     });
 
     const result = await executeBinding({
+      respondentVerified: true,
       config: configOf(),
       answers: goodAnswers,
       gateway,
@@ -457,6 +463,7 @@ describe('executeBinding — idempotent short-circuit', () => {
     });
 
     await executeBinding({
+      respondentVerified: true,
       config: configOf(),
       answers: goodAnswers,
       gateway,
@@ -476,6 +483,7 @@ describe('executeBinding — idempotent short-circuit', () => {
     });
 
     const result = await executeBinding({
+      respondentVerified: true,
       config: configOf(),
       answers: goodAnswers,
       gateway,
@@ -519,6 +527,7 @@ describe('a date-column answer is written in the shape the TARGET field can hold
   it('writes a Time as its clock when the target column is not temporal', async () => {
     const gateway = new FakeGateway({ writableFields: ['Notes'], temporalFields: [] });
     await executeBinding({
+      respondentVerified: true,
       config: mappingTo('Notes', 'q-time'),
       answers: answersOf([timeRow]),
       gateway,
@@ -532,6 +541,7 @@ describe('a date-column answer is written in the shape the TARGET field can hold
   it('writes a Date as its calendar day when the target column is not temporal', async () => {
     const gateway = new FakeGateway({ writableFields: ['Notes'], temporalFields: [] });
     await executeBinding({
+      respondentVerified: true,
       config: mappingTo('Notes', 'q-date'),
       answers: answersOf([dateRow]),
       gateway,
@@ -546,6 +556,7 @@ describe('a date-column answer is written in the shape the TARGET field can hold
     // The case that would break if the conversion were unconditional.
     const gateway = new FakeGateway({ writableFields: ['StartsAt'], temporalFields: ['StartsAt'] });
     await executeBinding({
+      respondentVerified: true,
       config: mappingTo('StartsAt', 'q-time'),
       answers: answersOf([timeRow]),
       gateway,
@@ -561,6 +572,7 @@ describe('a date-column answer is written in the shape the TARGET field can hold
     // rather than a guess.
     const gateway = new FakeGateway({ writableFields: ['Notes'], temporalFields: [] });
     await executeBinding({
+      respondentVerified: true,
       config: mappingTo('Notes', 'q-time'),
       answers: answersOf([timeRow]),
       gateway,
@@ -568,5 +580,74 @@ describe('a date-column answer is written in the shape the TARGET field can hold
     });
 
     expect(gateway.writes[0].values.Notes).toBe('1970-01-01T14:30:00.000Z');
+  });
+});
+
+/**
+ * The identity rule while no respondent can be verified (#303 §6, DW12). Every submission today is
+ * an anonymous link's: nothing proves the person who typed `a@b.com` is the owner of the record
+ * that email matches. Matching is still worth doing — it stops a duplicate being created — but
+ * WRITING to the matched record would let anyone overwrite anyone's record by typing their email.
+ */
+describe('executeBinding — an unverified respondent never updates a matched record', () => {
+  const matched: MatchedRecord = {
+    recordId: 'person-1',
+    values: new Map([['Email', 'a@b.com'], ['FirstName', 'Someone']]),
+    multipleFound: false,
+  };
+
+  async function unverified(gateway: BindingTargetGateway, config = configOf()) {
+    return executeBinding({ config, answers: goodAnswers, gateway, allowedEntities: null, respondentVerified: false });
+  }
+
+  it('writes nothing to a matched record a merge policy would update, and reports the match', async () => {
+    const gateway = new FakeGateway({ match: matched });
+
+    const result = await unverified(gateway);
+
+    expect(gateway.writes).toEqual([]);
+    expect(result.ok && result.outcome).toMatchObject({ kind: 'Skipped', targetRecordId: 'person-1', writtenFields: [] });
+    expect(result.ok && result.outcome.skipReason).toMatch(/not verified/i);
+  });
+
+  it('reports the match the same way when the matched record already agrees (nothing to attach to it either)', async () => {
+    const gateway = new FakeGateway({
+      match: { recordId: 'person-1', values: new Map([['Email', 'a@b.com'], ['FirstName', 'Ada']]), multipleFound: false },
+    });
+
+    const result = await unverified(gateway);
+
+    expect(gateway.writes).toEqual([]);
+    expect(result.ok && result.outcome).toMatchObject({ kind: 'Skipped', targetRecordId: 'person-1' });
+  });
+
+  it('writes nothing under MatchOrSkip either, and still reports the match', async () => {
+    const gateway = new FakeGateway({ match: matched });
+
+    const result = await unverified(
+      gateway,
+      configOf({ identityRule: parseIdentityRule({ mode: 'MatchOrSkip', match: [{ targetField: 'Email' }] }) }),
+    );
+
+    expect(gateway.writes).toEqual([]);
+    expect(result.ok && result.outcome).toMatchObject({ kind: 'Skipped', targetRecordId: 'person-1' });
+  });
+
+  it('still creates when nothing matches (MatchThenCreate)', async () => {
+    const gateway = new FakeGateway({ match: null });
+
+    const result = await unverified(gateway);
+
+    expect(result.ok && result.outcome.kind).toBe('Created');
+    expect(gateway.writes).toEqual([{ recordId: null, values: { Email: 'a@b.com', FirstName: 'Ada' } }]);
+  });
+
+  it('still creates under AlwaysCreate, which never matches', async () => {
+    const gateway = new FakeGateway({ match: matched });
+
+    const result = await unverified(gateway, configOf({ identityRule: parseIdentityRule({ mode: 'AlwaysCreate' }) }));
+
+    expect(result.ok && result.outcome.kind).toBe('Created');
+    expect(gateway.queries).toEqual([]);
   });
 });

@@ -14,7 +14,7 @@
  * it stands: `answers` is `[FormAnswerInputType!]!`, so graphql-js rejects a null list or element
  * before the resolver body runs, and `resolvePublishedDefinition` returns a typed failure rather
  * than throwing (`RunView` reports `Success: false`; the snapshot parser catches). This closes the
- * CLASS. The reasoning is the one `file-links.service.ts` already applies to its own read guard:
+ * CLASS. The reasoning is the one forms-core-entities-server's `file-links.ts` already applies to its own read guard:
  * a contract that holds only for the current implementation is not a contract — and the thing on
  * the other side of this one is an anonymous stranger holding a link.
  *

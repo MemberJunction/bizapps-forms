@@ -70,6 +70,10 @@ export class mjBizAppsFormsFormAutomationRun_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
+    @Field({nullable: true, description: "The Work Queue message (MessageID) whose delivery ran this step: the run's identity for at-least-once delivery. A redelivery of the same message re-runs only the steps with no terminal run carrying that id, and reuses a step's open row; a run with a different id belongs to another save of the response. NULL on runs written before this column and on runs the submit path makes inline, which belong to no message. Deliberately not a foreign key: the work queue purges its messages on a retention schedule and this history outlives them."}) 
+    @MaxLength(36)
+    WorkQueueMessageID?: string;
+        
     @Field({nullable: true}) 
     @MaxLength(255)
     FormAutomation?: string;
@@ -125,6 +129,9 @@ export class CreatemjBizAppsFormsFormAutomationRunInput {
     @Field({ nullable: true })
     OutputSummary: string | null;
 
+    @Field({ nullable: true })
+    WorkQueueMessageID: string | null;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -167,6 +174,9 @@ export class UpdatemjBizAppsFormsFormAutomationRunInput {
 
     @Field({ nullable: true })
     OutputSummary?: string | null;
+
+    @Field({ nullable: true })
+    WorkQueueMessageID?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];

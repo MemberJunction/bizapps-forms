@@ -58,7 +58,8 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
  * (unused by any test here, since this file never drives `/resume`, `/remember` or `/forget`) so the
  * module mock matches the real one's shape.
  */
-vi.mock('../../automation/isolated-provider', () => ({
+vi.mock('@mj-biz-apps/forms-core-entities-server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mj-biz-apps/forms-core-entities-server')>()),
   withLazyIsolatedProvider: async <T>(
     _purpose: string,
     work: (acquire: () => Promise<Record<string, never>>) => Promise<T>,

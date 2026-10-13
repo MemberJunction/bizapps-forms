@@ -21,7 +21,7 @@ import type {
 } from '@mj-biz-apps/forms-entities';
 import { distributionWindowClosed } from './distribution-window';
 import { FORM_DISTRIBUTION_ENTITY, FORM_VERSION_ENTITY } from './entity-names';
-import { parsePublishedDefinition } from './snapshot-parser';
+import { parsePublishedDefinition } from '@mj-biz-apps/forms-core-entities-server';
 
 /**
  * The narrow slice of a data provider this flow uses — a single `RunView`. Typed minimally

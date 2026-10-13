@@ -14,7 +14,7 @@ import type {
  * rather than smuggling the field through an untyped literal.
  */
 type LegacyConditionalRule = ConditionalRule & { require: ConditionalGroup };
-import { parsePublishedDefinition } from '../snapshot-parser';
+import { parsePublishedDefinition } from '@mj-biz-apps/forms-core-entities-server';
 import { validateAnswers } from '@mj-biz-apps/forms-entities';
 
 /**

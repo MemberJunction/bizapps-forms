@@ -81,7 +81,43 @@ export async function runEngineUnitOfWork<T>(
   context: string,
   work: () => Promise<T>,
 ): Promise<T> {
-  return runEngineCall(provider, context, () => RunInEntityTransaction(provider, work));
+  return runEngineCall(provider, context, async () => {
+    // Which errors are the WORK's: those pass through as the engine worded them. Anything else came
+    // from the transaction itself — BEGIN, COMMIT — in driver words (login, server, statement),
+    // and an operation hands a thrown message to its caller as `ErrorMessage`.
+    const workErrors = new Set<unknown>();
+    try {
+      return await RunInEntityTransaction(provider, async () => {
+        try {
+          return await work();
+        } catch (err) {
+          workErrors.add(err);
+          throw err;
+        }
+      });
+    } catch (err) {
+      if (workErrors.has(err)) {
+        throw err;
+      }
+      throw new EngineTransactionFailure(err);
+    }
+  });
+}
+
+/**
+ * The transaction around an engine's unit of work failed on its own — BEGIN or COMMIT — so nothing
+ * was saved. The caller gets a fixed sentence; the driver's text rides on `logDetail` to the one log
+ * line {@link runEngineCall} writes. `fault`: this is the system failing, never a refusal.
+ */
+export class EngineTransactionFailure extends Error {
+  public readonly fault = true;
+  public readonly logDetail: string;
+
+  constructor(cause: unknown) {
+    super('The database transaction for this change failed, so nothing was saved; the server log has the detail.');
+    this.name = 'EngineTransactionFailure';
+    this.logDetail = cause instanceof Error ? (cause.stack ?? cause.message) : String(cause);
+  }
 }
 
 /**

@@ -94,6 +94,10 @@ export class BindResponseToEntityAction extends BaseAction {
         // applies; invoked deliberately by a privileged caller — an approval hook that has already
         // decided this response should be written — the caller's own grants are the constraint.
         allowedEntities: null,
+        // Never verified, whoever invokes this: a human approving a response approves its CONTENT,
+        // not that the person who typed an email owns the record it matches. Until a verified
+        // recipient session exists (#137) a match is recorded on the ledger and never written.
+        respondentVerified: false,
       });
 
       if (bindingFailed(result)) {

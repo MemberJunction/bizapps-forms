@@ -73,7 +73,8 @@ const leasePurposes = vi.hoisted((): string[] => []);
 /** What the lease resolves to (or throws) on the NEXT call — configured per test, reset in `beforeEach`. */
 let acquireBehavior: () => Promise<DatabaseProviderBase> = async () => ({}) as DatabaseProviderBase;
 
-vi.mock('../../automation/isolated-provider', () => ({
+vi.mock('@mj-biz-apps/forms-core-entities-server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mj-biz-apps/forms-core-entities-server')>()),
   withLazyIsolatedProvider: vi.fn(
     async <T>(purpose: string, work: (acquire: () => Promise<DatabaseProviderBase>) => Promise<T>): Promise<T> => {
       leasePurposes.push(purpose);

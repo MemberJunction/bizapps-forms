@@ -12,7 +12,7 @@
  * Neither gap is reachable through the current schema — `answers` is `[FormAnswerInputType!]!`, so
  * graphql-js rejects a null list before the resolver runs, and `resolvePublishedDefinition` returns
  * a typed failure rather than throwing. This closes the CLASS rather than a demonstrated leak, for
- * the same reason `file-links.service.ts` guards its read: a contract that holds only for the
+ * the same reason forms-core-entities-server's `file-links.ts` guards its read: a contract that holds only for the
  * current implementation is not a contract.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

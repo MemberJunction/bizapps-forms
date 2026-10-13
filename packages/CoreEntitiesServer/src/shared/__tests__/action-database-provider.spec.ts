@@ -20,7 +20,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   }
   return { ...actual, Metadata, LogError: (m: string) => globalState.errors.push(m) };
 });
-const { withActionDatabaseProvider } = await import('../action-provider.js');
+const { withActionDatabaseProvider } = await import('../isolated-provider.js');
 
 /** A process-global provider that hands out `isolated` and records the release. */
 function globalHanding(isolated: DatabaseProviderBase) {

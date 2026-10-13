@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import type { FormAnswerInput, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 
-import { FILE_ENTITY_RECORD_LINK_ENTITY } from '../../file-links/file-links.service';
+import { FILE_ENTITY_RECORD_LINK_ENTITY } from '@mj-biz-apps/forms-core-entities-server';
 import { persistSubmission, type PersistenceInputs } from '../persistence.service';
 import { FORM_RESPONSE_ENTITY } from '../entity-names';
 import type { ValidatedAnswer } from '@mj-biz-apps/forms-entities';

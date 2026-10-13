@@ -19,6 +19,7 @@ export class mjBizAppsFormsFormAutomationRunFormComponent extends BaseFormCompon
             { sectionKey: 'executionStatus', sectionName: 'Execution Status', isExpanded: true },
             { sectionKey: 'executionTimeline', sectionName: 'Execution Timeline', isExpanded: true },
             { sectionKey: 'executionDetails', sectionName: 'Execution Details', isExpanded: true },
+            { sectionKey: 'details', sectionName: 'Details', isExpanded: true },
             { sectionKey: 'systemMetadata', sectionName: 'System Metadata', isExpanded: false }
         ]);
     }

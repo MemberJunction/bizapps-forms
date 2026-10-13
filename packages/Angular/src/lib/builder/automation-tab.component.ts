@@ -10,6 +10,7 @@ import {
   escapeSqlString,
   parseIdentityRule,
   resolveMappedValues,
+  settingsUpdateToMarkAuthoritative,
   type FieldMappings,
   type MergeRule,
   type StoredAnswerRow,
@@ -34,7 +35,6 @@ import {
   type StepKind,
   type SubmitStep,
 } from './automation-steps';
-import { settingsUpdateToMarkAuthoritative } from './on-submit-mode';
 import { FORMS_ENTITY } from '../shared/entity-names';
 import {
   pickEntities,

@@ -18,7 +18,7 @@ import type {
   mjBizAppsFormsFormResponseEntityType,
 } from '@mj-biz-apps/forms-entities';
 
-import type { AcquireIsolatedProvider } from '../automation/isolated-provider.js';
+import type { AcquireIsolatedProvider } from '@mj-biz-apps/forms-core-entities-server';
 import {
   findInviteByRawToken,
   mintResponseInvite,

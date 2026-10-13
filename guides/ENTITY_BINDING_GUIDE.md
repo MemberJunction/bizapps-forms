@@ -216,11 +216,28 @@ Error messages carry their **scope**, which tells you who has to fix it:
 | `config:` | Broken for every submission — an author or operator must fix it. Never retried. |
 | `candidate:` | About this one response. Retried if the cause was transient. |
 
-**Recovery.** Failed runs with attempts remaining are re-driven by `sweepFailedAutomations`, capped
-at `MAX_BINDING_ATTEMPTS` (5). Pending work is derived from state — a `Failed` run row *is* the
-work item — so a crash is recovered by a query rather than by replaying a queue. `config:` failures
-are never retried; a run with no recorded message is, because that is what a crash between opening
-and closing a run leaves behind.
+**Recovery.** A response's automations are run by `FormAutomationEngine.RunForResponse`
+(`packages/CoreEntitiesServer/src/engines/automation-run.ts`). Two callers reach it: the submit path,
+which today still calls it inline after the save, and the `Forms.RunAutomations` work-queue handler
+(`packages/CoreEntitiesServer/src/work-queue/RunAutomationsHandler.ts`), which takes over when the
+submit path switches to publishing the `forms.response-submitted` message in its transaction
+(#303, the submit-engine change). Under the work queue, delivery is at least once:
+- each step's `FormAutomationRun` row is its idempotency record for that delivery's EVENT: the row
+  carries the message's `MessageID` (`WorkQueueMessageID`), and only rows carrying it count;
+- `Succeeded`, `Failed` (a permanent failure) and `Skipped` are terminal for the event; a step
+  that failed transiently is left `Pending`;
+- a redelivery re-runs only the steps with no terminal row for the event, reusing their open row;
+- a delivery is retried with jittered backoff while some step failed transiently; on the
+  subscription's last attempt (`MaxAttempts`, 5) a final submit is dead-lettered with its open rows
+  closed `Failed` (an operator's replay reopens exactly those), and a partial save is abandoned
+  instead — it never dead-letters, so it can never block the response's final under the
+  subscription's `Ordered` partitioning.
+`config:` failures are permanent and never retried.
+
+**Identity.** Every run is made with `respondentVerified: false` — no verified-recipient session
+exists until #137. A binding may still MATCH a record (so no duplicate is created), but never
+UPDATES it: the outcome is `Skipped` with the matched record's id on the ledger, and nothing — no
+field, no attachment — is written to that record. A create policy still creates.
 
 ---
 
@@ -253,18 +270,20 @@ public path completely broken and every unit test passing.
 | Answer collapse + GUID folding | `packages/Entities/src/contracts/answer-canonical.ts` |
 | Binding config types + parsers | `packages/Entities/src/contracts/entity-binding.ts` |
 | Mapping + merge planning (pure) | `packages/Entities/src/contracts/entity-binding-merge.ts` |
-| Which automations run, in what order | `packages/Server/src/public-submit/automation-plan.ts` |
-| Carrying out a plan | `packages/Server/src/automation/automation-runner.ts` |
-| Dispatch by target type + bookkeeping | `packages/Server/src/automation/dispatch-automation.ts` |
+| Which automations run, in what order | `packages/CoreEntitiesServer/src/automation/automation-plan.ts` |
+| Carrying out a plan | `packages/CoreEntitiesServer/src/automation/automation-runner.ts` |
+| Dispatch by target type + bookkeeping | `packages/CoreEntitiesServer/src/automation/dispatch-automation.ts` |
+| Running a response's automations (snapshot plan, redelivery skip) | `packages/CoreEntitiesServer/src/engines/automation-run.ts` |
+| Editing the steps (save, reorder, remove) | `packages/CoreEntitiesServer/src/engines/automation-editing.ts` |
+| The work-queue handler and message contract | `packages/CoreEntitiesServer/src/work-queue/` |
 | Binding policy (validate → identity → merge → write) | `packages/CoreEntitiesServer/src/binding/binding-executor.ts` |
 | The MJ I/O behind that policy | `packages/CoreEntitiesServer/src/binding/mj-binding-gateway.ts` |
 | `Forms: Bind Response To Entity` action | `packages/Actions/src/custom/binding/bind-response-to-entity.action.ts` |
-| Recovery sweep | `packages/Server/src/automation/recovery-sweep.ts` |
-| Upload provenance | `packages/Server/src/upload/upload-provenance.service.ts` |
-| File→record link reconciliation (pure) | `packages/Server/src/file-links/file-links.service.ts` |
-| The MJ I/O behind that | `packages/Server/src/file-links/mj-file-link-gateway.ts` |
+| Upload provenance | `packages/CoreEntitiesServer/src/uploads/upload-provenance.ts` |
+| File→record link reconciliation (pure) | `packages/CoreEntitiesServer/src/file-links/file-links.ts` |
+| The MJ I/O behind that | `packages/CoreEntitiesServer/src/file-links/mj-file-link-gateway.ts` |
 | Builder "Automate" tab | `packages/Angular/src/lib/builder/automation-tab.component.ts` |
-| Service principal, allow-list, sweep | `packages/Server/src/automation/{service-principal,allowed-entities,recovery-sweep}.ts` |
+| Service principal, allow-list | `packages/CoreEntitiesServer/src/automation/{service-principal,allowed-entities}.ts` |
 
 The split that matters: **policy is testable without a database, I/O is not**. Everything in
 `binding-executor.ts` runs against a `BindingTargetGateway` interface, because the decisions that

@@ -1,10 +1,10 @@
 /**
  * Fire the on-submit Actions by NAME (seam S3) after a response is saved.
  *
- * The four Phase-1 hooks are implemented by WP-E and may not be registered yet,
- * so each is resolved defensively via `ActionEngineServer.GetActionByName` and
- * SKIPPED-with-log when absent. A hook failure never fails the submit — the
- * response is already persisted; hooks are best-effort side effects.
+ * The firing itself is `runLegacyOnSubmitHooks` in forms-core-entities-server — the one
+ * implementation, which the work-queue handler runs too. This wrapper adds what the submit path
+ * needs around it: the automation principal (fail-closed) and an isolated provider. A hook failure
+ * never fails the submit — the response is already persisted; hooks are best-effort side effects.
  *
  * Each hook receives the `FormResponseID` (and `FormID`) as input ActionParams so the
  * action can load the response and do its work (upsert Person, send email, create
@@ -18,12 +18,15 @@
  * reason instead of silently running on the global provider.
  */
 import { ActionEngineServer } from '@memberjunction/actions';
-import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
 import { LogError } from '@memberjunction/core';
-import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
+import type { UserInfo } from '@memberjunction/core';
 import { LEGACY_ON_SUBMIT_ACTION_NAMES, type LegacyOnSubmitActionName } from '@mj-biz-apps/forms-entities';
-import { resolveAutomationPrincipal } from '../automation/service-principal';
-import { withIsolatedProvider, type IsolatedProviderRunner } from '../automation/isolated-provider';
+import {
+  resolveAutomationPrincipal,
+  runLegacyOnSubmitHooks,
+  withIsolatedProvider,
+  type IsolatedProviderRunner,
+} from '@mj-biz-apps/forms-core-entities-server';
 
 /**
  * The S3 action names — the frozen contract WP-E implements.
@@ -59,58 +62,6 @@ export interface OnSubmitContext {
   distributionId: string;
 }
 
-/** Build the standard input params passed to every on-submit action. */
-function buildHookParams(ctx: OnSubmitContext): ActionParam[] {
-  return [
-    Object.assign(new ActionParam(), { Name: 'FormResponseID', Value: ctx.responseId, Type: 'Input' as const }),
-    Object.assign(new ActionParam(), { Name: 'FormID', Value: ctx.formId, Type: 'Input' as const }),
-    Object.assign(new ActionParam(), { Name: 'FormVersionID', Value: ctx.formVersionId, Type: 'Input' as const }),
-    Object.assign(new ActionParam(), { Name: 'DistributionID', Value: ctx.distributionId, Type: 'Input' as const }),
-  ];
-}
-
-/**
- * Resolve + run one action by name on the given provider; never throws.
- *
- * The lookup runs INSIDE the try, not just the RunAction call. `GetActionByName` used to sit
- * outside it, so a throwing lookup escaped this function entirely, propagated through the caller's
- * for-loop, and was caught only by `fireOnSubmitHooks`'s chain-level catch — which reports ALL FOUR
- * hooks `failed`, overwriting the real `fired` result of any hook that had already run before this
- * one's lookup blew up (bizapps-forms#260 final review, F2).
- */
-async function fireOne(
-  engine: ActionEngineServer,
-  name: OnSubmitActionName,
-  ctx: OnSubmitContext,
-  contextUser: UserInfo,
-  provider: DatabaseProviderBase,
-): Promise<HookFireResult> {
-  try {
-    const action = engine.GetActionByName(name);
-    if (!action) {
-      console.warn(`[forms] On-submit action "${name}" is not registered; skipping.`);
-      return { name, status: 'skipped-not-registered' };
-    }
-    const params = Object.assign(new RunActionParams(), {
-      Action: action,
-      ContextUser: contextUser,
-      Filters: [],
-      Params: buildHookParams(ctx),
-      Provider: provider,
-    });
-    const result = await engine.RunAction(params);
-    if (result.Success) {
-      return { name, status: 'fired' };
-    }
-    console.warn(`[forms] On-submit action "${name}" returned failure: ${result.Message ?? ''}`);
-    return { name, status: 'failed', message: result.Message };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[forms] On-submit action "${name}" threw: ${message}`);
-    return { name, status: 'failed', message };
-  }
-}
-
 /**
  * Fire all four on-submit hooks (in order), on one isolated provider instance.
  * Configures the engine once with the context user. Hooks run only for COMPLETE
@@ -141,13 +92,9 @@ export async function fireOnSubmitHooks(
   }
   await engine.Config(false, runAsUser);
   try {
-    return await isolate(`on-submit hooks for response ${ctx.responseId}`, async (provider) => {
-      const results: HookFireResult[] = [];
-      for (const name of ON_SUBMIT_ACTION_NAMES) {
-        results.push(await fireOne(engine, name, ctx, runAsUser, provider));
-      }
-      return results;
-    });
+    return await isolate(`on-submit hooks for response ${ctx.responseId}`, (provider) =>
+      runLegacyOnSubmitHooks(ctx, runAsUser, provider, engine),
+    );
   } catch (err) {
     // Isolation itself failed (no instance could be created) — every hook is unrun, not merely
     // one of them. Fail-closed like the no-principal path above: report it, never fall back to

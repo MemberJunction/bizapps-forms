@@ -57,7 +57,8 @@ vi.mock('../../magic-link/resume-invites.service', () => ({
     provider?: DatabaseProviderBase,
   ) => revokeResponseInvites(responseId, options, contextUser, provider),
 }));
-vi.mock('../../automation/isolated-provider', () => ({
+vi.mock('@mj-biz-apps/forms-core-entities-server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mj-biz-apps/forms-core-entities-server')>()),
   withIsolatedProvider: (purpose: string, work: (provider: DatabaseProviderBase) => Promise<unknown>) =>
     withIsolatedProvider(purpose, work),
 }));

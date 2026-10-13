@@ -10,4 +10,9 @@ export interface FormsRemoveAutomationOutput {
     FormID: string;
     /** The binding the step ran, left in place; `null` when it ran an Action or Agent. */
     RetainedBindingID: string | null;
+    /**
+     * Built-in steps seeded in the same transaction, because the removal is what turned the form's
+     * own steps on (a form still on Legacy dispatch). Usually empty.
+     */
+    SeededAutomationIDs: string[];
 }

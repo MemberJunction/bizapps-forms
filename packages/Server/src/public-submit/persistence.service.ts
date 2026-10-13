@@ -34,8 +34,7 @@ import type {
   mjBizAppsFormsFormResponseEntity,
   mjBizAppsFormsFormResponseEntityType,
 } from '@mj-biz-apps/forms-entities';
-import { syncFileLinks } from '../file-links/file-links.service';
-import { MJFileLinkGateway } from '../file-links/mj-file-link-gateway';
+import { MJFileLinkGateway, syncFileLinks } from '@mj-biz-apps/forms-core-entities-server';
 import {
   FORM_DISTRIBUTION_ENTITY,
   FORM_RESPONSE_ANSWER_ENTITY,
@@ -246,7 +245,7 @@ function countsCompletion(inputs: PersistenceInputs): boolean {
  * `findOwnedResponseById` — runs under SQL Server's case-insensitive default collation. A
  * case-sensitive comparison here would refuse writes that the lookup had just approved.
  *
- * `upload/upload-provenance.service.ts` folds identifiers the same way, and the duplication is
+ * `uploads/upload-provenance.ts` (forms-core-entities-server) folds identifiers the same way, and the duplication is
  * deliberate rather than an extraction waiting to happen: that one answers "do these two values
  * denote the same thing", this one also answers "is there a value at all", and the ANSWER TO THE
  * SECOND QUESTION IS A SECURITY DECISION here — folding to `''` is what makes a row unowned and

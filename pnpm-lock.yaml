@@ -264,18 +264,39 @@ importers:
 
   packages/CoreEntitiesServer:
     dependencies:
+      '@memberjunction/actions':
+        specifier: ^6.2.0-edge.3
+        version: 6.2.0-edge.3
+      '@memberjunction/actions-base':
+        specifier: ^6.2.0-edge.3
+        version: 6.2.0-edge.3
+      '@memberjunction/ai-agents':
+        specifier: ^6.2.0-edge.3
+        version: 6.2.0-edge.3(@aws-sdk/credential-provider-node@3.972.86)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.4)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@memberjunction/ai-core-plus':
+        specifier: ^6.2.0-edge.3
+        version: 6.2.0-edge.3
       '@memberjunction/core':
         specifier: 6.2.0-edge.3
         version: 6.2.0-edge.3
       '@memberjunction/core-entities':
         specifier: ^6.2.0-edge.3
         version: 6.2.0-edge.3
+      '@memberjunction/generic-database-provider':
+        specifier: ^6.2.0-edge.3
+        version: 6.2.0-edge.3(@aws-sdk/credential-provider-node@3.972.86)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.4)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       '@memberjunction/global':
         specifier: 6.2.0-edge.3
         version: 6.2.0-edge.3
       '@memberjunction/sqlserver-dataprovider':
         specifier: ^6.2.0-edge.3
         version: 6.2.0-edge.3(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(chokidar@3.6.0)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@memberjunction/work-queue-core':
+        specifier: ^6.2.0-edge.3
+        version: 6.2.0-edge.3(vitest@3.2.7(@types/debug@4.1.13)(@types/node@25.9.5)(jsdom@26.1.0))
+      '@memberjunction/work-queue-engine':
+        specifier: ^6.2.0-edge.3
+        version: 6.2.0-edge.3(vitest@3.2.7(@types/debug@4.1.13)(@types/node@25.9.5)(jsdom@26.1.0))
       '@mj-biz-apps/forms-entities':
         specifier: 0.15.1
         version: link:../Entities
@@ -315,12 +336,6 @@ importers:
         specifier: ^6.2.0-edge.3
         version: 6.2.0-edge.3
       '@memberjunction/actions-base':
-        specifier: ^6.2.0-edge.3
-        version: 6.2.0-edge.3
-      '@memberjunction/ai-agents':
-        specifier: ^6.2.0-edge.3
-        version: 6.2.0-edge.3(@aws-sdk/credential-provider-node@3.972.86)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.4)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
-      '@memberjunction/ai-core-plus':
         specifier: ^6.2.0-edge.3
         version: 6.2.0-edge.3
       '@memberjunction/core':

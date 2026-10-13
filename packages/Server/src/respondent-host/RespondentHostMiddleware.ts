@@ -51,7 +51,13 @@ import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware, configInfo } from '@memberjunction/server';
 import { LogStatus, LogError, LogErrorEx, Metadata, RunView, type UserInfo } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/generic-database-provider';
-import { getMagicLinkProvisioningConfig } from '@mj-biz-apps/forms-core-entities-server';
+import {
+  getMagicLinkProvisioningConfig,
+  resolveAutomationPrincipal,
+  withIsolatedProvider,
+  withLazyIsolatedProvider,
+  type AcquireIsolatedProvider,
+} from '@mj-biz-apps/forms-core-entities-server';
 import { frameAncestorsDirective, parseAllowedOrigins } from '@mj-biz-apps/forms-entities';
 
 import { matchesExactRoute, matchSingleSegmentRoute } from '../http/route-match.js';
@@ -63,16 +69,10 @@ import { redeemSlugToToken } from './redeem.service.js';
 import { loadFormIdentity } from './form-identity.js';
 import { assessRespondentReadiness } from './host-readiness.js';
 import { assessAutomationReadiness, describeDurableDispatch, type PermissionLookup } from '../automation/automation-readiness.js';
-import { resolveAutomationPrincipal } from '../automation/service-principal.js';
 import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.js';
 import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
 import { runForget, runRemember, runResume, type ResumeRouteOutcome } from './device-resume.service.js';
 import { makeDeviceResumeDeps } from './resume-deps.js';
-import {
-  withIsolatedProvider,
-  withLazyIsolatedProvider,
-  type AcquireIsolatedProvider,
-} from '../automation/isolated-provider.js';
 import { readResumeCookie } from './resume-cookie.js';
 import { matchResumeRoute } from './resume-routes.js';
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';

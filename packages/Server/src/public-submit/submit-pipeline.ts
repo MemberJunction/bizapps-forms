@@ -34,8 +34,6 @@ import {
   type FieldError,
   type mjBizAppsFormsFormResponseEntityType,
   type PublishedFormScreen,
-  type FormQuestionType,
-  type PublishedFormDefinition,
 } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition, type ResolvedDefinition } from './definition-loader.service';
 import { fireOnSubmitHooks, type HookFireResult } from './on-submit-hooks.service';
@@ -75,18 +73,14 @@ import { captchaRequired, TURNSTILE_NOT_CONFIGURED, verifyTurnstile } from './tu
 import { buildAnswerMap, validateAnswers, type ValidationMode } from '@mj-biz-apps/forms-entities';
 import {
   evaluateProvenance,
+  FormAutomationEngine,
+  FormAutomationError,
   loadUploadLedger,
   provenanceIsStrict,
+  resolveAutomationPrincipal,
+  withIsolatedProvider,
   type UploadLedgerRow,
-} from '../upload/upload-provenance.service';
-import { loadFormResponseContext } from '@mj-biz-apps/forms-core-entities-server';
-import { planAutomations } from './automation-plan';
-import { runAutomations } from '../automation/automation-runner';
-import { isolatedDispatcher } from '../automation/isolated-dispatcher';
-import { buildConditionAnswers } from '../automation/condition-answers';
-import { allowedBindingEntities } from '../automation/allowed-entities';
-import { resolveAutomationPrincipal } from '../automation/service-principal';
-import { withIsolatedProvider } from '../automation/isolated-provider';
+} from '@mj-biz-apps/forms-core-entities-server';
 
 /** Normalized submission input the pipeline consumes (resolver maps GraphQL -> this). */
 export interface PipelineSubmission {
@@ -1228,7 +1222,7 @@ async function fireHooksSafely(ctx: PipelineContext, resolved: ResolvedDefinitio
       return;
     }
     if (!ctx.fireHooks) {
-      await runConfiguredAutomations(resolved, responseId);
+      await runConfiguredAutomations(ctx, responseId);
       return;
     }
     // A test injected a firer. Fall through to it, as this path always has: `runConfiguredAutomations`
@@ -1319,85 +1313,41 @@ async function checkFileProvenance(
 }
 
 /**
- * Run the automations a form actually configured.
+ * Run the automations a form actually configured — through `FormAutomationEngine.RunForResponse`,
+ * the same call the `Forms.RunAutomations` work-queue handler makes, so the plan (from the published
+ * snapshot), the redelivery skip and the per-step provider isolation are one implementation. This
+ * inline call is what the submit path does until it publishes to the work queue instead (#303 Task 8).
  *
  * Refuses to run anything when the service principal cannot be resolved, rather than falling back
  * to a broader identity. A deployment that has not provisioned the principal gets no automations
  * and a clear log line; quietly running privileged work as the system user instead would restore
- * exactly the broad grants the dedicated principal exists to avoid, at the moment nobody is
- * looking. Wrapped whole, because a submission that is already saved must never fail here.
+ * exactly the broad grants the dedicated principal exists to avoid. The steps run as the principal;
+ * what plans them is read as the pipeline's elevated user (the principal has no grant on versions).
+ * Wrapped whole, because a submission that is already saved must never fail here.
  *
- * Everything after the principal check runs on one isolated provider instance
- * (`withIsolatedProvider`), not the process-global one: bizapps-forms#260, where a durable
- * action's detached transaction on the global provider made a later read race its COMMIT. When no
- * isolated instance can be created, nothing here runs — the failure is logged, never run on the
- * global provider as a fallback.
+ * Everything runs on one isolated provider instance (`withIsolatedProvider`), not the process-global
+ * one: bizapps-forms#260, where a durable action's detached transaction on the global provider made
+ * a later read race its COMMIT. When no isolated instance can be created, nothing here runs — the
+ * failure is logged, never run on the global provider as a fallback.
  */
-async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId: string): Promise<void> {
+async function runConfiguredAutomations(ctx: PipelineContext, responseId: string): Promise<void> {
   try {
     const principal = resolveAutomationPrincipal();
     if (!principal) {
       return;
     }
-    await withIsolatedProvider(`on-submit automations for response ${responseId}`, async (provider) => {
-      const loaded = await loadFormResponseContext(responseId, principal, provider);
-      if (loaded.status === 'absent') {
-        console.warn(`[forms] automations skipped: response ${responseId} does not exist.`);
-        return;
-      }
-      if (loaded.status === 'failed') {
-        // Usually a missing grant on the automation principal (#239) — name it, don't just skip.
-        LogError(`[forms] automations skipped: response ${responseId} could not be loaded as the automation principal: ${loaded.error}`);
-        return;
-      }
-      const context = loaded.context;
-
-      const answers = buildConditionAnswers(resolved.definition, context.canonicalAnswers);
-      const plan = planAutomations(resolved.definition.automations, {
-        complete: true,
-        answers,
-        score: scoreFor(resolved, answers),
-      });
-
-      await runAutomations({
-        plan,
-        // Sync automations dispatch on THIS scope's `provider`; Async ones get a scope of their
-        // own, because `runAutomations` fires them without awaiting and one can still be running
-        // after this function's `withIsolatedProvider` call above releases `provider` — see
-        // `isolatedDispatcher`'s doc comment (bizapps-forms#260, relocated).
-        dispatch: isolatedDispatcher(provider, responseId, (_automation, dispatchProvider) => ({
-          responseId,
-          formId: resolved.definition.formId,
-          formVersionId: resolved.version.ID,
-          distributionId: resolved.distribution.ID,
-          answers: context.canonicalAnswers,
-          questionTypes: questionTypesOf(resolved.definition),
-          principal,
-          provider: dispatchProvider,
-          allowedEntities: allowedBindingEntities(),
-        })),
-      });
-    });
+    await withIsolatedProvider(`on-submit automations for response ${responseId}`, (provider) =>
+      FormAutomationEngine.Instance.RunForResponse({ responseId, trigger: 'OnComplete', principal }, provider, ctx.elevatedUser),
+    );
   } catch (err) {
+    if (err instanceof FormAutomationError) {
+      // Logged once, with its detail, at the engine's boundary.
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
-    // Same failure class as the `loaded.status === 'failed'` branch above (this submission's side
-    // effects did not run and an operator needs to know why) — LogError, for the same reason.
+    // This submission's side effects did not run and an operator needs to know why.
     LogError(`[forms] automations failed for response ${responseId}: ${message}`);
   }
-}
-/**
- * Every question's type, keyed by id, for consumers that must write an answer onward in a shape
- * the destination can hold. `CanonicalAnswers` carries values without types by design; entity
- * binding needs both to decide whether a `Time` is an instant or a clock at its target column.
- */
-function questionTypesOf(definition: PublishedFormDefinition): ReadonlyMap<string, FormQuestionType> {
-  const types = new Map<string, FormQuestionType>();
-  for (const page of definition.pages) {
-    for (const question of page.questions) {
-      types.set(question.id, question.type);
-    }
-  }
-  return types;
 }
 
 /**
