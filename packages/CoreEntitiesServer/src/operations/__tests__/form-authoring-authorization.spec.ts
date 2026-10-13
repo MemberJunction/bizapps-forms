@@ -4,7 +4,13 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Metadata, type IMetadataProvider, type UserInfo } from '@memberjunction/core';
-import { authorizeFormAuthoring, formAuthoringRefusal, refuseFormAuthoring } from '../form-authoring-authorization.js';
+import {
+  authorizeDistributionAuthoring,
+  authorizeFormAuthoring,
+  distributionAuthoringRefusal,
+  formAuthoringRefusal,
+  refuseFormAuthoring,
+} from '../form-authoring-authorization.js';
 import { makeFakeProvider } from '../../testing/index.js';
 
 const logged = vi.hoisted(() => [] as string[]);
@@ -14,6 +20,7 @@ vi.mock('@memberjunction/core', async () => {
 });
 
 const FORMS = 'MJ_BizApps_Forms: Forms';
+const DISTRIBUTIONS = 'MJ_BizApps_Forms: Form Distributions';
 
 function user(overrides: Partial<Record<'IsMagicLinkAnonymous' | 'MagicLinkScope', unknown>> = {}): UserInfo {
   return { ID: 'author-1', Name: 'Author', IsMagicLinkAnonymous: false, MagicLinkScope: undefined, ...overrides } as unknown as UserInfo;
@@ -89,5 +96,65 @@ describe('authorizeFormAuthoring', () => {
     expect(refuseFormAuthoring('Forms: Generate Form From Brief', user(), mayNot)).toMatch(/lacks Update permission/);
     expect(logged).toHaveLength(1);
     expect(logged[0]).toMatch(/Forms: Generate Form From Brief.*author-1/);
+  });
+});
+
+/**
+ * The share-link operations (#303 Task 6): the authoring rule, plus the rights on Form Distributions
+ * the verb needs. The claims query this replaced required Update on Form Distributions; issuing a
+ * link also creates one.
+ */
+describe('distributionAuthoringRefusal', () => {
+  const rights = (forms: boolean, create: boolean, update: boolean) =>
+    makeFakeProvider({
+      updatePermissions: { [FORMS]: forms, [DISTRIBUTIONS]: update },
+      createPermissions: { [DISTRIBUTIONS]: create },
+    }).provider;
+
+  it('admits an author with Update on Forms and the share-link rights asked for', () => {
+    expect(distributionAuthoringRefusal(user(), rights(true, true, true), ['CanCreate', 'CanUpdate'])).toBeNull();
+    expect(distributionAuthoringRefusal(user(), rights(true, false, true), ['CanUpdate'])).toBeNull();
+  });
+
+  it('applies the authoring rule first: a magic-link session is refused whatever its share-link rights', () => {
+    expect(
+      distributionAuthoringRefusal(user({ MagicLinkScope: { ResourceID: 'dist-1' } }), rights(true, true, true), ['CanUpdate']),
+    ).toMatch(/magic-link/);
+    expect(distributionAuthoringRefusal(user({ IsMagicLinkAnonymous: true }), rights(true, true, true), ['CanUpdate'])).toMatch(
+      /anonymous/,
+    );
+  });
+
+  it('refuses an author without Update on Forms, whatever their share-link rights', () => {
+    expect(distributionAuthoringRefusal(user(), rights(false, true, true), ['CanUpdate'])).toMatch(
+      /Update permission on MJ_BizApps_Forms: Forms/,
+    );
+  });
+
+  it('refuses an author without Update on Form Distributions', () => {
+    expect(distributionAuthoringRefusal(user(), rights(true, true, false), ['CanUpdate'])).toMatch(
+      /Update permission on MJ_BizApps_Forms: Form Distributions/,
+    );
+  });
+
+  it('refuses an author without Create on Form Distributions when the verb creates one', () => {
+    expect(distributionAuthoringRefusal(user(), rights(true, false, true), ['CanCreate', 'CanUpdate'])).toMatch(
+      /Create permission on MJ_BizApps_Forms: Form Distributions/,
+    );
+  });
+
+  it('fails closed when Form Distributions is not in the metadata', () => {
+    const formsOnly = {
+      EntityByName: (name: string) => (name === FORMS ? rights(true, true, true).EntityByName(FORMS) : undefined),
+    } as unknown as IMetadataProvider;
+    expect(distributionAuthoringRefusal(user(), formsOnly, ['CanUpdate'])).toMatch(/Form Distributions is not in this host's metadata/);
+  });
+
+  it('authorizeDistributionAuthoring logs the refusal with the operation and the user, and answers yes/no', () => {
+    logged.length = 0;
+    expect(authorizeDistributionAuthoring('Forms.OpenDistribution', user(), ['CanUpdate'], rights(true, true, true))).toBe(true);
+    expect(logged).toEqual([]);
+    expect(authorizeDistributionAuthoring('Forms.OpenDistribution', user(), ['CanUpdate'], rights(true, true, false))).toBe(false);
+    expect(logged.join('\n')).toMatch(/Forms\.OpenDistribution.*author-1.*Form Distributions/);
   });
 });

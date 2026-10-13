@@ -2,16 +2,18 @@
  * The emulated Forms database the engine, operation and authoring-Action specs run against: the shared fake provider, its tables
  * seeded with one draft form, and the REAL `FormEntityServer` / `FormVersionEntityServer` over every
  * Form and Form Version row (see `testing/write-through-entity.ts`) — so each save the engine makes
- * passes through the same invariants a production save does.
+ * passes through the same invariants a production save does. A spec that also passes
+ * `FormDistributionEntityServer` gets it over every Form Distribution row, with the row-lock read
+ * its update saves make answered from the table — so the provisioning hook runs as in production.
  *
- * A spec that imports this must first mock `@mj-biz-apps/forms-entities` so the two generated bases
- * are `WriteThroughEntityBase` (the mock has to live in the spec file; Vitest hoists it there). The
+ * A spec that imports this must first mock `@mj-biz-apps/forms-entities` so the generated bases it
+ * runs subclasses over are `WriteThroughEntityBase` (the mock has to live in the spec file; Vitest hoists it there). The
  * subclass constructors are passed in rather than imported here for the same reason: they must be
  * the classes evaluated AFTER that mock.
  */
 import type { UserInfo } from '@memberjunction/core';
-import { makeFakeProvider, type FakeProvider, type FakeProviderConfig, type FakeRow } from './fake-provider.js';
-import { writeThroughEntities, type WriteThroughEntityBase } from './write-through-entity.js';
+import { makeFakeProvider, type FakeProvider, type FakeProviderConfig, type FakeRow, type FakeSqlScript } from './fake-provider.js';
+import { writeThroughEntities, type WriteThroughEntityBase, type WriteThroughEntitySpec } from './write-through-entity.js';
 
 export const FORMS = 'MJ_BizApps_Forms: Forms';
 export const VERSIONS = 'MJ_BizApps_Forms: Form Versions';
@@ -31,6 +33,10 @@ export const FORM_COLUMNS = [
   'CategoryID', 'TemplateSourceFormID',
 ] as const;
 export const VERSION_COLUMNS = ['ID', 'FormID', 'VersionNumber', 'Status', 'PublishedAt', 'DefinitionSnapshot'] as const;
+export const DISTRIBUTION_COLUMNS = [
+  'ID', 'FormID', 'Name', 'Slug', 'ChannelType', 'Status', 'OpenAt', 'CloseAt', 'MaxResponses', 'ResponseCount',
+  'MagicLinkInviteID', 'PublicLinkToken', 'CaptchaRequired', 'IsActive', 'AllowedOrigins',
+] as const;
 
 export const AUTHOR = {
   ID: 'author-1',
@@ -43,6 +49,8 @@ export const AUTHOR = {
 export interface ServerSubclasses {
   FormEntityServer: new () => WriteThroughEntityBase;
   FormVersionEntityServer: new () => WriteThroughEntityBase;
+  /** Optional: only the specs that exercise share-link provisioning need it. */
+  FormDistributionEntityServer?: new () => WriteThroughEntityBase;
 }
 
 export function formRow(overrides: Partial<FakeRow> = {}): FakeRow {
@@ -156,7 +164,23 @@ export function screenRow(overrides: Partial<FakeRow> & { ID: string }): FakeRow
 }
 
 export function distributionRow(overrides: Partial<FakeRow> & { ID: string }): FakeRow {
-  return { FormID: 'form-1', Name: overrides.ID, Slug: overrides.ID, ChannelType: 'PublicLink', Status: 'Active', IsActive: true, ...overrides };
+  return {
+    FormID: 'form-1',
+    Name: overrides.ID,
+    Slug: overrides.ID,
+    ChannelType: 'PublicLink',
+    Status: 'Active',
+    IsActive: true,
+    OpenAt: null,
+    CloseAt: null,
+    MaxResponses: null,
+    ResponseCount: 0,
+    MagicLinkInviteID: null,
+    PublicLinkToken: null,
+    CaptchaRequired: false,
+    AllowedOrigins: null,
+    ...overrides,
+  };
 }
 
 /** A draft with one page, a text question and a choice question with two options. */
@@ -191,19 +215,36 @@ export function formsWorld(
   config: Partial<FakeProviderConfig> = {},
 ): FakeProvider {
   let world: FakeProvider | undefined;
+  const Distribution = subclasses.FormDistributionEntityServer;
+  const specs: Record<string, WriteThroughEntitySpec> = {
+    [FORMS]: { construct: () => new subclasses.FormEntityServer(), columns: FORM_COLUMNS },
+    [VERSIONS]: { construct: () => new subclasses.FormVersionEntityServer(), columns: VERSION_COLUMNS },
+  };
+  if (Distribution) {
+    specs[DISTRIBUTIONS] = { construct: () => new Distribution(), columns: DISTRIBUTION_COLUMNS };
+  }
   world = makeFakeProvider({
     tables,
-    wrapEntity: writeThroughEntities(
-      {
-        [FORMS]: { construct: () => new subclasses.FormEntityServer(), columns: FORM_COLUMNS },
-        [VERSIONS]: { construct: () => new subclasses.FormVersionEntityServer(), columns: VERSION_COLUMNS },
-      },
-      () => world?.provider,
-      AUTHOR,
-    ),
+    wrapEntity: writeThroughEntities(specs, () => world?.provider, AUTHOR),
     ...config,
+    sql: [...(Distribution ? [storedCredentialRead(() => world)] : []), ...(config.sql ?? [])],
   });
   return world;
+}
+
+/**
+ * Answer `FormDistributionEntityServer`'s locked read of a row's stored credential from the table,
+ * as the database would — so a save carries the pair the "database" holds, not the instance's copy.
+ */
+function storedCredentialRead(world: () => FakeProvider | undefined): FakeSqlScript {
+  return {
+    match: /SELECT \[MagicLinkInviteID\], \[PublicLinkToken\]/,
+    rows: (sql) => {
+      const id = /\[ID\] = '((?:[^']|'')*)'/.exec(sql)?.[1]?.replace(/''/g, "'");
+      const row = (world()?.tables[DISTRIBUTIONS] ?? []).find((candidate) => candidate.ID === id);
+      return row ? [{ MagicLinkInviteID: row.MagicLinkInviteID ?? null, PublicLinkToken: row.PublicLinkToken ?? null }] : [];
+    },
+  };
 }
 
 /** The rows of one table, as the "database" holds them now. */

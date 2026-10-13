@@ -70,22 +70,34 @@ export async function saveAsEngine(entity: EngineWritable): Promise<boolean> {
 
 /**
  * Run an engine's unit of work in one entity transaction — joining the caller's as a savepoint when
- * one is open — and log a failure ONCE, at the outermost boundary.
+ * one is open — and log a failure ONCE, at the outermost boundary ({@link runEngineCall}).
  *
  * Engines nest (`FormAuthoringEngine` publishes through `FormPublishingEngine` inside its own
  * build), and each used to log what it caught, so one failure reached the log twice with two
- * different contexts. Only the call that opened the physical transaction (depth 0 on entry) logs:
- * it is the boundary the failure leaves, and its `context` says what was being attempted for whom.
- * A refusal over the draft (`fault === false`) is a status, not an error.
+ * different contexts.
  */
 export async function runEngineUnitOfWork<T>(
   provider: DatabaseProviderBase,
   context: string,
   work: () => Promise<T>,
 ): Promise<T> {
+  return runEngineCall(provider, context, () => RunInEntityTransaction(provider, work));
+}
+
+/**
+ * Run an engine verb and log a failure ONCE, at the outermost boundary — without opening a
+ * transaction of its own. For the verb that must not be one unit (issuing a share link; see
+ * `FormDistributionEngine.Issue`), and the base of {@link runEngineUnitOfWork}.
+ *
+ * Only the call that found no transaction open on entry (depth 0) logs: it is the boundary the
+ * failure leaves, and its `context` says what was being attempted for whom. Inside a caller's
+ * transaction the caller logs. A refusal over the request (`fault === false`) is a status, not an
+ * error.
+ */
+export async function runEngineCall<T>(provider: DatabaseProviderBase, context: string, work: () => Promise<T>): Promise<T> {
   const outermost = (provider.TransactionDepth ?? 0) === 0;
   try {
-    return await RunInEntityTransaction(provider, work);
+    return await work();
   } catch (err) {
     if (outermost) {
       const refusal = err instanceof Error && 'fault' in err && err.fault === false;

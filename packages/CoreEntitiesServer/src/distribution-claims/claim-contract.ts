@@ -16,7 +16,7 @@ import type { UserInfo } from '@memberjunction/core';
  * Versioned (`.v1`) so an incompatible change can ship under a new key while old consumers keep
  * working against the old one. The value is an ARRAY that a consumer creates if it is absent and
  * pushes onto; nobody ever replaces it, because replacing would silently evict every other
- * consumer's registration. It is read lazily on each query rather than captured at startup, so
+ * consumer's registration. It is read lazily on each lookup rather than captured at startup, so
  * the order in which apps load does not matter.
  */
 export const DISTRIBUTION_CLAIM_PROVIDERS_KEY = '__mjBizAppsForms.distributionClaimProviders.v1';
@@ -34,7 +34,7 @@ export const CLAIM_PROVIDER_TIMEOUT_MS = 5000;
 /**
  * How many elements of one provider's answer are examined. Only the slugs asked about can be
  * claimed, so a longer answer is padding or a bug; checking all of it would let one provider spend
- * unbounded CPU and flood the log and the GraphQL response with rejections.
+ * unbounded CPU and flood the log and the operation's response with rejections.
  */
 export const MAX_CLAIMS_PER_PROVIDER = 500;
 

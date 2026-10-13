@@ -37,9 +37,9 @@ interface WriteThroughValidation {
 
 /**
  * Properties of the harness and of the server subclasses that are NOT columns. A column is every
- * other own property — which is why the subclasses' transient engine flag is named here: written
- * back as a column it would reach the table, and a spec could then "prove" a flag that MJ never
- * persists.
+ * other own property — which is why the subclasses' transient flags (the engine flag, and the
+ * distribution hook's re-entrancy guard) are named here: written back as a column they would reach
+ * the table, and a spec could then "prove" a flag that MJ never persists.
  */
 const NOT_COLUMNS = new Set([
   'record',
@@ -50,6 +50,7 @@ const NOT_COLUMNS = new Set([
   'ProviderToUse',
   'EntityInfo',
   'AuthorizedByEngine',
+  'credentialWriteInFlight',
 ]);
 
 export class WriteThroughEntityBase {

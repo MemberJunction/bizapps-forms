@@ -648,9 +648,13 @@ function runTableView<T>(
 
 /**
  * A generic row matches when every `Column='value'` equality, every bit equality (`Column=1`,
- * `Column = 0`) and every `Column IN ('a','b')` list in the filter holds for it. Anything else in the
- * filter is ignored — so a test that depends on a richer predicate must assert on the filter text
- * too, rather than trusting this to have applied it.
+ * `Column = 0`), every `Column IN ('a','b')` list and every `Column IS [NOT] NULL` in the filter holds
+ * for it. Anything else in the filter is ignored — so a test that depends on a richer predicate must
+ * assert on the filter text too, rather than trusting this to have applied it.
+ *
+ * `IS [NOT] NULL` is honoured for the same reason as bits: a read of "this form's slugs" that also
+ * returned its slug-less links handed `null` to code that asked for slugs. A missing column reads as
+ * null, as it would in a row the database filled with its default.
  *
  * Bit equalities are honoured because a flag is often the whole point of a read (`IsTemplate=1`):
  * ignoring it answered with every row, so a check meant to look only at templates also "found" the
@@ -664,6 +668,12 @@ function matchesRowFilter(row: FakeRow, filter: string): boolean {
   }
   for (const m of filter.matchAll(/(?:^|[^\w.])\[?(\w+)\]?\s*=\s*([01])(?![\w.'])/g)) {
     if (Number(row[m[1]] ?? 0) !== Number(m[2])) {
+      return false;
+    }
+  }
+  for (const m of filter.matchAll(/(?:^|[^\w.])\[?(\w+)\]?\s+IS\s+(NOT\s+)?NULL\b/gi)) {
+    const isNull = row[m[1]] === null || row[m[1]] === undefined;
+    if (isNull === Boolean(m[2])) {
       return false;
     }
   }

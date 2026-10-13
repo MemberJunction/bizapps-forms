@@ -8,6 +8,8 @@ export * from './contracts'
 export * from './contracts/form-blueprint'
 // The clone remap is authoring-only for the same reason: no respondent ever copies a form.
 export * from './contracts/clone-remap'
+// So is the share-link rule (slug grammar and the respondent URL): no respondent ever builds a link.
+export * from './contracts/share-link'
 
 /**
  * Forces the generated entity subclasses to be loaded so their @RegisterClass

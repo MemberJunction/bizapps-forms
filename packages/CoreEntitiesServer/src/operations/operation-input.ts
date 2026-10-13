@@ -49,3 +49,58 @@ export function optionalNullableTextInput(value: unknown, field: string, operati
   }
   throw new Error(`${operationKey}: ${field} must be text or null when given.`);
 }
+
+/** An optional JSON boolean; absent or `null` is `undefined`. Anything else is refused, as in {@link requireBooleanInput}. */
+export function optionalBooleanInput(value: unknown, field: string, operationKey: string): boolean | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== 'boolean') {
+    throw new Error(`${operationKey}: ${field} must be true or false when given.`);
+  }
+  return value;
+}
+
+/** An optional value from a closed set (a CHECK-constrained column); absent or `null` is `undefined`. */
+export function optionalChoiceInput<T extends string>(
+  value: unknown,
+  choices: readonly T[],
+  field: string,
+  operationKey: string,
+): T | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const choice = choices.find((candidate) => candidate === value);
+  if (choice === undefined) {
+    throw new Error(`${operationKey}: ${field} must be one of ${choices.join(', ')} when given.`);
+  }
+  return choice;
+}
+
+/** A whole number of at least 1, or `null` for "no bound" — which is also what absent means. */
+export function nullablePositiveIntegerInput(value: unknown, field: string, operationKey: string): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new Error(`${operationKey}: ${field} must be a whole number of at least 1, or null.`);
+  }
+  return value;
+}
+
+/**
+ * An ISO-8601 instant as a `Date`, or `null` — which is also what absent means. Only a string is
+ * accepted: the wire is JSON, where a number could be seconds or milliseconds and a guess between
+ * them moves a link's opening by a factor of a thousand.
+ */
+export function nullableInstantInput(value: unknown, field: string, operationKey: string): Date | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const instant = typeof value === 'string' && value.trim() ? new Date(value) : undefined;
+  if (!instant || Number.isNaN(instant.getTime())) {
+    throw new Error(`${operationKey}: ${field} must be an ISO-8601 date and time, or null.`);
+  }
+  return instant;
+}

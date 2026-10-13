@@ -115,9 +115,11 @@ refused, the tab shows "Some apps' answers about these links had problems:" foll
 name and the reason; if the whole check fails, it shows "Couldn't check whether another app uses
 these links:" and the error. A failed check is never shown as "nobody claims this".
 
-Only users with Update rights on Form Distributions can ask, and a call made with an API key also
-needs that key's `view:run` scope on Form Distributions; the query is the authenticated GraphQL
-`FormDistributionClaims(formId)`.
+Only signed-in authors can ask: the lookup is the `Forms.GetDistributionClaims` Remote Operation
+(input `{ FormID }`), which refuses anonymous and magic-link sessions and requires Update rights on
+both Forms and Form Distributions. It replaced the GraphQL query `FormDistributionClaims(formId)`,
+which also checked an API key's `view:run` scope on Form Distributions; the operation has no
+equivalent of that scope check.
 
 ## Things to know
 

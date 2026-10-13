@@ -2,7 +2,13 @@
  * Pure helpers for deriving the public artifacts of a distribution (slug, public
  * URL, redeem URL, embed snippet). Kept free of Angular/MJ so they are trivially
  * unit-testable and reusable by {@link DistributionService}.
+ *
+ * The slug and respondent-URL RULES are the contracts' (`share-link.ts` in
+ * `@mj-biz-apps/forms-entities`): the server's `FormDistributionEngine` composes the same URL
+ * from the same function, so the link this builder shows and the one a distribution verb
+ * returns cannot differ. These keep their names because they are forms-ng's public API.
  */
+import { randomSlugSuffix, respondentUrl, slugify as slugifyName } from '@mj-biz-apps/forms-entities';
 
 /** Strip trailing slashes from a base URL so path joins are clean. */
 function trimBase(baseUrl: string): string {
@@ -11,7 +17,7 @@ function trimBase(baseUrl: string): string {
 
 /** The slug-friendly respondent URL for a distribution (no anonymous session). */
 export function publicUrl(slug: string, baseUrl: string): string {
-  return `${trimBase(baseUrl)}/f/${encodeURIComponent(slug)}`;
+  return respondentUrl(slug, baseUrl);
 }
 
 /**
@@ -46,16 +52,10 @@ export function embedSnippet(slug: string, baseUrl: string): string {
 
 /** Slugify a name to a URL-friendly token, falling back to a random token. */
 export function slugify(name: string, randomSuffix: () => string): string {
-  const base = name
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
-  return base.length > 0 ? base : `form-${randomSuffix()}`;
+  return slugifyName(name, randomSuffix);
 }
 
 /** Default random suffix generator (5 base-36 chars). */
 export function randomSuffix(): string {
-  return Math.random().toString(36).slice(2, 7);
+  return randomSlugSuffix();
 }

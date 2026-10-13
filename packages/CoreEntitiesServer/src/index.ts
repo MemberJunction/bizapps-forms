@@ -57,6 +57,7 @@ export {
 export {
   getMagicLinkProvisioningConfig,
   resetMagicLinkProvisioningConfigForTests,
+  DISTRIBUTION_CHANNEL_TYPES,
   type MagicLinkProvisioningConfig,
   type DistributionChannelType,
 } from './magic-link/config.js';
@@ -119,6 +120,23 @@ export {
   type FormLifecycleResult,
   type TemplateSource,
 } from './engines/FormAuthoringEngine.js';
+export {
+  FormDistributionEngine,
+  FormDistributionError,
+  DEFAULT_CHANNEL,
+  MAX_SLUG_ATTEMPTS,
+  type DistributionLink,
+  type IssueLinkRequest,
+} from './engines/FormDistributionEngine.js';
+// The claim protocol consumer apps implement (`docs/distribution-claims.md`); the types are Forms'
+// own — a consumer re-declares the shapes it needs rather than importing them.
+export {
+  DISTRIBUTION_CLAIM_PROVIDERS_KEY,
+  type ClaimFailure,
+  type ClaimLookup,
+  type DistributionClaim,
+  type DistributionClaimProvider,
+} from './distribution-claims/claim-contract.js';
 export { FormAuthoringError } from './engines/authoring-errors.js';
 export type { ClonedForm } from './engines/form-clone.js';
 export { STARTER_TEMPLATES, getStarterTemplate, type StarterTemplate } from './engines/starter-templates.js';
@@ -135,8 +153,25 @@ export {
 export { ArchiveFormServerOperation, LoadArchiveFormOperation } from './operations/ArchiveFormServerOperation.js';
 export { RestoreFormServerOperation, LoadRestoreFormOperation } from './operations/RestoreFormServerOperation.js';
 export {
+  IssueDistributionLinkServerOperation,
+  LoadIssueDistributionLinkOperation,
+} from './operations/IssueDistributionLinkServerOperation.js';
+export {
+  ReissueDistributionLinkServerOperation,
+  LoadReissueDistributionLinkOperation,
+} from './operations/ReissueDistributionLinkServerOperation.js';
+export { OpenDistributionServerOperation, LoadOpenDistributionOperation } from './operations/OpenDistributionServerOperation.js';
+export { CloseDistributionServerOperation, LoadCloseDistributionOperation } from './operations/CloseDistributionServerOperation.js';
+export {
+  GetDistributionClaimsServerOperation,
+  LoadGetDistributionClaimsOperation,
+} from './operations/GetDistributionClaimsServerOperation.js';
+export {
+  authorizeDistributionAuthoring,
   authorizeFormAuthoring,
+  distributionAuthoringRefusal,
   formAuthoringRefusal,
   refuseFormAuthoring,
+  type DistributionRight,
   type FormPermissionSource,
 } from './operations/form-authoring-authorization.js';

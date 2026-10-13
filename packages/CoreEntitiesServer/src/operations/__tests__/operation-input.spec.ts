@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { optionalNullableTextInput, optionalTextInput, requireBooleanInput, requireTextInput } from '../operation-input.js';
+import {
+  nullableInstantInput,
+  nullablePositiveIntegerInput,
+  optionalBooleanInput,
+  optionalChoiceInput,
+  optionalNullableTextInput,
+  optionalTextInput,
+  requireBooleanInput,
+  requireTextInput,
+} from '../operation-input.js';
 
 describe('requireTextInput', () => {
   it('returns the trimmed text', () => {
@@ -44,6 +53,67 @@ describe('optionalNullableTextInput', () => {
   it.each([42, false, {}])('refuses %j', (value) => {
     expect(() => optionalNullableTextInput(value, 'Description', 'Forms.CloneForm')).toThrow(
       'Forms.CloneForm: Description must be text or null when given.',
+    );
+  });
+});
+
+describe('optionalBooleanInput', () => {
+  it('returns a JSON boolean, and undefined when absent or null', () => {
+    expect(optionalBooleanInput(true, 'CaptchaRequired', 'Forms.IssueDistributionLink')).toBe(true);
+    expect(optionalBooleanInput(false, 'CaptchaRequired', 'Forms.IssueDistributionLink')).toBe(false);
+    expect(optionalBooleanInput(undefined, 'CaptchaRequired', 'Forms.IssueDistributionLink')).toBeUndefined();
+    expect(optionalBooleanInput(null, 'CaptchaRequired', 'Forms.IssueDistributionLink')).toBeUndefined();
+  });
+
+  it.each(['true', 1, 0, ''])('refuses %j rather than guessing', (value) => {
+    expect(() => optionalBooleanInput(value, 'CaptchaRequired', 'Forms.IssueDistributionLink')).toThrow(
+      'Forms.IssueDistributionLink: CaptchaRequired must be true or false when given.',
+    );
+  });
+});
+
+describe('optionalChoiceInput', () => {
+  const CHANNELS = ['Email', 'Embed', 'PublicLink', 'QR'] as const;
+
+  it('returns one of the choices, and undefined when absent or null', () => {
+    expect(optionalChoiceInput('QR', CHANNELS, 'ChannelType', 'Forms.IssueDistributionLink')).toBe('QR');
+    expect(optionalChoiceInput(undefined, CHANNELS, 'ChannelType', 'Forms.IssueDistributionLink')).toBeUndefined();
+    expect(optionalChoiceInput(null, CHANNELS, 'ChannelType', 'Forms.IssueDistributionLink')).toBeUndefined();
+  });
+
+  it.each(['qr', 'Fax', '', 3])('refuses %j, listing the choices', (value) => {
+    expect(() => optionalChoiceInput(value, CHANNELS, 'ChannelType', 'Forms.IssueDistributionLink')).toThrow(
+      'Forms.IssueDistributionLink: ChannelType must be one of Email, Embed, PublicLink, QR when given.',
+    );
+  });
+});
+
+describe('nullablePositiveIntegerInput', () => {
+  it('returns a positive integer, and null when absent or null (no bound)', () => {
+    expect(nullablePositiveIntegerInput(25, 'MaxResponses', 'Forms.IssueDistributionLink')).toBe(25);
+    expect(nullablePositiveIntegerInput(undefined, 'MaxResponses', 'Forms.IssueDistributionLink')).toBeNull();
+    expect(nullablePositiveIntegerInput(null, 'MaxResponses', 'Forms.IssueDistributionLink')).toBeNull();
+  });
+
+  it.each([0, -1, 1.5, '10', Number.NaN, Number.POSITIVE_INFINITY])('refuses %j', (value) => {
+    expect(() => nullablePositiveIntegerInput(value, 'MaxResponses', 'Forms.IssueDistributionLink')).toThrow(
+      'Forms.IssueDistributionLink: MaxResponses must be a whole number of at least 1, or null.',
+    );
+  });
+});
+
+describe('nullableInstantInput', () => {
+  it('parses an ISO-8601 instant, and returns null when absent or null', () => {
+    expect(nullableInstantInput('2026-11-01T09:00:00Z', 'OpenAt', 'Forms.IssueDistributionLink')?.toISOString()).toBe(
+      '2026-11-01T09:00:00.000Z',
+    );
+    expect(nullableInstantInput(undefined, 'OpenAt', 'Forms.IssueDistributionLink')).toBeNull();
+    expect(nullableInstantInput(null, 'OpenAt', 'Forms.IssueDistributionLink')).toBeNull();
+  });
+
+  it.each(['tomorrow', '', 1730000000000, '2026-13-45'])('refuses %j', (value) => {
+    expect(() => nullableInstantInput(value, 'OpenAt', 'Forms.IssueDistributionLink')).toThrow(
+      'Forms.IssueDistributionLink: OpenAt must be an ISO-8601 date and time, or null.',
     );
   });
 });

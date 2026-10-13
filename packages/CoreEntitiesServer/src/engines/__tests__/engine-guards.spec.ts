@@ -8,7 +8,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
   LogStatus: (m: string) => logged.statuses.push(m),
 }));
 
-const { runEngineUnitOfWork, saveAsEngine } = await import('../engine-guards.js');
+const { runEngineCall, runEngineUnitOfWork, saveAsEngine } = await import('../engine-guards.js');
 
 beforeEach(() => {
   logged.errors.length = 0;
@@ -98,5 +98,43 @@ describe('runEngineUnitOfWork — one transaction, one log line', () => {
     ).rejects.toThrow('boom');
     expect(logged.errors).toEqual(['outer: boom']);
     expect(db.transactions).toEqual(['begin', 'begin:nested', 'rollback:nested', 'rollback']);
+  });
+});
+
+/**
+ * The same one-log-line rule for an engine verb that must NOT run as one transaction (issuing a share
+ * link: its slug retry depends on a failed insert leaving the connection usable).
+ */
+describe('runEngineCall — one log line, no transaction', () => {
+  it('runs the work without opening a transaction and returns its result', async () => {
+    const db = makeFakeProvider({});
+
+    expect(await runEngineCall(db.provider, 'ctx', async () => 'done')).toBe('done');
+    expect(db.transactions).toEqual([]);
+    expect([...logged.errors, ...logged.statuses]).toEqual([]);
+  });
+
+  it('logs a fault as an error and a refusal as a status, with the context, and rethrows', async () => {
+    const db = makeFakeProvider({});
+    const refusal = Object.assign(new Error('form is archived'), { fault: false });
+
+    await expect(runEngineCall(db.provider, 'issuing a link (user u1)', async () => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
+    await expect(runEngineCall(db.provider, 'issuing a link (user u1)', async () => Promise.reject(refusal))).rejects.toBe(refusal);
+
+    expect(logged.errors).toEqual(['issuing a link (user u1): boom']);
+    expect(logged.statuses).toEqual(['issuing a link (user u1): form is archived']);
+  });
+
+  it("leaves the log to the caller whose transaction it runs inside", async () => {
+    const db = makeFakeProvider({});
+
+    await expect(
+      runEngineUnitOfWork(db.provider, 'outer', () =>
+        runEngineCall(db.provider, 'inner', async () => {
+          throw new Error('boom');
+        }),
+      ),
+    ).rejects.toThrow('boom');
+    expect(logged.errors).toEqual(['outer: boom']);
   });
 });

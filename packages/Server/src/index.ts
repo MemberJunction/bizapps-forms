@@ -19,9 +19,14 @@ import '@mj-biz-apps/forms-actions';
 import {
   LoadArchiveFormOperation,
   LoadCloneFormOperation,
+  LoadCloseDistributionOperation,
   LoadCreateFormFromTemplateOperation,
   LoadFormsEntityServerSubclasses,
+  LoadGetDistributionClaimsOperation,
+  LoadIssueDistributionLinkOperation,
+  LoadOpenDistributionOperation,
   LoadPublishFormOperation,
+  LoadReissueDistributionLinkOperation,
   LoadRestoreFormOperation,
   MagicLinkMinterRegistry,
 } from '@mj-biz-apps/forms-core-entities-server';
@@ -55,9 +60,6 @@ import './http/StacktraceRedactionMiddleware.js';
 
 // WP-B: import the custom public-submit resolver so its TypeGraphQL metadata is registered.
 import './public-submit/PublicFormResolver.js';
-
-// #292: same for the authenticated author query that reports consumer-owned share-link slugs.
-import './distribution-claims/DistributionClaimsResolver.js';
 
 // TASK 2: import the respondent host-page middleware so its @RegisterClass fires and MJ
 // server bootstrap discovers the public /f/:slug route (anonymous, shell-free host page).
@@ -117,9 +119,8 @@ MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());
 /** Absolute paths to the generated resolver files, for use with createMJServer() */
 export const RESOLVER_PATHS = [resolve(__dirname, 'generated/generated.{js,ts}')];
 // WP-B (public submit endpoint): custom anonymous resolvers, discovered via the *Resolver glob.
+// (#292's FormDistributionClaims query is now the `Forms.GetDistributionClaims` Remote Operation.)
 RESOLVER_PATHS.push(resolve(__dirname, 'public-submit/*Resolver.{js,ts}'));
-// #292: the FormDistributionClaims query. An authenticated AUTHOR query (builder), not a respondent one.
-RESOLVER_PATHS.push(resolve(__dirname, 'distribution-claims/*Resolver.{js,ts}'));
 
 /**
  * Bootstrap function called by DynamicPackageLoader during MJAPI startup.
@@ -135,6 +136,11 @@ export function LoadBizAppsFormsServer(): void {
     LoadCreateFormFromTemplateOperation();
     LoadArchiveFormOperation();
     LoadRestoreFormOperation();
+    LoadIssueDistributionLinkOperation();
+    LoadReissueDistributionLinkOperation();
+    LoadOpenDistributionOperation();
+    LoadCloseDistributionOperation();
+    LoadGetDistributionClaimsOperation();
     // Register the concrete magic-link minter so the FormDistribution hook can provision anonymous
     // links. Idempotent: re-registering simply replaces the instance.
     MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());
