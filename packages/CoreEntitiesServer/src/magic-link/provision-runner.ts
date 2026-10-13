@@ -13,7 +13,7 @@
 import { LogError, LogStatus, type UserInfo } from '@memberjunction/core';
 import type { MagicLinkProvisioningConfig } from './config.js';
 import { decideProvisioning, resolveExpiry, type DistributionProvisioningState, type ProvisioningReason } from './provisioning-decision.js';
-import type { IAnonymousMagicLinkMinter } from './minter.js';
+import type { IAnonymousMagicLinkMinter, InviteWriteHost } from './minter.js';
 
 /** Entity name of the distribution itself — the resource the invite is scoped to. */
 export const DISTRIBUTION_ENTITY_NAME = 'MJ_BizApps_Forms: Form Distributions';
@@ -79,14 +79,21 @@ export interface ProvisionOutcome {
  * @param minter            the registered minter, or `undefined` when none is registered
  * @param contextUser       the internal staff user saving the record (the invite issuer)
  * @param persistCredential writes (or clears) the credential on the record
+ * @param host              where every invite write goes. A distribution UPDATE passes its own
+ *                          provider, so the mint, revoke and expiry writes join the transaction that
+ *                          save holds and roll back with it; without one the minter writes through
+ *                          its own provider, on another connection, and a rolled-back save leaves a
+ *                          committed revoke beside a live token — the #104 dead link.
  */
 export async function runProvisioning(
   ctx: ProvisionContext,
   config: MagicLinkProvisioningConfig,
-  minter: IAnonymousMagicLinkMinter | undefined,
+  registeredMinter: IAnonymousMagicLinkMinter | undefined,
   contextUser: UserInfo | undefined,
   persistCredential: PersistCredential,
+  host?: InviteWriteHost,
 ): Promise<ProvisionOutcome> {
+  const minter = registeredMinter && host ? writingThrough(registeredMinter, host) : registeredMinter;
   const decision = decideProvisioning(ctx, config);
   if (!decision.revoke && !decision.mint) {
     // Nothing to issue or withdraw. A credential we are KEEPING still has to stay
@@ -384,4 +391,18 @@ async function issueCredential(
       `${mint.inviteId} for distribution ${ctx.distributionId}.`,
   );
   return { result: replacing ? 'reissued' : 'minted', inviteId: mint.inviteId };
+}
+
+/**
+ * The minter, with every write it makes bound to `host`. One binding here rather than a `host`
+ * argument threaded through each helper below, so no helper can forget it: a single unhosted call
+ * is the one write that escapes the transaction.
+ */
+function writingThrough(minter: IAnonymousMagicLinkMinter, host: InviteWriteHost): IAnonymousMagicLinkMinter {
+  return {
+    MintAnonymousInvite: (params, creatingUser) => minter.MintAnonymousInvite(params, creatingUser, host),
+    RevokeAnonymousInvite: (credential, contextUser) => minter.RevokeAnonymousInvite(credential, contextUser, host),
+    SetAnonymousInviteExpiry: (credential, bounds, contextUser) =>
+      minter.SetAnonymousInviteExpiry(credential, bounds, contextUser, host),
+  };
 }

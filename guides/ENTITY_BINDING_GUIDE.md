@@ -256,8 +256,8 @@ public path completely broken and every unit test passing.
 | Which automations run, in what order | `packages/Server/src/public-submit/automation-plan.ts` |
 | Carrying out a plan | `packages/Server/src/automation/automation-runner.ts` |
 | Dispatch by target type + bookkeeping | `packages/Server/src/automation/dispatch-automation.ts` |
-| Binding policy (validate → identity → merge → write) | `packages/Actions/src/custom/binding/binding-executor.ts` |
-| The MJ I/O behind that policy | `packages/Actions/src/custom/binding/mj-binding-gateway.ts` |
+| Binding policy (validate → identity → merge → write) | `packages/CoreEntitiesServer/src/binding/binding-executor.ts` |
+| The MJ I/O behind that policy | `packages/CoreEntitiesServer/src/binding/mj-binding-gateway.ts` |
 | `Forms: Bind Response To Entity` action | `packages/Actions/src/custom/binding/bind-response-to-entity.action.ts` |
 | Recovery sweep | `packages/Server/src/automation/recovery-sweep.ts` |
 | Upload provenance | `packages/Server/src/upload/upload-provenance.service.ts` |

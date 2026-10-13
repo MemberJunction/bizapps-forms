@@ -12,7 +12,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import type { AIPromptParams } from '@memberjunction/ai-core-plus';
-import type { ActionDataProvider } from '../shared/action-provider';
+import type { ActionDataProvider } from '@mj-biz-apps/forms-core-entities-server';
 import type { AnalyzedAnswer } from './response-analyzer-model';
 
 /** What `AIPromptRunner.ExecutePrompt` returns — captured so the test can inspect its `params`. */

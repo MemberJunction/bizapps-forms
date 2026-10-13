@@ -4,7 +4,7 @@ import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/cor
 import type { DefinitionRunViewProvider } from '../definition-loader.service';
 import { FORM_RESPONSE_ANSWER_ENTITY, FORM_RESPONSE_ENTITY } from '../entity-names';
 import { loadResumeSnapshot } from '../resume-snapshot.service';
-import { makeContextUser } from './fakes';
+import { makeContextUser } from '@mj-biz-apps/forms-core-entities-server/testing';
 
 const ROW_ID = '9DA322E6-0000-4000-8000-000000000001';
 

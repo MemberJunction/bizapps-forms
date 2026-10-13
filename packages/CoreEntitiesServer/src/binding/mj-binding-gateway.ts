@@ -15,8 +15,8 @@ import { CompositeKey, EntityFieldTSType, LogError, RunView } from '@memberjunct
 import type { BaseEntity, EntityInfo, UserInfo } from '@memberjunction/core';
 import { sqlLiteral } from '@mj-biz-apps/forms-entities';
 import type { CanonicalAnswerValue, IdentityNormalization } from '@mj-biz-apps/forms-entities';
-import type { ActionDataProvider } from '../shared/action-provider';
-import type { BindingTargetGateway, EntityCapability, MatchedRecord, MatchQuery, TargetFields } from './binding-executor';
+import type { ActionDataProvider } from '../shared/action-provider.js';
+import type { BindingTargetGateway, EntityCapability, MatchedRecord, MatchQuery, TargetFields } from './binding-executor.js';
 
 export class MJBindingGateway implements BindingTargetGateway {
   constructor(

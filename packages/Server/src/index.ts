@@ -6,12 +6,15 @@
  * are registered with the MJ class factory.
  */
 
-// Import entity and action packages to trigger @RegisterClass decorators
+// Import entity and action packages to trigger @RegisterClass decorators. Order matters:
+// forms-entities FIRST, so the generated entity classes register before the server subclasses in
+// forms-core-entities-server that extend them (MJ's ClassFactory takes the LAST registration for a
+// key). forms-actions imports forms-core-entities-server itself, so it is loaded by then either way.
 import '@mj-biz-apps/forms-entities';
 import '@mj-biz-apps/forms-actions';
 
-// Import server-side entity subclasses (lifecycle hooks / hardening) to trigger @RegisterClass
-import { MagicLinkMinterRegistry } from '@mj-biz-apps/forms-core-entities-server';
+// Server-side entity subclasses (invariants for every writer) — importing registers them.
+import { LoadFormsEntityServerSubclasses, MagicLinkMinterRegistry } from '@mj-biz-apps/forms-core-entities-server';
 
 // Concrete magic-link invite minter, registered into the entity-hook seam so the
 // FormDistribution lifecycle hook can provision anonymous links via MJ core's
@@ -114,8 +117,10 @@ RESOLVER_PATHS.push(resolve(__dirname, 'distribution-claims/*Resolver.{js,ts}'))
  * the module is fully evaluated.
  */
 export function LoadBizAppsFormsServer(): void {
-    // Static imports above ensure all classes are registered. Register the concrete
-    // magic-link minter so the FormDistribution hook can provision anonymous links.
-    // Idempotent: re-registering simply replaces the instance.
+    // Static imports above ensure all classes are registered; this reference keeps a bundler from
+    // dropping the entity server subclasses as unused.
+    LoadFormsEntityServerSubclasses();
+    // Register the concrete magic-link minter so the FormDistribution hook can provision anonymous
+    // links. Idempotent: re-registering simply replaces the instance.
     MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());
 }

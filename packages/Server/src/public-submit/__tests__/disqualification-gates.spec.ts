@@ -9,7 +9,7 @@ import {
   makeFakeProvider,
   makeVersion,
   respondentPermissions,
-} from './fakes';
+} from '@mj-biz-apps/forms-core-entities-server/testing';
 
 /**
  * WHERE THE KNOCKOUT SITS AMONG THE GATES (RULES_AND_BRANCHING_PLAN C3).

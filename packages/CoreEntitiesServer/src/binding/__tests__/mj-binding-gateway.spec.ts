@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ActionDataProvider } from '../../shared/action-provider';
+import type { ActionDataProvider } from '../../shared/action-provider.js';
 
 // The global Metadata/RunView (what `new Metadata()` / `new RunView()` with no args resolve to)
 // THROW on any use. If MJBindingGateway ever fell back to them instead of the `provider` passed
@@ -25,7 +25,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   return { ...actual, Metadata, RunView };
 });
 
-const { MJBindingGateway } = await import('../mj-binding-gateway');
+const { MJBindingGateway } = await import('../mj-binding-gateway.js');
 
 const fakeUser = { Name: 'tester' } as never;
 

@@ -69,9 +69,9 @@ export type BindingResult = { ok: true; outcome: BindingOutcome } | { ok: false;
 /**
  * Narrow a result to its failure branch.
  *
- * A type guard rather than a bare `if (!result.ok)` because this package compiles without
- * `strict`, and outside strict mode TypeScript does not narrow a discriminated union through a
- * negated boolean discriminant — so the obvious spelling reads as an error at the call site. The
+ * A type guard rather than a bare `if (!result.ok)` because forms-server, which calls this, compiles
+ * without `strict`, and outside strict mode TypeScript does not narrow a discriminated union through
+ * a negated boolean discriminant — so the obvious spelling reads as an error at the call site. The
  * guard states the relationship explicitly and works either way.
  */
 export function bindingFailed(result: BindingResult): result is { ok: false; failure: BindingFailure } {

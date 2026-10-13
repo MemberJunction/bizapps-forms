@@ -201,8 +201,9 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     credential: AnonymousCredentialRef,
     bounds: InviteExpiryBounds,
     contextUser: UserInfo,
+    host?: InviteWriteHost,
   ): Promise<InviteWriteResult> {
-    return this.writeToInvite(credential, contextUser, 'set the expiry of', undefined, (invite) => {
+    return this.writeToInvite(credential, contextUser, 'set the expiry of', host, (invite) => {
       if (invite.Status !== 'Active') {
         return { verdict: 'settled', message: `Invite ${invite.ID} is ${invite.Status}; expiry left as it was.` };
       }

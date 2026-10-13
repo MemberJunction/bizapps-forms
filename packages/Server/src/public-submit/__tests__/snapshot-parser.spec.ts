@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parsePublishedDefinition } from '../snapshot-parser';
-import { makeDefinition } from './fakes';
+import { makeDefinition } from '@mj-biz-apps/forms-core-entities-server/testing';
 import { FORM_QUESTION_TYPES } from '@mj-biz-apps/forms-entities';
 
 describe('parsePublishedDefinition', () => {

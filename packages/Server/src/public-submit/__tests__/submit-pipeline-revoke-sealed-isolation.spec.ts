@@ -76,7 +76,7 @@ import {
   makeFakeProvider,
   makeVersion,
   respondentPermissions,
-} from './fakes';
+} from '@mj-biz-apps/forms-core-entities-server/testing';
 
 /** A plain, unconfigured (legacy-dispatch) context with hooks stubbed and NO `revokeInvites` —
  * the seam under test is the pipeline's own default, not an injected replacement for it. */

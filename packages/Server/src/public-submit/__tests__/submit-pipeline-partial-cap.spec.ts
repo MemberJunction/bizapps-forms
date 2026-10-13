@@ -16,7 +16,7 @@ import {
   makeFakeProvider,
   makeVersion,
   respondentPermissions,
-} from './fakes';
+} from '@mj-biz-apps/forms-core-entities-server/testing';
 
 /** A partial submission satisfying the shape guard (required-field checks are relaxed for partials). */
 function partialSubmission(): PipelineSubmission {

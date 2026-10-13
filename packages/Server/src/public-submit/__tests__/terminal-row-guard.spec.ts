@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { mjBizAppsFormsFormResponseEntityType } from '@mj-biz-apps/forms-entities';
 import { persistSubmission } from '../persistence.service';
-import { expectPersistSuccess, makeContextUser, makeFakeProvider, respondentPermissions } from './fakes';
+import { makeContextUser, makeFakeProvider, respondentPermissions } from '@mj-biz-apps/forms-core-entities-server/testing';
+import { expectPersistSuccess } from './persistence-assertions';
 
 /**
  * A SEALED ROW IS SEALED ON EVERY PATH INTO PERSISTENCE.

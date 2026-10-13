@@ -24,7 +24,7 @@ import {
   makeVersion,
   respondentPermissions,
   type ExistingResponseRow,
-} from './fakes';
+} from '@mj-biz-apps/forms-core-entities-server/testing';
 
 const ROW_ID = '9da322e6-0000-4000-8000-000000000001';
 const OTHER_ROW_ID = '33910b9e-0000-4000-8000-000000000002';

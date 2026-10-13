@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import { readCaptchaDemand, type CaptchaDemandProvider } from '../../respondent-host/captcha-demand';
 import { FORM_DISTRIBUTION_ENTITY, FORM_VERSION_ENTITY } from '../entity-names';
-import { makeContextUser } from './fakes';
+import { makeContextUser } from '@mj-biz-apps/forms-core-entities-server/testing';
 
 /**
  * The boot-time probe behind the Turnstile readiness check (#122): does anything on this host ask

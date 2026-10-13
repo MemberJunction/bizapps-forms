@@ -15,7 +15,13 @@ import { describe, expect, it } from 'vitest';
 import type { FormAnswerInput, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 
 import { persistSubmission, type PersistenceInputs } from '../persistence.service';
-import { expectPersistFailure, makeContextUser, makeFakeProvider, respondentPermissions, type FakeProvider } from './fakes';
+import {
+  makeContextUser,
+  makeFakeProvider,
+  respondentPermissions,
+  type FakeProvider,
+} from '@mj-biz-apps/forms-core-entities-server/testing';
+import { expectPersistFailure } from './persistence-assertions';
 
 const ANSWER_ENTITY = 'MJ_BizApps_Forms: Form Response Answers';
 

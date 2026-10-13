@@ -20,30 +20,34 @@
  * What this class owns itself is everything about the ROW rather than the decision: the credential
  * columns are server-owned ({@link refuseClientCredentialWrites}), a save carries the pair the store
  * holds rather than the one this instance loaded ({@link adoptStoredCredential}), two writers of one
- * row take turns ({@link Save}), and a delete withdraws the credential in the same transaction
- * ({@link Delete}). Each exists because a concrete interleaving produced either an orphaned live
- * invite or a dead link badged Live; the docstring on each names it.
+ * row take turns on a database row lock ({@link Save}), and a delete withdraws the credential in the
+ * same transaction ({@link Delete}). Each exists because a concrete interleaving produced either an
+ * orphaned live invite or a dead link badged Live; the docstring on each names it.
+ *
+ * It also holds the one rule about the row's CONTENT that every writer must meet: `AllowedOrigins`
+ * follows the embed-origin grammar ({@link ValidateAsync}).
  *
  * See FORMS_BUILD_PLAN §4 item 4.
  */
 import {
   BaseEntity,
-  BaseEntityResult,
   LogError,
   RunInEntityTransaction,
-  RunView,
+  type DatabaseProviderBase,
   type EntityDeleteOptions,
   type EntitySaveOptions,
   type IEntityDataProvider,
-  type IRunViewProvider,
   type UserInfo,
+  type ValidationResult,
 } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import {
+  allowedOriginsRefusal,
   mjBizAppsFormsFormDistributionEntity,
   quoteSqlString,
   type mjBizAppsFormsFormDistributionEntityType,
 } from '@mj-biz-apps/forms-entities';
+import { addViolations, refuse, refuseIfUnvalidated, tracksStoredValues } from '../entities/entity-refusal.js';
 import { getMagicLinkProvisioningConfig } from './config.js';
 import { MagicLinkMinterRegistry, type IAnonymousMagicLinkMinter, type InviteWriteHost } from './minter.js';
 import { runProvisioning, DISTRIBUTION_ENTITY_NAME, type MintedLink } from './provision-runner.js';
@@ -52,44 +56,26 @@ import { runProvisioning, DISTRIBUTION_ENTITY_NAME, type MintedLink } from './pr
 type StoredCredential = Pick<mjBizAppsFormsFormDistributionEntityType, 'MagicLinkInviteID' | 'PublicLinkToken'>;
 
 /**
- * Saves in flight, per distribution, so two writers of one row take turns — see {@link Save}.
- *
- * Keyed by the row id, holding a promise that settles when the last save to claim that id has
- * finished. A claimant chains onto whatever is there and replaces it; the entry is removed when
- * the claimant that put it there is done, so an idle row costs nothing. In-process only: MJAPI is
- * one process, and the public submit path — the concurrent writer that matters — runs inside it.
+ * The provider surface a save needs to lock the row it is about to write: raw SQL on the provider's
+ * own connection (so the lock is taken inside the transaction it opened), the quoting that names
+ * the table, and the dialect that decides how a row lock is spelled.
  */
-const savesInFlight = new Map<string, Promise<void>>();
+type RowLockHost = IEntityDataProvider &
+  Pick<DatabaseProviderBase, 'ExecuteSQL' | 'QuoteIdentifier' | 'QuoteSchemaAndView' | 'PlatformKey'>;
 
-/**
- * Run `work` after every earlier claim on `id` has settled, and hold the id until it is done.
- *
- * The wait is bounded by the previous save's own completion, which MJ bounds with its database
- * timeouts; there is deliberately no timeout of its own, because giving up waiting would let the
- * race back in silently. A failed predecessor does not block a successor — the chain waits on
- * settlement, not success.
- */
-async function takeTurn<T>(id: string, work: () => Promise<T>): Promise<T> {
-  const key = id.trim().toUpperCase();
-  const previous = savesInFlight.get(key) ?? Promise.resolve();
-  const turn = previous.then(work);
-  const settled = turn.then(
-    () => undefined,
-    () => undefined,
+/** Whether the row's provider can take a row lock — every server database provider can. */
+function locksRows(provider: IEntityDataProvider | undefined): provider is RowLockHost {
+  return (
+    !!provider &&
+    'ExecuteSQL' in provider &&
+    typeof provider.ExecuteSQL === 'function' &&
+    'QuoteSchemaAndView' in provider &&
+    typeof provider.QuoteSchemaAndView === 'function' &&
+    'QuoteIdentifier' in provider &&
+    typeof provider.QuoteIdentifier === 'function' &&
+    'PlatformKey' in provider &&
+    typeof provider.PlatformKey === 'string'
   );
-  savesInFlight.set(key, settled);
-  try {
-    return await turn;
-  } finally {
-    if (savesInFlight.get(key) === settled) {
-      savesInFlight.delete(key);
-    }
-  }
-}
-
-/** Whether this provider also runs views — the half of it a fresh read of the store goes through. */
-function runsViews(provider: IEntityDataProvider): provider is IEntityDataProvider & IRunViewProvider {
-  return 'RunView' in provider && typeof provider.RunView === 'function';
 }
 
 /**
@@ -144,23 +130,82 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    * that actually landed. A revocation driven by values that then failed to save
    * would kill a live link's credential over a write that never happened.
    *
-   * Two writers of one row TAKE TURNS ({@link takeTurn}). A reissue persists its request —
-   * invite linked, token cleared — with the first save and services it with the second, and in
-   * between that state reads as "work owed" to any other save of the same row: a public
-   * submission bumping `ResponseCount` in that window revoked the already-revoked invite, minted
-   * a second replacement, and left whichever invite lost the last write Active and unreferenced —
-   * the orphan bizapps-forms#104 exists to remove, produced by the act of rotating. Serialised,
-   * the second writer runs after the rotation has landed, and {@link adoptStoredCredential} then
-   * hands it the new pair. The hook's own re-entrant save runs inside the turn already held.
+   * Two writers of one row TAKE TURNS, on the database. A reissue persists its request — invite
+   * linked, token cleared — with the first save and services it with the second, and in between
+   * that state reads as "work owed" to any other save of the same row: a public submission bumping
+   * `ResponseCount` in that window revoked the already-revoked invite, minted a second replacement,
+   * and left whichever invite lost the last write Active and unreferenced — the orphan
+   * bizapps-forms#104 exists to remove, produced by the act of rotating. So an update runs as one
+   * transaction on the row's own provider whose FIRST statement locks the row
+   * ({@link adoptStoredCredential}); a second writer's lock waits until the first commits, then
+   * reads the pair the first one landed. The hook's own re-entrant save runs inside the transaction
+   * already held, so it neither opens another nor locks again.
+   *
+   * This replaced an in-process queue keyed by row id, which serialised writers in ONE API process
+   * only. With two API instances behind a balancer — or an engine running on its own provider — the
+   * same interleaving came straight back; a database lock is the only turn every writer must take.
+   *
+   * A create needs no turn: until it commits there is no row for another writer to hold.
    */
   public override async Save(options?: EntitySaveOptions): Promise<boolean> {
-    if (this.credentialWriteInFlight || !this.IsSaved) {
-      return this.saveAndProvision(options);
+    if (this.credentialWriteInFlight) {
+      return this.saveAndProvision(options); // the hook's own write, inside the turn already held
     }
-    return takeTurn(this.ID, () => this.saveAndProvision(options));
+    if (await refuseIfUnvalidated(this, options)) {
+      return false;
+    }
+    if (!this.IsSaved) {
+      return this.saveAndProvision(options); // no row yet, so nothing another writer could hold
+    }
+    const distributionId = this.ID;
+    try {
+      // The row's provider is also handed to the minter, so the invite writes the save provokes
+      // land in this transaction and roll back with it — a revoke committed beside a rolled-back
+      // save is a revoked invite beside a live token, the #104 dead link.
+      const host = transactionalHost(this.ProviderToUse);
+      return await RunInEntityTransaction(this.ProviderToUse, () => this.saveAndProvision(options, host));
+    } catch (e) {
+      // Rolled back: nothing this save wrote to the row stands. Refuse on the surface a refused save
+      // already reports through, rather than throwing out of Save().
+      const message =
+        `Could not save distribution ${distributionId}: ${e instanceof Error ? e.message : String(e)}. ` +
+        `The save was rolled back.`;
+      LogError(`[FormDistributionEntityServer] ${message}`);
+      return refuse(this, 'update', message);
+    }
   }
 
-  private async saveAndProvision(options?: EntitySaveOptions): Promise<boolean> {
+  /** Opts in to {@link ValidateAsync} explicitly, as every Forms entity server subclass does. */
+  public override get DefaultSkipAsyncValidation(): boolean {
+    return false;
+  }
+
+  /**
+   * `AllowedOrigins` must follow the embed-origin grammar, whoever writes it.
+   *
+   * The builder refused a bad entry before this existed, but only the builder: an import, an AI
+   * action, a direct API write or `MJ.SaveEntityGraph` could store `*.acme.com`, which the request
+   * path then silently DROPS — so the author believed a site was allowed that was not, or that a
+   * restriction held that did not. The grammar is the contracts one (`allowedOriginsRefusal`), so
+   * the builder, this check and the request path cannot disagree about what an entry is.
+   *
+   * Checked only when the column changes. A distribution already holding a bad list — written
+   * before this rule — must still take a `ResponseCount` bump from a submission; refusing that save
+   * would turn a stale column into failed submissions, and the request path already reads the bad
+   * entries as dropped. "Changes" is MJ's dirty flag, which reflects the database only while the
+   * entity tracks record changes (see `tracksStoredValues`); with that off it is the client's claim,
+   * so the list is checked on every save instead of the whole update being refused — a submission
+   * on a misconfigured host still counts unless the list really is bad.
+   */
+  public override async ValidateAsync(): Promise<ValidationResult> {
+    const result = await super.ValidateAsync();
+    const changed =
+      !this.IsSaved || !tracksStoredValues(this) || this.GetFieldByName('AllowedOrigins')?.Dirty === true;
+    const refusal = changed ? allowedOriginsRefusal(this.AllowedOrigins) : null;
+    return addViolations(result, refusal ? [{ field: 'AllowedOrigins', message: refusal }] : [], () => this.AllowedOrigins);
+  }
+
+  private async saveAndProvision(options?: EntitySaveOptions, host?: InviteWriteHost): Promise<boolean> {
     this.refuseClientCredentialWrites();
     await this.adoptStoredCredential();
     const saved = await super.Save(options);
@@ -184,6 +229,7 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
         MagicLinkMinterRegistry.Instance.Minter,
         this.ContextCurrentUser,
         (credential) => this.persistCredential(credential),
+        host,
       );
     } catch (e) {
       // Defensive: the runner is fail-soft, but a thrown error must never undo a
@@ -265,25 +311,28 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
   }
 
   /**
-   * Make this save carry the credential pair THE STORE holds, not the one this instance loaded.
+   * Lock this row, and make this save carry the credential pair THE STORE holds, not the one this
+   * instance loaded — one statement for both.
    *
-   * MJ writes every column on an update, dirty or not. So an instance loaded before a rotation and
-   * saved after it — a server-side writer holding the row across other work — put the OLD pair
-   * back: a revoked invite beside its dead token, which `decideProvisioning` reads as `current` and
-   * never re-mints, and which the builder badges Live. A permanently dead link, produced by a
-   * rename. {@link refuseClientCredentialWrites} cannot see this: it acts on DIRTY fields, and a
-   * stale copy's credential columns are clean. So the pair is re-read from the store on every
-   * update and carried through, with one exception — a token this client cleared stays cleared,
-   * because that is the reissue request and the whole point of the save.
+   * The pair: MJ writes every column on an update, dirty or not. So an instance loaded before a
+   * rotation and saved after it — a server-side writer holding the row across other work — put the
+   * OLD pair back: a revoked invite beside its dead token, which `decideProvisioning` reads as
+   * `current` and never re-mints, and which the builder badges Live. A permanently dead link,
+   * produced by a rename. {@link refuseClientCredentialWrites} cannot see this: it acts on DIRTY
+   * fields, and a stale copy's credential columns are clean. So the pair is re-read on every update
+   * and carried through, with one exception — a token this client cleared stays cleared, because
+   * that is the reissue request and the whole point of the save.
    *
-   * One read per update of a distribution, which includes every public submission. Through this
-   * row's own provider, so it sees whatever transaction that provider holds open, and past the
-   * server's cache, because the write that made the loaded copy stale may have come from another
-   * process this cache never heard about.
+   * The lock: the read takes an update lock held to the end of the transaction {@link Save} opened
+   * (`UPDLOCK, HOLDLOCK` on SQL Server, `FOR UPDATE` on PostgreSQL), so it is also the turn a
+   * concurrent writer of this row waits for — and what it then reads is the pair this writer
+   * landed. It goes to the base TABLE, not the view: a lock hint on a view would lock every table
+   * the view joins. Through this row's own provider, so it runs inside that transaction; never
+   * through a cache.
    *
    * A read that fails leaves the loaded values in place and says so: refusing the save would turn a
    * narrow race into a failed submission, and the loaded values are what every save wrote before
-   * this existed.
+   * the re-read existed.
    */
   private async adoptStoredCredential(): Promise<void> {
     if (this.credentialWriteInFlight || !this.IsSaved) {
@@ -292,30 +341,40 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
     const token = this.GetFieldByName('PublicLinkToken');
     const clearRequested = Boolean(token?.Dirty) && !this.PublicLinkToken;
 
-    const provider = this.ProviderToUse;
-    const rv = provider && runsViews(provider) ? new RunView(provider) : new RunView();
-    const read = await rv.RunView<StoredCredential>(
-      {
-        EntityName: DISTRIBUTION_ENTITY_NAME,
-        ExtraFilter: `ID=${quoteSqlString(this.ID)}`,
-        Fields: ['MagicLinkInviteID', 'PublicLinkToken'],
-        ResultType: 'simple',
-        MaxRows: 1,
-        BypassCache: true,
-      },
-      this.ContextCurrentUser,
-    );
-    const stored = read.Success ? read.Results?.[0] : undefined;
-    if (!stored) {
+    const stored = await this.readStoredCredentialLocked();
+    if ('failure' in stored) {
       LogError(
         `[FormDistributionEntityServer] Could not read the stored credential of distribution ${this.ID} ` +
-          `before saving it (${read.Success ? 'no row' : read.ErrorMessage ?? 'unknown error'}); saving the ` +
-          `loaded values instead.`,
+          `before saving it (${stored.failure}); saving the loaded values instead, without a row lock.`,
       );
       return;
     }
     this.MagicLinkInviteID = stored.MagicLinkInviteID;
     this.PublicLinkToken = clearRequested ? null : stored.PublicLinkToken;
+  }
+
+  /** The stored credential pair, read under an update lock on this row — or why it could not be. */
+  private async readStoredCredentialLocked(): Promise<StoredCredential | { failure: string }> {
+    const provider = this.ProviderToUse;
+    if (!locksRows(provider)) {
+      return { failure: 'the provider cannot run SQL, so the row cannot be locked or re-read' };
+    }
+    try {
+      // Built inside the try: a provider whose quoting throws takes the same fail-soft path as a
+      // failed read, rather than throwing out of the save.
+      const q = (name: string): string => provider.QuoteIdentifier(name);
+      const table = provider.QuoteSchemaAndView(this.EntityInfo.SchemaName, this.EntityInfo.BaseTable);
+      const columns = `${q('MagicLinkInviteID')}, ${q('PublicLinkToken')}`;
+      const where = `${q('ID')} = ${quoteSqlString(this.ID)}`;
+      const sql =
+        provider.PlatformKey === 'postgresql'
+          ? `SELECT ${columns} FROM ${table} WHERE ${where} FOR UPDATE`
+          : `SELECT ${columns} FROM ${table} WITH (UPDLOCK, HOLDLOCK) WHERE ${where}`;
+      const rows = await provider.ExecuteSQL<StoredCredential>(sql, undefined, undefined, this.ContextCurrentUser);
+      return rows[0] ?? { failure: 'no row' };
+    } catch (e) {
+      return { failure: e instanceof Error ? e.message : String(e) };
+    }
   }
 
   /**
@@ -381,8 +440,7 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
         `failed (${e instanceof Error ? e.message : String(e)}), so the delete was rolled back. The link ` +
         `and its credential are unchanged; try again, or pause the link instead.`;
       LogError(`[FormDistributionEntityServer] ${message}`);
-      this.RegisterResultHistoryEntry(new BaseEntityResult(false, message, 'delete'));
-      return false;
+      return refuse(this, 'delete', message);
     }
   }
 

@@ -202,23 +202,51 @@ export type EmbedOriginPolicy =
  *     wrong loudly, and `reason` says exactly which entries caused it.
  */
 export function parseAllowedOrigins(raw: string | null | undefined): EmbedOriginPolicy {
+  return readAllowedOrigins(raw).policy;
+}
+
+/**
+ * Why a value may not be WRITTEN to the column, or `null` when it may.
+ *
+ * Stricter than {@link parseAllowedOrigins} on purpose, and for the reason the builder already
+ * refuses a whole edit over one bad entry: dropping it is safe on the read path, where the value is
+ * already stored and dropping can only narrow the list, but at write time it would tell the author
+ * their restriction landed when part of it did not. So any unusable entry refuses the write, and
+ * the refusal names every one of them. NULL, blank and `[]` — unrestricted — are always writable.
+ *
+ * Shares {@link readAllowedOrigins} with the read path, so the two never disagree about what an
+ * entry is: a value this accepts never reads as `closed`.
+ */
+export function allowedOriginsRefusal(raw: string | null | undefined): string | null {
+  const { policy, rejected } = readAllowedOrigins(raw);
+  if (rejected.length > 0) {
+    return `Not a usable site address: ${rejected.join(', ')}. Each one must be ${ALLOWED_ORIGIN_GRAMMAR}`;
+  }
+  return policy.kind === 'closed' ? policy.reason : null;
+}
+
+/** The policy a column value means, and the entries that could not be read as origins. */
+function readAllowedOrigins(raw: string | null | undefined): { policy: EmbedOriginPolicy; rejected: string[] } {
   if (raw === null || raw === undefined || raw.trim().length === 0) {
-    return { kind: 'unrestricted' };
+    return { policy: { kind: 'unrestricted' }, rejected: [] };
   }
   let parsed: JSONValue;
   try {
     parsed = JSON.parse(raw) as JSONValue;
   } catch {
-    return { kind: 'closed', reason: `AllowedOrigins is not valid JSON: ${truncate(raw)}` };
+    return { policy: { kind: 'closed', reason: `AllowedOrigins is not valid JSON: ${truncate(raw)}` }, rejected: [] };
   }
   if (!Array.isArray(parsed)) {
     return {
-      kind: 'closed',
-      reason: `AllowedOrigins must be a JSON array of origin strings; got ${typeof parsed}. ${ALLOWED_ORIGIN_GRAMMAR}`,
+      policy: {
+        kind: 'closed',
+        reason: `AllowedOrigins must be a JSON array of origin strings; got ${typeof parsed}. ${ALLOWED_ORIGIN_GRAMMAR}`,
+      },
+      rejected: [],
     };
   }
   if (parsed.length === 0) {
-    return { kind: 'unrestricted' };
+    return { policy: { kind: 'unrestricted' }, rejected: [] };
   }
   const origins: string[] = [];
   const rejected: string[] = [];
@@ -232,12 +260,15 @@ export function parseAllowedOrigins(raw: string | null | undefined): EmbedOrigin
   }
   if (origins.length === 0) {
     return {
-      kind: 'closed',
-      reason: `AllowedOrigins named ${rejected.length} entr${rejected.length === 1 ? 'y' : 'ies'} `
-        + `and none is usable (${rejected.join(', ')}). Expected ${ALLOWED_ORIGIN_GRAMMAR}`,
+      policy: {
+        kind: 'closed',
+        reason: `AllowedOrigins named ${rejected.length} entr${rejected.length === 1 ? 'y' : 'ies'} `
+          + `and none is usable (${rejected.join(', ')}). Expected ${ALLOWED_ORIGIN_GRAMMAR}`,
+      },
+      rejected,
     };
   }
-  return { kind: 'allowlist', origins };
+  return { policy: { kind: 'allowlist', origins }, rejected };
 }
 
 /**

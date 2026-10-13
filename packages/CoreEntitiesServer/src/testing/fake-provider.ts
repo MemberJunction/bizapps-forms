@@ -1,13 +1,27 @@
 /**
- * Lightweight test doubles for the public-submit pipeline. These implement only
- * the slice of the MJ provider / entity surface the pipeline touches, and are
- * typed against the real interfaces (no `any`) via narrowly-scoped casts at the
- * boundary where the fake is handed to code expecting the full class.
+ * Test double for the MJ server provider — the slice of `DatabaseProviderBase` that Forms' server
+ * code touches, typed against the real interfaces (no `any`) and cast once at the boundary where
+ * the fake is handed to code expecting the full class.
+ *
+ * Lives here, behind the package's `./testing` subpath, because every server-side layer tests
+ * against it: the entity server subclasses and engines in this package, and the public-submit
+ * pipeline in `forms-server`. It is NOT exported from the package's runtime entry (`.`), so a host
+ * that loads the package never evaluates it.
+ *
+ * What it models, and why each piece exists:
+ *  - `RunView` / `RunViews` with `ExtraFilter` emulation, because a fake that ignores a filter lets
+ *    a lookup that matches nothing pass a test written to prove it matches something.
+ *  - `GetEntityObject` handing back recording entities, so a test asserts on what was WRITTEN.
+ *  - Entity transactions (`SupportsEntityTransactions`, `BeginEntityTransaction`) with savepoint
+ *    nesting and rollback, so `RunInEntityTransaction` from `@memberjunction/core` runs its real
+ *    code path against it and a rolled-back unit of work leaves no recorded writes behind.
+ *  - `ExecuteSQL`, recording every statement and answering from a script, so code that reads under
+ *    a row lock or counts affected rows (`Dialect.AffectedRowCountSQL`) can be driven and asserted.
  */
-import type { PersistenceResult } from '../persistence.service';
 import type {
   DatabaseProviderBase,
   EntityInfo,
+  EntityTransactionScope,
   EntityUserPermissionInfo,
   RunViewParams,
   RunViewResult,
@@ -20,8 +34,6 @@ import type {
   mjBizAppsFormsFormResponseEntityType,
   mjBizAppsFormsFormVersionEntityType,
 } from '@mj-biz-apps/forms-entities';
-import { FILE_ENTITY_RECORD_LINK_ENTITY } from '../../file-links/file-links.service';
-import { FORM_UPLOAD_ENTITY } from '../entity-names';
 
 /** A recorded entity save, captured by the fake provider for assertions. */
 export interface SavedRecord {
@@ -49,11 +61,17 @@ export interface FakeProviderConfig {
   version?: mjBizAppsFormsFormVersionEntityType;
   /** Existing completed-response count returned for the form-quota count query. */
   formResponseCount?: number;
-  createPermissions: CreatePermissions;
+  /** Per-entity CanCreate for the scope check; an entity absent from the map is refused. */
+  createPermissions?: CreatePermissions;
   /** Force a RunView failure for a given entity name (to exercise fail-closed paths). */
   failRunViewFor?: string;
   /** Force a Save() to return false for a given entity name. */
   failSaveFor?: string;
+  /**
+   * Force a generic-table entity's Save() to return false when this says so — for failing ONE row
+   * of several, which is what a rollback test needs (the rows saved before it must be undone).
+   */
+  failSaveWhen?: (entityName: string, values: Record<string, unknown>) => boolean;
   /**
    * Existing FormResponse rows the session-response lookup should return. The fake filters
    * these by the requested `Status` (parsed out of the ExtraFilter). Used to exercise dedupe
@@ -85,6 +103,63 @@ export interface FakeProviderConfig {
    * window in which a response holds neither its old answers nor its new ones was untestable.
    */
   existingAnswers?: { ID: string; QuestionID?: string }[];
+  /**
+   * Generic rows per entity name. An entity named here is served ONLY from its table — the
+   * special-purpose fixtures above (`distribution`, `version`, …) are ignored for it — with
+   * `RunView` honouring `Column='value'` equalities and `Status IN (…)` in the filter, all three
+   * result types, and `entity_object` rows that write back to the table when saved. The table is
+   * live: tests may read it after the code under test ran.
+   */
+  tables?: Record<string, FakeRow[]>;
+  /**
+   * How `ExecuteSQL` answers. Scripts are tried in order; the first whose `match` hits the statement
+   * supplies its rows (or throws `error`). An unmatched statement returns no rows — and is still
+   * recorded in `statements`, which is where a test asserts what was sent.
+   */
+  sql?: FakeSqlScript[];
+  /** Which dialect the provider reports. Defaults to `sqlserver`. */
+  platform?: 'sqlserver' | 'postgresql';
+  /** Report `SupportsEntityTransactions = false`, to drive a caller's no-transaction path. */
+  noTransactions?: boolean;
+  /**
+   * Hand code under test something other than the bare table record for a generic-table entity —
+   * typically a real entity SERVER subclass over a fake base that writes through to `record` — so
+   * its overrides run on rows that `RunView` and `GetEntityObject` return. Applied to both.
+   */
+  wrapEntity?: (entityName: string, record: FakeTableRecord) => unknown;
+}
+
+/**
+ * A generic-table entity as the fake builds it: the row's columns as properties, plus the slice of
+ * `BaseEntity` the fake implements. `Save()` writes every column back to the table row.
+ */
+export interface FakeTableRecord {
+  [column: string]: unknown;
+  readonly IsSaved: boolean;
+  LatestResult: { CompleteMessage: string };
+  NewRecord(): boolean;
+  Load(id: string): Promise<boolean>;
+  Save(): Promise<boolean>;
+  Delete(): Promise<boolean>;
+}
+
+/** One row of a generic {@link FakeProviderConfig.tables} entry. Must carry its primary key `ID`. */
+export type FakeRow = Record<string, unknown> & { ID: string };
+
+/** One scripted answer for `ExecuteSQL`. */
+export interface FakeSqlScript {
+  match: RegExp | string;
+  /** The rows to answer with — or a function of the statement, to answer from a table it names. */
+  rows?: Record<string, unknown>[] | ((sql: string) => Record<string, unknown>[]);
+  /** Make the statement fail, as a database error would. */
+  error?: string;
+}
+
+/** One statement `ExecuteSQL` received, and whether a transaction was open when it ran. */
+export interface RecordedStatement {
+  sql: string;
+  parameters: unknown[] | undefined;
+  inTransaction: boolean;
 }
 
 /** The fake provider plus inspection handles for tests. */
@@ -94,12 +169,25 @@ export interface FakeProvider {
   /** Rows `Delete()`d, so a test can assert a removal and not just an absence. */
   deleted: SavedRecord[];
   distribution?: mjBizAppsFormsFormDistributionEntityType;
+  /**
+   * Transaction boundaries in order: `begin`, `begin:nested`, `commit`, `commit:nested`,
+   * `rollback`, `rollback:nested`. A rollback also removes from `saved` / `deleted` (and undoes
+   * table writes) everything recorded since its own begin, as a database would.
+   */
+  transactions: string[];
+  /** Every `ExecuteSQL` call, in order. */
+  statements: RecordedStatement[];
+  /** The live generic tables (see {@link FakeProviderConfig.tables}). */
+  tables: Record<string, FakeRow[]>;
 }
 
 const FORM_RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
 const FORM_RESPONSE_ANSWER_ENTITY = 'MJ_BizApps_Forms: Form Response Answers';
 const FORM_DISTRIBUTION_ENTITY = 'MJ_BizApps_Forms: Form Distributions';
 const FORM_VERSION_ENTITY = 'MJ_BizApps_Forms: Form Versions';
+const FORM_UPLOAD_ENTITY = 'MJ_BizApps_Forms: Form Uploads';
+/** MJ core's file-link entity; the file-link reconciler in forms-server reads and writes it. */
+const FILE_ENTITY_RECORD_LINK_ENTITY = 'MJ: File Entity Record Links';
 
 /**
  * A shared "row store" keyed by FormResponse ID — the persistent side of the fake DB. Seeded with
@@ -234,6 +322,15 @@ function makeFakeEntityInfo(entityName: string, canCreate: boolean): EntityInfo 
 export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
   const saved: SavedRecord[] = [];
   const deleted: SavedRecord[] = [];
+  const transactions: string[] = [];
+  const statements: RecordedStatement[] = [];
+  const tables: Record<string, FakeRow[]> = {};
+  for (const [name, rows] of Object.entries(config.tables ?? {})) {
+    tables[name] = rows.map((row) => ({ ...row }));
+  }
+  const tx = new FakeTransactionLog(saved, deleted, transactions);
+  const wrap = (entityName: string, record: FakeTableRecord): unknown =>
+    config.wrapEntity ? config.wrapEntity(entityName, record) : record;
 
   // The persistent row store. RunView-visible rows AND race-only rows both live here (so a
   // CREATE collides and the recovery Load resolves); only `existingResponses` is returned by
@@ -244,9 +341,21 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
   }
 
   const runView = async <T>(params: RunViewParams): Promise<RunViewResult<T>> => {
-    const name = params.EntityName;
+    const name = params.EntityName ?? '';
     if (config.failRunViewFor && name === config.failRunViewFor) {
       return runViewResult<T>(false, []);
+    }
+    const table = tables[name];
+    if (table) {
+      return runTableView<T>(params, table, (row) =>
+        wrap(name, makeTableEntity(name, table, row, {
+          saved,
+          deleted,
+          tx,
+          failSave: config.failSaveFor === name,
+          failSaveWhen: config.failSaveWhen,
+        })),
+      );
     }
     if (name === FORM_DISTRIBUTION_ENTITY) {
       return runViewResult<T>(true, config.distribution ? [config.distribution as unknown as T] : []);
@@ -294,10 +403,45 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
     // did not run" became indistinguishable to the code under test.
     RunViews: async <T>(params: RunViewParams[]): Promise<RunViewResult<T>[]> =>
       Promise.all(params.map((p) => runView<T>(p))),
-    GetEntityObject: async (entityName: string) =>
-      makeFakeEntity(entityName, saved, deleted, config.failSaveFor === entityName, responseStore),
+    GetEntityObject: async (entityName: string) => {
+      const table = tables[entityName];
+      if (table) {
+        return wrap(entityName, makeTableEntity(entityName, table, null, {
+          saved,
+          deleted,
+          tx,
+          failSave: config.failSaveFor === entityName,
+          failSaveWhen: config.failSaveWhen,
+        }));
+      }
+      return makeFakeEntity(entityName, saved, deleted, config.failSaveFor === entityName, responseStore);
+    },
     EntityByName: (entityName: string) =>
-      makeFakeEntityInfo(entityName, config.createPermissions[entityName] ?? false),
+      makeFakeEntityInfo(entityName, config.createPermissions?.[entityName] ?? false),
+    SupportsEntityTransactions: config.noTransactions !== true,
+    BeginEntityTransaction: async (): Promise<EntityTransactionScope> => tx.begin(),
+    get TransactionDepth(): number {
+      return tx.depth;
+    },
+    PlatformKey: config.platform ?? 'sqlserver',
+    QuoteIdentifier: (name: string): string => (config.platform === 'postgresql' ? `"${name}"` : `[${name}]`),
+    QuoteSchemaAndView: (schema: string, object: string): string =>
+      config.platform === 'postgresql' ? `"${schema}"."${object}"` : `[${schema}].[${object}]`,
+    Dialect: {
+      // The SQL Server spelling, which is all a test needs: the statement is scripted, not executed.
+      AffectedRowCountSQL: (dml: string, alias: string): string => `${dml};\nSELECT @@ROWCOUNT AS [${alias}]`,
+    },
+    ExecuteSQL: async <T>(sql: string, parameters?: unknown[]): Promise<T[]> => {
+      statements.push({ sql, parameters, inTransaction: tx.depth > 0 });
+      const script = (config.sql ?? []).find((candidate) =>
+        typeof candidate.match === 'string' ? sql.includes(candidate.match) : candidate.match.test(sql),
+      );
+      if (script?.error) {
+        throw new Error(script.error);
+      }
+      const rows = typeof script?.rows === 'function' ? script.rows(sql) : script?.rows ?? [];
+      return rows.map((row) => ({ ...row })) as T[];
+    },
   };
 
   return {
@@ -305,7 +449,205 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
     saved,
     deleted,
     distribution: config.distribution,
+    transactions,
+    statements,
+    tables,
   };
+}
+
+/**
+ * The fake's transaction stack: depth-counted like the real provider (the outermost scope is the
+ * physical transaction, nested ones are savepoints), settle-once like `EntityTransactionScope`, and
+ * able to undo what a rolled-back scope recorded.
+ */
+class FakeTransactionLog {
+  public depth = 0;
+  /** Undo steps for table writes, in the order they happened. */
+  private readonly undo: (() => void)[] = [];
+
+  constructor(
+    private readonly saved: SavedRecord[],
+    private readonly deleted: SavedRecord[],
+    private readonly log: string[],
+  ) {}
+
+  /** Remember how to put a table write back, if a scope enclosing it rolls back. */
+  public journal(step: () => void): void {
+    if (this.depth > 0) {
+      this.undo.push(step);
+    }
+  }
+
+  public begin(): EntityTransactionScope {
+    const nested = this.depth > 0;
+    this.depth += 1;
+    const depthAtBegin = this.depth;
+    this.log.push(nested ? 'begin:nested' : 'begin');
+    const mark = { saved: this.saved.length, deleted: this.deleted.length, undo: this.undo.length };
+    let settled = false;
+    const settle = async (commit: boolean): Promise<void> => {
+      if (settled) {
+        return;
+      }
+      if (this.depth !== depthAtBegin) {
+        // The real provider logs this and carries on, entangling two units of work in one
+        // physical transaction. A test double should make it impossible to miss instead.
+        throw new Error(
+          `Fake transaction scope settled out of order: begun at depth ${depthAtBegin}, settled at depth ` +
+            `${this.depth}. Two units of work interleaved their scopes on one provider instance.`,
+        );
+      }
+      settled = true;
+      this.depth -= 1;
+      this.log.push(`${commit ? 'commit' : 'rollback'}${nested ? ':nested' : ''}`);
+      if (!commit) {
+        this.saved.length = mark.saved;
+        this.deleted.length = mark.deleted;
+        for (const step of this.undo.splice(mark.undo).reverse()) {
+          step();
+        }
+      } else if (!nested) {
+        this.undo.length = 0;
+      }
+    };
+    return { IsNested: nested, Commit: () => settle(true), Rollback: () => settle(false) };
+  }
+}
+
+/** What a generic-table entity needs from its provider. */
+interface TableEntityHost {
+  saved: SavedRecord[];
+  deleted: SavedRecord[];
+  tx: FakeTransactionLog;
+  failSave: boolean;
+  failSaveWhen?: (entityName: string, values: Record<string, unknown>) => boolean;
+}
+
+/**
+ * An entity backed by one row of a generic table: reads come from the row, `Save()` writes the
+ * whole value set back (or inserts the row when new), `Delete()` removes it. Every write is
+ * journalled so a rolled-back transaction puts the table back as it was.
+ */
+function makeTableEntity(entityName: string, table: FakeRow[], row: FakeRow | null, host: TableEntityHost): FakeTableRecord {
+  const values: Record<string, unknown> = row ? { ...row } : {};
+  let current: FakeRow | null = row;
+  let insertCount = 0;
+  const record = new Proxy(
+    {
+      LatestResult: { CompleteMessage: 'forced save failure' },
+      get IsSaved(): boolean {
+        return current !== null;
+      },
+      NewRecord: () => {
+        current = null;
+        for (const key of Object.keys(values)) {
+          delete values[key];
+        }
+        return true;
+      },
+      Load: async (id: string) => {
+        const found = table.find((candidate) => candidate.ID === id) ?? null;
+        current = found;
+        if (found) {
+          Object.assign(values, found);
+        }
+        return found !== null;
+      },
+      Save: async () => {
+        if (host.failSave || host.failSaveWhen?.(entityName, { ...values }) === true) {
+          return false;
+        }
+        if (current === null) {
+          insertCount += 1;
+          const inserted: FakeRow = { ...values, ID: String(values.ID ?? `id-${entityName}-${table.length + insertCount}`) };
+          values.ID = inserted.ID;
+          table.push(inserted);
+          current = inserted;
+          host.tx.journal(() => {
+            table.splice(table.indexOf(inserted), 1);
+          });
+        } else {
+          const target = current;
+          const before = { ...target };
+          Object.assign(target, values);
+          host.tx.journal(() => {
+            for (const key of Object.keys(target)) {
+              delete target[key];
+            }
+            Object.assign(target, before);
+          });
+        }
+        host.saved.push({ entityName, values: { ...values } });
+        return true;
+      },
+      Delete: async () => {
+        const target = current;
+        if (target) {
+          const index = table.indexOf(target);
+          table.splice(index, 1);
+          host.tx.journal(() => {
+            table.splice(index, 0, target);
+          });
+        }
+        host.deleted.push({ entityName, values: { ID: values.ID } });
+        return true;
+      },
+    },
+    {
+      set(target, prop: string, value) {
+        if (prop in target) {
+          Reflect.set(target, prop, value);
+          return true;
+        }
+        values[prop] = value;
+        return true;
+      },
+      get(target, prop: string) {
+        if (prop in target) {
+          return Reflect.get(target, prop);
+        }
+        return values[prop];
+      },
+    },
+  );
+  return record as unknown as FakeTableRecord;
+}
+
+/** Serve one `RunView` from a generic table, honouring the filter and the requested result type. */
+function runTableView<T>(
+  params: RunViewParams,
+  table: FakeRow[],
+  toEntity: (row: FakeRow) => unknown,
+): RunViewResult<T> {
+  const rawFilter = params.ExtraFilter;
+  const filter = IsPlatformSQL(rawFilter) ? rawFilter.default : rawFilter ?? '';
+  const matching = table.filter((row) => matchesRowFilter(row, filter));
+  if (params.ResultType === 'count_only') {
+    return runViewResult<T>(true, [], matching.length);
+  }
+  const limited = params.MaxRows ? matching.slice(0, params.MaxRows) : matching;
+  const rows = params.ResultType === 'entity_object' ? limited.map(toEntity) : limited.map((row) => ({ ...row }));
+  return { ...runViewResult<T>(true, rows as T[]), TotalRowCount: matching.length };
+}
+
+/**
+ * A generic row matches when every `Column='value'` equality and every `Column IN ('a','b')` list in
+ * the filter holds for it. Anything else in the filter is ignored — so a test that depends on a
+ * richer predicate must assert on the filter text too, rather than trusting this to have applied it.
+ */
+function matchesRowFilter(row: FakeRow, filter: string): boolean {
+  for (const m of filter.matchAll(/(?:^|[^\w.])\[?(\w+)\]?\s*=\s*N?'((?:[^']|'')*)'/g)) {
+    if (String(row[m[1]] ?? '') !== m[2].replace(/''/g, "'")) {
+      return false;
+    }
+  }
+  for (const m of filter.matchAll(/(?:^|[^\w.])\[?(\w+)\]?\s+IN\s*\(([^)]*)\)/gi)) {
+    const allowed = [...m[2].matchAll(/'((?:[^']|'')*)'/g)].map((q) => q[1].replace(/''/g, "'"));
+    if (!allowed.includes(String(row[m[1]] ?? ''))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -453,28 +795,4 @@ export function respondentPermissions(): CreatePermissions {
     'MJ_BizApps_Forms: Form Versions': false,
     'MJ_BizApps_Forms: Form Distributions': false,
   };
-}
-
-/**
- * Narrow a {@link PersistenceResult} to one branch, failing the test with the OTHER branch's words
- * if it went the other way.
- *
- * `PersistenceResult` is a discriminated union: a failure carries a `message`, a success carries a
- * `responseId` and a `status`, and neither carries the other's fields. Before that, every field was
- * optional and a spec could read `result.message` off a success and quietly assert `undefined`
- * against `undefined`. These make the branch an explicit assertion, and a wrong branch reports what
- * actually happened instead of a bare "expected undefined".
- */
-export function expectPersistFailure(result: PersistenceResult): Extract<PersistenceResult, { outcome: 'failed' }> {
-  if (result.outcome === 'saved') {
-    throw new Error(`expected the save to FAIL, but it succeeded with response ${result.responseId}`);
-  }
-  return result;
-}
-
-export function expectPersistSuccess(result: PersistenceResult): Extract<PersistenceResult, { outcome: 'saved' }> {
-  if (result.outcome === 'failed') {
-    throw new Error(`expected the save to SUCCEED, but it failed: ${result.message}`);
-  }
-  return result;
 }

@@ -15,7 +15,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
-import type { ActionDataProvider } from '../shared/action-provider';
+import type { ActionDataProvider } from '@mj-biz-apps/forms-core-entities-server';
 import type {
   AnalyzedAnswer,
   AnalyzerInputAnswer,

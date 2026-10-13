@@ -14,7 +14,7 @@ import {
   type MatchedRecord,
   type MatchQuery,
   type TargetFields,
-} from '../binding-executor';
+} from '../binding-executor.js';
 
 /** A gateway backed by a plain in-memory record, recording what it was asked to write. */
 class FakeGateway implements BindingTargetGateway {

@@ -44,7 +44,8 @@ directly. MJ's rule lists both; they do not exist here.
   Follow whichever the neighbouring code already uses.
 - **`@memberjunction/test-utils` is not installed here.** MJ's rule tells you to use it; don't, unless
   you add it deliberately. Hand-rolled fakes are the established pattern —
-  `packages/Server/src/public-submit/__tests__/fakes.ts` is worth copying.
+  `packages/CoreEntitiesServer/src/testing/fake-provider.ts` (imported as
+  `@mj-biz-apps/forms-core-entities-server/testing`) is the shared one, and worth extending rather than copying.
 - No database connections in unit tests. Stack-level checks live elsewhere (below).
 - There is no `scripts/scaffold-tests.mjs` and no `guides/` directory — both are MJ-only.
 

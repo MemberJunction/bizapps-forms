@@ -10,7 +10,7 @@ import { runUpload, UPLOAD_FAILED_MESSAGE, type UploadContext, type UploadReques
 import { resetUploadConfigForTests } from '../config';
 import { FOREIGN_ORIGIN_MESSAGE } from '../../http/embed-origin';
 import type { ParsedFile } from '../multipart';
-import { makeDefinition, makeDistribution, makeVersion } from '../../public-submit/__tests__/fakes';
+import { makeDefinition, makeDistribution, makeVersion } from '@mj-biz-apps/forms-core-entities-server/testing';
 
 const USER = { ID: 'anon', Name: 'Anonymous' } as unknown as UserInfo;
 

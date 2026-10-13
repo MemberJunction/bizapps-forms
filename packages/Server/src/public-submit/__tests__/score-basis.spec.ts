@@ -9,7 +9,7 @@ import {
   makeFakeProvider,
   makeVersion,
   respondentPermissions,
-} from './fakes';
+} from '@mj-biz-apps/forms-core-entities-server/testing';
 
 /**
  * WHAT THE SERVER SCORES OVER (RULES_AND_BRANCHING_PLAN C4).

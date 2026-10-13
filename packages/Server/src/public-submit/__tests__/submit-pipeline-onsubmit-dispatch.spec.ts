@@ -19,7 +19,7 @@ import {
   makeFakeProvider,
   makeVersion,
   respondentPermissions,
-} from './fakes';
+} from '@mj-biz-apps/forms-core-entities-server/testing';
 
 function validSubmission(): PipelineSubmission {
   return {

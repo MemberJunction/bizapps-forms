@@ -37,7 +37,7 @@ import {
   recordBindingLedgerRow,
   MJBindingGateway,
   type BindingOutcome,
-} from '@mj-biz-apps/forms-actions';
+} from '@mj-biz-apps/forms-core-entities-server';
 import { syncFileLinks, type FileLinkTarget } from '../file-links/file-links.service';
 import { fileLinkProviderFor, MJFileLinkGateway } from '../file-links/mj-file-link-gateway';
 

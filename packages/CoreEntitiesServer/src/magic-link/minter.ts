@@ -248,11 +248,14 @@ export interface IAnonymousMagicLinkMinter {
    *                    maxLifetimeHours: undefined }` means "no bound", which the
    *                    implementation renders however its store expresses that
    * @param contextUser the internal staff user whose save triggered the change
+   * @param host        where the invite is read and written; see {@link InviteWriteHost}. Given
+   *                    by a distribution save, so the write joins that save's transaction.
    */
   SetAnonymousInviteExpiry(
     credential: AnonymousCredentialRef,
     bounds: InviteExpiryBounds,
     contextUser: UserInfo,
+    host?: InviteWriteHost,
   ): Promise<InviteWriteResult>;
 }
 

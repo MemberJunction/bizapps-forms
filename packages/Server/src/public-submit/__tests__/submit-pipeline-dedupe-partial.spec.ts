@@ -18,7 +18,7 @@ import {
   respondentPermissions,
   type ExistingResponseRow,
   type FakeProvider,
-} from './fakes';
+} from '@mj-biz-apps/forms-core-entities-server/testing';
 
 const FORM_RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
 const FORM_RESPONSE_ANSWER_ENTITY = 'MJ_BizApps_Forms: Form Response Answers';

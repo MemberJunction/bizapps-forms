@@ -28,7 +28,7 @@ import {
   quoteSqlString,
   type FormQuestionType,
 } from '@mj-biz-apps/forms-entities';
-import type { ActionDataProvider } from './action-provider';
+import type { ActionDataProvider } from './action-provider.js';
 
 const ENTITY = {
   FormResponse: 'MJ_BizApps_Forms: Form Responses',

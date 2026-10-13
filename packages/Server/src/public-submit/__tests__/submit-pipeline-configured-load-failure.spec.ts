@@ -13,7 +13,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
-import type { ActionDataProvider, FormResponseContextResult } from '@mj-biz-apps/forms-actions';
+import type { ActionDataProvider, FormResponseContextResult } from '@mj-biz-apps/forms-core-entities-server';
 import type { PublishedFormAutomation } from '@mj-biz-apps/forms-entities';
 
 const loadFormResponseContext =
@@ -35,8 +35,8 @@ const withIsolatedProvider = vi.fn(async (_purpose: string, work: (provider: Dat
 const dispatchAutomation = vi.fn(async () => ({ success: true }));
 const logError = vi.fn();
 
-vi.mock('@mj-biz-apps/forms-actions', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@mj-biz-apps/forms-actions')>()),
+vi.mock('@mj-biz-apps/forms-core-entities-server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mj-biz-apps/forms-core-entities-server')>()),
   loadFormResponseContext: (responseId: string, user: UserInfo, provider: ActionDataProvider) =>
     loadFormResponseContext(responseId, user, provider),
 }));
@@ -64,7 +64,7 @@ import {
   makeFakeProvider,
   makeVersion,
   respondentPermissions,
-} from './fakes';
+} from '@mj-biz-apps/forms-core-entities-server/testing';
 
 const AUTOMATION: PublishedFormAutomation = {
   id: 'auto-1',

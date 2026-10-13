@@ -4,7 +4,7 @@ import type { RunActionParams } from '@memberjunction/actions-base';
 import type { DatabaseProviderBase } from '@memberjunction/core';
 import { fireOnSubmitHooks, ON_SUBMIT_ACTION_NAMES } from '../on-submit-hooks.service';
 import type { IsolatedProviderRunner } from '../../automation/isolated-provider';
-import { makeContextUser } from './fakes';
+import { makeContextUser } from '@mj-biz-apps/forms-core-entities-server/testing';
 
 const hookContext = { responseId: 'r1', formId: 'f1', formVersionId: 'v1', distributionId: 'd1' };
 

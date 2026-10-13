@@ -15,8 +15,8 @@ import { LogError, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import { sqlLiteral } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormEntityBindingRecordEntity } from '@mj-biz-apps/forms-entities';
-import type { ActionDataProvider } from '../shared/action-provider';
-import type { BindingOutcome, BindingOutcomeKind, PriorBindingOutcome } from './binding-executor';
+import type { ActionDataProvider } from '../shared/action-provider.js';
+import type { BindingOutcome, BindingOutcomeKind, PriorBindingOutcome } from './binding-executor.js';
 
 const BINDING_RECORD_ENTITY = 'MJ_BizApps_Forms: Form Entity Binding Records';
 

@@ -23,7 +23,7 @@ import {
   makeVersion,
   respondentPermissions,
   type ExistingResponseRow,
-} from './fakes';
+} from '@mj-biz-apps/forms-core-entities-server/testing';
 
 interface Revoked {
   responseId: string;

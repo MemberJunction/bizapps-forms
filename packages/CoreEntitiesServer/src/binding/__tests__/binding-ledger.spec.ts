@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
-import type { ActionDataProvider } from '../../shared/action-provider';
-import type { BindingOutcome } from '../binding-executor';
+import type { ActionDataProvider } from '../../shared/action-provider.js';
+import type { BindingOutcome } from '../binding-executor.js';
 
 const LEDGER_ENTITY = 'MJ_BizApps_Forms: Form Entity Binding Records';
 
@@ -33,7 +33,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   return { ...actual, Metadata, RunView, LogError: (message: string) => state.loggedMessages.push(message) };
 });
 
-const { readPriorBindingOutcome, recordBindingLedgerRow } = await import('../binding-ledger');
+const { readPriorBindingOutcome, recordBindingLedgerRow } = await import('../binding-ledger.js');
 
 const fakeUser = { Name: 'tester' } as unknown as UserInfo;
 

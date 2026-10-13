@@ -20,12 +20,17 @@ import {
   parseMergePolicy,
   type mjBizAppsFormsFormEntityBindingEntity,
 } from '@mj-biz-apps/forms-entities';
-import { loadFormResponseContext } from '../shared/form-response-context';
-import { resolveActionProvider } from '../shared/action-provider';
+import {
+  bindingFailed,
+  executeBinding,
+  loadFormResponseContext,
+  MJBindingGateway,
+  parseBindingConfig,
+  readPriorBindingOutcome,
+  recordBindingLedgerRow,
+  resolveActionProvider,
+} from '@mj-biz-apps/forms-core-entities-server';
 import { getStringParam, setOutputParam } from '../shared/action-params';
-import { bindingFailed, executeBinding, parseBindingConfig } from './binding-executor';
-import { readPriorBindingOutcome, recordBindingLedgerRow } from './binding-ledger';
-import { MJBindingGateway } from './mj-binding-gateway';
 
 const BINDING_ENTITY = 'MJ_BizApps_Forms: Form Entity Bindings';
 

@@ -15,7 +15,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   }
   return { ...actual, Metadata };
 });
-const { resolveActionProvider } = await import('./action-provider');
+const { resolveActionProvider } = await import('../action-provider.js');
 
 function fakeDataProvider(label: string): IMetadataProvider {
   return { label, RunView: async () => ({}), RunViews: async () => [], GetEntityObject: async () => ({}) } as unknown as IMetadataProvider;

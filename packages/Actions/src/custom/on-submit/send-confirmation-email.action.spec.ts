@@ -8,7 +8,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
-import type { ActionDataProvider } from '../shared/action-provider';
+import type { ActionDataProvider } from '@mj-biz-apps/forms-core-entities-server';
 
 /** A simple field-bag for the FormResponse + Form loads. */
 class FakeEntity {

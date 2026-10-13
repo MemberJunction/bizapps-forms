@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { checkRespondentScope } from '../scope-check.service';
-import { makeContextUser, makeFakeProvider, respondentPermissions } from './fakes';
+import { makeContextUser, makeFakeProvider, respondentPermissions } from '@mj-biz-apps/forms-core-entities-server/testing';
 
 describe('checkRespondentScope', () => {
   it('allows a properly-scoped respondent (CanCreate on responses only)', () => {

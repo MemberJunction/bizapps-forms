@@ -33,7 +33,7 @@ import {
   type ExistingResponseRow,
   type FakeProvider,
   type SavedRecord,
-} from './fakes';
+} from '@mj-biz-apps/forms-core-entities-server/testing';
 
 const FORM_RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
 

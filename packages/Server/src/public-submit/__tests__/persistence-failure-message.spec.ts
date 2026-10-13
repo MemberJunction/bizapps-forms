@@ -16,7 +16,13 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { persistSubmission, SAVE_FAILED_MESSAGE, withoutQueryEcho, type PersistenceInputs } from '../persistence.service';
-import { expectPersistFailure, makeContextUser, makeDefinition, makeFakeProvider, respondentPermissions } from './fakes';
+import {
+  makeContextUser,
+  makeDefinition,
+  makeFakeProvider,
+  respondentPermissions,
+} from '@mj-biz-apps/forms-core-entities-server/testing';
+import { expectPersistFailure } from './persistence-assertions';
 
 const RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
 const ANSWER_ENTITY = 'MJ_BizApps_Forms: Form Response Answers';

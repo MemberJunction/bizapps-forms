@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CanonicalAnswers } from '@mj-biz-apps/forms-entities';
 import type { PublishedFormAutomation } from '@mj-biz-apps/forms-entities';
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
-import type { BindingOutcome } from '@mj-biz-apps/forms-actions';
+import type { BindingOutcome } from '@mj-biz-apps/forms-core-entities-server';
 import type { SyncFileLinksInput } from '../../file-links/file-links.service';
 import type { UploadLedgerRow } from '../../upload/upload-provenance.service';
 
@@ -94,8 +94,8 @@ function fakeProvider(): DatabaseProviderBase {
   } as unknown as DatabaseProviderBase;
 }
 
-vi.mock('@mj-biz-apps/forms-actions', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mj-biz-apps/forms-actions')>();
+vi.mock('@mj-biz-apps/forms-core-entities-server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@mj-biz-apps/forms-core-entities-server')>();
   return {
     ...actual,
     parseBindingConfig: () => ({}),

@@ -50,9 +50,9 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 });
 
 // Import AFTER the mock is declared so the loader binds to the mocked core.
-const { loadFormResponseContext } = await import('./form-response-context');
-type FormResponseContext = import('./form-response-context').FormResponseContext;
-type ActionDataProvider = import('./action-provider').ActionDataProvider;
+const { loadFormResponseContext } = await import('../form-response-context.js');
+type FormResponseContext = import('../form-response-context.js').FormResponseContext;
+type ActionDataProvider = import('../action-provider.js').ActionDataProvider;
 
 const fakeUser = { Name: 'tester' } as unknown as UserInfo;
 

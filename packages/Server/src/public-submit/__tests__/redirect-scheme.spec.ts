@@ -22,7 +22,7 @@ import {
   makeFakeProvider,
   makeVersion,
   respondentPermissions,
-} from './fakes';
+} from '@mj-biz-apps/forms-core-entities-server/testing';
 
 /**
  * A one-question form whose SETTINGS-level redirect is the value under test. `endingRedirectUrl`

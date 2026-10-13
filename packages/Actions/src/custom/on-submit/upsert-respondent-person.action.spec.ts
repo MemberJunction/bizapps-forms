@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
-import type { ActionDataProvider } from '../shared/action-provider';
+import type { ActionDataProvider } from '@mj-biz-apps/forms-core-entities-server';
 // PRECONDITION, not decoration. The action refuses to run when no generated class is registered
 // for `MJ_BizApps_Common: People`, because MJ's fallback would silently discard every field it
 // sets (#60). In production `custom/register.ts` imports this package for exactly that reason,
