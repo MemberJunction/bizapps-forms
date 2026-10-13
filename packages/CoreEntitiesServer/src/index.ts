@@ -197,6 +197,7 @@ export {
 } from './operations/CreateFormFromTemplateServerOperation.js';
 export { ArchiveFormServerOperation, LoadArchiveFormOperation } from './operations/ArchiveFormServerOperation.js';
 export { RestoreFormServerOperation, LoadRestoreFormOperation } from './operations/RestoreFormServerOperation.js';
+export { DeleteTemplateServerOperation, LoadDeleteTemplateOperation } from './operations/DeleteTemplateServerOperation.js';
 export {
   IssueDistributionLinkServerOperation,
   LoadIssueDistributionLinkOperation,

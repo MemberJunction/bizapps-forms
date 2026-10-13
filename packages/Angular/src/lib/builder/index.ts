@@ -90,10 +90,10 @@ export {
   selectScreen,
   type BuilderSelection,
 } from './builder-selection';
-export { PublishService, type PublishResult } from './publish.service';
 export {
   DistributionService,
   type CreateDistributionInput,
+  type CreateDistributionResult,
   type DistributionChannel,
   type DistributionListResult,
   type MutationOutcome,
@@ -102,7 +102,6 @@ export {
   autoShareName,
   credentialMayStillRedeem,
   formReach,
-  isOpenToResponses,
   shareState,
   type FormReach,
   type FormReachKind,
@@ -123,7 +122,7 @@ export {
 } from './question-type-catalog';
 export { generateQrMatrix, qrMatrixToSvg, textToQrSvg, type QrMatrix } from './qr-code';
 export { isValidReorder } from './reorder';
-export { publicUrl, embedSnippet, slugify } from './distribution-links';
+export { publicUrl, embedSnippet } from './distribution-links';
 export type { FormTree, PageNode, QuestionNode } from './builder-models';
 
 import './form-builder.component';

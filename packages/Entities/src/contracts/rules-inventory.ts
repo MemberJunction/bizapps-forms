@@ -266,8 +266,8 @@ export function collectRuleEntries(form: RuleInventoryForm): RuleEntry[] {
  *
  * The question "may this form go live?" and the question "does this item wear a broken badge?"
  * are ONE question, answered here, from one walk of one projection. The publish gate consumes
- * this (forms-ng's `publish.service.ts` today); the canvas consumes {@link ruleBadgesFor} over the same
- * entries. Neither can start disagreeing with the other, and any breakage class
+ * this (`FormPublishingEngine`, and the builder to retract a standing refusal); the canvas consumes
+ * {@link ruleBadgesFor} over the same entries. Neither can start disagreeing with the other, and any breakage class
  * {@link collectRuleEntries} learns later blocks publish without this function being touched.
  *
  * Lines, not entries, because both callers want the same sentence: what the rule says, and what

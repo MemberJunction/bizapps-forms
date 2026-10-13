@@ -37,6 +37,7 @@ import {
 } from '@memberjunction/core';
 import { BaseSingleton, GetGlobalObjectStore } from '@memberjunction/global';
 import {
+  isOpenToResponses,
   quoteSqlString,
   randomSlugSuffix,
   respondentUrl,
@@ -391,10 +392,6 @@ function issueRequestRefusal(request: IssueLinkRequest): string | null {
 function derivedLinkName(formName: string, channel: DistributionChannelType): string {
   const suffix = ` — ${CHANNEL_LABELS[channel]}`;
   return `${formName.trim().slice(0, MAX_NAME_LENGTH - suffix.length)}${suffix}`;
-}
-
-function isOpenToResponses(link: Pick<mjBizAppsFormsFormDistributionEntityType, 'Status' | 'IsActive'>): boolean {
-  return link.Status === 'Active' && link.IsActive === true;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Metadata, RunView, LogError, type UserInfo } from '@memberjunction/core';
+import { EntitySaveOptions, Metadata, RunView, LogError, type UserInfo } from '@memberjunction/core';
 import type {
   mjBizAppsFormsFormEntity,
   mjBizAppsFormsFormStyleEntity,
@@ -209,11 +209,29 @@ export class DesignStateService {
     return result.Results.length === 0;
   }
 
+  /**
+   * How this service's rows are saved. By default one row's save (`SkipRelatedCollections`: the
+   * form record holds its `Pages` and `Screens` loaded, and a style change must not ship a page edit
+   * still on its autosave timer as a graph). The builder points it at its own save queue
+   * ({@link UseSaveQueue}), so a style change is flushed before a publish and never runs over a
+   * structural save or a field save of the same form row.
+   */
+  private saveRow: (entity: mjBizAppsFormsFormEntity | mjBizAppsFormsFormStyleEntity) => Promise<boolean> = (entity) => {
+    const options = new EntitySaveOptions();
+    options.SkipRelatedCollections = true;
+    return entity.Save(options);
+  };
+
+  /** Route every save this service makes through `save` — the builder's one save queue. */
+  public UseSaveQueue(save: (entity: mjBizAppsFormsFormEntity | mjBizAppsFormsFormStyleEntity) => Promise<boolean>): void {
+    this.saveRow = save;
+  }
+
   private async saveChecked(
     entity: mjBizAppsFormsFormEntity | mjBizAppsFormsFormStyleEntity,
     action: string,
   ): Promise<boolean> {
-    const ok = await entity.Save();
+    const ok = await this.saveRow(entity);
     if (!ok) {
       LogError(
         `Forms design panel failed to ${action}: ${entity.LatestResult?.CompleteMessage ?? 'unknown error'}`,

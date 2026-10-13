@@ -13,15 +13,16 @@ import { NavigationService } from '@memberjunction/ng-shared';
 import { describe, expect, it } from 'vitest';
 import { FormsHomeDashboardComponent } from './forms-home-dashboard.component';
 import { FormsHomeService } from './forms-home.service';
-import { FormCloneService } from '../templates/form-clone.service';
 import type { FormStatus, FormSummaryRow } from './home-models';
 
-type HomeServiceSurface = Pick<FormsHomeService, 'loadForms' | 'setStatus' | 'runAuthoringAction'>;
+type HomeServiceSurface = Pick<FormsHomeService, 'loadForms' | 'archive' | 'restore' | 'createFromTemplate' | 'runAuthoringAction'>;
 
 function homeService(overrides: Partial<HomeServiceSurface>): HomeServiceSurface {
   return {
     loadForms: async () => [],
-    setStatus: async (_id: string, _status: FormStatus) => null,
+    archive: async (id: string) => ({ ok: true, output: { FormID: id, Status: 'Closed' as FormStatus } }),
+    restore: async (id: string) => ({ ok: true, output: { FormID: id, Status: 'Draft' as FormStatus } }),
+    createFromTemplate: async () => ({ ok: true, output: { FormID: 'new-1', Warnings: [] } }),
     runAuthoringAction: async () => ({ success: true, formId: null, message: 'Form created.' }),
     ...overrides,
   };
@@ -31,9 +32,7 @@ function makeComponent(service: HomeServiceSurface): FormsHomeDashboardComponent
   const injector = Injector.create({
     providers: [
       { provide: FormsHomeService, useValue: service },
-      // The failure paths under test never reach the clone service or navigation; empty
-      // doubles are enough to satisfy the injector.
-      { provide: FormCloneService, useValue: {} },
+      // The failure paths under test never reach navigation; an empty double satisfies the injector.
       { provide: NavigationService, useValue: {} },
       { provide: ChangeDetectorRef, useValue: { markForCheck: () => undefined, detectChanges: () => undefined } },
     ],
@@ -86,7 +85,7 @@ describe('FormsHomeDashboardComponent failure alert (#253)', () => {
 
   it('says the archive failed, then why', async () => {
     const component = makeComponent(
-      homeService({ setStatus: async () => Promise.reject(new Error('timeout')) }),
+      homeService({ archive: async () => Promise.reject(new Error('timeout')) }),
     );
     expect(component.isArchived(draftRow)).toBe(false);
 
@@ -95,10 +94,12 @@ describe('FormsHomeDashboardComponent failure alert (#253)', () => {
     expect(component.errorMessage).toBe('Could not archive this form: timeout');
   });
 
-  // A failed Save() does not throw — BaseEntity.Save() returns false and setStatus hands back
-  // LatestResult.CompleteMessage — so this, not a rejection, is what a live archive failure looks like.
-  it('says the archive failed when setStatus reports a failure instead of throwing', async () => {
-    const component = makeComponent(homeService({ setStatus: async () => 'Simulated save failure' }));
+  // An operation does not throw on a refusal — it returns one — so this, not a rejection, is what a
+  // live archive failure looks like.
+  it('says the archive failed when the operation reports a refusal instead of throwing', async () => {
+    const component = makeComponent(
+      homeService({ archive: async () => ({ ok: false, error: 'Simulated save failure', resultCode: 'EXECUTION_ERROR' }) }),
+    );
     const errors = emitted(component);
 
     await component.toggleArchive(draftRow);
@@ -124,5 +125,52 @@ describe('FormsHomeDashboardComponent failure alert (#253)', () => {
     await component.authorWithAI();
 
     expect(component.errorMessage).toBe('The authoring action failed: Error: GraphQL Error (Code: unknown)');
+  });
+});
+
+describe('FormsHomeDashboardComponent lifecycle and templates', () => {
+  const archivedRow: FormSummaryRow = { ...draftRow, status: 'Closed' };
+
+  it('restores an archived form through restore(), and archives a live one through archive()', async () => {
+    const asked: string[] = [];
+    const component = makeComponent(
+      homeService({
+        archive: async (id) => {
+          asked.push(`archive ${id}`);
+          return { ok: true, output: { FormID: id, Status: 'Closed' } };
+        },
+        restore: async (id) => {
+          asked.push(`restore ${id}`);
+          return { ok: true, output: { FormID: id, Status: 'Published' } };
+        },
+      }),
+    );
+
+    await component.toggleArchive(draftRow);
+    await component.toggleArchive(archivedRow);
+
+    expect(asked).toEqual(['archive form-1', 'restore form-1']);
+  });
+
+  it("shows a saved template's copy notes AFTER the list reloads, rather than letting the reload wipe them", async () => {
+    // The reload's start clears the alert; set before it, the notes were wiped unseen.
+    const component = makeComponent(
+      homeService({ createFromTemplate: async () => ({ ok: true, output: { FormID: 'new-1', Warnings: ['A rule could not be carried over.'] } }) }),
+    );
+    component.OpenEntityRecord.subscribe(() => undefined);
+
+    await component.useTemplate({ kind: 'saved', templateId: 't1', name: 'Intake' });
+
+    expect(component.errorMessage).toBe('A rule could not be carried over.');
+  });
+
+  it("says the copy failed, then the server's reason", async () => {
+    const component = makeComponent(
+      homeService({ createFromTemplate: async () => ({ ok: false, error: 'Form t1 is not a template.', resultCode: 'EXECUTION_ERROR' }) }),
+    );
+
+    await component.useTemplate({ kind: 'saved', templateId: 't1', name: 'Intake' });
+
+    expect(component.errorMessage).toBe('Could not create a form from "Intake": Form t1 is not a template.');
   });
 });

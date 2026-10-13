@@ -18,8 +18,10 @@ const source = (file: string): string =>
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/[^\n]*/g, '');
 
+// The home half is EXECUTED now: the grid's read moved to `../shared/form-catalog` (#303), and
+// `form-catalog.spec.ts` runs it — counts come back from `count_only` aggregates through the shared
+// counter, and no response row is downloaded. The reporting half below is the next slice's subject.
 const SERVICES = {
-  home: 'forms-home.service.ts',
   reporting: '../dashboard/services/forms-reporting.service.ts',
 } as const;
 

@@ -25,8 +25,9 @@
  * the copy can say what it did rather than quietly differing from its source.
  *
  * Pure on purpose: this is the half of the clone that can be tested without a database. It lives
- * in the contracts because two writers run it — the browser's `FormCloneService` until #303 moves
- * every clone to the server, and `FormAuthoringEngine.Clone` — and one remap must not become two.
+ * in the contracts because it is a rule, not an engine detail: `FormAuthoringEngine.Clone` is its
+ * one writer since #303 retired the browser's `FormCloneService`, and a second copy would be the
+ * next drift.
  * It is exported from the package root only, not the `./contracts` barrel the respondent widget
  * bundles: no respondent ever copies a form.
  */

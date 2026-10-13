@@ -429,5 +429,28 @@
     "primaryKey": {
       "ID": "8D4E68A9-73CA-4C10-95F1-A8BD76806E58"
     }
+  },
+  {
+    "fields": {
+      "Name": "Delete Template",
+      "OperationKey": "Forms.DeleteTemplate",
+      "CategoryID": "@lookup:MJ: Remote Operation Categories.Name=Forms",
+      "Description": "Permanently delete a saved template and everything under it (pages, questions, options, screens, automations, bindings) in one transaction. Only a template can be deleted, and only one with no responses, versions or share links; a working form is archived instead.",
+      "InputTypeName": "FormsDeleteTemplateInput",
+      "InputTypeDefinition": "@file:types/forms-delete-template.input.ts",
+      "InputTypeIsArray": false,
+      "OutputTypeName": "FormsDeleteTemplateOutput",
+      "OutputTypeDefinition": "@file:types/forms-delete-template.output.ts",
+      "OutputTypeIsArray": false,
+      "ExecutionMode": "Sync",
+      "RequiredScope": "forms:write",
+      "RequiresSystemUser": false,
+      "GenerationType": "Manual",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "2A8946C7-0045-4B58-9B34-5E030D9D0DF0"
+    }
   }
 ]

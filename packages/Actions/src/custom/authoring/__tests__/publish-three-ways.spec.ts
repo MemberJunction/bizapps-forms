@@ -261,7 +261,7 @@ describe('one draft, three ways to publish it (#303 DW4)', () => {
     const { formVersionId } = await FormPublishingEngine.Instance.Publish(formId, db.provider, AUTHOR);
 
     // The builder's in-memory tree: pages holding their questions holding their options, as
-    // `BuilderStateService` loads them, plus the automations and settings publish.service reads.
+    // `BuilderStateService` loads them, plus the automations and settings a publish reads.
     const form = rowWhere(db, FORMS, (f) => f.ID === formId);
     const tree = {
       form: form as never,

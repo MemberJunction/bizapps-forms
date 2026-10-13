@@ -14,14 +14,15 @@
  * So this loads the collection first. That keeps one cascade implementation (MJ's) rather than a
  * second, hand-written delete loop that would have to agree with it.
  *
- * NOT covered: a question deleted as a NODE of someone else's delete graph. When a page is deleted
- * with its `Questions` loaded, MJ runs each question's node through the private
- * `deleteAsGraphNode` → `_innerDelete`, which never calls this override. And those questions were
- * loaded through the page collection's RunView, which does not load their `immediate` companions,
- * so their `Options` are empty and the plan omits them — the page delete then fails on
- * `FormQuestionOption`'s foreign key. Task 10 (DW14, structural edits as one `MJ.SaveEntityGraph`)
- * must load each question's `Options` before deleting a page, or delete deepest-first; a
- * `FormPage` server subclass that force-loads them before `super.Delete()` is one way.
+ * This also covers a question deleted as a NODE of a page's delete graph — the builder's "delete
+ * this page" (`FormStructureGraph`, one `MJ.SaveEntityGraph`). Only the ROOT node of a graph runs
+ * through MJ's private `deleteAsGraphNode` → `_innerDelete`; every child node is deleted through
+ * its own public `Delete()`, so this override runs for each of the page's questions. It has to:
+ * those questions were loaded through the page collection's RunView, which does not load their
+ * `immediate` companions, so without the load here the page delete fails on
+ * `FormQuestionOption`'s foreign key. Proven against SQL Server by
+ * `form-structure-graph.integration.spec.ts` (neutralise the load below and its page-delete case
+ * fails on `FK_FormQuestionOption_Question`).
  */
 import { BaseEntity, LogError, type EntityDeleteOptions } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';

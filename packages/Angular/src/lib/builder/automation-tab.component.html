@@ -412,6 +412,10 @@
             </div>
           }
 
+          @if (seededNote()) {
+            <p class="at-summary-note" role="status">{{ seededNote() }}</p>
+          }
+
           @if (selected(); as step) {
             <header class="at-head">
               <div class="at-head-row">

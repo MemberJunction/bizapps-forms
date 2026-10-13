@@ -154,6 +154,43 @@ export interface FormsCreateFormFromTemplateOutput {
 }
 
 /**
+ * Input for `Forms.DeleteTemplate`: permanently delete one SAVED template (a `Form` row with
+ * `IsTemplate = 1`) and everything under it.
+ *
+ * Deletion is real only for templates. A working form is archived (`Forms.ArchiveForm`), never
+ * deleted, because a form that collected responses must keep them; a template provably has none.
+ *
+ * NO import statements — definitions are emitted verbatim into remote_operations.ts.
+ */
+export interface FormsDeleteTemplateInput {
+    /** The template to delete. A form that is not a template is refused. */
+    TemplateFormID: string;
+}
+
+/**
+ * Output for `Forms.DeleteTemplate`. The counts say what went with the template, all in one
+ * transaction: either all of it is gone or none of it is.
+ *
+ * NO import statements — definitions are emitted verbatim into remote_operations.ts.
+ */
+export interface FormsDeleteTemplateOutput {
+    /** The template deleted. */
+    TemplateFormID: string;
+    /** Pages deleted with it. */
+    PageCount: number;
+    /** Questions deleted with it. */
+    QuestionCount: number;
+    /** Question options deleted with it. */
+    OptionCount: number;
+    /** Welcome and ending screens deleted with it. */
+    ScreenCount: number;
+    /** Automations deleted with it. */
+    AutomationCount: number;
+    /** Entity bindings deleted with it. */
+    BindingCount: number;
+}
+
+/**
  * Input for `Forms.GetDistributionClaims`: which of a form's share-link slugs other installed apps
  * own (for example an interview step in another app that publishes the link itself).
  *
@@ -1135,6 +1172,22 @@ export class FormsCloseDistributionOperation extends BaseRemotableOperation<Form
  */
 export class FormsCreateFormFromTemplateOperation extends BaseRemotableOperation<FormsCreateFormFromTemplateInput, FormsCreateFormFromTemplateOutput> {
     public readonly OperationKey = "Forms.CreateFormFromTemplate";
+    public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
+    public readonly RequiresSystemUser = false;
+}
+
+// ============================================================
+// Forms.DeleteTemplate — Delete Template
+// ============================================================
+/**
+ * Delete Template
+ * Permanently delete a saved template and everything under it (pages, questions, options, screens, automations, bindings) in one transaction. Only a template can be deleted, and only one with no responses, versions or share links; a working form is archived instead.
+ * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
+ * under 'Forms.DeleteTemplate'. This generated base provides the typed contract only (client-safe).
+ */
+export class FormsDeleteTemplateOperation extends BaseRemotableOperation<FormsDeleteTemplateInput, FormsDeleteTemplateOutput> {
+    public readonly OperationKey = "Forms.DeleteTemplate";
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;

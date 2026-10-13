@@ -208,11 +208,9 @@ describe('a reorder that breaks a rule says so at the drag', () => {
     expect(method.indexOf('this.busy = true')).toBeLessThan(method.indexOf('persistQuestionOrder'));
   });
 
-  it('checks that the new order was actually written', () => {
-    // `persistQuestionOrder` writes one question at a time and returns false when a write is
-    // refused halfway — a third state matching neither the order before the move nor after it.
-    expect(builder()).toMatch(/if \(!\(await this\.state\.persistQuestionOrder\(page\)\)\)/);
-  });
+  // "Checks that the new order was actually written" used to be a regex over this method's call to
+  // `persistQuestionOrder`. It is executed now (`form-builder.verbs.spec.ts`, "a refused reorder"):
+  // the reorder is one save, and a refusal puts the moved question back.
 
   it('is its own band, not the failure band, and carries an Undo that outlives the tick', () => {
     // `lastFailure` means one thing: the database refused a write. Widening it to "and also,
@@ -285,10 +283,12 @@ describe('every write that can invert a pair is watched', () => {
 
   it('keeps the cross-section move to ONE write path', () => {
     // The diff is hooked per method, so a second place that transfers between lists is a second
-    // place to forget it. One call site is what makes the guard above sufficient.
+    // place to forget it. One METHOD is what makes the guard above sufficient: it transfers the
+    // question, and transfers it back when the save is refused, so both calls live in it.
     const occurrences = builder().match(/transferArrayItem\(/g) ?? [];
-    expect(occurrences).toHaveLength(1);
-    expect(crossPageMethod()).toMatch(/transferArrayItem\(/);
+    const inMethod = crossPageMethod().match(/transferArrayItem\(/g) ?? [];
+    expect(inMethod.length).toBeGreaterThan(0);
+    expect(occurrences).toHaveLength(inMethod.length);
   });
 
   it('records the section the question came FROM, so Undo returns it there', () => {
@@ -325,57 +325,7 @@ describe('every write that can invert a pair is watched', () => {
   });
 });
 
-/**
- * A publish refusal must not outlive the rules it names.
- *
- * THE DEFECT, found smoke-testing the gate. Publish is refused, the toolbar reads *Publish
- * refused — 4 broken rules would ship with this form*, the author fixes all four, the badges go
- * green — and that line is still on screen, now beside the "Published" pill. Two answers on one
- * toolbar, one of them false, which is precisely the failure the gate exists to remove: the
- * message that enforces "the badge and the gate agree" must not itself start disagreeing with
- * the badges.
- *
- * Retired on TRUTH, not on identity, and from the same clock as the reorder band — `markDirty`
- * fires wherever an edit lands, and a spurious call can only re-confirm a still-broken form; it
- * can never retract a refusal that still applies. Asked of `brokenRuleLines`, the function the
- * refusal came from, so the message and its retraction cannot answer differently.
- */
-describe('a publish refusal is retracted when its rules are fixed', () => {
-  /** The component's retirement method, comments stripped — what actually runs. */
-  const retireStaleRefusal = (): string => {
-    const source = builder();
-    const start = source.indexOf('private retireStaleRefusal(');
-    expect(start).toBeGreaterThan(-1);
-    return source.slice(start, source.indexOf('\n  }', start));
-  };
-
-  it('retires the refusal from the same clock that retires the reorder band', () => {
-    // `markDirty()` is the one seam every edit already passes through — the same reason
-    // `retireStaleNotice` is called there. Hanging this off any single edit path instead would
-    // retract the refusal for the ways of fixing a rule that path knows about, and strand it for
-    // every other way the author might have fixed it.
-    const source = builder();
-    const markDirty = source.slice(
-      source.indexOf('private markDirty()'),
-      source.indexOf('\n  }', source.indexOf('private markDirty()')),
-    );
-    expect(markDirty).toMatch(/this\.retireStaleRefusal\(\)/);
-    expect(markDirty).toMatch(/this\.retireStaleNotice\(\)/);
-  });
-
-  it('asks brokenRuleLines, not a second opinion assembled here', () => {
-    // The whole point of issue #79 is that "is this rule broken" has ONE answer. A retraction
-    // computed from its own walk of the tree is a third reader that can disagree with both the
-    // badge and the gate, and the disagreement would be silent.
-    expect(retireStaleRefusal()).toMatch(/brokenRuleLines\(/);
-  });
-
-  it('clears only a refusal that was about rules', () => {
-    // "Could not read the form's settings" is not something fixing a rule repairs, so it must
-    // survive the next edit. The guard is the stored `brokenRules` from the result, which the
-    // service sets on that refusal and no other.
-    const method = retireStaleRefusal();
-    expect(method).toMatch(/refusedRules/);
-    expect(method).toMatch(/statusMessage = ''/);
-  });
-});
+// "A publish refusal is retracted when its rules are fixed" used to be read out of the component's
+// source here. Publishing is `Forms.PublishForm` now (#303), and the retraction is EXECUTED in
+// `form-builder.verbs.spec.ts`: a broken-rule refusal drops on the first edit after the rules are
+// fixed, and a refusal that was never about rules stands.

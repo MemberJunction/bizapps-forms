@@ -6,9 +6,9 @@
  * API it is configured to talk to, for links it lists). This function fixes the SHAPE both produce —
  * `<base>/f/<encoded slug>` — so they cannot disagree about it. It does not make them agree: the two
  * bases differ on a host behind a path-prefixing proxy, where the internal API address differs from
- * the public one, or where `MJAPI_PUBLIC_URL` is unset (the server then returns no URL), until the
- * builder takes the URL from the server instead of composing its own. Two places also derive a slug
- * until the builder stops creating links itself. So the rule lives here, once.
+ * the public one, or where `MJAPI_PUBLIC_URL` is unset — the server then returns no URL, which is why
+ * the builder keeps composing its own for display. Slugs are derived on the server only; the builder
+ * creates links through `Forms.IssueDistributionLink`. So the rule lives here, once.
  *
  * Exported from the package root only, not the `./contracts` barrel the respondent widget bundles:
  * no respondent ever builds a share link.
@@ -78,4 +78,19 @@ export function slugRefusal(slug: string): string | null {
     `"${slug.slice(0, SLUG_MAX_LENGTH + 10)}" is not a usable slug: use lowercase letters and digits joined by single ` +
     `hyphens, at most ${SLUG_MAX_LENGTH} characters.`
   );
+}
+
+/**
+ * Is this link open to responses — the state the Distribute tab's switch is labelled with?
+ *
+ * `Status = 'Active'` AND `IsActive`, both. That is the pair the server's provisioning requires
+ * before it warrants a credential, and the pair `Forms.OpenDistribution` writes. Reading either half
+ * alone answers a different question while wearing the same label: the builder's switch once drew a
+ * link at `Status = 'Active', IsActive = 0` as ON beside a "Paused" badge, and its click handler,
+ * reading the same half-predicate, concluded the link was open and CLOSED it.
+ *
+ * ONE definition for the builder and `FormDistributionEngine`, which each carried a copy.
+ */
+export function isOpenToResponses(link: { Status: string; IsActive: boolean }): boolean {
+  return link.IsActive === true && link.Status === 'Active';
 }

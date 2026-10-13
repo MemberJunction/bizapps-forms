@@ -1,5 +1,6 @@
 /**
- * `Forms.CloneForm`, `Forms.CreateFormFromTemplate`, `Forms.ArchiveForm` and `Forms.RestoreForm`
+ * `Forms.CloneForm`, `Forms.CreateFormFromTemplate`, `Forms.ArchiveForm`, `Forms.RestoreForm` and
+ * `Forms.DeleteTemplate`
  * through `ExecuteServer` — `Authorize`, then `InternalExecute`, wrapped into a `RemoteOpResult` —
  * over the emulated database with the real entity server subclasses (`forms-world.ts`).
  *
@@ -52,6 +53,7 @@ const { CreateFormFromTemplateServerOperation, LoadCreateFormFromTemplateOperati
 );
 const { ArchiveFormServerOperation, LoadArchiveFormOperation } = await import('../ArchiveFormServerOperation.js');
 const { RestoreFormServerOperation, LoadRestoreFormOperation } = await import('../RestoreFormServerOperation.js');
+const { DeleteTemplateServerOperation, LoadDeleteTemplateOperation } = await import('../DeleteTemplateServerOperation.js');
 const { FormEntityServer } = await import('../../entities/FormEntityServer.js');
 const { FormVersionEntityServer } = await import('../../entities/FormVersionEntityServer.js');
 
@@ -99,6 +101,12 @@ const OPERATIONS = [
   },
   { key: 'Forms.ArchiveForm', make: () => new ArchiveFormServerOperation(), load: LoadArchiveFormOperation, input: { FormID: 'form-1' } },
   { key: 'Forms.RestoreForm', make: () => new RestoreFormServerOperation(), load: LoadRestoreFormOperation, input: { FormID: 'form-1' } },
+  {
+    key: 'Forms.DeleteTemplate',
+    make: () => new DeleteTemplateServerOperation(),
+    load: LoadDeleteTemplateOperation,
+    input: { TemplateFormID: 'form-1' },
+  },
 ] as const;
 
 describe.each(OPERATIONS)('$key — registration and Authorize', ({ key, make, load, input }) => {
@@ -311,5 +319,49 @@ describe('Forms.ArchiveForm / Forms.RestoreForm', () => {
       expect(result.ErrorMessage).toBe(`${key}: FormID is required.`);
     }
     expect(db.saved).toEqual([]);
+  });
+});
+
+describe('Forms.DeleteTemplate', () => {
+  const templateTables = (isTemplate: boolean): Record<string, FakeRow[]> => ({
+    ...draftTables(),
+    [FORMS]: [formRow({ IsTemplate: isTemplate })],
+    [VERSIONS]: [],
+    [DISTRIBUTIONS]: [],
+    'MJ_BizApps_Forms: Form Responses': [],
+  });
+
+  it('deletes the template and reports what went with it', async () => {
+    const db = world(templateTables(true));
+
+    const result = await run(new DeleteTemplateServerOperation(), db, { TemplateFormID: 'form-1' });
+
+    expect(result).toMatchObject({
+      ResultCode: 'SUCCESS',
+      Output: { TemplateFormID: 'form-1', PageCount: 1, QuestionCount: 2, OptionCount: 2, ScreenCount: 0, AutomationCount: 0, BindingCount: 0 },
+    });
+    expect(rowsOf(db, FORMS)).toEqual([]);
+    expect(rowsOf(db, QUESTIONS)).toEqual([]);
+  });
+
+  it('refuses a working form with the engine\'s reason, and deletes nothing', async () => {
+    const db = world(templateTables(false));
+
+    const result = await run(new DeleteTemplateServerOperation(), db, { TemplateFormID: 'form-1' });
+
+    expect(result.ResultCode).toBe('EXECUTION_ERROR');
+    expect(result.ErrorMessage).toBe('"Intake" is a form, not a template, and forms are archived rather than deleted.');
+    expect(db.deleted).toEqual([]);
+  });
+
+  it('refuses a missing TemplateFormID, naming the operation', async () => {
+    const db = world(templateTables(true));
+
+    for (const input of [{}, { TemplateFormID: ' ' }, null]) {
+      const result = await run(new DeleteTemplateServerOperation(), db, input);
+      expect(result.ResultCode).toBe('EXECUTION_ERROR');
+      expect(result.ErrorMessage).toBe('Forms.DeleteTemplate: TemplateFormID is required.');
+    }
+    expect(db.deleted).toEqual([]);
   });
 });

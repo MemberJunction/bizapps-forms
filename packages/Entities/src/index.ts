@@ -10,6 +10,9 @@ export * from './contracts/form-blueprint'
 export * from './contracts/clone-remap'
 // So is the share-link rule (slug grammar and the respondent URL): no respondent ever builds a link.
 export * from './contracts/share-link'
+// The builder's structural-save graph (`form-structure-graph.ts`): authoring-only, and not pure — it
+// drives BaseEntity collections — so it stays out of the `./contracts` barrel the widget bundles.
+export * from './form-structure-graph'
 
 /**
  * Forces the generated entity subclasses to be loaded so their @RegisterClass

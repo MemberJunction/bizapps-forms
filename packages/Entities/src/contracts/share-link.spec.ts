@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SLUG_MAX_LENGTH, respondentUrl, slugRefusal, slugify, suffixedSlug } from './share-link';
+import { SLUG_MAX_LENGTH, isOpenToResponses, respondentUrl, slugRefusal, slugify, suffixedSlug } from './share-link';
 
 describe('respondentUrl', () => {
   it('joins base + /f/ + slug', () => {
@@ -86,5 +86,14 @@ describe('suffixedSlug', () => {
       expect(slugRefusal(slug), slug).toBeNull();
       expect(slug.endsWith('-xyz12')).toBe(true);
     }
+  });
+});
+
+describe('isOpenToResponses', () => {
+  it('is open only when the link is Active AND switched on', () => {
+    expect(isOpenToResponses({ Status: 'Active', IsActive: true })).toBe(true);
+    expect(isOpenToResponses({ Status: 'Active', IsActive: false })).toBe(false);
+    expect(isOpenToResponses({ Status: 'Closed', IsActive: true })).toBe(false);
+    expect(isOpenToResponses({ Status: 'Draft', IsActive: true })).toBe(false);
   });
 });

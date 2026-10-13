@@ -108,6 +108,12 @@ export interface FakeProviderConfig {
    */
   failSaveWhen?: (entityName: string, values: Record<string, unknown>) => boolean | string;
   /**
+   * Force a generic-table entity's Delete() to return false when this says so (a string is the
+   * failure message) — for failing ONE delete of several, so a rollback test can see the deletes
+   * before it undone.
+   */
+  failDeleteWhen?: (entityName: string, values: Record<string, unknown>) => boolean | string;
+  /**
    * Existing FormResponse rows the session-response lookup should return. The fake filters
    * these by the requested `Status` (parsed out of the ExtraFilter). Used to exercise dedupe
    * (a Complete row) and partial upsert/promotion (a Partial row).
@@ -428,6 +434,7 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
           tx,
           failSave: config.failSaveFor === name,
           failSaveWhen: config.failSaveWhen,
+          failDeleteWhen: config.failDeleteWhen,
         })),
       );
     }
@@ -494,6 +501,7 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
           tx,
           failSave: config.failSaveFor === entityName,
           failSaveWhen: config.failSaveWhen,
+          failDeleteWhen: config.failDeleteWhen,
         }));
       }
       return makeFakeEntity(entityName, saved, deleted, config.failSaveFor === entityName, responseStore);
@@ -663,6 +671,7 @@ interface TableEntityHost {
   tx: FakeTransactionLog;
   failSave: boolean;
   failSaveWhen?: (entityName: string, values: Record<string, unknown>) => boolean | string;
+  failDeleteWhen?: (entityName: string, values: Record<string, unknown>) => boolean | string;
 }
 
 /**
@@ -728,6 +737,11 @@ function makeTableEntity(entityName: string, table: FakeRow[], row: FakeRow | nu
         return true;
       },
       Delete: async () => {
+        const forced = host.failDeleteWhen?.(entityName, { ...values });
+        if (forced) {
+          record.LatestResult = { CompleteMessage: typeof forced === 'string' ? forced : 'forced delete failure' };
+          return false;
+        }
         const target = current;
         if (target) {
           const index = table.indexOf(target);

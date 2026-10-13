@@ -113,13 +113,10 @@ describe('the add-content bar belongs to the selected question', () => {
   });
 });
 
-describe('the insert reuses the existing write paths', () => {
-  it('renumbers through the same call the drag path uses, rather than writing DisplayOrder itself', () => {
-    const builder = read('form-builder.component.ts');
-    const insert = /protected async insertQuestionAt\([\s\S]*?\n  \}/.exec(builder)?.[0] ?? '';
-    expect(insert).toMatch(/state\.persistQuestionOrder\(page\)/);
-    expect(insert).not.toMatch(/DisplayOrder\s*=/);
-  });
+describe('the insert runs the checks a drag runs', () => {
+  // "Renumbers through the same call the drag path uses" is gone with the call: the insert is ONE
+  // save that creates the question at the seam and renumbers below it (#303), executed in
+  // `form-builder.verbs.spec.ts` and `builder-state.structure.spec.ts`.
 
   it('runs the same rule-damage diff a costly drag runs', () => {
     // `reorderQuestion` states it is the only path able to invert a pair of surviving questions,

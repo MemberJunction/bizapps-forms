@@ -1,17 +1,17 @@
 /**
- * Pure helpers for deriving the public artifacts of a distribution (slug, public
- * URL, redeem URL, embed snippet). Kept free of Angular/MJ so they are trivially
- * unit-testable and reusable by {@link DistributionService}.
+ * Pure helpers for deriving the public artifacts of a distribution (public URL, redeem URL, embed
+ * snippet). Kept free of Angular/MJ so they are trivially unit-testable and reusable by
+ * {@link DistributionService}.
  *
- * The slug and respondent-URL RULES are the contracts' (`share-link.ts` in
- * `@mj-biz-apps/forms-entities`), and the server's `FormDistributionEngine` uses the same
- * function, so the two cannot disagree about the URL's SHAPE. They can still differ in its BASE:
- * this builder passes its configured API origin, the server `MJAPI_PUBLIC_URL` — different behind a
- * path-prefixing proxy or a split internal/public address, and the server returns no URL when
- * `MJAPI_PUBLIC_URL` is unset. That lasts until the builder shows the URL the server returns.
- * These keep their names because they are forms-ng's public API.
+ * The respondent-URL RULE is the contracts' (`share-link.ts` in `@mj-biz-apps/forms-entities`),
+ * and the server's `FormDistributionEngine` uses the same function, so the two cannot disagree
+ * about the URL's SHAPE. They can still differ in its BASE: this builder passes its configured API
+ * origin, the server `MJAPI_PUBLIC_URL` — different behind a path-prefixing proxy or a split
+ * internal/public address — and the server returns no URL at all when `MJAPI_PUBLIC_URL` is unset,
+ * which is why the builder keeps composing one for display. Slugs are the server's alone now
+ * (`Forms.IssueDistributionLink`), so the slug helpers that lived here are gone.
  */
-import { randomSlugSuffix, respondentUrl, slugify as slugifyName } from '@mj-biz-apps/forms-entities';
+import { respondentUrl } from '@mj-biz-apps/forms-entities';
 
 /** Strip trailing slashes from a base URL so path joins are clean. */
 function trimBase(baseUrl: string): string {
@@ -51,14 +51,4 @@ export function embedSnippet(slug: string, baseUrl: string): string {
     `<iframe src="${url}" title="Form" loading="lazy" ` +
     `style="width:100%;border:0;min-height:600px" allow="clipboard-write"></iframe>`
   );
-}
-
-/** Slugify a name to a URL-friendly token, falling back to a random token. */
-export function slugify(name: string, randomSuffix: () => string): string {
-  return slugifyName(name, randomSuffix);
-}
-
-/** Default random suffix generator (5 base-36 chars). */
-export function randomSuffix(): string {
-  return randomSlugSuffix();
 }

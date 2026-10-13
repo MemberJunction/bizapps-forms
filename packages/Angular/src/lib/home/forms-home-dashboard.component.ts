@@ -8,11 +8,12 @@ import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { BaseDashboard } from '@memberjunction/ng-shared';
 import type { ResourceData } from '@memberjunction/core-entities';
-import { BaseEntity, CompositeKey, LogError } from '@memberjunction/core';
-import { MJGlobal, MJEventType, RegisterClass } from '@memberjunction/global';
+import { CompositeKey, LogError } from '@memberjunction/core';
+import { RegisterClass } from '@memberjunction/global';
 import type { ActionParam } from '@memberjunction/actions-base';
 
 import { FORMS_UI_CSS, failureMessage } from '../shared';
+import { onFormsWrite, type FormsWriteSubscription } from '../shared/forms-writes';
 import { FormsHomeService } from './forms-home.service';
 import { FORMS_HOME_CSS } from './forms-home-dashboard.styles';
 import { totalResponses } from './home-aggregations';
@@ -23,7 +24,6 @@ import {
   type FormSummaryRow,
 } from './home-models';
 import { TemplatesGalleryComponent, type TemplateChoice } from '../templates/templates-gallery.component';
-import { FormCloneService } from '../templates/form-clone.service';
 
 /**
  * Status -> badge tone. Total over `FormStatus`, so widening the CHECK constraint
@@ -46,17 +46,16 @@ const STATUS_TONE: Record<FormStatus, string> = {
  */
 const ARCHIVED_STATUS: FormStatus = 'Closed';
 
+/**
+ * How long a burst of Form writes elsewhere settles before the grid re-reads once. An open builder
+ * writes the Form row on every structural edit (it is the graph's root), so an undebounced grid
+ * behind it re-read itself per reorder.
+ */
+const FORM_WRITE_DEBOUNCE_MS = 750;
+
 /** Headline for an authoring failure, whether the action threw or reported `success: false`. */
 const AUTHORING_FAILED = 'The authoring action failed.';
 
-/**
- * The handle returned by subscribing to MJGlobal's event stream.
- *
- * Derived from the API rather than imported as `rxjs`'s `Subscription`: rxjs is not a dependency
- * of this package (it arrives through Angular in the host), so naming the type directly fails the
- * package's own typecheck. Deriving it keeps the shape correct without inventing a dependency.
- */
-type EventSubscription = ReturnType<ReturnType<MJGlobal['GetEventListener']>['subscribe']>;
 
 /** "1 form" / "12 forms" — the list page says both numbers out loud a lot. */
 function plural(n: number, one: string, many = `${one}s`): string {
@@ -73,12 +72,13 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
  * metadata record (DriverClass) and the Forms app nav item are authored
  * alongside this component.
  *
- * It lists every form (RunView, read-only) and offers three ways to create one:
+ * It lists every form (read-only; `../shared/form-catalog`) and offers four ways to create one:
  *  - "New form" — opens a blank Form record; the WP-D entity-form override
  *    (@RegisterClass(BaseFormComponent, 'MJ_BizApps_Forms: Forms')) renders the
  *    visual builder for the new record.
  *  - "Author with AI" — runs `Forms: Generate Form From Brief` with a Brief.
- *  - "From template" — runs `Forms: Create Form From Template` with a TemplateKey.
+ *  - "From template", a starter — runs `Forms: Create Form From Template` with a TemplateKey.
+ *  - "From template", a saved one — `Forms.CreateFormFromTemplate` copies it on the server.
  *
  * Clicking a row, or finishing an authoring action, opens that Form record via
  * the container-handled `OpenEntityRecord` event — which renders the builder.
@@ -90,14 +90,13 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
   selector: 'mj-forms-home-dashboard',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [FormsHomeService, FormCloneService],
+  providers: [FormsHomeService],
   imports: [FormsModule, DatePipe, TemplatesGalleryComponent],
   templateUrl: './forms-home-dashboard.component.html',
   styles: [FORMS_UI_CSS, FORMS_HOME_CSS],
 })
 export class FormsHomeDashboardComponent extends BaseDashboard {
   private readonly data = inject(FormsHomeService);
-  private readonly clone = inject(FormCloneService);
   private readonly cdr = inject(ChangeDetectorRef);
 
   public loading = false;
@@ -114,7 +113,7 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   public brief = '';
 
   /** MJGlobal subscription behind {@link watchForFormChanges}; released on destroy. */
-  private formChanges?: EventSubscription;
+  private formChanges?: FormsWriteSubscription;
 
   public async GetResourceDisplayName(_data: ResourceData): Promise<string> {
     return 'Forms';
@@ -143,9 +142,8 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
    *
    * The list used to load once. Rename a form in the builder, come back, and the old name was
    * still there — the row had not changed, the page had simply never asked again. Polling would
-   * have papered over it; MJ already broadcasts the fact. Every `BaseEntity.Save()` and
-   * `.Delete()` raises an MJGlobal `ComponentEvent` tagged `BaseEntity.BaseEventCode`, so the
-   * list listens for the ones that concern Forms rows and re-reads.
+   * have papered over it; `onFormsWrite` hears every Forms row written elsewhere — a record's own
+   * save or delete, or an announced operation (a publish, a clone) — and the list re-reads.
    *
    * Deliberately narrow. It reacts to the Forms entity only — a save anywhere else in the
    * Explorer must not trigger a reload here — and it skips reloads while this surface is itself
@@ -155,22 +153,12 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     if (this.formChanges) {
       return;
     }
-    this.formChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
-      if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
-        return;
-      }
-      const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
-      if (args?.type !== 'save' && args?.type !== 'delete') {
-        return;
-      }
-      if (args.baseEntity?.EntityInfo?.Name !== HOME_ENTITY.forms) {
-        return;
-      }
+    this.formChanges = onFormsWrite(HOME_ENTITY.forms, ['save', 'delete'], () => {
       if (this.busy || this.loading) {
         return;
       }
       void this.loadForms();
-    });
+    }, { debounceMs: FORM_WRITE_DEBOUNCE_MS });
   }
 
   public async loadForms(): Promise<void> {
@@ -235,25 +223,26 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   }
 
   /**
-   * Archives a form, or restores an archived one to Draft.
+   * Archives a form, or restores an archived one.
    *
-   * Not a delete, and not labelled as one: see `FormsHomeService.setStatus` for why the
-   * schema cannot support removing a form without destroying the responses it collected.
-   * Restore returns it to Draft rather than Published, so bringing a form back never
-   * silently reopens a public link.
+   * Not a delete, and not labelled as one: every child table holds a plain FK to the form, and
+   * a form that collected responses must keep them, so `Forms.ArchiveForm` moves it to `Closed`
+   * and closes its share links in the same transaction. `Forms.RestoreForm` brings it back to
+   * `Published` when it has a published version (else `Draft`) — but its links stay closed, so
+   * restoring never silently reopens a public link.
    */
   public async toggleArchive(row: FormSummaryRow): Promise<void> {
-    const next: FormStatus = this.isArchived(row) ? 'Draft' : ARCHIVED_STATUS;
-    const action = `Could not ${next === ARCHIVED_STATUS ? 'archive' : 'restore'} this form.`;
+    const restoring = this.isArchived(row);
+    const action = `Could not ${restoring ? 'restore' : 'archive'} this form.`;
     this.busy = true;
     this.errorMessage = null;
     this.cdr.markForCheck();
     try {
-      // A failed Save() RETURNS its message rather than throwing, so this is the usual failure
-      // path, not the catch below — it needs the same "what failed" prefix.
-      const failure = await this.data.setStatus(row.id, next);
-      if (failure) {
-        this.fail(new Error(failure), action);
+      // An operation reports a refusal as a result rather than a throw, so this is the usual
+      // failure path, not the catch below — it needs the same "what failed" prefix.
+      const outcome = restoring ? await this.data.restore(row.id) : await this.data.archive(row.id);
+      if (!outcome.ok) {
+        this.fail(new Error(outcome.error), action);
         return;
       }
       await this.loadForms();
@@ -314,8 +303,8 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
    *
    * The two kinds take different roads and the author must not be able to tell: a starter is a
    * blueprint that lives in code, so the server action expands it; a saved template is a Form
-   * row, so it is deep-copied here. Both end with the same thing on screen — the new draft open
-   * in the builder.
+   * row, so the server deep-copies it (`Forms.CreateFormFromTemplate`). Both end with the same
+   * thing on screen — the new draft open in the builder.
    */
   public async useTemplate(choice: TemplateChoice): Promise<void> {
     if (choice.kind === 'starter') {
@@ -332,21 +321,23 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.errorMessage = null;
     this.cdr.markForCheck();
     try {
-      const result = await this.clone.cloneForm(choice.templateId, {
-        name: choice.name,
-        isTemplate: false,
-      });
-      // Warnings describe references the copy could not carry over. They are shown rather than
-      // logged and forgotten, because the author is the only person who can fix a dropped rule.
-      if (result.warnings.length > 0) {
-        this.errorMessage = result.warnings.join(' ');
+      const outcome = await this.data.createFromTemplate(choice.templateId, choice.name);
+      if (!outcome.ok) {
+        this.fail(new Error(outcome.error), `Could not create a form from "${choice.name}".`);
+        return;
       }
       this.closePanel();
       this.OpenEntityRecord.emit({
         EntityName: HOME_ENTITY.forms,
-        RecordPKey: CompositeKey.FromID(result.formId),
+        RecordPKey: CompositeKey.FromID(outcome.output.FormID),
       });
       await this.loadForms();
+      // Warnings describe references the copy could not carry over. They are shown rather than
+      // logged and forgotten, because the author is the only person who can fix a dropped rule —
+      // and AFTER the reload, whose start clears the alert: set before it, they were wiped unseen.
+      if (outcome.output.Warnings.length > 0) {
+        this.errorMessage = outcome.output.Warnings.join(' ');
+      }
     } catch (err) {
       this.fail(err, `Could not create a form from "${choice.name}".`);
     } finally {

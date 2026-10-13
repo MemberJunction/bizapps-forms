@@ -11,9 +11,14 @@ import {
   transferArrayItem,
   type CdkDragDrop,
 } from '@angular/cdk/drag-drop';
-import { BaseEntity, CompositeKey, LogError } from '@memberjunction/core';
-import { MJEventType, MJGlobal, RegisterClass } from '@memberjunction/global';
+import { CompositeKey, LogError, RunView } from '@memberjunction/core';
+import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
+import {
+  FormsCloneFormOperation,
+  FormsPublishFormOperation,
+  quoteSqlString,
+} from '@mj-biz-apps/forms-entities';
 import type {
   mjBizAppsFormsFormEntity,
   mjBizAppsFormsFormQuestionOptionEntity,
@@ -28,7 +33,10 @@ import type {
 import { FORMS_ENTITY } from '../shared/entity-names';
 import { BuilderStateService } from './builder-state.service';
 import { DesignStateService } from './design-state.service';
-import { PublishService, type PublishResult } from './publish.service';
+import { readDraftAutomations, readLiveSnapshot } from './publish-baseline';
+import { runOperation } from '../shared/remote-operation';
+import { onFormsWrite, type FormsWriteSubscription } from '../shared/forms-writes';
+import { findTemplateSavedFrom, loadFormRecord } from '../shared/form-catalog';
 import { QuestionEditorComponent } from './question-editor.component';
 import { ScreenEditorComponent } from './screen-editor.component';
 import { PageEditorComponent } from './page-editor.component';
@@ -37,8 +45,6 @@ import { DistributionService } from './distribution.service';
 import { formReach, type FormReach, type ShareLinkFacts } from './share-state';
 import { AutomationTabComponent, type MappableQuestion } from './automation-tab.component';
 import { SaveAsTemplateDialogComponent, type SaveAsTemplateRequest } from '../templates/save-as-template-dialog.component';
-import { FormCloneService } from '../templates/form-clone.service';
-import { FormTemplatesService } from '../templates/form-templates.service';
 import {
   templateFingerprint,
   templateControlState,
@@ -51,6 +57,7 @@ import { FormPreviewModalComponent } from './form-preview-modal.component';
 import {
   allQuestions,
   brokenRuleLines,
+  brokenRuleRefusal,
   collectRuleEntries,
   conditionSourcesOf,
   endingReachFor,
@@ -131,11 +138,6 @@ import { targetPageFor, type NewQuestionTarget } from './new-question-target';
  * form — build it, style it, distribute it, decide what happens on submit, then read what
  * came back. Collection follows configuration.
  */
-/**
- * The handle returned by subscribing to MJGlobal's event stream. Derived from the API because
- * rxjs is not a dependency of this package (it arrives through Angular in the host).
- */
-type EventSubscription = ReturnType<ReturnType<MJGlobal['GetEventListener']>['subscribe']>;
 
 type BuilderTab = 'build' | 'design' | 'distribute' | 'automate' | 'responses';
 
@@ -173,8 +175,8 @@ function draftDefinition(
  *
  * Layout (desktop): a left palette of question types, a center canvas listing the
  * questions, and a right properties panel for the selected question. A second tab
- * manages distributions. Publishing snapshots the definition into a new FormVersion
- * via {@link PublishService}.
+ * manages distributions. Publishing is `Forms.PublishForm`: the server snapshots the stored
+ * rows into a new FormVersion, so the builder only saves, then asks.
  *
  * The component extends {@link BaseFormComponent} so the Explorer host wires `record`
  * (the loaded Form entity) and the save/navigation plumbing. We render our own UI
@@ -207,10 +209,7 @@ function draftDefinition(
   providers: [
     BuilderStateService,
     DesignStateService,
-    PublishService,
     DistributionService,
-    FormCloneService,
-    FormTemplatesService,
   ],
   templateUrl: './form-builder.component.html',
   styles: [FORM_BUILDER_STYLES],
@@ -220,16 +219,20 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   protected readonly state = inject(BuilderStateService);
   private readonly design = inject(DesignStateService);
-  private readonly publisher = inject(PublishService);
   private readonly distributions = inject(DistributionService);
-  private readonly clone = inject(FormCloneService);
-  private readonly templates = inject(FormTemplatesService);
 
   /** The canvas's own root, so a focus lookup cannot reach outside this builder instance. */
   private readonly host: ElementRef<HTMLElement> = inject(ElementRef);
 
   /** afterNextRender is called from an async handler, i.e. outside the injection context. */
   private readonly injector = inject(Injector);
+
+  constructor() {
+    super();
+    // One save queue for every write the builder makes, the Design tab's included (see
+    // `BuilderStateService.save`): flushed before a publish, never running over a structural save.
+    this.design.UseSaveQueue((entity) => this.state.save(entity));
+  }
 
   protected readonly paletteGroups = QUESTION_PALETTE_GROUPS;
   protected tree: FormTree | null = null;
@@ -278,7 +281,7 @@ export class FormBuilderComponent extends BaseFormComponent {
   /** Any problem with the save the dialog needs to show (a name already in use). */
   protected templateDialogError: string | null = null;
   /** MJGlobal subscription behind {@link watchForTemplateChanges}; released on destroy. */
-  private templateChanges?: EventSubscription;
+  private templateChanges?: FormsWriteSubscription;
 
   /**
    * Whether to offer saving, confirm one exists, or offer again because the form has changed.
@@ -316,11 +319,10 @@ export class FormBuilderComponent extends BaseFormComponent {
   /**
    * The form's authored automations, as the published snapshot would carry them.
    *
-   * Cached so {@link markDirty} stays synchronous, and refreshed from `BaseEntity` events rather
-   * than from a callback the Automate tab has to remember to fire — the tab mutates automations
-   * from a dozen places (add, delete, reorder, toggle active, switch execution mode, seed the
-   * legacy defaults), and a notification that has to be added at each one is a notification that
-   * will be missed at the next one.
+   * Cached so {@link markDirty} stays synchronous, and refreshed from the announced writes of the
+   * Automate tab's operations (`shared/forms-writes.ts`) rather than from a callback the tab has
+   * to remember to fire: every step verb goes through `runOperation`, which announces it, so a new
+   * verb cannot forget to.
    */
   private draftAutomations: readonly PublishedFormAutomation[] = [];
 
@@ -335,10 +337,18 @@ export class FormBuilderComponent extends BaseFormComponent {
   private automationsUnknown = false;
 
   /** MJGlobal subscription behind {@link watchForAutomationChanges}; released on destroy. */
-  private automationChanges?: EventSubscription;
+  private automationChanges?: FormsWriteSubscription;
 
+  /**
+   * Operations this builder is running itself, which it follows up on itself — counted so
+   * {@link watchForFormOperations} does not re-read for them as well (the announcement is raised
+   * synchronously inside the operation's call, while this count is up).
+   */
+  private ownOperations = 0;
+  /** Subscription behind {@link watchForFormOperations}; released on destroy. */
+  private formOperations?: FormsWriteSubscription;
   /** MJGlobal subscription behind {@link watchForDistributionChanges}; released on destroy. */
-  private distributionChanges?: EventSubscription;
+  private distributionChanges?: FormsWriteSubscription;
 
   /**
    * The style the draft currently resolves to, cached so the fingerprint stays synchronous.
@@ -473,7 +483,7 @@ export class FormBuilderComponent extends BaseFormComponent {
       ? ((await this.design.loadStyleById(this.record.StyleID)) ?? undefined)
       : undefined;
     this.publishedFingerprint = storedSnapshotFingerprint(
-      await this.publisher.latestPublishedSnapshot(this.record.ID),
+      await readLiveSnapshot(new RunView(), this.record.ID),
       this.record.ID,
     );
     await this.refreshDraftAutomations();
@@ -496,7 +506,18 @@ export class FormBuilderComponent extends BaseFormComponent {
       this.cdr.markForCheck();
       return;
     }
-    this.tree = await this.state.loadTree(this.record);
+    try {
+      this.tree = await this.state.loadTree(this.record);
+    } catch (err) {
+      // Stop HERE. An empty tree is what tells the builder to create "Page 1", so carrying on over
+      // a failed read would write a page into a form that already has them.
+      const reason = err instanceof Error ? err.message : String(err);
+      LogError(`Forms builder could not load form ${this.record.ID}: ${reason}`);
+      this.statusMessage = `This form could not be loaded. ${reason}`;
+      this.busy = false;
+      this.cdr.markForCheck();
+      return;
+    }
     if (this.tree.pages.length === 0) {
       const page = await this.state.addPage(this.tree, 'Page 1');
       if (page) {
@@ -509,6 +530,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.watchForTemplateChanges();
     this.watchForAutomationChanges();
     this.watchForDistributionChanges();
+    this.watchForFormOperations();
     this.busy = false;
     this.announceReady();
   }
@@ -579,7 +601,6 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.busy = true;
     const node = await this.state.addQuestion(this.tree, target.page, type, this.defaultPrompt(type));
     if (node) {
-      target.page.questions.push(node);
       // Selecting the new question is what clears any screen selection. The author asked for a
       // question; the pane has to show them the question they just got.
       this.selection = questionSelection(node.entity.ID);
@@ -618,10 +639,10 @@ export class FormBuilderComponent extends BaseFormComponent {
   /**
    * Put a new question at the seam the author clicked.
    *
-   * REUSES BOTH EXISTING WRITE PATHS rather than adding a third: `state.addQuestion` creates it
-   * (appending, which is all it knows how to do), the array splice puts it where the author
-   * asked, and `state.persistQuestionOrder` — the same call the drag path makes — renumbers the
-   * page. Nothing here writes `DisplayOrder` itself.
+   * `state.addQuestion` creates it AT the seam — the new row and the renumbering of every question
+   * below it are one save, so an insert cannot leave two questions sharing a `DisplayOrder` — and
+   * puts the saved node into the page itself, at the seam as it stands when the save runs. Nothing
+   * here writes `DisplayOrder` or splices the page.
    *
    * WHY THE DAMAGE DIFF IS HERE. `reorderQuestion` says it is the only path that can invert a
    * pair of surviving questions, and that if insert-at-index ever shipped "that proof lapses and
@@ -643,17 +664,13 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.busy = true;
     try {
       const before = this.ruleEntries;
-      const node = await this.state.addQuestion(this.tree, page, type, this.defaultPrompt(type));
+      // Clamped, not trusted: the seam index was read when the popover opened.
+      const at = Math.min(seam.index, page.questions.length);
+      // One save creates the question at the seam AND renumbers everything below it; the service
+      // puts the node into the page itself once it is saved.
+      const node = await this.state.addQuestion(this.tree, page, type, this.defaultPrompt(type), at);
       if (!node) {
         return;
-      }
-      // Clamped, not trusted: the seam index was read when the popover opened.
-      page.questions.splice(Math.min(seam.index, page.questions.length), 0, node);
-      if (!(await this.state.persistQuestionOrder(page))) {
-        LogError(
-          `Insert of a ${type} question on page ${page.entity.ID} was not fully persisted; ` +
-            'DisplayOrder may not match the order on screen.',
-        );
       }
       this.noteAnyDamage(before, node.entity.ID, node.entity.Prompt, page);
       this.selection = questionSelection(node.entity.ID);
@@ -801,7 +818,7 @@ export class FormBuilderComponent extends BaseFormComponent {
       return;
     }
     this.busy = true;
-    if (await this.state.deletePage(page)) {
+    if (await this.state.deletePage(this.tree, page)) {
       this.tree.pages = this.tree.pages.filter((p) => p.entity.ID !== page.entity.ID);
       this.selection = clearIfPage(this.selection, page.entity.ID);
       for (const q of page.questions) {
@@ -1348,7 +1365,15 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.markDirty();
   }
 
+  /**
+   * The option verbs and the question delete hold `busy` like every other structural handler, so a
+   * second click cannot queue an edit computed from a page the first is about to change. (The
+   * service also reads the page when each save RUNS, so even a queued pair stays consistent.)
+   */
   protected async onAddOption(event: { node: QuestionNode; matrixAxis?: 'Row' | 'Column' }): Promise<void> {
+    if (this.busy || !this.tree) {
+      return;
+    }
     const { node, matrixAxis } = event;
     // Number within the AXIS, not within the whole option list: a matrix whose second column
     // was labelled "Option 4" because two rows came first is just confusing.
@@ -1358,31 +1383,53 @@ export class FormBuilderComponent extends BaseFormComponent {
       ? node.options.filter((o) => (o.MatrixAxis ?? 'Row') === matrixAxis)
       : node.options;
     const label = nextOptionLabel(peers.map((o) => o.Label), matrixAxis ?? 'Option');
-    const option = await this.state.addOption(node, label, matrixAxis);
-    if (option) {
-      node.options.push(option);
-      this.markDirty();
-    }
+    await this.whileBusy(async () => {
+      // The service puts the saved option into `node.options` itself.
+      if (this.tree && (await this.state.addOption(this.tree, node, label, matrixAxis))) {
+        this.markDirty();
+      }
+    });
   }
 
   protected async onRemoveOption(event: { node: QuestionNode; optionIndex: number }): Promise<void> {
     const { node, optionIndex } = event;
     const option = node.options[optionIndex];
-    if (option && (await this.state.deleteOption(option))) {
-      node.options.splice(optionIndex, 1);
-      await this.state.persistOptionOrder(node);
-      this.markDirty();
+    if (this.busy || !this.tree || !option) {
+      return;
     }
+    await this.whileBusy(async () => {
+      // The delete closes the gap in the option order in the same save, and takes the option out
+      // of `node.options` itself once it is gone.
+      if (this.tree && (await this.state.deleteOption(this.tree, node, option))) {
+        this.markDirty();
+      }
+    });
   }
 
   protected async deleteQuestion(page: PageNode, node: QuestionNode): Promise<void> {
-    if (this.busy || !(await this.state.deleteQuestion(node))) {
+    if (this.busy || !this.tree) {
       return;
     }
-    page.questions = page.questions.filter((q) => q !== node);
-    await this.state.persistQuestionOrder(page);
-    this.selection = clearIfQuestion(this.selection, node.entity.ID);
-    this.markDirty();
+    await this.whileBusy(async () => {
+      // One save deletes it (with its options) and closes the gap in the page's order; the service
+      // takes it out of `page.questions` once it is gone.
+      if (this.tree && (await this.state.deleteQuestion(this.tree, page, node))) {
+        this.selection = clearIfQuestion(this.selection, node.entity.ID);
+        this.markDirty();
+      }
+    });
+  }
+
+  /** Hold `busy` across `work`, released on every path — a stuck flag freezes every guarded handler. */
+  private async whileBusy(work: () => Promise<void>): Promise<void> {
+    this.busy = true;
+    this.cdr.markForCheck();
+    try {
+      await work();
+    } finally {
+      this.busy = false;
+      this.cdr.markForCheck();
+    }
   }
 
   /**
@@ -1454,7 +1501,8 @@ export class FormBuilderComponent extends BaseFormComponent {
    * proof lapses and the diff has to wrap the new write too.
    */
   private async reorderQuestion(page: PageNode, from: number, to: number): Promise<void> {
-    if (this.busy || !isValidReorder(from, to, page.questions.length)) {
+    const tree = this.tree;
+    if (!tree || this.busy || !isValidReorder(from, to, page.questions.length)) {
       return;
     }
     const moved = page.questions[from];
@@ -1462,6 +1510,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     // what Undo puts it back before. `null` when it was last on the page.
     const wasBefore = page.questions[from + 1]?.entity.ID ?? null;
     const before = this.ruleEntries;
+    const noticeBefore = this.reorderNotice;
     moveItemInArray(page.questions, from, to);
 
     const labels = this.itemLabels;
@@ -1497,16 +1546,13 @@ export class FormBuilderComponent extends BaseFormComponent {
     // can throw, and a stuck `busy` freezes every guarded handler on the screen at once.
     this.busy = true;
     try {
-      // Checked rather than discarded: this writes one question at a time and can fail halfway,
-      // leaving `DisplayOrder` matching neither the order before this move nor the one after.
-      // `state.lastFailure()` owns SAYING so to the author — the band above this one is for a
-      // refused write — and the notice below it stays true either way, because it is about what
-      // is on screen. Logged as well so a partial write is not invisible once that band is gone.
-      if (!(await this.state.persistQuestionOrder(page))) {
-        LogError(
-          `Reorder of "${moved.entity.Prompt}" on page ${page.entity.ID} was not fully persisted; ` +
-            'DisplayOrder may match neither the previous nor the new order.',
-        );
+      // One save renumbers the page, so a refusal changed nothing in the database — and the screen
+      // is put back to match, with whatever notice stood before, instead of showing a move that
+      // did not happen. `state.lastFailure()` tells the author why.
+      if (!(await this.state.persistQuestionOrder(tree, page))) {
+        moveItemInArray(page.questions, to, from);
+        this.reorderNotice = noticeBefore;
+        LogError(`Reorder of "${moved.entity.Prompt}" on page ${page.entity.ID} was refused; nothing moved.`);
       }
     } finally {
       this.busy = false;
@@ -1521,7 +1567,7 @@ export class FormBuilderComponent extends BaseFormComponent {
    * THE SAME SHAPE AS {@link reorderQuestion} AND THE SAME BAND, deliberately: one gesture keeps
    * one behaviour. The drop is never refused because of rules — every position in every section
    * is a legal target — and if the move breaks one, the author reads it in the band the in-page
-   * drag already raises. Publish is what refuses a broken form (`publish.service.ts`), and it
+   * drag already raises. Publish is what refuses a broken form (`Forms.PublishForm`), and it
    * still does.
    *
    * It DISCHARGES the obligation {@link reorderQuestion} records. That method claims to be the
@@ -1543,7 +1589,9 @@ export class FormBuilderComponent extends BaseFormComponent {
     from: number,
     to: number,
   ): Promise<void> {
+    const tree = this.tree;
     if (
+      !tree ||
       this.busy ||
       !isValidCrossPageMove(from, source.questions.length, to, destination.questions.length)
     ) {
@@ -1554,6 +1602,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     // to, so the anchor has to be one of that page's questions. `null` when it was last there.
     const wasBefore = source.questions[from + 1]?.entity.ID ?? null;
     const before = this.ruleEntries;
+    const noticeBefore = this.reorderNotice;
     transferArrayItem(source.questions, destination.questions, from, to);
 
     const labels = this.itemLabels;
@@ -1577,16 +1626,13 @@ export class FormBuilderComponent extends BaseFormComponent {
 
     this.busy = true;
     try {
-      // Checked rather than discarded, exactly as the in-page reorder does.
-      // `persistCrossPageMove` orders its writes so no partial failure can put the question in
-      // two sections or none, but it CAN leave an order within one page wrong, and the author
-      // has to be able to find that out. `state.lastFailure()` says so on screen; this says so
-      // in the log for afterwards.
-      if (!(await this.state.persistCrossPageMove(moved, source, destination))) {
+      // One save moves the question and renumbers both sections, so a refusal changed nothing in
+      // the database; the screen is put back to match, exactly as the in-page reorder does.
+      if (!(await this.state.persistCrossPageMove(tree, moved, source, destination))) {
+        transferArrayItem(destination.questions, source.questions, to, from);
+        this.reorderNotice = noticeBefore;
         LogError(
-          `Move of "${moved.entity.Prompt}" from page ${source.entity.ID} to page ` +
-            `${destination.entity.ID} was not fully persisted; DisplayOrder on one of the two ` +
-            'pages may not match the order on screen.',
+          `Move of "${moved.entity.Prompt}" from page ${source.entity.ID} to page ${destination.entity.ID} was refused; nothing moved.`,
         );
       }
     } finally {
@@ -1779,8 +1825,8 @@ export class FormBuilderComponent extends BaseFormComponent {
    *
    * The builder stays mounted while its tab is open, so without this, deleting a template in the
    * gallery left the form still announcing "Saved as template" — the inconsistency that prompted
-   * this whole control being derived rather than latched. Same MJGlobal entity-event mechanism the
-   * forms list and the gallery use.
+   * this whole control being derived rather than latched. Same `onFormsWrite` mechanism the forms
+   * list and the gallery use.
    */
   /**
    * Release the template listener. Overrides rather than shadows: `BaseFormComponent` does real
@@ -1794,6 +1840,8 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.automationChanges = undefined;
     this.distributionChanges?.unsubscribe();
     this.distributionChanges = undefined;
+    this.formOperations?.unsubscribe();
+    this.formOperations = undefined;
     super.ngOnDestroy();
   }
 
@@ -1805,7 +1853,7 @@ export class FormBuilderComponent extends BaseFormComponent {
    * not ask".
    */
   private async refreshDraftAutomations(): Promise<void> {
-    const automations = await this.publisher.loadAutomations(this.record.ID);
+    const automations = await readDraftAutomations(new RunView(), this.record.ID);
     this.automationsUnknown = automations === null;
     this.draftAutomations = automations ?? [];
   }
@@ -1815,13 +1863,14 @@ export class FormBuilderComponent extends BaseFormComponent {
    *
    * Both save AND delete, unlike {@link watchForTemplateChanges}: this builder never writes
    * `FormAutomation` rows itself, so — unlike the `Form` rows it autosaves constantly — an
-   * automation save can only have come from the Automate tab and is always worth re-reading.
+   * automation write can only have come from the Automate tab, whose operations announce it
+   * (`shared/forms-writes.ts`), and is always worth re-reading.
    */
   private watchForAutomationChanges(): void {
     if (this.automationChanges) {
       return;
     }
-    this.automationChanges = this.onEntityWrite(
+    this.automationChanges = onFormsWrite(
       FORMS_ENTITY.FormAutomation,
       ['save', 'delete'],
       () => void this.refreshDraftAutomations().then(() => this.markDirty()),
@@ -1853,7 +1902,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (this.distributionChanges) {
       return;
     }
-    this.distributionChanges = this.onEntityWrite(
+    this.distributionChanges = onFormsWrite(
       FORMS_ENTITY.FormDistribution,
       ['save', 'delete'],
       () => void this.refreshShareLinks(),
@@ -1864,46 +1913,13 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (this.templateChanges) {
       return;
     }
-    // Only a DELETE: a save fires constantly while this very builder autosaves its own rows,
-    // and re-reading the template on each one would load a tree per keystroke.
-    this.templateChanges = this.onEntityWrite(FORMS_ENTITY.Form, ['delete'], () => {
+    // Only a DELETE — a record's own, or `Forms.DeleteTemplate`'s announced one from the gallery:
+    // a save fires constantly while this very builder autosaves its own rows, and re-reading the
+    // template on each one would load a tree per keystroke.
+    this.templateChanges = onFormsWrite(FORMS_ENTITY.Form, ['delete'], () => {
       if (this.tree) {
         void this.refreshSavedTemplate(this.tree.form.ID);
       }
-    });
-  }
-
-  /**
-   * Run `onWrite` whenever some other surface saves or deletes a row of `entityName`.
-   *
-   * `BaseEntity.Save()` / `.Delete()` raise an MJGlobal `ComponentEvent` tagged
-   * `BaseEntity.BaseEventCode`; decoding that shape — the event kind, the untyped `args`, the
-   * write kind, the entity name — is four guards that say nothing about why any given watcher
-   * exists. Stated once here, the three callers above read as what they actually are: which
-   * entity, which writes, and what to re-read. The reasoning that differs between them stays
-   * at the call sites, where it belongs.
-   */
-  private onEntityWrite(
-    entityName: string,
-    types: readonly ('save' | 'delete')[],
-    onWrite: () => void,
-  ): EventSubscription {
-    // Widened rather than cast: the caller states its intent with a literal union, and the
-    // event hands back a bare string. Assigning the narrow array to the wide type is the one
-    // direction that is safe without an assertion.
-    const wanted: readonly string[] = types;
-    return MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
-      if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
-        return;
-      }
-      const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
-      if (!args?.type || !wanted.includes(args.type)) {
-        return;
-      }
-      if (args.baseEntity?.EntityInfo?.Name !== entityName) {
-        return;
-      }
-      onWrite();
     });
   }
 
@@ -1926,14 +1942,23 @@ export class FormBuilderComponent extends BaseFormComponent {
    * question an author actually has once they have kept editing.
    */
   private async refreshSavedTemplate(formId: string): Promise<void> {
-    this.savedTemplateId = await this.templates.findTemplateSavedFrom(formId);
+    this.savedTemplateId = await findTemplateSavedFrom(formId);
     this.savedTemplateName = null;
     this.savedTemplateFingerprint = null;
     if (this.savedTemplateId) {
-      const templateForm = await this.templates.loadTemplateForm(this.savedTemplateId);
+      const templateForm = await loadFormRecord(this.savedTemplateId);
       if (templateForm) {
         this.savedTemplateName = templateForm.Name;
-        const templateTree = await this.state.loadTree(templateForm);
+        const templateTree = await this.state.loadTree(templateForm).catch((err: unknown) => {
+          // Not fatal to the builder: without the template's tree the indicator cannot say whether
+          // the form has drifted from it, and says "saved" without the comparison instead.
+          LogError(`Forms builder could not read template ${templateForm.ID}: ${err instanceof Error ? err.message : String(err)}`);
+          return null;
+        });
+        if (!templateTree) {
+          this.cdr.markForCheck();
+          return;
+        }
         const style = templateForm.StyleID
           ? await this.design.loadStyleById(templateForm.StyleID)
           : undefined;
@@ -1950,11 +1975,12 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   /**
-   * Copy this form into the template gallery.
+   * Copy this form into the template gallery — `Forms.CloneForm` with `AsTemplate`.
    *
-   * Pending edits are flushed first for the same reason publish flushes them: the copy is made
-   * from the database rows, so an edit still sitting in the debounce would be missing from a
-   * template that looks like it was taken from what is on screen.
+   * Pending edits are flushed first for the same reason publish flushes them: the server copies the
+   * stored rows, so an edit still sitting in the debounce would be missing from a template that
+   * looks like it was taken from what is on screen. A refusal (a template name already taken, most
+   * often) stays in the dialog, where the name can be changed.
    */
   protected async saveAsTemplate(request: SaveAsTemplateRequest): Promise<void> {
     if (!this.tree || this.busy) {
@@ -1966,24 +1992,22 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.templateDialogError = null;
     this.cdr.markForCheck();
     try {
-      // Refuse a duplicate name BEFORE writing anything: two cards reading "Client intake" are
-      // indistinguishable, and the copy is already made by the time a later check could fire.
-      if ((await this.templates.templateNameTaken(request.name)) === true) {
-        this.templateDialogError = `A template called “${request.name}” already exists. Give this one a name that tells them apart.`;
+      await this.state.flushPendingSaves();
+      const outcome = await runOperation(
+        new FormsCloneFormOperation(),
+        { SourceFormID: formId, Name: request.name, Description: request.description, AsTemplate: true },
+        `saving form ${formId} as a template`,
+        [FORMS_ENTITY.Form],
+      );
+      if (!outcome.ok) {
+        this.templateDialogError = outcome.error;
         return;
       }
-      await this.state.flushPendingSaves();
-      const result = await this.clone.cloneForm(formId, {
-        name: request.name,
-        description: request.description,
-        isTemplate: true,
-        sourceFormId: formId,
-      });
       this.templateDialogOpen = false;
       await this.refreshSavedTemplate(formId);
       this.statusMessage =
-        result.warnings.length > 0
-          ? `Saved as a template, with notes: ${result.warnings.join(' ')}`
+        outcome.output.Warnings.length > 0
+          ? `Saved as a template, with notes: ${outcome.output.Warnings.join(' ')}`
           : `Saved "${request.name}" to your templates.`;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not save this form as a template.';
@@ -1995,35 +2019,106 @@ export class FormBuilderComponent extends BaseFormComponent {
     }
   }
 
+  /**
+   * Publish the form — `Forms.PublishForm`, which snapshots the STORED rows on the server.
+   *
+   * Every coalesced edit is landed first, because the server publishes what the database holds
+   * and an edit still on its debounce timer would be missing from the live form.
+   */
   protected async publish(): Promise<void> {
     if (!this.tree || this.busy) {
       return;
     }
+    const tree = this.tree;
     this.busy = true;
     this.statusMessage = '';
     this.refusedRules = null;
-    // Land every coalesced edit before publishing. The snapshot is built from the in-memory tree
-    // so it would be correct either way, but a form whose published version contains an edit its
-    // own draft rows do not is a genuinely confusing thing to debug later.
     await this.state.flushPendingSaves();
     this.publishStateReady = false;
-    const result: PublishResult = await this.publisher.publish(this.tree);
+    const formId = tree.form.ID;
+    this.ownOperations += 1;
+    const outcome = await runOperation(
+      new FormsPublishFormOperation(),
+      { FormID: formId },
+      `publishing form ${formId}`,
+      [FORMS_ENTITY.Form, FORMS_ENTITY.FormVersion],
+    ).finally(() => {
+      this.ownOperations -= 1;
+    });
     this.busy = false;
-    if (result.success) {
-      this.statusMessage = `Published version ${result.versionNumber}.`;
-      // The draft IS the published snapshot now; re-read rather than assume, so a publish
-      // that transformed anything server-side still leaves the two sides comparable.
+    if (outcome.ok) {
+      this.statusMessage = `Published version ${outcome.output.VersionNumber}.`;
+      // The server moved `Form.Status` to Published. The record must learn it: every save sends
+      // the whole row, so the next autosave would otherwise send `Draft` back and be refused.
+      if (!(await this.refreshFormRecord())) {
+        this.statusMessage = `${this.statusMessage} Reload the builder before editing the form's settings.`;
+      }
+      // The draft IS the published snapshot now; re-read rather than assume.
       await this.refreshPublishState();
     } else {
-      this.statusMessage = result.error ?? 'Publish failed.';
-      // Only a broken-rule refusal is retractable by editing; `brokenRules` is absent on every
-      // other one, which is what leaves those messages standing until the next publish.
-      this.refusedRules = result.brokenRules ?? null;
+      this.statusMessage = outcome.error;
+      // The server's reason is shown as it came. It counts as a refusal OVER RULES — the one kind
+      // `retireStaleRefusal` retracts once they are fixed — only when it IS the broken-rule refusal
+      // for the rules on screen, word for word (`brokenRuleRefusal` over the same walk the server
+      // runs). Any other refusal — the settings, a permission, an archived form — stands until the
+      // next publish, even on a form that also has a broken rule.
+      const broken = brokenRuleLines(tree);
+      this.refusedRules = broken.length > 0 && outcome.error === brokenRuleRefusal(broken) ? broken : null;
       // A failed publish changed nothing, so the state we already had still holds. Without this
       // the control would sit on "Checking…" forever and the author would have no way to retry.
       this.publishStateReady = true;
     }
     this.cdr.markForCheck();
+  }
+
+  /**
+   * Re-read the open form's row and adopt what the server wrote, keeping any field the author has
+   * changed since. Answers whether it could; a failure is logged, not thrown — the write it follows
+   * did happen.
+   */
+  private refreshFormRecord(): Promise<boolean> {
+    // Inside the record's save chain (see `BuilderStateService.adoptStored`): a read racing a
+    // save of the same row could otherwise put the pre-save value back.
+    return this.state.adoptStored(this.record, async () => {
+      const read = await new RunView().RunView<Record<string, unknown>>({
+        EntityName: FORMS_ENTITY.Form,
+        ExtraFilter: `ID=${quoteSqlString(this.record.ID)}`,
+        ResultType: 'simple',
+        MaxRows: 1,
+      });
+      const row = read.Success ? read.Results[0] : undefined;
+      if (!row) {
+        LogError(`Forms builder could not re-read form ${this.record.ID} after the server wrote it: ${read.ErrorMessage || 'no row'}`);
+        return null;
+      }
+      return row;
+    });
+  }
+
+  /**
+   * Catch the record up whenever an OPERATION writes a form row — the Automate tab's steps (which
+   * mark `Form.Settings`), an archive or restore from Forms home. Every field save sends the whole
+   * row, so without this the next rename would put back the settings, or the status, the builder
+   * read when it opened. Records' own saves are not heard: the builder makes those itself.
+   *
+   * The builder's OWN operations are skipped ({@link ownOperations}): publish re-reads the record
+   * itself, so it can tell the author when the re-read fails, and re-reading twice is a second
+   * answer to one question.
+   */
+  private watchForFormOperations(): void {
+    if (this.formOperations) {
+      return;
+    }
+    this.formOperations = onFormsWrite(
+      FORMS_ENTITY.Form,
+      ['save'],
+      () => {
+        if (this.ownOperations === 0) {
+          void this.refreshFormRecord();
+        }
+      },
+      { operationsOnly: true },
+    );
   }
 
   protected setTab(tab: BuilderTab): void {

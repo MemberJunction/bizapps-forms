@@ -15,7 +15,7 @@
  * It does NO LLM work and NO guessing: a blueprint must pass `formBlueprintSchema`, checked again
  * here because this is the boundary every blueprint crosses.
  */
-import { LogError, LogStatus, type DatabaseProviderBase, type UserInfo } from '@memberjunction/core';
+import { LogError, LogStatus, type BaseEntity, type DatabaseProviderBase, type UserInfo } from '@memberjunction/core';
 import { BaseSingleton } from '@memberjunction/global';
 import {
   blueprintOnSubmitMode,
@@ -97,6 +97,17 @@ export interface FormFromTemplate {
 export interface FormLifecycleResult {
   formId: string;
   status: FormStatus;
+}
+
+/** What deleting a template removed with it. */
+export interface DeletedTemplate {
+  templateFormId: string;
+  pageCount: number;
+  questionCount: number;
+  optionCount: number;
+  screenCount: number;
+  automationCount: number;
+  bindingCount: number;
 }
 
 export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
@@ -251,6 +262,60 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
       const live = await hasPublishedVersion(form.ID, provider, user);
       await saveStatus(form, live && !form.IsTemplate ? 'Published' : 'Draft', 'restore');
       return { formId: form.ID, status: form.Status };
+    });
+  }
+
+  /**
+   * Permanently delete a saved template and everything under it, in ONE unit of work.
+   *
+   * DELETION IS REAL HERE, AND ONLY HERE. A working form is archived, never deleted: every child
+   * table holds a plain FK to `Form(ID)` and a form that collected responses must keep them. A
+   * template provably has none — `CK_Form_TemplateNotPublished` keeps it from being published, and
+   * the public path serves only published versions — but the rule is re-checked on the row in front
+   * of it rather than trusted, because the cost of being wrong is destroying someone's data: a form
+   * that is not a template, or a template with any response, version or share link, is refused
+   * before anything is deleted.
+   *
+   * Children go first, in FK order (options through their questions, then questions, automations
+   * before the bindings they run, screens, pages), the template last. Every row is read with a
+   * view, not `Load()`, so no generated collection is filled and each delete is that one row.
+   * Moved from the browser (`shared/template-deletion.ts`, a transaction group) by fix round 1 of
+   * #303 Task 10a.
+   */
+  public async DeleteTemplate(templateFormId: string, provider: DatabaseProviderBase, user: UserInfo): Promise<DeletedTemplate> {
+    const id = requireFormId(templateFormId, 'delete');
+    requireUser(user, `Deleting template ${id}`);
+    requireEntityTransactions(provider, `Deleting template ${id}`);
+    return runEngineUnitOfWork(provider, `[FormAuthoringEngine] template ${id} was not deleted (user ${user.ID})`, async () => {
+      const form = await loadForm(id, provider, user, 'deleted');
+      if (!form.IsTemplate) {
+        throw new FormAuthoringError(`"${form.Name}" is a form, not a template, and forms are archived rather than deleted.`);
+      }
+      await refuseAttachedRecords(form.ID, provider, user);
+      const byForm = `FormID=${quoteSqlString(form.ID)}`;
+      const questions = await rowsToDelete(ENTITY.FormQuestion, byForm, provider, user);
+      const options = questions.length
+        ? await rowsToDelete(ENTITY.FormQuestionOption, `QuestionID IN (${questions.map((q) => quoteSqlString(q.ID)).join(',')})`, provider, user)
+        : [];
+      const automations = await rowsToDelete(ENTITY.FormAutomation, byForm, provider, user);
+      const bindings = await rowsToDelete(ENTITY.FormEntityBinding, byForm, provider, user);
+      const screens = await rowsToDelete(ENTITY.FormScreen, byForm, provider, user);
+      const pages = await rowsToDelete(ENTITY.FormPage, byForm, provider, user);
+      for (const rows of [options, questions, automations, bindings, screens, pages]) {
+        await deleteEach(rows, form.ID);
+      }
+      if (!(await form.Delete())) {
+        throw new FormAuthoringError(`Could not delete template ${form.ID}: ${saveFailure(form)}. Nothing was deleted.`, { fault: true });
+      }
+      return {
+        templateFormId: form.ID,
+        pageCount: pages.length,
+        questionCount: questions.length,
+        optionCount: options.length,
+        screenCount: screens.length,
+        automationCount: automations.length,
+        bindingCount: bindings.length,
+      };
     });
   }
 
@@ -595,6 +660,61 @@ async function loadForm(formId: string, provider: DatabaseProviderBase, user: Us
   // The subclass is what closes the links on archive and checks the restore: without it the verb
   // would write a bare status, so the engine refuses rather than write anyway.
   return requireServerEntity(form, FormEntityServer, ENTITY.Form);
+}
+
+/** A row the template delete removes: what `deleteEach` needs of it. */
+type DeletableRow = BaseEntity & { ID: string };
+
+/** Every row of `entityName` matching `filter`, as entities to delete — a failed read refuses. */
+async function rowsToDelete(entityName: string, filter: string, provider: DatabaseProviderBase, user: UserInfo): Promise<DeletableRow[]> {
+  const result = await provider.RunView<DeletableRow>({ EntityName: entityName, ExtraFilter: filter, ResultType: 'entity_object', BypassCache: true }, user);
+  if (!result.Success) {
+    throw new FormAuthoringError(`Could not read ${entityName} (${result.ErrorMessage || 'no detail'}), so nothing was deleted.`, { fault: true });
+  }
+  return result.Results ?? [];
+}
+
+/** Delete each row in order, or throw naming the one refused — which rolls the whole delete back. */
+async function deleteEach(rows: readonly DeletableRow[], templateId: string): Promise<void> {
+  for (const row of rows) {
+    if (!(await row.Delete())) {
+      throw new FormAuthoringError(
+        `Could not delete ${row.EntityInfo?.Name ?? 'a row'} ${row.ID} of template ${templateId}: ${saveFailure(row)}. Nothing was deleted.`,
+        { fault: true },
+      );
+    }
+  }
+}
+
+/**
+ * Refuse a template anything is attached to — the things that make a form undeletable. Checked
+ * before the first delete, because a guard that runs after the first child is gone is not a guard.
+ */
+async function refuseAttachedRecords(formId: string, provider: DatabaseProviderBase, user: UserInfo): Promise<void> {
+  const byForm = `FormID=${quoteSqlString(formId)}`;
+  const reads = await provider.RunViews<{ ID: string }>(
+    [ENTITY.FormResponse, ENTITY.FormVersion, ENTITY.FormDistribution].map((EntityName) => ({
+      EntityName,
+      ExtraFilter: byForm,
+      ResultType: 'simple' as const,
+      Fields: ['ID'],
+      BypassCache: true,
+    })),
+    user,
+  );
+  if (reads.some((read) => !read?.Success)) {
+    throw new FormAuthoringError('Could not confirm this template has no responses attached, so it was not deleted.', { fault: true });
+  }
+  const [responses, versions, distributions] = reads.map((read) => read.Results.length);
+  if (responses > 0) {
+    throw new FormAuthoringError(`This template has ${responses} response(s) attached and cannot be deleted.`);
+  }
+  if (versions > 0) {
+    throw new FormAuthoringError(`This template has ${versions} published version(s) attached and cannot be deleted.`);
+  }
+  if (distributions > 0) {
+    throw new FormAuthoringError(`This template has ${distributions} distribution link(s) attached and cannot be deleted.`);
+  }
 }
 
 async function hasPublishedVersion(formId: string, provider: DatabaseProviderBase, user: UserInfo): Promise<boolean> {

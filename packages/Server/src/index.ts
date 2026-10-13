@@ -21,6 +21,7 @@ import {
   LoadCloneFormOperation,
   LoadCloseDistributionOperation,
   LoadCreateFormFromTemplateOperation,
+  LoadDeleteTemplateOperation,
   LoadFormsEntityServerSubclasses,
   LoadGetDistributionClaimsOperation,
   LoadGetRespondentFormOperation,
@@ -145,6 +146,7 @@ export function LoadBizAppsFormsServer(): void {
     LoadCreateFormFromTemplateOperation();
     LoadArchiveFormOperation();
     LoadRestoreFormOperation();
+    LoadDeleteTemplateOperation();
     LoadIssueDistributionLinkOperation();
     LoadReissueDistributionLinkOperation();
     LoadOpenDistributionOperation();
