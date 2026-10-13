@@ -416,4 +416,54 @@ describe('toRespondentDefinition — items no respondent can ever see', () => {
       );
     }
   });
+
+  // #303 Task 8 carry from the Task 2 review. The widget banks a checkpoint by POSITION: a page marked
+  // `isPartialSubmitPoint` counts as passed once the respondent has answered something on a LATER
+  // page (`passedSubmitPoints`), whether or not the checkpoint page itself showed anything. Dropping a
+  // page no respondent can see therefore dropped its checkpoint with it, and an author's "save
+  // progress here" stopped banking once the widget read the projection.
+  it('keeps the checkpoint of a page it drops, as a copy-less stub in the same position', () => {
+    const published = formWith([
+      { id: 'p1', displayOrder: 0, questions: [q('a')] },
+      {
+        id: 'p-gated',
+        displayOrder: 1,
+        title: 'Gated section',
+        isPartialSubmitPoint: true,
+        conditionalRule: scoreGated,
+        questions: [q('g', { prompt: 'Gated prompt' })],
+      },
+      {
+        id: 'p-emptied',
+        displayOrder: 2,
+        title: 'Emptied section',
+        description: 'Emptied description',
+        isPartialSubmitPoint: true,
+        questions: [q('h', { conditionalRule: scoreGated, prompt: 'Emptied prompt' })],
+      },
+      { id: 'p4', displayOrder: 3, questions: [q('z')] },
+    ]);
+    const projection = toRespondentDefinition(published);
+
+    expect(projection.pages.map((page) => [page.id, page.isPartialSubmitPoint === true])).toEqual([
+      ['p1', false],
+      ['p-gated', true],
+      ['p-emptied', true],
+      ['p4', false],
+    ]);
+    for (const stub of projection.pages.slice(1, 3)) {
+      expect(stub.questions).toEqual([]);
+      expect(stub.title).toBeUndefined();
+      expect(stub.description).toBeUndefined();
+    }
+    const json = JSON.stringify(projection);
+    expect(json).not.toContain('Gated');
+    expect(json).not.toContain('Emptied');
+    // And the walk is still the published walk.
+    for (const answers of [new Map(), new Map([['a', 'x'], ['z', 'y']])]) {
+      expect(settleVisibility(projection, answers).rendered.map((question) => question.id)).toEqual(
+        settleVisibility(published, answers).rendered.map((question) => question.id),
+      );
+    }
+  });
 });

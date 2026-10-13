@@ -98,8 +98,9 @@ export function toAnswerInputType(answer: FormAnswerInput): FormAnswerInputType 
 // --- Compile-time contract lock (widget <-> S1 wire shape) -----------------
 //
 // Fails `ngc` if the wire shape drifts from the frozen `@mj-biz-apps/forms-entities` contract.
-// Mirrors the server-side lock in Server/src/public-submit/graphql-types.ts so BOTH ends pin to
-// the same contract. Two divergences are DELIBERATE: answer `jsonValue` is a JSON STRING here
+// Its server-side twin (forms-server's `public-submit/graphql-types.ts`) was retired with the
+// `SubmitFormResponse` mutation (#303 Task 8); the server's wire shape is now the generated
+// `FormsSaveResponseInput`, which the widget adopts in #303 Task 10. Two divergences are DELIBERATE: answer `jsonValue` is a JSON STRING here
 // (contract: structured JSONValue), and `responseId` is transport-only (not in the contract).
 
 /** Flatten intersections / Omit / mapped types to a plain object literal so `Exact` compares cleanly. */

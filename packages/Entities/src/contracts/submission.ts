@@ -44,7 +44,10 @@ export interface FormAnswerInput {
   fileId?: string | null;
 }
 
-/** The payload posted to the S1 `SubmitFormResponse` mutation. */
+/**
+ * The payload the retired `SubmitFormResponse` mutation took — still the widget's transport shape until
+ * it switches to `Forms.SaveResponse` (#303 Task 10), whose input is `FormsSaveResponseInput`.
+ */
 export interface FormSubmissionInput {
   /** Resolves FormDistribution -> Form -> published FormVersion. */
   distributionSlug: string;
@@ -99,7 +102,10 @@ export const NOTHING_TO_SUBMIT_MESSAGE = 'Please answer at least one question be
 export const CAPTCHA_NOT_CONFIGURED_MESSAGE =
   'This form requires a security check that has not been set up on this server. Please contact the form owner.';
 
-/** The result returned by the S1 `SubmitFormResponse` mutation. */
+/**
+ * The result the retired `SubmitFormResponse` mutation returned — still the widget's transport shape
+ * until it switches to `Forms.SaveResponse` (#303 Task 10), whose output is `FormsSaveResponseOutput`.
+ */
 export interface FormSubmissionResult {
   success: boolean;
   responseId?: string;

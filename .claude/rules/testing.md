@@ -39,7 +39,7 @@ directly. MJ's rule lists both; they do not exist here.
   from the MJ app scaffold — leave it alone; new package tests use `.spec.ts`.
 - Two placements, both in use:
   - **colocated** beside the source — `create-followup-task.action.spec.ts`
-  - **`__tests__/`** subdirectory — `packages/Server/src/public-submit/__tests__/`
+  - **`__tests__/`** subdirectory — `packages/CoreEntitiesServer/src/submission/__tests__/`
 
   Follow whichever the neighbouring code already uses.
 - **`@memberjunction/test-utils` is not installed here.** MJ's rule tells you to use it; don't, unless

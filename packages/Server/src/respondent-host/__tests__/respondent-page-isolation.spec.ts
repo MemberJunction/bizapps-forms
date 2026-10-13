@@ -137,7 +137,7 @@ import type { Server } from 'node:http';
 import { RespondentHostMiddleware } from '../RespondentHostMiddleware';
 import { resetRespondentHostConfigForTests } from '../config';
 import { redeemInFlightLimiter, resetRedeemInFlightForTests } from '../redeem-rate-limit';
-import { FORM_DISTRIBUTION_ENTITY, FORM_ENTITY, FORM_VERSION_ENTITY } from '../../public-submit/entity-names';
+import { FORMS_ENTITY } from '@mj-biz-apps/forms-core-entities-server';
 
 /**
  * The REAL global `fetch`, captured before `beforeEach` stubs it. `redeemSlugToToken` runs for
@@ -203,9 +203,10 @@ beforeEach(() => {
   redeemProviderSeen = undefined;
   identityProviderSeen = undefined;
   acquireBehavior = async () => LEASED_INSTANCE;
-  rowsByEntity[FORM_DISTRIBUTION_ENTITY] = [DISTRIBUTION];
-  rowsByEntity[FORM_VERSION_ENTITY] = [{ ID: 'version-1' }];
-  rowsByEntity[FORM_ENTITY] = [{ Description: 'Tell us how we did.' }];
+  rowsByEntity[FORMS_ENTITY.FormDistribution] = [DISTRIBUTION];
+  rowsByEntity[FORMS_ENTITY.FormVersion] = [{ ID: 'version-1' }];
+  // `Status` because the door now refuses a form that is not Published (#303 Task 8 fix round 1).
+  rowsByEntity[FORMS_ENTITY.Form] = [{ Description: 'Tell us how we did.', Status: 'Published' }];
   // `redeemSlugToToken` runs for real in this suite (see file header), so its `postRedeem` step
   // makes a genuine `fetch` call to core's redeem endpoint — stubbed to a bare success so the
   // slug-lookup read under test is the thing that decides pass/fail, not the network step after it.

@@ -6,8 +6,8 @@ import type { FormAnswerInput } from './submission';
 import type { PublishedFormDefinition } from './form-definition';
 import type { PublishedFormQuestion } from './form-definition';
 import { isAnswerSupplied } from './conditional-rule';
+import { MAX_ANSWER_VALUE_BYTES } from './answer-shape';
 import {
-  MAX_ANSWER_VALUE_BYTES,
   UNKNOWN_QUESTION_MESSAGE,
   answerValueOf,
   validateAnswer,
@@ -377,6 +377,43 @@ describe('validateAnswers — the date column, in every mode (#116)', () => {
     expect(outcome.errors).toEqual([{ questionId: 'q-time', message: 'Enter a valid time.' }]);
   });
 
+  describe('a numeric column on a DRAFT (#303 Task 8)', () => {
+  // Carry from the Task 2 review. A DRAFT was held to upper bounds only, so an autosave
+  // could store "12abc" as the TextValue of a Number question — a value no completion would accept
+  // and no numeric reader can use. A number control emits nothing until the value parses, so a
+  // non-number is never "still being typed" towards a number: refused, like an unstorable date.
+  it('rejects a non-numeric value for a Number question on a DRAFT, attributed to its question', () => {
+    const outcome = validateAnswers(numericDraftDefinition(), [{ questionId: 'q-count', textValue: '12abc' }], 'draft');
+    expect(outcome.errors).toEqual([{ questionId: 'q-count', message: 'Enter a number.' }]);
+    expect(outcome.answers).toEqual([]);
+  });
+
+  it('rejects a non-numeric Rating and NPS on a DRAFT too — every numeric-column type', () => {
+    const outcome = validateAnswers(
+      numericDraftDefinition(),
+      [
+        { questionId: 'q-rating', textValue: 'five' },
+        { questionId: 'q-nps', textValue: 'ten' },
+      ],
+      'draft',
+    );
+    expect(outcome.errors.map((e) => e.questionId).sort()).toEqual(['q-nps', 'q-rating']);
+  });
+
+  it('still lets a DRAFT carry a number, in either column spelling', () => {
+    const outcome = validateAnswers(
+      numericDraftDefinition(),
+      [
+        { questionId: 'q-count', numericValue: 12 },
+        { questionId: 'q-rating', textValue: '4' },
+      ],
+      'draft',
+    );
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.answers.map((a) => a.question.id).sort()).toEqual(['q-count', 'q-rating']);
+  });
+  });
+
   it('still lets a DRAFT carry a whole date or time', () => {
     const outcome = validateAnswers(
       temporalDefinition(),
@@ -390,6 +427,29 @@ describe('validateAnswers — the date column, in every mode (#116)', () => {
     expect(outcome.answers.map((a) => a.question.id).sort()).toEqual(['q-date', 'q-time']);
   });
 });
+
+/** One optional question of each numeric-column type, for the draft numeric rule. */
+function numericDraftDefinition(): PublishedFormDefinition {
+  const question = (id: string, type: 'Number' | 'Rating' | 'NPS', displayOrder: number) => ({
+    id,
+    type,
+    prompt: id,
+    isRequired: false,
+    displayOrder,
+    options: [],
+  });
+  return {
+    formId: 'form-num',
+    formVersionId: 'ver-num',
+    name: 'Numbers',
+    renderMode: 'Scroll',
+    settings: { anonymousAllowed: true, captchaRequired: false },
+    styleTokens: { cssVariables: {} },
+    pages: [{ id: 'p1', displayOrder: 1, questions: [question('q-count', 'Number', 1), question('q-rating', 'Rating', 2), question('q-nps', 'NPS', 3)] }],
+    automations: [],
+    endScreens: [],
+  };
+}
 
 /** A definition where q-other is shown only when q-choice equals 'Other'. */
 function conditionalDefinition(): PublishedFormDefinition {
@@ -1111,3 +1171,30 @@ describe('validateAnswers — settled visibility', () => {
     expect(outcome.visibility.settled).toBe(true);
   });
 });
+
+/**
+ * Fix round 3 (re-review N2): the per-field verdict the widget shows under a field and gates Submit on
+ * (`validateAnswer`) must refuse what the whole-payload verdict (`validateAnswers`) refuses, or the
+ * respondent is told nothing until the server's banner — which names no field.
+ */
+describe('validateAnswer and validateAnswers agree on numbers the column cannot store', () => {
+  const num = { id: 'q-n', type: 'Number' as const, prompt: 'n', isRequired: false, displayOrder: 1, options: [] };
+  const edges: [number, string | undefined][] = [
+    [3.14159, 'Use at most 4 decimal places.'],
+    [1e-5, 'Use at most 4 decimal places.'],
+    [1e14, 'Enter a number between -99999999999999.9999 and 99999999999999.9999.'],
+    [1e15, 'Enter a number between -99999999999999.9999 and 99999999999999.9999.'],
+    [3.1416, undefined],
+    [-12, undefined],
+  ];
+  for (const mode of ['complete', 'draft', 'screened-out'] as const) {
+    for (const [value, message] of edges) {
+      it(`${mode}: ${value}`, () => {
+        expect(validateAnswer(num, value, mode)?.message).toBe(message);
+        const whole = validateAnswers({ pages: [{ id: 'p', displayOrder: 1, questions: [num] }] }, [{ questionId: 'q-n', numericValue: value }], mode);
+        expect(whole.errors[0]?.message).toBe(message);
+      });
+    }
+  }
+});
+

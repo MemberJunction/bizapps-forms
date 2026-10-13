@@ -172,10 +172,10 @@ export type FormAutomationTrigger = 'OnComplete' | 'OnPartial' | 'OnCompleteOrPa
  * true when the dispatch was detached, and a contract nobody honours is worse than a narrower one
  * that everybody does.
  *
- * The gap this leaves is real and deliberate: there is no per-automation way to say "hold the
- * confirmation until this finishes", only the process-wide `FORMS_HOOKS_BLOCKING` switch. Adding
- * one is a product decision, not a doc fix — every automation the builder creates defaults to
- * `Sync`, so making Sync block would put existing forms' respondents back behind the full chain.
+ * The gap this leaves is real and deliberate: there is no way to say "hold the confirmation until
+ * this finishes" — the submit commits a Work Queue message and the `Forms.RunAutomations` handler
+ * runs the chain later (#303; the process-wide `FORMS_HOOKS_BLOCKING` switch went with the inline
+ * path). Adding one is a product decision, not a doc fix.
  */
 export type FormAutomationExecutionMode = 'Sync' | 'Async';
 

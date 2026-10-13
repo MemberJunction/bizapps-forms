@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { PublishedFormDefinition, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
-import { validateAnswers } from '@mj-biz-apps/forms-entities/contracts';
+import { resolveResponseOutcome, toRespondentDefinition, validateAnswers } from '@mj-biz-apps/forms-entities/contracts';
 import { FormRuntime } from './form-runtime';
 
 /** A small two-page form with a conditional follow-up + a required field. */
@@ -810,5 +810,185 @@ describe('FormRuntime — the field and the form judge the same value', () => {
     rt.setValue('q-num', 'abc');
     expect(rt.errorFor(rt.visibleAnswerableQuestions()[0])).toBe('Enter a number.');
     expect(rt.isFormValid()).toBe(false);
+  });
+});
+
+/**
+ * #303 Task 8 fix round 3 (re-review N2): one rule, both sides. The server refuses a number the
+ * `decimal(18,4)` column cannot hold — more than 4 decimal places, or out of range — and the widget's
+ * per-field verdict (`validateAnswer`, behind `errorMessage` and `areValid`) used to call that same
+ * number valid. So no message appeared, Submit posted, the server's banner named no field, and every
+ * autosave was refused WHOLE — silently, so nothing typed after it was saved.
+ *
+ * Decision for the autosave: EXCLUDE the unstorable field from the draft payload (`buildDraftInputs`)
+ * and show the error under it. Everything else the respondent typed keeps saving; the one field it
+ * cannot store is named on screen, and a final submit stays blocked by `areValid` until it is fixed.
+ * Surfacing alone would leave the rest of the draft unsaved for as long as the field is wrong.
+ */
+describe('FormRuntime — a number the server cannot store (fix round 3)', () => {
+  function numberForm(): PublishedFormDefinition {
+    return {
+      formId: 'f',
+      formVersionId: 'v',
+      name: 'Numbers',
+      renderMode: 'Scroll',
+      settings: { anonymousAllowed: true, captchaRequired: false },
+      styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
+      pages: [
+        {
+          id: 'p',
+          displayOrder: 1,
+          questions: [
+            { id: 'q-pi', type: 'Number', prompt: 'Pi', isRequired: false, displayOrder: 1, options: [] },
+            { id: 'q-name', type: 'ShortText', prompt: 'Name', isRequired: false, displayOrder: 2, options: [] },
+          ],
+        },
+      ],
+    };
+  }
+
+  it('shows the field error the server would give, and the field is not valid', () => {
+    const rt = new FormRuntime(numberForm());
+    rt.setValue('q-pi', 3.14159);
+    const question = rt.visiblePages()[0].questions[0];
+    expect(rt.errorFor(question)).toBe('Use at most 4 decimal places.');
+    expect(rt.areValid([question])).toBe(false);
+
+    rt.setValue('q-pi', 1e15);
+    expect(rt.errorFor(question)).toBe('Enter a number between -99999999999999.9999 and 99999999999999.9999.');
+  });
+
+  it('autosaves everything else, leaving out only the field it cannot store — so the draft is never refused whole', () => {
+    const rt = new FormRuntime(numberForm());
+    rt.setValue('q-pi', 3.14159);
+    rt.setValue('q-name', 'Ada');
+
+    const draft = rt.buildDraftInputs();
+
+    expect(draft.held).toBe(false);
+    const answers = draft.held ? [] : draft.answers;
+    expect(answers.map((a) => a.questionId)).toEqual(['q-name']);
+    expect(validateAnswers(numberForm(), answers, 'draft').errors).toEqual([]);
+    // The FINAL payload still carries it — the submit is blocked by `areValid`, not by dropping it.
+    expect(rt.buildAnswerInputs().map((a) => a.questionId)).toEqual(['q-pi', 'q-name']);
+  });
+
+  it('keeps a storable number in the draft', () => {
+    const rt = new FormRuntime(numberForm());
+    rt.setValue('q-pi', 3.1416);
+    expect(rt.buildDraftInputs()).toEqual({ held: false, answers: [{ questionId: 'q-pi', numericValue: 3.1416 }] });
+  });
+});
+
+/**
+ * #303 Task 8 fix round 4 (re-review R3-1/R3-2, controller ruling). Leaving an unstorable field out
+ * of an autosave must never change what the server judges for anything else. To a rule, a field that
+ * is left out is a field nobody answered: a show rule on it hides the question that depends on it
+ * (the server drops that answer and DELETES its saved draft row), and an `isNotAnswered` knockout on
+ * it fires on an answer the respondent did give. So when a rule may read the field, the autosave is
+ * HELD — nothing is sent, the answers stay in the browser, the field shows its error — and a field no
+ * rule reads is still left out alone, so the rest of the draft keeps saving.
+ */
+describe('FormRuntime — an autosave never leaves out a field a rule reads (fix round 4)', () => {
+  function ruledForm(rules: { bShownWhen?: PublishedFormQuestion['conditionalRule']; pageRule?: PublishedFormDefinition['pages'][number]['conditionalRule'] }): PublishedFormDefinition {
+    return {
+      formId: 'f',
+      formVersionId: 'v',
+      name: 'Rules',
+      renderMode: 'Scroll',
+      settings: { anonymousAllowed: true, captchaRequired: false },
+      styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [{ id: 'ko', screenType: 'Ending', title: 'Not eligible', displayOrder: 1, isDisqualification: true }],
+      pages: [
+        {
+          id: 'p',
+          displayOrder: 1,
+          conditionalRule: rules.pageRule,
+          questions: [
+            { id: 'a', type: 'Number', prompt: 'A', isRequired: false, displayOrder: 1, options: [] },
+            { id: 'b', type: 'ShortText', prompt: 'B', isRequired: false, displayOrder: 2, options: [], conditionalRule: rules.bShownWhen },
+            { id: 'c', type: 'Number', prompt: 'C', isRequired: false, displayOrder: 3, options: [] },
+          ],
+        },
+      ],
+    };
+  }
+
+  it('R3-1: A=3.14159 with B shown when A > 0 — holds the autosave, so B is never dropped and its saved row never deleted', () => {
+    const definition = ruledForm({ bShownWhen: { show: { all: [{ questionId: 'a', op: 'greaterThan', value: 0 }] } } });
+    const rt = new FormRuntime(definition);
+    rt.setValue('a', 3.14159);
+    rt.setValue('b', 'valid answer');
+
+    // The respondent sees B, and the error under A.
+    expect(rt.visibleAnswerableQuestions().map((q) => q.id)).toEqual(['a', 'b', 'c']);
+    expect(rt.errorFor(rt.visibleAnswerableQuestions()[0])).toBe('Use at most 4 decimal places.');
+
+    expect(rt.buildDraftInputs()).toEqual({ held: true, unstorable: ['a'] });
+
+    // Why: the payload trimmed of A is one in which the server would hide B and drop its answer.
+    const trimmed = rt.buildAnswerInputs().filter((answer) => answer.questionId !== 'a');
+    const verdict = validateAnswers(definition, trimmed, 'draft');
+    expect(verdict.errors).toEqual([]);
+    expect(verdict.answers.map((answer) => answer.input.questionId)).toEqual([]);
+  });
+
+  it('R3-2: A=42.00001 with an isNotAnswered knockout on A — holds the autosave, so no partial comes back ended', () => {
+    const definition = ruledForm({
+      pageRule: { jump: [{ when: { all: [{ questionId: 'a', op: 'isNotAnswered' }] }, target: { kind: 'ending', id: 'ko' } }] },
+    });
+    const rt = new FormRuntime(definition);
+    rt.setValue('a', 42.00001);
+
+    expect(rt.buildDraftInputs()).toEqual({ held: true, unstorable: ['a'] });
+
+    // Why: on the payload trimmed of A the server's outcome is the knockout; on the real one it is not.
+    const answersOf = (inputs: { questionId: string; numericValue?: number | null }[]): Map<string, number | undefined> =>
+      new Map(inputs.map((input) => [input.questionId, input.numericValue ?? undefined]));
+    expect(resolveResponseOutcome(definition, answersOf([])).outcome.disqualified).toBe(true);
+    expect(resolveResponseOutcome(definition, answersOf(rt.buildAnswerInputs())).outcome.disqualified).toBe(false);
+  });
+
+  it('a bad field no rule reads is still left out alone, and the rest of the draft saves', () => {
+    const definition = ruledForm({ bShownWhen: { show: { all: [{ questionId: 'a', op: 'greaterThan', value: 0 }] } } });
+    const rt = new FormRuntime(definition);
+    rt.setValue('a', 7);
+    rt.setValue('b', 'valid answer');
+    rt.setValue('c', 1.23456);
+
+    const draft = rt.buildDraftInputs();
+    expect(draft).toEqual({
+      held: false,
+      answers: [
+        { questionId: 'a', numericValue: 7 },
+        { questionId: 'b', textValue: 'valid answer' },
+      ],
+    });
+    const verdict = validateAnswers(definition, draft.held ? [] : draft.answers, 'draft');
+    expect(verdict.errors).toEqual([]);
+    expect(verdict.answers.map((answer) => answer.input.questionId)).toEqual(['a', 'b']);
+  });
+
+  it('holds on the respondent projection the widget is served, which has had the rules that could read the field removed', () => {
+    const full = ruledForm({
+      pageRule: { jump: [{ when: { all: [{ questionId: 'c', op: 'isNotAnswered' }] }, target: { kind: 'ending', id: 'ko' } }] },
+    });
+    // What the widget's API load does with the server's payload.
+    const served = JSON.parse(JSON.stringify(toRespondentDefinition(full))) as PublishedFormDefinition;
+    const rt = new FormRuntime(served);
+    rt.setValue('b', 'valid answer');
+    rt.setValue('c', 1.23456);
+
+    expect(rt.buildDraftInputs()).toEqual({ held: true, unstorable: ['c'] });
+  });
+
+  it('sends a draft with nothing to leave out exactly as before', () => {
+    const rt = new FormRuntime(ruledForm({ bShownWhen: { show: { all: [{ questionId: 'a', op: 'greaterThan', value: 0 }] } } }));
+    rt.setValue('a', 3.1416);
+    rt.setValue('b', 'valid answer');
+    expect(rt.buildDraftInputs()).toEqual({ held: false, answers: rt.buildAnswerInputs() });
   });
 });

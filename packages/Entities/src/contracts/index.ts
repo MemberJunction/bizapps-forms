@@ -39,6 +39,8 @@ export * from './rules-panel-model';
 export * from './rules-inventory';
 export * from './snapshot-builder';
 export * from './visibility';
+export * from './answer-shape';
 export * from './answer-validation';
 export * from './respondent-definition';
 export * from './response-outcome';
+export * from './rule-sources';

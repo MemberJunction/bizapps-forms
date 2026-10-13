@@ -394,10 +394,10 @@
             <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
             <span>
               {{ summary() }}
-              <!-- True whether or not the deployment runs hooks blocking: persistence happens
-                   before dispatch either way, so the guarantee below holds in both modes. A note
-                   promising "the respondent never waits" would not — that one is a default an
-                   operator can flip with FORMS_HOOKS_BLOCKING. -->
+              <!-- True by construction: the answers commit in the same transaction as the Work Queue
+                   message that schedules these steps, and the Forms.RunAutomations handler runs
+                   them afterwards (#303). A step that fails or takes its time never touches the
+                   stored response. -->
               <span class="at-summary-note">
                 Their answers are saved before any of this runs, so a step that fails or takes its
                 time never costs someone their submission.

@@ -23,6 +23,7 @@ import {
   LoadCreateFormFromTemplateOperation,
   LoadFormsEntityServerSubclasses,
   LoadGetDistributionClaimsOperation,
+  LoadGetRespondentFormOperation,
   LoadIssueDistributionLinkOperation,
   LoadOpenDistributionOperation,
   LoadFormsWorkQueue,
@@ -33,6 +34,7 @@ import {
   LoadRestoreFormOperation,
   LoadRunAutomationsHandler,
   LoadSaveAutomationOperation,
+  LoadSaveResponseOperation,
   MagicLinkMinterRegistry,
 } from '@mj-biz-apps/forms-core-entities-server';
 
@@ -62,9 +64,6 @@ import './http/RequestIdentityMiddleware.js';
 // — on every error unless NODE_ENV is production, and the anonymous session a public link mints is
 // enough to request one; this keeps it off the wire whatever NODE_ENV says (#119).
 import './http/StacktraceRedactionMiddleware.js';
-
-// WP-B: import the custom public-submit resolver so its TypeGraphQL metadata is registered.
-import './public-submit/PublicFormResolver.js';
 
 // TASK 2: import the respondent host-page middleware so its @RegisterClass fires and MJ
 // server bootstrap discovers the public /f/:slug route (anonymous, shell-free host page).
@@ -121,11 +120,13 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 // at import time makes provisioning work regardless. Idempotent: a re-register replaces.
 MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());
 
-/** Absolute paths to the generated resolver files, for use with createMJServer() */
+/**
+ * Absolute paths to the generated resolver files, for use with createMJServer(). Generated resolvers
+ * ONLY (spec #303 §1): the respondent API that used to add `public-submit/*Resolver` here is now the
+ * `Forms.GetRespondentForm` / `Forms.SaveResponse` Remote Operations, served by MJ's own
+ * `ExecuteRemoteOperation` mutation — as `Forms.GetDistributionClaims` replaced #292's resolver.
+ */
 export const RESOLVER_PATHS = [resolve(__dirname, 'generated/generated.{js,ts}')];
-// WP-B (public submit endpoint): custom anonymous resolvers, discovered via the *Resolver glob.
-// (#292's FormDistributionClaims query is now the `Forms.GetDistributionClaims` Remote Operation.)
-RESOLVER_PATHS.push(resolve(__dirname, 'public-submit/*Resolver.{js,ts}'));
 
 /**
  * Bootstrap function called by DynamicPackageLoader during MJAPI startup.
@@ -149,6 +150,9 @@ export function LoadBizAppsFormsServer(): void {
     LoadSaveAutomationOperation();
     LoadReorderAutomationsOperation();
     LoadRemoveAutomationOperation();
+    // The respondent operations (#303 Task 8): what an anonymous respondent loads, and every save.
+    LoadGetRespondentFormOperation();
+    LoadSaveResponseOperation();
     // The work-queue outbox (#303 §5): the `Forms.RunAutomations` handler a host with
     // `workQueue.enabled` resolves by HandlerKey, and the startup sink that configures
     // `WorkQueueEngine` for publishing. The configuring cannot happen HERE: the host calls this while

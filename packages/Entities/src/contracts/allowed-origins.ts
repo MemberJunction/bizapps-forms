@@ -9,7 +9,7 @@
  * types — importable from the server, the builder and a unit test alike. The server-side half of
  * the verdict (composing this policy with the API's OWN origin, which is what a real `<iframe>`
  * embed reports) deliberately does NOT live here: that is a deployment fact, and it lives in
- * `forms-server`'s `http/embed-origin.ts`. What DOES live here is how any origin — authored or
+ * `forms-core-entities-server`'s `shared/embed-origin.ts`. What DOES live here is how any origin — authored or
  * merely reported — is read ({@link normalizeOrigin} / {@link normalizeReportedOrigin}), because
  * the two sides of a comparison have to agree even when only one of them was authored.
  *

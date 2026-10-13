@@ -46,7 +46,10 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
 vi.mock('@memberjunction/generic-database-provider', () => ({
   UserCache: { Instance: { GetSystemUser: () => undefined, UserByName: () => undefined } },
 }));
-vi.mock('@mj-biz-apps/forms-core-entities-server', () => ({
+vi.mock('@mj-biz-apps/forms-core-entities-server', async (importOriginal) => ({
+  // The rate limiter, the request-identity store and the in-flight limiter live here now (#303
+  // Task 8) and are the real ones — they are what this file is about.
+  ...(await importOriginal<typeof import('@mj-biz-apps/forms-core-entities-server')>()),
   getMagicLinkProvisioningConfig: () => ({ roleName: 'Form Respondent' }),
   // The middleware's isolated-provider helpers and the automation principal moved into this package
   // (#303); pass-throughs, because provider isolation is not what this file is about.
@@ -88,18 +91,17 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 
 import { RequestIdentityMiddleware, requestIdentityHandler } from '../../http/RequestIdentityMiddleware';
-import { currentRequestIdentity } from '../../http/request-identity';
 import {
   checkRedeemRateLimit,
   redeemInFlightLimiter,
   redeemRateLimitMax,
   resetRedeemInFlightForTests,
 } from '../redeem-rate-limit';
-import { FormsRateLimiter } from '../../public-submit/rate-limit.service';
 // Type only: the class itself is imported dynamically inside the tests that need it, so that
 // `vi.mock` is in place before the module is evaluated. `import type` is erased at compile time
 // and does not load the module, so it cannot defeat that.
 import type { RespondentHostMiddleware } from '../RespondentHostMiddleware';
+import { FormsRateLimiter, currentRequestIdentity } from '@mj-biz-apps/forms-core-entities-server';
 
 afterEach(() => {
   delete process.env.FORMS_REDEEM_IP_MAX;

@@ -7,6 +7,10 @@
  *  - engines (`engines/`) — the domain operations, each one transaction: publishing, authoring
  *    (build, clone, create from template, archive, restore), share links, and automations (editing
  *    the steps; running them for a response);
+ *  - the respondent path (`FormSubmissionEngine`, `submission/`): the gates, the transactional save and
+ *    the allowlisted projection behind `Forms.GetRespondentForm` / `Forms.SaveResponse`, plus the
+ *    pieces forms-server's public HTTP doors share with it (link resolution, rate limiter, embed
+ *    origin, the request-identity store, the ownership rule);
  *  - the `Forms.RunAutomations` work-queue handler (`work-queue/`) and the `forms.response-submitted`
  *    message contract its publisher shares;
  *  - Remote Operation server subclasses (`operations/`) — thin typed wrappers over one engine call
@@ -192,12 +196,62 @@ export {
   LoadReorderAutomationsOperation,
 } from './operations/ReorderAutomationsServerOperation.js';
 export { RemoveAutomationServerOperation, LoadRemoveAutomationOperation } from './operations/RemoveAutomationServerOperation.js';
+export {
+  GetRespondentFormServerOperation,
+  LoadGetRespondentFormOperation,
+} from './operations/GetRespondentFormServerOperation.js';
+export { SaveResponseServerOperation, LoadSaveResponseOperation } from './operations/SaveResponseServerOperation.js';
+export { authorizeRespondent, respondentSessionRefusal } from './operations/respondent-authorization.js';
+
+// The respondent path (spec #303 §4 FormSubmissionEngine, §6) and what forms-server's public HTTP doors
+// (respondent host page, redeem, resume, upload, download) share with it.
+export {
+  FormSubmissionEngine,
+  RespondentFormUnavailableError,
+  FORM_UNAVAILABLE_MESSAGE,
+  QUOTA_REACHED_MESSAGE,
+  SUBMIT_FAILED_MESSAGE,
+  type RespondentFormView,
+  type SubmissionSeams,
+} from './engines/FormSubmissionEngine.js';
+export type {
+  RespondentCaller,
+  RespondentEnding,
+  RespondentResponseStatus,
+  RespondentSaveMode,
+  RespondentSaveRequest,
+  RespondentSaveResult,
+} from './submission/save-request.js';
+export { getPublicSubmitConfig, resetPublicSubmitConfigForTests, type PublicSubmitConfig } from './submission/config.js';
+export { FormsRateLimiter, rateLimitedMessage, type RateLimitGate, type RateLimitResult } from './submission/rate-limit.js';
+export { abuseIdentity, hashSessionId, warnOnceIfAbuseKeyingDegraded } from './submission/source-metadata.js';
+export { distributionWindowClosed, distributionWindowRefusal, type DistributionWindowRefusal } from './submission/distribution-window.js';
+export { distributionQuotaExceeded } from './submission/quota.js';
+export {
+  publishedVersionFilter,
+  readFormPublication,
+  resolvePublishedDefinition,
+  type FormPublication,
+  type DefinitionLoadFailure,
+  type DefinitionLoadResult,
+  type DefinitionRunViewProvider,
+  type ResolvedDefinition,
+} from './submission/published-link.js';
+export { checkRespondentScope, type ScopeCheckResult, type ScopeMetadataProvider } from './submission/respondent-scope.js';
+export { foldId, responseIsOurs, scopeNamesResponse, withoutQueryEcho, type ResponseCaller } from './submission/persistence.js';
+export { deviceResumeAllowed, distributionOfResponse } from './submission/resume-columns.js';
+export { revokeResponseInvites, type RevokeSummary } from './magic-link/response-invite-revocation.js';
+export { checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE, apiOwnOrigin, resetEmbedOriginConfigForTests, type EmbedOriginVerdict } from './shared/embed-origin.js';
+export { InFlightLimiter, DEFAULT_MAX_IN_FLIGHT } from './shared/in-flight-limiter.js';
+export { DEFAULT_SESSION_HASH_SALT, sessionHashSalt, resetDefaultSaltWarningForTests, warnOnceIfDefaultHashSalt } from './shared/hash-salt.js';
+export { currentRequestIdentity, runWithRequestIdentity, type RequestIdentity } from './shared/request-identity.js';
 
 // The work-queue outbox (spec #303 §5): the message contract both ends share, the handler, and the
 // engine configuration a publishing host needs.
 export * from './work-queue/response-submitted.js';
 export { RunAutomationsHandler, LoadRunAutomationsHandler } from './work-queue/RunAutomationsHandler.js';
 export { configureFormsWorkQueue, FormsWorkQueueStartup, LoadFormsWorkQueue } from './work-queue/forms-work-queue.js';
+export { WORK_QUEUE_RESPONSE_SUBMITTED, type ResponseSubmittedQueue } from './work-queue/publish-response-submitted.js';
 
 export {
   authorizeDistributionAuthoring,

@@ -290,7 +290,8 @@ function renderSettings(question: PublishedFormQuestion): Record<string, JSONVal
  * so shipping its prompt, help text and options only hands the browser copy nobody was meant to
  * read. Such questions, and pages hidden the same way, are dropped. A page whose every question was
  * dropped goes too, unless it carries a `Go to` of its own (that fires when the page is left, so the
- * page must stay to be left).
+ * page must stay to be left) — and a dropped page that is a partial-submit point leaves its
+ * checkpoint behind ({@link checkpointStub}).
  *
  * The one thing that must survive is a JUMP TARGET. The walk lands on a target's position and
  * carries on from there; a target that no longer exists makes the jump inert, so the respondent
@@ -308,19 +309,33 @@ function pruneNeverShown(pages: RespondentFormPage[]): RespondentFormPage[] {
       }
       return targeted.has(question.id) ? [stubQuestion(question)] : [];
     });
-    if (pageNever) {
-      if (targeted.has(page.id) || questions.length > 0) {
-        kept.push({ id: page.id, displayOrder: page.displayOrder, conditionalRule: { show: NEVER }, questions });
-      }
-      continue;
-    }
     const leftEmpty = page.questions.length > 0 && questions.length === 0;
-    if (leftEmpty && !targeted.has(page.id) && !page.conditionalRule?.jump) {
+    const droppable = pageNever
+      ? !targeted.has(page.id) && questions.length === 0
+      : leftEmpty && !targeted.has(page.id) && !page.conditionalRule?.jump;
+    if (droppable && page.isPartialSubmitPoint === true) {
+      kept.push(checkpointStub(page));
       continue;
     }
-    kept.push({ ...page, questions });
+    if (droppable) {
+      continue;
+    }
+    kept.push(pageNever ? { id: page.id, displayOrder: page.displayOrder, conditionalRule: { show: NEVER }, questions } : { ...page, questions });
   }
   return kept;
+}
+
+/**
+ * A page nobody can see, reduced to the CHECKPOINT it carries (#303 Task 8).
+ *
+ * The widget banks a partial-submit point by position — the page counts as passed once something on
+ * a LATER page is answered (`passedSubmitPoints`), whether or not the page itself showed anything —
+ * so dropping the page dropped the author's "save progress here" with it. The stub keeps the id, the
+ * position and the flag, and nothing to read: no title, no description, no questions, a never-true
+ * show rule, so the walk is exactly as if the page were gone.
+ */
+function checkpointStub(page: RespondentFormPage): RespondentFormPage {
+  return { id: page.id, displayOrder: page.displayOrder, isPartialSubmitPoint: true, conditionalRule: { show: NEVER }, questions: [] };
 }
 
 /**

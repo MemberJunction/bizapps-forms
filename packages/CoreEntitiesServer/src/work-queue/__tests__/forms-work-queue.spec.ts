@@ -17,9 +17,15 @@ const wq = vi.hoisted(() => ({
   configError: null as Error | null,
   topics: new Set(['forms.response-submitted']),
   subscriptions: new Set(['forms.run-automations']),
+  host: null as null | { IsStarted: boolean; GetHealth: () => { Subscriptions: { Name: string; State: string; Reason: string | null }[] } },
 }));
 vi.mock('@memberjunction/work-queue-engine', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@memberjunction/work-queue-engine')>()),
+  WorkQueueHost: {
+    get Active() {
+      return wq.host;
+    },
+  },
   WorkQueueEngine: {
     Instance: {
       Config: async (...args: unknown[]) => {
@@ -41,7 +47,13 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
   LogStatus: (m: string) => logged.statuses.push(m),
 }));
 
-const { configureFormsWorkQueue, FormsWorkQueueStartup } = await import('../forms-work-queue.js');
+const { configureFormsWorkQueue, FormsWorkQueueStartup, watchRunAutomationsHost, RUN_AUTOMATIONS_HOST_POLLS } = await import('../forms-work-queue.js');
+
+/** A started host whose health lists `subscriptions`. */
+function hostWith(subscriptions: { Name: string; State: string; Reason?: string | null }[], started = true) {
+  return { IsStarted: started, GetHealth: () => ({ Subscriptions: subscriptions.map((s) => ({ Reason: null, ...s })) }) };
+}
+const noWait = async (): Promise<void> => undefined;
 
 const SYSTEM = { ID: 'system-1' } as unknown as UserInfo;
 
@@ -52,6 +64,7 @@ beforeEach(() => {
   wq.subscriptions = new Set(['forms.run-automations']);
   logged.errors.length = 0;
   logged.statuses.length = 0;
+  wq.host = hostWith([{ Name: 'forms.run-automations', State: 'Running' }]);
 });
 
 describe('configureFormsWorkQueue', () => {
@@ -102,3 +115,81 @@ describe('FormsWorkQueueStartup — the sink MJ runs once the database is up', (
     expect(logged.statuses.join('\n')).toMatch(/no database provider/i);
   });
 });
+
+/**
+ * Controller ruling (#303 Task 8 fix round 1): a host that publishes submissions but runs no
+ * `forms.run-automations` consumer must say so LOUDLY — once, naming what to configure — because
+ * nothing else on that host will: the automations simply wait in the queue. The work-queue host
+ * starts after the startup sinks run, so the watch polls for it, a bounded number of times.
+ */
+describe('watchRunAutomationsHost', () => {
+  it('logs no error when this host runs the subscription', async () => {
+    expect(await watchRunAutomationsHost({ wait: noWait })).toBe('running');
+    expect(logged.errors).toEqual([]);
+  });
+
+  it('waits for a host that starts late, then finds it running', async () => {
+    wq.host = null;
+    let polls = 0;
+    const wait = async (): Promise<void> => {
+      polls += 1;
+      if (polls === 2) {
+        wq.host = hostWith([{ Name: 'forms.run-automations', State: 'Running' }]);
+      }
+    };
+    expect(await watchRunAutomationsHost({ wait })).toBe('running');
+    expect(logged.errors).toEqual([]);
+  });
+
+  // Re-review N1: MJ's `WorkQueueHost.Start()` marks the host started and Active BEFORE its first
+  // reconcile, which plans the subscriptions, finishes — so for a moment a correctly configured host
+  // reports no subscriptions at all. That window is "not loaded yet", never "not configured".
+  it('keeps polling through the started-but-not-yet-reconciled window, then finds it running', async () => {
+    const host = { IsStarted: true, subscriptions: [] as { Name: string; State: string; Reason: string | null }[], GetHealth: () => ({ Subscriptions: host.subscriptions }) };
+    wq.host = host;
+    let polls = 0;
+    const wait = async (): Promise<void> => {
+      polls += 1;
+      if (polls === 3) {
+        host.subscriptions = [{ Name: 'forms.run-automations', State: 'Running', Reason: null }];
+      }
+    };
+    expect(await watchRunAutomationsHost({ wait })).toBe('running');
+    expect(logged.errors).toEqual([]);
+  });
+
+  it('logs ONE error, at its poll cap, when a started host never loads any subscription', async () => {
+    wq.host = hostWith([]);
+    let polls = 0;
+    expect(await watchRunAutomationsHost({ wait: async () => void (polls += 1) })).toBe('not-running');
+    expect(polls).toBe(RUN_AUTOMATIONS_HOST_POLLS - 1);
+    expect(logged.errors).toHaveLength(1);
+    expect(logged.errors[0]).toMatch(/workQueue\.subscriptions/);
+  });
+
+  it('logs ONE error naming what to configure when no work-queue host ever starts, after its bounded polls', async () => {
+    wq.host = null;
+    let polls = 0;
+    expect(await watchRunAutomationsHost({ wait: async () => void (polls += 1) })).toBe('not-enabled');
+    expect(polls).toBe(RUN_AUTOMATIONS_HOST_POLLS - 1);
+    expect(logged.errors).toHaveLength(1);
+    expect(logged.errors[0]).toMatch(/workQueue\.enabled/);
+    expect(logged.errors[0]).toMatch(/forms\.run-automations/);
+  });
+
+  it("logs ONE error when the host runs work queues but not Forms' subscription", async () => {
+    wq.host = hostWith([{ Name: 'some.other', State: 'Running' }]);
+    expect(await watchRunAutomationsHost({ wait: noWait })).toBe('not-running');
+    expect(logged.errors).toHaveLength(1);
+    expect(logged.errors[0]).toMatch(/workQueue\.subscriptions/);
+  });
+
+  it('logs ONE error naming the state and reason when the subscription is not Running', async () => {
+    wq.host = hostWith([{ Name: 'forms.run-automations', State: 'HandlerNotRegistered', Reason: 'no handler Forms.RunAutomations' }]);
+    expect(await watchRunAutomationsHost({ wait: noWait })).toBe('not-running');
+    expect(logged.errors).toHaveLength(1);
+    expect(logged.errors[0]).toMatch(/HandlerNotRegistered/);
+    expect(logged.errors[0]).toMatch(/no handler Forms\.RunAutomations/);
+  });
+});
+

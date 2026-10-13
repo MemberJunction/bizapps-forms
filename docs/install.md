@@ -196,9 +196,9 @@ too) the first time a request arrives carrying `X-Forwarded-For` while `FORMS_TR
 Forms' own internal magic-link redeem call is excluded — but the warning is a symptom check,
 not a substitute for setting the variable at deploy time.
 
-The public-submit path is bounded by a second set of env vars, all read once at process start by
-`packages/Server/src/public-submit/config.ts` (its header comment is the source of truth; this
-table mirrors it):
+The public-submit path (`Forms.SaveResponse`) is bounded by a second set of env vars, all read once at
+process start by `packages/CoreEntitiesServer/src/submission/config.ts` (its header comment is the
+source of truth; this table mirrors it):
 
 | Variable | Default | What it bounds |
 |---|---|---|

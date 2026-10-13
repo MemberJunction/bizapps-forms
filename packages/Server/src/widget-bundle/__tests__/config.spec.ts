@@ -188,7 +188,7 @@ describe('widget sourcemap gate (#121)', () => {
   // The fail-open direction has to be AUDIBLE. `NODE_ENV` unset is the default for
   // `node server.mjs` (the path docs/local-host.md documents) and nothing in this repo sets it,
   // so a deploy that never exported it serves the map and would otherwise say nothing at all.
-  // Same posture as `warnOnceIfDefaultHashSalt` in http/hash-salt.ts: an insecure-by-omission
+  // Same posture as `warnOnceIfDefaultHashSalt` in forms-core-entities-server's shared/hash-salt.ts: an insecure-by-omission
   // default is allowed, but it announces itself once at boot.
   it('warns that the map is public when nothing told the host whether it is production', () => {
     stageBundleWithMap();

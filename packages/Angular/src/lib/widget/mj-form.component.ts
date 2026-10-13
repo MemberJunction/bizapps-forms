@@ -32,6 +32,7 @@ import {
   resolveResponseOutcome,
   resolveStyleTokensForRender,
   SCREENED_OUT_MESSAGE,
+  type FormAnswerInput,
   type FormOutcome,
   type FormStyleTokens,
   type FormSubmissionInput,
@@ -1207,8 +1208,31 @@ export class MjFormComponent implements OnInit, OnDestroy {
         referrer: typeof document !== 'undefined' ? document.referrer : undefined,
         userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
       },
-      answers: rt.buildAnswerInputs(),
+      // An autosave leaves out a field the server cannot store as a draft, so one bad field never
+      // stops the rest of the draft saving — unless a rule may read it (`draftAnswers`); a final
+      // submit carries everything.
+      answers: partial ? this.draftAnswers(rt) : rt.buildAnswerInputs(),
     };
+  }
+
+  /**
+   * The autosave's answers — or a throw when the draft is HELD: a field the server cannot store is
+   * one a rule may read, so leaving it out would change what the server decides for other questions
+   * (#303 Task 8 fix round 4; see `FormRuntime.buildDraftInputs`).
+   *
+   * A throw, not an empty payload: it is raised while the request's argument is being built, so no
+   * request is made and no saved row is touched, and the {@link AutosaveController} records `'error'`
+   * — never `'saved'` — and retries on its capped backoff, each retry re-checking for free.
+   */
+  private draftAnswers(rt: FormRuntime): FormAnswerInput[] {
+    const draft = rt.buildDraftInputs();
+    if (draft.held) {
+      throw new Error(
+        `Autosave held for response ${this.responseTarget()}: question(s) ${draft.unstorable.join(', ')} cannot be saved ` +
+          'as entered and a rule may read them, so nothing was sent; the answers stay in this browser until they are fixed.',
+      );
+    }
+    return draft.answers;
   }
 
   /**

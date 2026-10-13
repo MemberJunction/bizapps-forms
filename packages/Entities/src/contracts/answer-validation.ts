@@ -13,7 +13,9 @@
  * Pipeline of {@link validateAnswers}:
  *  0. Refuse any answer whose question id is in NO page of the definition — malformed input in
  *     every mode (#124). A hidden or display-only question is a KNOWN id and is not this.
- *  1. Refuse any answer larger than {@link MAX_ANSWER_VALUE_BYTES}, in every mode.
+ *  1. Refuse, in every mode and before anything reads a value, an answer that is too large, too deep
+ *     or too wide, or not in the form its question's type stores (`answer-shape.ts`). A payload that
+ *     fails this is refused whole: nothing below runs.
  *  2. Settle visibility over the answers ({@link settleVisibility}); questions that resolve hidden
  *     are DROPPED (their answers are discarded, and they cannot trip "required").
  *  3. For each visible question: enforce `isRequired`, then the format implied by the question's
@@ -23,7 +25,7 @@
  *     against both quotas. A form that asks nothing is completable, and always was.
  *
  * A `draft` (autosave) submission is held to step 3's UPPER BOUNDS only (`maxLength`, `max`) —
- * plus the one thing the row cannot physically hold, see {@link validateDraft}. It is a draft, and
+ * plus what its column cannot hold (an unparseable date, a non-number), see {@link validateDraft}. It is a draft, and
  * the widget autosaves on a debounce with no validity gate, so a half-typed value is the normal
  * case rather than an error — but "not finished" and "already too big" are different claims.
  *
@@ -37,6 +39,7 @@ import { isAnswerSupplied, type AnswerValue, type ValidationRule } from './condi
 import {
   coerceAnswerToNumber,
   isRequiredSatisfied,
+  NOT_A_NUMBER_MESSAGE,
   matchesValidationPattern,
   validateAnswerFormat,
   validateCompositeParts,
@@ -44,6 +47,14 @@ import {
 import { answerColumnFor, isAnswerableQuestionType } from './question-types';
 import type { PublishedFormPage, PublishedFormQuestion } from './form-definition';
 import { NOTHING_TO_SUBMIT_MESSAGE, type FieldError, type FormAnswerInput } from './submission';
+import {
+  answerShapeProblem,
+  answersStructureRefusal,
+  MAX_ANSWER_VALUE_BYTES,
+  numericStorageProblem,
+  oversizedAnswerMessage,
+  utf8ByteLength,
+} from './answer-shape';
 import { settleVisibility, type SettledVisibility } from './visibility';
 
 /**
@@ -58,23 +69,6 @@ import { settleVisibility, type SettledVisibility } from './visibility';
  * where the author's validation was off.
  */
 export type ValidationMode = 'complete' | 'draft' | 'screened-out';
-
-/**
- * Global ceiling on ONE answer value, independent of any author-configured rule.
- *
- * A hard abuse bound, not a product knob: `FormResponseAnswer.TextValue` is `NVARCHAR(MAX)` and
- * the widget sets no `maxlength`, so without this the only limit on a question without a
- * `validationRule` was MJAPI's 50mb GraphQL body cap. 64KB is far beyond any legitimate typed
- * answer. Enforced in EVERY mode — an autosaved draft persists a row just like a completion does.
- * The widget now enforces it too, so a respondent is told under the field rather than by a
- * refused save.
- *
- * WHAT THIS DOES NOT BOUND, stated because the obvious reading is wrong: it is a cap per ANSWER,
- * and nothing here caps how many answers one payload may carry. The unknown-question refusal
- * limits them to the form's own question set, but that count is author-controlled, so a
- * 100-question form still admits 100 x 64KB in a single save.
- */
-export const MAX_ANSWER_VALUE_BYTES = 64 * 1024;
 
 /**
  * What an answer naming a question this form does not have is told (#124).
@@ -116,8 +110,8 @@ export interface AnswersValidation {
    * a second map from the same inputs would be a second implementation of `answerValueOf`'s
    * column precedence, and the two disagreeing would show a respondent the wrong thank-you page.
    *
-   * Today forms-server's confirmation ending reads this map, but its knockout gate still reads a
-   * raw `buildAnswerMap` of the payload; #303 Task 8 moves both onto `resolveResponseOutcome`.
+   * `FormSubmissionEngine` resolves the outcome with `resolveResponseOutcome`, which settles the
+   * same answers the same way, so the knockout, the score and the stored answers are one set.
    */
   answerMap: ReadonlyMap<string, AnswerValue>;
   /** The settled visibility, including whether the form's rules settled at all. */
@@ -218,9 +212,18 @@ export function validateAnswers(
   // answer before a later answer hides the question.
   collectUnknownAnswers(definition, answers, errors);
 
-  // Judged on the RAW inputs, before visibility drops any of them: an oversized value the walk
-  // would discard still travelled and still describes a caller this save should refuse whole.
-  collectOversizedAnswers(answers, errors);
+  // The SHAPE before anything reads a value (`answer-shape.ts`), on the RAW inputs, before visibility
+  // drops any of them: a value the walk would discard still travelled, and describes a caller this
+  // save refuses whole. Size and nesting first, with no recursion — nothing below may walk a value
+  // that has not passed it — then the column each question's type stores. A payload that fails
+  // either is malformed in every mode, so nothing else is judged (#303 Task 8 fix round 2).
+  errors.push(...answersStructureRefusal(answers));
+  if (errors.length === 0) {
+    collectMisshapenAnswers(definition, answers, errors);
+  }
+  if (errors.length > 0) {
+    return { errors, answers: [], answerMap: new Map(), visibility: UNJUDGED };
+  }
 
   const inputByQuestion = new Map(answers.map((a) => [a.questionId, a] as const));
   const visibility = settleVisibility(definition, buildAnswerMap(answers));
@@ -228,9 +231,6 @@ export function validateAnswers(
   for (const question of visibility.answerable) {
     const input = inputByQuestion.get(question.id);
     const value = input ? answerValueOf(input) : undefined;
-    if (isOversized(value)) {
-      continue; // already reported above, once, against the raw input
-    }
     const problem = judgeAnswer(question, value, mode);
     if (problem) {
       errors.push({ questionId: question.id, message: problem.message });
@@ -272,6 +272,16 @@ function judgeAnswer(
   if (!isAnswerSupplied(value)) {
     return undefined; // nothing to validate on an unanswered, optional question
   }
+  // In EVERY mode, and here — the per-field verdict the widget shows and gates Submit on — as well as
+  // in the whole-payload shape check: a number `decimal(18,4)` cannot hold is refused by both, with
+  // the same words, or the widget calls valid what the server refuses (fix round 3, re-review N2).
+  // Only a NUMBER: a numeric spelling sent as text is stored as text, and the format rule judges it.
+  if (typeof value === 'number' && answerColumnFor(question.type) === 'numeric') {
+    const unstorable = numericStorageProblem(value);
+    if (unstorable) {
+      return { message: unstorable };
+    }
+  }
   if (mode === 'draft') {
     const message = validateDraft(question, value, question.validationRule);
     return message ? { message } : undefined;
@@ -302,27 +312,36 @@ function requiredMessage(question: PublishedFormQuestion): string {
 }
 
 /**
- * What a DRAFT is held to: the ceilings, plus anything the row cannot physically hold.
+ * What a DRAFT is held to: the ceilings, plus anything its question's column cannot hold.
  *
- * The second clause is scoped to the `date` column, and only to it, because it is the one typed
- * column whose transport is wider than its storage: `dateValue` is a GraphQL `String`, `DateValue`
- * is a `DATETIMEOFFSET`. An unparseable date is also never a value "still being typed":
- * `<input type="date">` and `<input type="time">` emit nothing until the value is whole, so holding
- * a draft to it costs no respondent any progress (#116).
+ * Two columns, and only these two, because they are the typed columns a value can reach that is not
+ * of their type:
+ *  - `date`: `dateValue` is wire text, `DateValue` a `DATETIMEOFFSET`. An unparseable date is never
+ *    a value "still being typed" — `<input type="date">`/`type="time"` emit nothing until the value
+ *    is whole — so holding a draft to it costs no respondent any progress (#116).
+ *  - `numeric` (#303 Task 8): a non-number on a Number, Rating or NPS question reached storage as a
+ *    `TextValue` no completion would accept and no numeric reader can use. A number control emits
+ *    nothing until its value parses, so the same reasoning holds. Only "is it a number" is asked
+ *    here; ranges stay the completion's business (and `max` the ceiling below).
  */
 function validateDraft(
   question: PublishedFormQuestion,
   value: AnswerValue,
   rule: ValidationRule | undefined,
 ): string | undefined {
-  if (answerColumnFor(question.type) === 'date') {
+  const column = answerColumnFor(question.type);
+  if (column === 'date') {
     const unstorable = validateAnswerFormat(question, value);
     if (unstorable) {
       return unstorable;
     }
   }
+  if (column === 'numeric' && coerceAnswerToNumber(value) === undefined) {
+    return NOT_A_NUMBER_MESSAGE;
+  }
   return rule ? validateUpperBounds(value, rule) : undefined;
 }
+
 
 /**
  * The subset of the rule a DRAFT is still answerable for: the ceilings. A value already past
@@ -383,14 +402,6 @@ function maxMessage(max: number): string {
   return `Must be at most ${max}.`;
 }
 
-/**
- * What an oversized answer is told, derived from the bound rather than restating it, so raising
- * the ceiling cannot leave the respondent being told the old number.
- */
-function oversizedAnswerMessage(): string {
-  return `That answer is too large. Answers are limited to ${MAX_ANSWER_VALUE_BYTES / 1024}KB each.`;
-}
-
 function isOversized(value: AnswerValue): boolean {
   return answerValueBytes(value) > MAX_ANSWER_VALUE_BYTES;
 }
@@ -403,28 +414,31 @@ function answerValueBytes(value: AnswerValue): number {
   return utf8ByteLength(typeof value === 'string' ? value : (JSON.stringify(value) ?? ''));
 }
 
-/**
- * UTF-8 length of a string, counted by hand.
- *
- * Not `Buffer.byteLength`, which is what the server used: this module runs in the widget bundle,
- * which has no Node `Buffer`. A lone surrogate counts 3 bytes, which is what an encoder emits for
- * it (U+FFFD), so this agrees with `Buffer.byteLength` on every input.
- */
-function utf8ByteLength(text: string): number {
-  let bytes = 0;
-  for (const char of text) {
-    const code = char.codePointAt(0) ?? 0;
-    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
-  }
-  return bytes;
-}
-
 /** Coerce a JSON array (multi-select) into the string[]/number[] the evaluator expects. */
 function jsonArrayToScalarArray(arr: ReadonlyArray<unknown>): string[] | number[] {
   if (arr.every((v) => typeof v === 'number')) {
     return arr as number[];
   }
   return arr.map((v) => (typeof v === 'string' ? v : String(v)));
+}
+
+/** The visibility of a payload refused before it was judged: nothing renders from it. */
+const UNJUDGED: SettledVisibility = { settled: true, passes: 0, answers: new Map(), rendered: [], answerable: [] };
+
+/** One error per answer to a KNOWN question whose shape its question's type does not store. */
+function collectMisshapenAnswers(
+  definition: { readonly pages: readonly PublishedFormPage[] },
+  answers: readonly FormAnswerInput[],
+  errors: FieldError[],
+): void {
+  const typeOf = new Map(definition.pages.flatMap((page) => page.questions.map((question) => [question.id, question.type] as const)));
+  for (const answer of answers) {
+    const type = typeOf.get(answer.questionId);
+    const problem = type === undefined ? undefined : answerShapeProblem(type, answer);
+    if (problem) {
+      errors.push({ questionId: answer.questionId, message: problem });
+    }
+  }
 }
 
 /** Every question id the published version carries, rendered or not, answerable or not. */
@@ -454,15 +468,6 @@ function collectUnknownAnswers(
     if (!known.has(answer.questionId) && !reported.has(answer.questionId)) {
       reported.add(answer.questionId);
       errors.push({ questionId: answer.questionId, message: UNKNOWN_QUESTION_MESSAGE });
-    }
-  }
-}
-
-/** One error per answer whose value exceeds {@link MAX_ANSWER_VALUE_BYTES}. */
-function collectOversizedAnswers(answers: readonly FormAnswerInput[], errors: FieldError[]): void {
-  for (const answer of answers) {
-    if (isOversized(answerValueOf(answer))) {
-      errors.push({ questionId: answer.questionId, message: oversizedAnswerMessage() });
     }
   }
 }

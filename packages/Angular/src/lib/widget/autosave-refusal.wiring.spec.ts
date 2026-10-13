@@ -62,3 +62,31 @@ describe('a refused autosave is an error, not a save (#271)', () => {
     expect(throwIndex).toBeLessThan(successIndex);
   });
 });
+
+/**
+ * #303 Task 8 fix round 4 (re-review R3-1/R3-2). When a field the autosave would have to leave out is
+ * one a rule may read, `FormRuntime.buildDraftInputs()` answers HELD (spec'd for real in
+ * `core/form-runtime.spec.ts`). The component must then send NOTHING — a trimmed draft is what hides
+ * a dependent question on the server and deletes its saved row, or trips a knockout — and must not
+ * report the hold as a save. Throwing is both: the payload is built as the argument of the request,
+ * so a throw while building it means the request is never made, and the controller records `'error'`.
+ */
+describe('a held autosave sends nothing and is not reported as saved (fix round 4)', () => {
+  it('the partial payload is built through the hold check, never straight from the runtime', () => {
+    const body = methodBody('private buildSubmission');
+    expect(body).toMatch(/answers:\s*partial\s*\?\s*this\.draftAnswers\(rt\)\s*:\s*rt\.buildAnswerInputs\(\)/);
+  });
+
+  it('a held draft throws before any answers are returned', () => {
+    const body = methodBody('private draftAnswers');
+    const check = body.indexOf('if (draft.held) {');
+    expect(check).toBeGreaterThan(-1);
+    expect(body.slice(check)).toMatch(/^if \(draft\.held\) \{\s*throw new Error\(/);
+    expect(check).toBeLessThan(body.indexOf('return draft.answers;'));
+  });
+
+  it('the payload is built inside the request call, so the throw comes before the request is made', () => {
+    const body = methodBody('private async savePartial');
+    expect(body).toMatch(/await this\.api\.submitResponse\(this\.buildSubmission\(def, rt, true\), this\.responseTarget\(\)\)/);
+  });
+});

@@ -9,11 +9,10 @@
  * ({@link settleVisibility}), scores the settled answerable questions, and resolves the outcome over
  * the settled answers.
  *
- * WHO CALLS IT TODAY: the widget only. The server still judges its knockout over the raw payload
- * (`buildAnswerMap` + `resolveFormOutcome` in forms-server's `submit-pipeline.ts`) and resolves the
- * confirmation ending with a one-pass score; moving the server onto this function is #303 Task 8
- * (FormSubmissionEngine). Until then the two agree for every payload the widget builds — that
- * payload is already the settled set — but not for a crafted one.
+ * WHO CALLS IT: the author's Preview in the widget, and the server on every respondent save
+ * (`FormSubmissionEngine.SaveResponse`, #303 Task 8) — the knockout, the score and the ending all
+ * come from this one call over the SETTLED answers, so a crafted payload that answers a hidden
+ * question cannot fire a knockout or move a score the respondent never saw.
  */
 import { computeScore } from './scoring';
 import { resolveFormOutcome, type FormOutcome } from './rule-verbs';

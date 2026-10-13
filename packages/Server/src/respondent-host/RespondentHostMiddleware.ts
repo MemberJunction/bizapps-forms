@@ -26,8 +26,8 @@
  *
  * ── How the magic-link redeem reaches this page (the "link → login" fix) ────────────────
  * A distribution's shared URL is `${publicUrl}/f/<slug>`. The respondent must reach `<mj-form>`
- * holding the *redeemed* anonymous SESSION JWT — never the raw token — because the S1 resolvers
- * (`PublicFormResolver`) call `GetUserFromPayload` and throw with no session.
+ * holding the *redeemed* anonymous SESSION JWT — never the raw token — because the respondent
+ * operations (`Forms.GetRespondentForm` / `Forms.SaveResponse`) authorize from that session's scope.
  *
  * Rather than wait for the core change that would re-point `MagicLinkRouter.sendRedeemResult` at
  * `/f/:slug`, this route does the redeem ITSELF, server-side (see {@link redeemSlugToToken}):
@@ -63,7 +63,6 @@ import { frameAncestorsDirective, parseAllowedOrigins } from '@mj-biz-apps/forms
 import { matchesExactRoute, matchSingleSegmentRoute } from '../http/route-match.js';
 import { getRequestOrigin } from '../http/request-origin.js';
 import { getGraphqlUrlForRequest, getRespondentHostConfig, graphqlRootPathWarning } from './config.js';
-import { getPublicSubmitConfig } from '../public-submit/config.js';
 import { renderRespondentHostPage } from './host-page.js';
 import { redeemSlugToToken } from './redeem.service.js';
 import { loadFormIdentity } from './form-identity.js';
@@ -77,8 +76,8 @@ import { readResumeCookie } from './resume-cookie.js';
 import { matchResumeRoute } from './resume-routes.js';
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
 import { checkRedeemRateLimit, redeemInFlightLimiter } from './redeem-rate-limit.js';
-import { currentRequestIdentity } from '../http/request-identity.js';
 import { requestIdentityHandler } from '../http/RequestIdentityMiddleware.js';
+import { getPublicSubmitConfig, currentRequestIdentity } from '@mj-biz-apps/forms-core-entities-server';
 
 /** Route the respondent host page is served from (matches the Forms `publicUrl()` shape). */
 export const RESPONDENT_HOST_ROUTE = '/f/:slug';

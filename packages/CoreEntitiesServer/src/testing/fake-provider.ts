@@ -53,11 +53,19 @@ export interface ExistingResponseRow {
   AnonymousSessionID: string;
   /** Optional stored SourceMetadata JSON, exercised by the client-id LIKE proof lookups. */
   SourceMetadata?: string;
+  /** The link the response came through — what binds a resume session to a link (#303 Task 8). */
+  FormDistributionID?: string;
 }
 
 /** Configuration for {@link makeFakeProvider}. */
 export interface FakeProviderConfig {
   distribution?: mjBizAppsFormsFormDistributionEntityType;
+  /**
+   * The `Status` of the form behind {@link distribution}, which the respondent path reads (a form
+   * must be Published to be served — #303 Task 8). Defaults to `Published`; served only when a
+   * `distribution` fixture is set and `MJ_BizApps_Forms: Forms` has no generic table.
+   */
+  formStatus?: string;
   version?: mjBizAppsFormsFormVersionEntityType;
   /** Existing completed-response count returned for the form-quota count query. */
   formResponseCount?: number;
@@ -192,6 +200,7 @@ const FORM_RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
 const FORM_RESPONSE_ANSWER_ENTITY = 'MJ_BizApps_Forms: Form Response Answers';
 const FORM_DISTRIBUTION_ENTITY = 'MJ_BizApps_Forms: Form Distributions';
 const FORM_VERSION_ENTITY = 'MJ_BizApps_Forms: Form Versions';
+const FORM_ENTITY = 'MJ_BizApps_Forms: Forms';
 const FORM_UPLOAD_ENTITY = 'MJ_BizApps_Forms: Form Uploads';
 /** MJ core's file-link entity; the file-link reconciler in forms-server reads and writes it. */
 const FILE_ENTITY_RECORD_LINK_ENTITY = 'MJ: File Entity Record Links';
@@ -320,6 +329,10 @@ function makeFakeEntityInfo(entityName: string, canCreate: boolean, canUpdate: b
   const info = {
     ID: fakeEntityId(entityName),
     Name: entityName,
+    // Enough for code that builds raw SQL against the entity's table (the submit path's quota
+    // UPDATE): the Forms schema, and the table name the entity's display name implies.
+    SchemaName: '__mj_BizAppsForms',
+    BaseTable: (entityName.split(': ').pop() ?? entityName).replace(/\s+/g, '').replace(/s$/, ''),
     GetUserPermisions: (_user: UserInfo): EntityUserPermissionInfo => permissions,
   };
   return info as unknown as EntityInfo;
@@ -366,6 +379,10 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
     }
     if (name === FORM_DISTRIBUTION_ENTITY) {
       return runViewResult<T>(true, config.distribution ? [config.distribution as unknown as T] : []);
+    }
+    if (name === FORM_ENTITY && config.distribution) {
+      const form = { ID: config.distribution.FormID, Status: config.formStatus ?? 'Published' };
+      return runViewResult<T>(true, [form as unknown as T]);
     }
     if (name === FORM_VERSION_ENTITY) {
       return runViewResult<T>(true, config.version ? [config.version as unknown as T] : []);
@@ -450,6 +467,9 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
       if (script?.error) {
         throw new Error(script.error);
       }
+      if (!script && config.distribution && DISTRIBUTION_SLOT_UPDATE.test(sql)) {
+        return [{ AffectedRows: takeDistributionSlot(config.distribution, tx) }] as T[];
+      }
       const rows = typeof script?.rows === 'function' ? script.rows(sql) : script?.rows ?? [];
       return rows.map((row) => ({ ...row })) as T[];
     },
@@ -464,6 +484,27 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
     statements,
     tables,
   };
+}
+
+/** The submit path's quota statement: `UPDATE …FormDistribution SET ResponseCount = ResponseCount + 1 …`. */
+const DISTRIBUTION_SLOT_UPDATE = /UPDATE\s+\S*FormDistribution\S*\s+SET\s+\S*ResponseCount\S*\s*=\s*\S*ResponseCount\S*\s*\+\s*1/i;
+
+/**
+ * Emulate the conditional slot UPDATE against the `distribution` fixture, as the database would: one
+ * row when the cap has room (and the count goes up), none when it is full. Journalled, so a rolled-back
+ * save gives the slot back. Unconditional fixtures (`MaxResponses: null`) always have room.
+ */
+function takeDistributionSlot(distribution: mjBizAppsFormsFormDistributionEntityType, tx: FakeTransactionLog): number {
+  const cap = distribution.MaxResponses;
+  if (cap !== null && cap !== undefined && distribution.ResponseCount >= cap) {
+    return 0;
+  }
+  const before = distribution.ResponseCount;
+  distribution.ResponseCount = before + 1;
+  tx.journal(() => {
+    distribution.ResponseCount = before;
+  });
+  return 1;
 }
 
 /**

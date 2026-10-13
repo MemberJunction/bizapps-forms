@@ -119,7 +119,12 @@ function executionModeRank(automation: PublishedFormAutomation): number {
   return automation.executionMode === 'Sync' ? 0 : 1;
 }
 
-function triggerMatches(automation: PublishedFormAutomation, complete: boolean): boolean {
+/**
+ * Whether `automation` fires on a save of this kind (`complete`: a final submit). Exported because the
+ * submit path asks the same question to decide whether a save needs a Work Queue message at all —
+ * one answer for "would this step run", not two.
+ */
+export function triggerMatches(automation: PublishedFormAutomation, complete: boolean): boolean {
   switch (automation.trigger) {
     case 'OnComplete':
       return complete;

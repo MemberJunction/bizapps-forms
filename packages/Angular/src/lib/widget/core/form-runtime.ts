@@ -10,6 +10,7 @@ import {
   resolveVisiblePages,
   answerCompleteness,
   isAnswerSupplied,
+  rulesMayRead,
   settleVisibility,
   validateAnswer,
   validateAnswers,
@@ -23,6 +24,14 @@ import {
 
 import { toAnswerInputs, transmittedValue } from './answer-value';
 import { computeProgress } from './progress';
+
+/**
+ * What an autosave would send: the storable answers, or — when a field it would have to leave out
+ * is one a rule may read — nothing, with the fields that hold it.
+ */
+export type DraftInputs =
+  | { readonly held: false; readonly answers: FormAnswerInput[] }
+  | { readonly held: true; readonly unstorable: readonly string[] };
 
 export class FormRuntime {
   private readonly answers = signal<Map<string, AnswerValue>>(new Map());
@@ -266,6 +275,37 @@ export class FormRuntime {
   /** Build the wire answers for all currently-visible answerable questions. */
   public buildAnswerInputs(): FormAnswerInput[] {
     return toAnswerInputs(this.visibleAnswerableQuestions(), this.answers());
+  }
+
+  /**
+   * The AUTOSAVE payload: {@link buildAnswerInputs} minus every answer the server cannot store as a
+   * draft — the same `validateAnswer` verdict, in `draft` mode, that the server applies — or HELD.
+   *
+   * Why leave a field out rather than send it (fix round 3, re-review N2): the server refuses a
+   * draft WHOLE when one answer cannot be stored (a number `decimal(18,4)` cannot hold, an unreadable
+   * date, a value past its ceiling), and autosave is fail-soft — so one bad field silently stopped
+   * EVERY other answer from being saved for as long as it stayed wrong. Leaving it out keeps the rest
+   * of the draft saving; the field shows its error under it ({@link errorFor}), and the final submit
+   * still carries it and stays blocked by {@link areValid} until it is fixed. The cost: a previously
+   * saved value for that one field is not kept while the field holds something unstorable.
+   *
+   * Why HOLD instead when a rule may read the field (fix round 4, re-review R3-1/R3-2): to a rule, a
+   * field left out is a field nobody answered, so leaving it out changes what the server decides for
+   * everything else — a question shown because of it is hidden and its saved row deleted, and an
+   * `isNotAnswered` knockout on it ends the form. Nothing is sent then; the answers stay here until
+   * the field is fixed. On the respondent projection every field counts as read (`rulesMayRead`),
+   * because the projection has had the server's knockout, score and automation rules removed.
+   */
+  public buildDraftInputs(): DraftInputs {
+    const visible = this.visibleAnswerableQuestions();
+    const unstorable = visible
+      .filter((question) => validateAnswer(question, transmittedValue(question, this.valueFor(question.id)), 'draft') !== undefined)
+      .map((question) => question.id);
+    if (rulesMayRead(this.definition, unstorable)) {
+      return { held: true, unstorable };
+    }
+    const storable = visible.filter((question) => !unstorable.includes(question.id));
+    return { held: false, answers: toAnswerInputs(storable, this.answers()) };
   }
 
   /**
