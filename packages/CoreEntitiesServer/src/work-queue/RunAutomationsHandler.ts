@@ -63,6 +63,7 @@ import {
   responseSubmittedPayloadRefusal,
   type ResponseSubmittedPayload,
 } from './response-submitted.js';
+import { isGuid } from '../shared/guid.js';
 
 @RegisterClass(BaseWorkHandler, RUN_AUTOMATIONS_HANDLER_KEY)
 export class RunAutomationsHandler extends BaseWorkHandler<ResponseSubmittedPayload> {
@@ -206,12 +207,10 @@ export class RunAutomationsHandler extends BaseWorkHandler<ResponseSubmittedPayl
   }
 }
 
-const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /** The message's `MessageID`, folded to lower case, or `null` when it has none a run could carry. */
 function messageIdOf(message: WorkMessage<ResponseSubmittedPayload>): string | null {
   const id = typeof message.MessageID === 'string' ? message.MessageID.trim() : '';
-  return GUID.test(id) ? id.toLowerCase() : null;
+  return isGuid(id) ? id.toLowerCase() : null;
 }
 
 /**

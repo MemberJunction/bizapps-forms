@@ -55,8 +55,14 @@ export interface FormsResponseAutomationRun {
     FormAutomation: string;
     /** Outcome of the attempt (the `FormAutomationRun.Status` CHECK values). */
     Status: 'Failed' | 'Pending' | 'Running' | 'Skipped' | 'Succeeded';
-    /** Attempts made. */
+    /** The delivery attempt of its Work Queue message that last opened this row (1-based); not a count of runs. */
     AttemptCount: number;
+    /**
+     * The `forms.response-submitted` Work Queue message whose delivery ran this step — the exact link
+     * from a run to the submit event that caused it. `null` for runs written before the column existed,
+     * and for runs no delivery wrote.
+     */
+    WorkQueueMessageID: string | null;
     /** When it began; `null` if it never started. */
     StartedAt: string | null;
     /** When it finished; `null` while in flight. */

@@ -104,3 +104,15 @@ export function nullableInstantInput(value: unknown, field: string, operationKey
   }
   return instant;
 }
+
+/**
+ * A required whole number of at least `min` — a paging offset or a page size. Only a JSON number is
+ * accepted: `"20"` or `20.5` is a caller that believed it asked for something else, and paging on a
+ * guess skips or repeats rows.
+ */
+export function requireWholeNumberInput(value: unknown, field: string, min: number, operationKey: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min) {
+    throw new Error(`${operationKey}: ${field} must be a whole number of at least ${min}.`);
+  }
+  return value;
+}

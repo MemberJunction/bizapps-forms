@@ -52,6 +52,7 @@ import type { DistributionChannelType } from '../magic-link/config.js';
 import { FormDistributionEntityServer } from '../magic-link/FormDistributionEntityServer.js';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
 import { requireEntityTransactions, requireServerEntity, runEngineCall, runEngineUnitOfWork, saveFailure } from './engine-guards.js';
+import { isGuid } from '../shared/guid.js';
 
 const ENTITY = FORMS_ENTITY;
 
@@ -86,9 +87,6 @@ const CHANNEL_LABELS: Record<DistributionChannelType, string> = {
 
 /** `FormDistribution.Name` is NVARCHAR(255). */
 const MAX_NAME_LENGTH = 255;
-
-/** Same shape as every other GUID check in Forms; the id goes into a SQL filter, so it must be one. */
-const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type DistributionStatus = mjBizAppsFormsFormDistributionEntityType['Status'];
 type FormFacts = Pick<mjBizAppsFormsFormEntityType, 'ID' | 'Name' | 'Status' | 'IsTemplate'>;
@@ -241,7 +239,8 @@ export class FormDistributionEngine extends BaseSingleton<FormDistributionEngine
    */
   public async GetClaims(formId: string, provider: DatabaseProviderBase, user: UserInfo): Promise<ClaimLookup> {
     const id = formId?.trim() ?? '';
-    if (!GUID_PATTERN.test(id)) {
+    // The id goes into a SQL filter, so it must be one.
+    if (!isGuid(id)) {
       throw new FormDistributionError(id ? 'The form id must be a form ID.' : 'A form id is required to look up share-link claims.');
     }
     requireUser(user, `Looking up share-link claims for form ${id}`);

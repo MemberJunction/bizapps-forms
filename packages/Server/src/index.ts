@@ -24,7 +24,10 @@ import {
   LoadFormsEntityServerSubclasses,
   LoadGetDistributionClaimsOperation,
   LoadGetRespondentFormOperation,
+  LoadGetResponseDetailOperation,
+  LoadGetResponseSummaryOperation,
   LoadIssueDistributionLinkOperation,
+  LoadListResponsesOperation,
   LoadOpenDistributionOperation,
   LoadFormsWorkQueue,
   LoadPublishFormOperation,
@@ -153,6 +156,10 @@ export function LoadBizAppsFormsServer(): void {
     // The respondent operations (#303 Task 8): what an anonymous respondent loads, and every save.
     LoadGetRespondentFormOperation();
     LoadSaveResponseOperation();
+    // Response reporting (#303 Task 9): the dashboard summary, the paged list and export, one response.
+    LoadGetResponseSummaryOperation();
+    LoadListResponsesOperation();
+    LoadGetResponseDetailOperation();
     // The work-queue outbox (#303 §5): the `Forms.RunAutomations` handler a host with
     // `workQueue.enabled` resolves by HandlerKey, and the startup sink that configures
     // `WorkQueueEngine` for publishing. The configuring cannot happen HERE: the host calls this while

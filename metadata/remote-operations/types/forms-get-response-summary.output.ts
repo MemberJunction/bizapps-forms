@@ -3,15 +3,23 @@
  * (`FormReportData` in forms-ng: summary, profile, breakdowns, open text, funnel), computed on the
  * server instead of in the browser over every answer row.
  *
- * AGGREGATES ONLY. Nothing here carries an answer's value: no email, phone, address, name or
- * free-text answer, and no rendered matrix answer. The server reads every value to compute the
- * figures and returns counts, rates, medians and groupings, which is the dashboard's own rule
- * (`respondent-profile.ts`: "an identity answer's VALUE never leaves this file";
- * `reporting.model.ts`: open text is "rates, lengths and themes; never the answers themselves").
- * The only text derived from answers is what the dashboard already shows as a grouping: email
- * DOMAINS, countries and organisation names folded to the top six plus "Other", and LongText
- * theme terms used in at least two answers. Per-response values belong to `Forms.ListResponses`
- * and `Forms.GetResponseDetail`, where each has a person and a time attached.
+ * AGGREGATES, NOT ANSWERS. The server reads every value and returns counts, rates, medians and
+ * groupings. What it does NOT return: an email address, phone number, street address, name, written
+ * answer, rendered Matrix answer, or a choice value outside the question's options (counted in one
+ * "Other (not an option)" bucket instead, since such a value can be anything a client sent).
+ *
+ * What it DOES return that comes from answers, stated exactly so nobody reads more into "aggregate":
+ *  - a Number/Rating/NPS question's `Min` and `Max`, which are stored values verbatim;
+ *  - grouping labels taken verbatim from answers: countries and organisation names (as typed) and
+ *    email DOMAINS (local parts never read), each folded to the top six plus "Other (n more)";
+ *    month and time-of-day buckets of Date and Time answers; LongText theme terms used in at least
+ *    two answers;
+ *  - any of those groupings at a count of 1 — a single respondent's country, organisation, personal
+ *    email domain or birth month can appear as its own bucket. No minimum-count threshold applies.
+ * That is acceptable because every caller of this operation is authorized to read each answer in
+ * full through `Forms.ListResponses` and `Forms.GetResponseDetail` (the same reading rule, enforced
+ * by row filters there; the summary refuses a caller whose reads of responses are row-filtered). The
+ * summary limits what a dashboard puts on screen; it is not an anonymisation boundary.
  *
  * Population rules carried over from reporting-aggregations.ts: the headline, the breakdowns, the
  * profile and the open-text section describe COMPLETE responses; the funnel counts every response,
@@ -40,7 +48,7 @@ export interface FormsResponseSummaryStats {
 
 /** One bucket of a distribution. */
 export interface FormsAnswerBucket {
-    /** Display label: an option label, Yes/No, a period, a domain, or "Other (n more)". */
+    /** Display label: an option label, "Other (not an option)", Yes/No, a period, a domain, or "Other (n more)". */
     Label: string;
     /** Answers (or, for profile groupings, addresses or responses) in this bucket. */
     Count: number;
@@ -94,9 +102,9 @@ export interface FormsQuestionBreakdown {
     QuestionType: string;
     /** Which card renders it (the dashboard's insight role; identity, open text and attachment questions are reported elsewhere). */
     Role: 'choice' | 'scale' | 'sentiment' | 'consent' | 'temporal' | 'composite';
-    /** Complete responses that stored an answer to it (a choice answer that selected nothing does not count). */
+    /** Complete responses that stored a value for it: a blank row, a choice answer that selected nothing, or a Matrix answer with no cell chosen does not count. */
     AnsweredCount: number;
-    /** choice: every option, most chosen first. sentiment and consent: Yes then No. temporal: periods in order, never re-sorted. Otherwise empty. */
+    /** choice: every option (plus "Other (not an option)" when an answer held a value outside them), most chosen first. sentiment and consent: Yes then No. temporal: periods in order, never re-sorted. Otherwise empty. */
     Buckets: FormsAnswerBucket[];
     /** scale only; `null` otherwise. */
     Numeric: FormsNumericAggregate | null;
@@ -199,4 +207,10 @@ export interface FormsGetResponseSummaryOutput {
     OpenText: FormsOpenTextInsight[];
     /** One step per page that asks at least one answerable question, in DisplayOrder. */
     Funnel: FormsFunnelStep[];
+    /**
+     * True when the form holds more identity, written-answer and Matrix answers than one summary
+     * reads (a fixed server ceiling). Profile, OpenText and the Matrix cells then describe only the
+     * answers read, and the dashboard must say so; every other section is exact either way.
+     */
+    InsightAnswersCapped: boolean;
 }

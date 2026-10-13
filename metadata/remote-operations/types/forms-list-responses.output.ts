@@ -58,7 +58,7 @@ export interface FormsListResponsesOutput {
     Rows: FormsResponseListRow[];
     /** Rows matching the filters across all pages. */
     TotalRowCount: number;
-    /** The version whose questions labelled Respondent (and that the export pivots onto): the form's Published version; `null` if never published. */
+    /** The version whose questions labelled Respondent (and that the export pivots onto): the input's FormVersionID when given, else the form's Published version; `null` if neither exists. */
     LabelVersionID: string | null;
     /** JSON text of LabelVersionID's `PublishedFormDefinition` snapshot, for export columns. Present only when IncludeAnswers is true and LabelVersionID is set. */
     DefinitionJSON?: string;

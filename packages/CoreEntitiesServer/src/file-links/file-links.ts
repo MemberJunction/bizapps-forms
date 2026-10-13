@@ -38,6 +38,8 @@
  * exercise.
  */
 
+import { isGuid } from '../shared/guid.js';
+
 /** MJ core's soft-link table — the one the record-attachments panel reads. */
 export const FILE_ENTITY_RECORD_LINK_ENTITY = 'MJ: File Entity Record Links';
 
@@ -101,9 +103,6 @@ export interface SyncFileLinksResult {
   /** Non-empty means the caller has something to log. Order matches the order attempted. */
   failures: readonly string[];
 }
-
-/** Canonical v4/v-agnostic UUID shape. */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Make the target record's attachments match this response's file answers.
@@ -297,7 +296,7 @@ function fold(value: string): string {
 }
 
 function isUuid(value: string | undefined | null): boolean {
-  return typeof value === 'string' && UUID_RE.test(value.trim());
+  return typeof value === 'string' && isGuid(value.trim());
 }
 
 function detail(error: unknown): string {

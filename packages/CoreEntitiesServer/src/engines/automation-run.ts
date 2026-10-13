@@ -59,6 +59,7 @@ import { withIsolatedProvider } from '../shared/isolated-provider.js';
 import { parsePublishedDefinition } from '../shared/snapshot-parser.js';
 import type { ResponseSubmittedTrigger } from '../work-queue/response-submitted.js';
 import { FormAutomationError } from './automation-errors.js';
+import { isGuid } from '../shared/guid.js';
 
 /** Which response, for which save, run as whom. */
 export interface ResponseAutomationRequest {
@@ -137,8 +138,6 @@ export const DEAD_LETTERED_RUN_PREFIX = 'Dead-lettered: ';
 export const ABANDONED_RUN_PREFIX = 'Abandoned after the retry limit (partial save): ';
 
 const TRIGGERS: readonly ResponseSubmittedTrigger[] = ['OnComplete', 'OnPartial'];
-
-const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** What one response's automations need, read in two round trips. */
 interface LoadedResponse {
@@ -377,7 +376,7 @@ async function runLegacy(
  */
 function requireResponseId(responseId: string): string {
   const id = responseId?.trim() ?? '';
-  if (!GUID.test(id)) {
+  if (!isGuid(id)) {
     throw new FormAutomationError(`"${id}" is not a response id, so no automation can run for it.`);
   }
   return id;

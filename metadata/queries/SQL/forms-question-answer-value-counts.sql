@@ -78,9 +78,14 @@ answered AS (
     GROUP BY v.QuestionID
 ),
 counted AS (
-    SELECT v.QuestionID, v.ValueKind, v.Value, v.NumericValue, COUNT(*) AS ValueCount
+    -- Grouped on the value's BYTES, not its text: the database collation is case- and trailing-space-
+    -- insensitive, so GROUP BY v.Value would put 'g', 'G' and 'g ' in one group and return whichever
+    -- spelling came first — moving a whole option's count into "Other", or an off-list variant into
+    -- the option, depending on row order. The browser compared values exactly; so does this. Every
+    -- row of a group has the same bytes, so MAX(v.Value) is that one value, deterministically.
+    SELECT v.QuestionID, v.ValueKind, MAX(v.Value) AS Value, v.NumericValue, COUNT(*) AS ValueCount
     FROM vals v
-    GROUP BY v.QuestionID, v.ValueKind, v.Value, v.NumericValue
+    GROUP BY v.QuestionID, v.ValueKind, CONVERT(VARBINARY(MAX), v.Value), v.NumericValue
 )
 SELECT
     c.QuestionID,

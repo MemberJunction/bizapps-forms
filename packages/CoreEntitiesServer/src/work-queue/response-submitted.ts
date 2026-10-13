@@ -20,6 +20,7 @@
  * respondent's personal data, which the queue copies into its own tables).
  */
 import type { PublishRequest, WorkJson } from '@memberjunction/work-queue-core';
+import { isGuid } from '../shared/guid.js';
 
 /** The topic the submit path publishes to. */
 export const RESPONSE_SUBMITTED_TOPIC = 'forms.response-submitted';
@@ -56,8 +57,6 @@ const MAX_DEDUPLICATION_KEY_LENGTH = 200;
 /** A partial save's key: short, and free of the separator the deduplication key is built with. */
 const PARTIAL_SAVE_KEY = /^[A-Za-z0-9_-]{1,64}$/;
 
-const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /** Why `payload` is not a valid `forms.response-submitted` payload, or `null` when it is. */
 export function responseSubmittedPayloadRefusal(payload: WorkJson | undefined): string | null {
   if (payload === null || payload === undefined || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -65,7 +64,7 @@ export function responseSubmittedPayloadRefusal(payload: WorkJson | undefined): 
   }
   for (const field of ['ResponseID', 'FormVersionID', 'FormDistributionID'] as const) {
     const value = payload[field];
-    if (typeof value !== 'string' || !GUID.test(value)) {
+    if (!isGuid(value)) {
       return `${field} is not an id`;
     }
   }

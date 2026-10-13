@@ -45,6 +45,7 @@ import { FORMS_ENTITY } from '../shared/entity-names.js';
 import { isTerminalResponseStatus } from './response-status.js';
 import { stampFormDistribution } from './resume-columns.js';
 import type { ValidatedAnswer } from '@mj-biz-apps/forms-entities';
+import { isGuid } from '../shared/guid.js';
 
 /** Everything the persistence step needs from the resolved/validated submission. */
 export interface PersistenceInputs {
@@ -218,12 +219,9 @@ function isDuplicateKeyError(entity: BaseEntity): boolean {
   return /duplicate key|primary key constraint|unique (?:key )?constraint/i.test(message);
 }
 
-/** Canonical v4/v-agnostic UUID shape — a malformed client id is never used as a PK. */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** True iff `value` is a syntactically valid uniqueidentifier string. */
+/** True iff `value` is a syntactically valid uniqueidentifier string — a malformed client id is never used as a PK. */
 export function isValidUuid(value: string | undefined | null): boolean {
-  return typeof value === 'string' && UUID_RE.test(value);
+  return isGuid(value);
 }
 
 /** The status this save writes. Disqualification wins over everything else. */

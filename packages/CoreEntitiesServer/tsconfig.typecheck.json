@@ -7,6 +7,11 @@
   // See `packages/Server/tsconfig.typecheck.json` for why this flag is in the no-emit gate
   // rather than in the build config: `emitDecoratorMetadata` output changes under it, and
   // type-graphql reads that at runtime.
-  "compilerOptions": { "noEmit": true, "strictNullChecks": true },
+  //
+  // `rootDir` is widened for one test module: `reporting/__tests__/browser-parity.ts` (DW16
+  // of #303) imports forms-ng's browser aggregation functions from their SOURCE, to hold the server
+  // summary to them on one fixture. The build config keeps `src`; this gate emits nothing. Revert to
+  // the inherited value once Task 10 turns that module into a golden snapshot.
+  "compilerOptions": { "noEmit": true, "strictNullChecks": true, "rootDir": ".." },
   "exclude": ["node_modules", "dist"]
 }

@@ -322,7 +322,7 @@
       "Name": "Get Response Summary",
       "OperationKey": "Forms.GetResponseSummary",
       "CategoryID": "@lookup:MJ: Remote Operation Categories.Name=Forms",
-      "Description": "Every section of the reporting dashboard for a form (headline counts and typical duration, who responded, per-question charts, written-answer insights, the page funnel), computed server-side from every answer. Returns aggregates only: never an answer's value, email, phone or free text. Read-only.",
+      "Description": "Every section of the reporting dashboard for a form (headline counts and typical duration, who responded, per-question charts, written-answer insights, the page funnel), computed server-side from every answer. Returns counts, rates and groupings, never an email, phone, name or written answer (numeric min/max and grouping labels such as countries, organisations and email domains do come from answers; see the output type). Read-only.",
       "InputTypeName": "FormsGetResponseSummaryInput",
       "InputTypeDefinition": "@file:types/forms-get-response-summary.input.ts",
       "InputTypeIsArray": false,

@@ -4,7 +4,7 @@
  * assertion downstream pass for the wrong reason.
  */
 import { describe, expect, it } from 'vitest';
-import { RunInEntityTransaction, RunView, type BaseEntity, type IRunViewProvider } from '@memberjunction/core';
+import { RunInEntityTransaction, RunView, type BaseEntity, type IRunViewProvider, type UserInfo } from '@memberjunction/core';
 import { makeFakeProvider } from '../index.js';
 
 const DISTRIBUTIONS = 'MJ_BizApps_Forms: Form Distributions';
@@ -199,5 +199,75 @@ describe('fix round 1 additions', () => {
   it('a scripted answer can be a function of the statement', async () => {
     const fake = makeFakeProvider({ sql: [{ match: 'FROM t', rows: (sql) => [{ echoed: sql }] }] });
     expect(await fake.provider.ExecuteSQL('SELECT 1 FROM t')).toEqual([{ echoed: 'SELECT 1 FROM t' }]);
+  });
+});
+
+describe('reads the reporting engine relies on (#303 Task 9)', () => {
+  const RESPONSES = 'MJ_BizApps_Forms: Form Responses';
+  const ANSWERS = 'MJ_BizApps_Forms: Form Response Answers';
+  const reporting = () =>
+    makeFakeProvider({
+      tables: {
+        [RESPONSES]: [
+          { ID: 'r1', FormID: 'f1', Status: 'Complete', SubmittedAt: new Date('2026-01-02') },
+          { ID: 'r2', FormID: 'f1', Status: 'Partial', SubmittedAt: null },
+          { ID: 'r3', FormID: 'f1', Status: 'Complete', SubmittedAt: new Date('2026-01-03') },
+          { ID: 'r4', FormID: 'f2', Status: 'Complete', SubmittedAt: new Date('2026-01-04') },
+        ],
+        [ANSWERS]: [
+          { ID: 'a1', ResponseID: 'r1', QuestionID: 'q1' },
+          { ID: 'a2', ResponseID: 'r2', QuestionID: 'q1' },
+          { ID: 'a3', ResponseID: 'r3', QuestionID: 'q2' },
+          { ID: 'a4', ResponseID: 'r4', QuestionID: 'q1' },
+        ],
+      },
+      queries: { 'Forms: Echo': (p) => [{ echoed: p.FormID }], 'Forms: Broken': { error: 'deadlock' } },
+      readPermissions: { [ANSWERS]: false },
+    });
+
+  it('orders (nulls first ascending, last descending, ties on the next term) and pages with StartRow / MaxRows', async () => {
+    const fake = reporting();
+    const read = await fake.provider.RunView<{ ID: string }>({ EntityName: RESPONSES, OrderBy: 'SubmittedAt DESC, ID', StartRow: 1, MaxRows: 2, ResultType: 'simple' });
+
+    expect(read.Results.map((r) => r.ID)).toEqual(['r3', 'r1']);
+    expect(read.TotalRowCount).toBe(4);
+    const ascending = await fake.provider.RunView<{ ID: string }>({ EntityName: RESPONSES, OrderBy: 'SubmittedAt', ResultType: 'simple' });
+    expect(ascending.Results.map((r) => r.ID)).toEqual(['r2', 'r1', 'r3', 'r4']);
+  });
+
+  it('resolves an IN (SELECT … FROM <view> WHERE …) subquery against the table behind the view', async () => {
+    const fake = reporting();
+    const read = await fake.provider.RunView<{ ID: string }>({
+      EntityName: ANSWERS,
+      ExtraFilter: "QuestionID IN ('q1') AND ResponseID IN (SELECT ID FROM [__mj_BizAppsForms].[vwFormResponses] WHERE FormID='f1' AND Status='Complete')",
+      ResultType: 'simple',
+    });
+
+    expect(read.Results.map((r) => r.ID)).toEqual(['a1']);
+  });
+
+  it('answers RunQuery from the script, records the user, and fails an unknown or broken query', async () => {
+    const fake = reporting();
+    const user = { ID: 'u1' } as unknown as UserInfo;
+
+    expect((await fake.provider.RunQuery({ QueryName: 'Forms: Echo', Parameters: { FormID: 'f1' } }, user)).Results).toEqual([{ echoed: 'f1' }]);
+    expect(await fake.provider.RunQuery({ QueryName: 'Forms: Broken' })).toMatchObject({ Success: false, ErrorMessage: 'deadlock' });
+    expect(await fake.provider.RunQuery({ QueryName: 'Forms: Nope' })).toMatchObject({ Success: false });
+    expect(fake.queryCalls.map((c) => [c.params.QueryName, c.user])).toEqual([
+      ['Forms: Echo', user],
+      ['Forms: Broken', undefined],
+      ['Forms: Nope', undefined],
+    ]);
+  });
+
+  it('reports CanRead from readPermissions (readable when unlisted) and resolves EntityByID for ids it issued', () => {
+    const fake = reporting();
+    const user = { ID: 'u1' } as unknown as UserInfo;
+
+    expect(fake.provider.EntityByName(ANSWERS)?.GetUserPermisions(user).CanRead).toBe(false);
+    expect(fake.provider.EntityByName(RESPONSES)?.GetUserPermisions(user).CanRead).toBe(true);
+    const id = fake.provider.EntityByName(RESPONSES)?.ID ?? '';
+    expect(fake.provider.EntityByID(id)?.Name).toBe(RESPONSES);
+    expect(fake.provider.EntityByID('not-issued')).toBeUndefined();
   });
 });

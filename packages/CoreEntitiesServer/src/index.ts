@@ -7,6 +7,8 @@
  *  - engines (`engines/`) — the domain operations, each one transaction: publishing, authoring
  *    (build, clone, create from template, archive, restore), share links, and automations (editing
  *    the steps; running them for a response);
+ *  - response reporting (`FormReportingEngine`, `reporting/`): the dashboard summary as server-side
+ *    aggregates, the paged response list and export, and one response's detail;
  *  - the respondent path (`FormSubmissionEngine`, `submission/`): the gates, the transactional save and
  *    the allowlisted projection behind `Forms.GetRespondentForm` / `Forms.SaveResponse`, plus the
  *    pieces forms-server's public HTTP doors share with it (link resolution, rate limiter, embed
@@ -160,11 +162,30 @@ export {
   type ResponseAutomationRequest,
 } from './engines/FormAutomationEngine.js';
 export type { AutomationRunResult, AutomationRunStatus } from './automation/automation-runner.js';
+export {
+  FormReportingEngine,
+  MAX_RESPONSE_PAGE_SIZE,
+  RESPONSE_LIST_ORDERS,
+  ROW_RESTRICTED_SUMMARY_MESSAGE,
+  SUMMARY_NOT_AVAILABLE_MESSAGE,
+  RESPONSE_STATUSES,
+  type ReportingSeams,
+  type ResponseDetailRequest,
+  type ResponseListOrder,
+  type ResponseListRequest,
+  type ResponseStatus,
+  type ResponseSummaryRequest,
+} from './engines/FormReportingEngine.js';
+export { FormReportingError } from './reporting/reporting-errors.js';
+export { REPORT_QUERY } from './reporting/report-queries.js';
+export { MAX_INSIGHT_ANSWER_ROWS } from './reporting/insight-answers.js';
+export { OFF_LIST_LABEL } from './reporting/breakdowns.js';
 export { EngineTransactionFailure } from './engines/engine-guards.js';
 export { FormAuthoringError } from './engines/authoring-errors.js';
 export type { ClonedForm } from './engines/form-clone.js';
 export { STARTER_TEMPLATES, getStarterTemplate, type StarterTemplate } from './engines/starter-templates.js';
 export { requireDatabaseProvider } from './shared/database-provider.js';
+export { isGuid } from './shared/guid.js';
 export { FORMS_ENTITY } from './shared/entity-names.js';
 
 // Remote Operation server subclasses (spec #303 §2) and the authoring rule they share.
@@ -201,6 +222,15 @@ export {
   LoadGetRespondentFormOperation,
 } from './operations/GetRespondentFormServerOperation.js';
 export { SaveResponseServerOperation, LoadSaveResponseOperation } from './operations/SaveResponseServerOperation.js';
+export {
+  GetResponseSummaryServerOperation,
+  LoadGetResponseSummaryOperation,
+} from './operations/GetResponseSummaryServerOperation.js';
+export { ListResponsesServerOperation, LoadListResponsesOperation } from './operations/ListResponsesServerOperation.js';
+export {
+  GetResponseDetailServerOperation,
+  LoadGetResponseDetailOperation,
+} from './operations/GetResponseDetailServerOperation.js';
 export { authorizeRespondent, respondentSessionRefusal } from './operations/respondent-authorization.js';
 
 // The respondent path (spec #303 §4 FormSubmissionEngine, §6) and what forms-server's public HTTP doors
@@ -256,9 +286,14 @@ export { WORK_QUEUE_RESPONSE_SUBMITTED, type ResponseSubmittedQueue } from './wo
 export {
   authorizeDistributionAuthoring,
   authorizeFormAuthoring,
+  authorizeResponseReading,
   distributionAuthoringRefusal,
   formAuthoringRefusal,
   refuseFormAuthoring,
+  responseReadingRefusal,
+  responseRowFilterRefusal,
+  RESPONSE_REPORTING_ENTITIES,
+  RESPONSE_SUMMARY_ROW_ENTITIES,
   type DistributionRight,
   type FormPermissionSource,
 } from './operations/form-authoring-authorization.js';

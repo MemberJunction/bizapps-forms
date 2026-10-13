@@ -23,6 +23,8 @@ import type {
   EntityInfo,
   EntityTransactionScope,
   EntityUserPermissionInfo,
+  RunQueryParams,
+  RunQueryResult,
   RunViewParams,
   RunViewResult,
   UserInfo,
@@ -76,8 +78,26 @@ export interface FakeProviderConfig {
    * `MJ_BizApps_Forms: Forms`). An entity absent from the map is refused, like `createPermissions`.
    */
   updatePermissions?: Record<string, boolean>;
+  /**
+   * Per-entity CanRead, for the reporting operations' `Authorize` (Read on the Forms entities they
+   * report from). Unlike the create and update maps, an entity ABSENT from this map is readable: every
+   * spec written before reads were checked assumed so.
+   */
+  readPermissions?: Record<string, boolean>;
+  /**
+   * The effective READ row filter each entity applies to every user (`GetEffectiveRowFilterWhereClause`),
+   * as a role's RLS filter or an API key's row filter would. Unlisted: none. The fake does not apply
+   * it to reads; it only reports it, which is what code deciding whether to elevate asks for.
+   */
+  rowFilters?: Record<string, string>;
   /** Force a RunView failure for a given entity name (to exercise fail-closed paths). */
   failRunViewFor?: string;
+  /**
+   * Saved queries `RunQuery` answers, by `QueryName`: a function of the call's `Parameters` returning
+   * the rows, or `{ error }` to fail the run as a database error would. A query not named here fails
+   * with "query not found", as MJ does for an unknown name.
+   */
+  queries?: Record<string, FakeQuery>;
   /** Force a Save() to return false for a given entity name. */
   failSaveFor?: string;
   /**
@@ -161,6 +181,15 @@ export interface FakeTableRecord {
 /** One row of a generic {@link FakeProviderConfig.tables} entry. Must carry its primary key `ID`. */
 export type FakeRow = Record<string, unknown> & { ID: string };
 
+/** How the fake answers one saved query (see {@link FakeProviderConfig.queries}). */
+export type FakeQuery = ((parameters: Record<string, unknown>) => Record<string, unknown>[]) | { error: string };
+
+/** One `RunView` or `RunQuery` call, and the user it ran as — what a spec asserts an identity on. */
+export interface RecordedCall<P> {
+  params: P;
+  user: UserInfo | undefined;
+}
+
 /** One scripted answer for `ExecuteSQL`. */
 export interface FakeSqlScript {
   match: RegExp | string;
@@ -194,6 +223,10 @@ export interface FakeProvider {
   statements: RecordedStatement[];
   /** The live generic tables (see {@link FakeProviderConfig.tables}). */
   tables: Record<string, FakeRow[]>;
+  /** Every `RunView` (including each one of a `RunViews` batch), in order, with its user. */
+  viewCalls: RecordedCall<RunViewParams>[];
+  /** Every `RunQuery`, in order, with its user. */
+  queryCalls: RecordedCall<RunQueryParams>[];
 }
 
 const FORM_RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
@@ -323,17 +356,35 @@ export function fakeEntityId(entityName: string): string {
   return id;
 }
 
-/** Build a fake EntityInfo whose GetUserPermisions reflects the configured CanCreate / CanUpdate. */
-function makeFakeEntityInfo(entityName: string, canCreate: boolean, canUpdate: boolean): EntityInfo {
-  const permissions = { CanCreate: canCreate, CanRead: true, CanUpdate: canUpdate, CanDelete: false } as EntityUserPermissionInfo;
+/** The entity name behind a {@link fakeEntityId}, or `undefined` for an id the fake never issued. */
+function fakeEntityNameOf(entityId: string): string | undefined {
+  for (const [name, id] of fakeEntityIds) {
+    if (id === entityId) {
+      return name;
+    }
+  }
+  return undefined;
+}
+
+/** The base view name the fake gives an entity: `vw` + its display name without spaces (`vwFormResponses`). */
+export function fakeBaseView(entityName: string): string {
+  return `vw${(entityName.split(': ').pop() ?? entityName).replace(/\s+/g, '')}`;
+}
+
+/** Build a fake EntityInfo whose GetUserPermisions reflects the configured CanCreate / CanRead / CanUpdate. */
+function makeFakeEntityInfo(entityName: string, canCreate: boolean, canUpdate: boolean, canRead = true, rowFilter = ''): EntityInfo {
+  const permissions = { CanCreate: canCreate, CanRead: canRead, CanUpdate: canUpdate, CanDelete: false } as EntityUserPermissionInfo;
   const info = {
     ID: fakeEntityId(entityName),
     Name: entityName,
     // Enough for code that builds raw SQL against the entity's table (the submit path's quota
-    // UPDATE): the Forms schema, and the table name the entity's display name implies.
+    // UPDATE) or view (a reporting subquery): the Forms schema, and the names the display name implies.
     SchemaName: '__mj_BizAppsForms',
     BaseTable: (entityName.split(': ').pop() ?? entityName).replace(/\s+/g, '').replace(/s$/, ''),
+    BaseView: fakeBaseView(entityName),
     GetUserPermisions: (_user: UserInfo): EntityUserPermissionInfo => permissions,
+    GetEffectiveRowFilterWhereClause: (_user: UserInfo, _type: string, returnPrefix: string): string =>
+      rowFilter ? `${returnPrefix ? `${returnPrefix} ` : ''}(${rowFilter})` : '',
   };
   return info as unknown as EntityInfo;
 }
@@ -344,6 +395,8 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
   const deleted: SavedRecord[] = [];
   const transactions: string[] = [];
   const statements: RecordedStatement[] = [];
+  const viewCalls: RecordedCall<RunViewParams>[] = [];
+  const queryCalls: RecordedCall<RunQueryParams>[] = [];
   const tables: Record<string, FakeRow[]> = {};
   for (const [name, rows] of Object.entries(config.tables ?? {})) {
     tables[name] = rows.map((row) => ({ ...row }));
@@ -360,14 +413,15 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
     responseStore.set(row.ID, row);
   }
 
-  const runView = async <T>(params: RunViewParams): Promise<RunViewResult<T>> => {
+  const runView = async <T>(params: RunViewParams, user?: UserInfo): Promise<RunViewResult<T>> => {
+    viewCalls.push({ params, user });
     const name = params.EntityName ?? '';
     if (config.failRunViewFor && name === config.failRunViewFor) {
       return runViewResult<T>(false, []);
     }
     const table = tables[name];
     if (table) {
-      return runTableView<T>(params, table, (row) =>
+      return runTableView<T>(params, table, tables, (row) =>
         wrap(name, makeTableEntity(name, table, row, {
           saved,
           deleted,
@@ -425,8 +479,12 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
     // Batched reads go through the SAME emulation as single ones. This returned an empty array
     // until the file-link reconciler started batching, at which point "no results" and "the view
     // did not run" became indistinguishable to the code under test.
-    RunViews: async <T>(params: RunViewParams[]): Promise<RunViewResult<T>[]> =>
-      Promise.all(params.map((p) => runView<T>(p))),
+    RunViews: async <T>(params: RunViewParams[], user?: UserInfo): Promise<RunViewResult<T>[]> =>
+      Promise.all(params.map((p) => runView<T>(p, user))),
+    RunQuery: async (params: RunQueryParams, user?: UserInfo): Promise<RunQueryResult> => {
+      queryCalls.push({ params, user });
+      return runFakeQuery(params, config.queries ?? {});
+    },
     GetEntityObject: async (entityName: string) => {
       const table = tables[entityName];
       if (table) {
@@ -445,7 +503,13 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
         entityName,
         config.createPermissions?.[entityName] ?? false,
         config.updatePermissions?.[entityName] ?? false,
+        config.readPermissions?.[entityName] ?? true,
+        config.rowFilters?.[entityName] ?? '',
       ),
+    EntityByID: (entityId: string) => {
+      const entityName = fakeEntityNameOf(entityId);
+      return entityName === undefined ? undefined : makeFakeEntityInfo(entityName, false, false);
+    },
     SupportsEntityTransactions: config.noTransactions !== true,
     BeginEntityTransaction: async (): Promise<EntityTransactionScope> => tx.begin(),
     get TransactionDepth(): number {
@@ -483,7 +547,33 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
     transactions,
     statements,
     tables,
+    viewCalls,
+    queryCalls,
   };
+}
+
+/** Answer one `RunQuery` from the scripted {@link FakeProviderConfig.queries}, in MJ's result shape. */
+function runFakeQuery(params: RunQueryParams, queries: Record<string, FakeQuery>): RunQueryResult {
+  const name = params.QueryName ?? '';
+  const script = queries[name];
+  const failed = (message: string): RunQueryResult => ({
+    QueryID: '',
+    QueryName: name,
+    Success: false,
+    Results: [],
+    RowCount: 0,
+    TotalRowCount: 0,
+    ExecutionTime: 0,
+    ErrorMessage: message,
+  });
+  if (!script) {
+    return failed(`Query '${name}' not found`);
+  }
+  if (typeof script !== 'function') {
+    return failed(script.error);
+  }
+  const rows = script(params.Parameters ?? {});
+  return { QueryID: `query-${name}`, QueryName: name, Success: true, Results: rows, RowCount: rows.length, TotalRowCount: rows.length, ExecutionTime: 0, ErrorMessage: '' };
 }
 
 /** The submit path's quota statement: `UPDATE …FormDistribution SET ResponseCount = ResponseCount + 1 …`. */
@@ -670,21 +760,89 @@ function makeTableEntity(entityName: string, table: FakeRow[], row: FakeRow | nu
   return record as unknown as FakeTableRecord;
 }
 
-/** Serve one `RunView` from a generic table, honouring the filter and the requested result type. */
+/**
+ * Serve one `RunView` from a generic table, honouring the filter, the order, the page (`StartRow`,
+ * `MaxRows`) and the requested result type. `TotalRowCount` counts every matching row, as MJ's does.
+ */
 function runTableView<T>(
   params: RunViewParams,
   table: FakeRow[],
+  tables: Record<string, FakeRow[]>,
   toEntity: (row: FakeRow) => unknown,
 ): RunViewResult<T> {
   const rawFilter = params.ExtraFilter;
   const filter = IsPlatformSQL(rawFilter) ? rawFilter.default : rawFilter ?? '';
-  const matching = table.filter((row) => matchesRowFilter(row, filter));
+  const { rest, memberships } = extractSubqueries(filter, tables);
+  const matching = table.filter((row) => matchesRowFilter(row, rest) && memberships.every((m) => m.values.has(String(row[m.column] ?? ''))));
   if (params.ResultType === 'count_only') {
     return runViewResult<T>(true, [], matching.length);
   }
-  const limited = params.MaxRows ? matching.slice(0, params.MaxRows) : matching;
+  const rawOrder = params.OrderBy;
+  const ordered = orderRows(matching, IsPlatformSQL(rawOrder) ? rawOrder.default : rawOrder ?? '');
+  const start = params.StartRow ?? 0;
+  const limited = params.MaxRows ? ordered.slice(start, start + params.MaxRows) : ordered.slice(start);
   const rows = params.ResultType === 'entity_object' ? limited.map(toEntity) : limited.map((row) => ({ ...row }));
   return { ...runViewResult<T>(true, rows as T[]), TotalRowCount: matching.length };
+}
+
+/** A `Column IN (SELECT Inner FROM view WHERE …)` predicate, resolved to the values the subquery yields. */
+interface SubqueryMembership {
+  column: string;
+  values: Set<string>;
+}
+
+/**
+ * Resolve every `Column IN (SELECT Inner FROM [schema].[view] WHERE <predicate>)` in a filter against
+ * the table whose entity has that base view ({@link fakeBaseView}), and return the filter with those
+ * predicates removed. The inner predicate is matched by the same rules as a top-level filter. A
+ * subquery naming a view no table has yields no values — so the outer row matches nothing, as a
+ * database answering from an empty view would.
+ */
+function extractSubqueries(filter: string, tables: Record<string, FakeRow[]>): { rest: string; memberships: SubqueryMembership[] } {
+  const memberships: SubqueryMembership[] = [];
+  const pattern = /\[?(\w+)\]?\s+IN\s*\(\s*SELECT\s+\[?(\w+)\]?\s+FROM\s+([\w.\[\]"]+)\s+WHERE\s+([^()]*)\)/gi;
+  const rest = filter.replace(pattern, (_whole, column: string, inner: string, view: string, predicate: string) => {
+    const viewName = view.split('.').pop()?.replace(/[[\]"]/g, '') ?? '';
+    const entityName = Object.keys(tables).find((name) => fakeBaseView(name) === viewName);
+    const rows = entityName ? tables[entityName].filter((row) => matchesRowFilter(row, predicate)) : [];
+    memberships.push({ column, values: new Set(rows.map((row) => String(row[inner] ?? ''))) });
+    return '';
+  });
+  return { rest, memberships };
+}
+
+/**
+ * Order rows by an `ORDER BY` list of `Column [ASC|DESC]` terms (anything else is ignored). Nulls
+ * sort first ascending, as SQL Server's do. A stable sort, so rows equal on every term keep table order.
+ */
+function orderRows(rows: FakeRow[], orderBy: string): FakeRow[] {
+  const terms = orderBy
+    .split(',')
+    .map((term) => term.trim().match(/^\[?(\w+)\]?(?:\s+(ASC|DESC))?$/i))
+    .filter((m): m is RegExpMatchArray => m !== null)
+    .map((m) => ({ column: m[1], direction: m[2]?.toUpperCase() === 'DESC' ? -1 : 1 }));
+  if (terms.length === 0) {
+    return rows;
+  }
+  const comparable = (value: unknown): number | string | null =>
+    value === null || value === undefined ? null : value instanceof Date ? value.getTime() : typeof value === 'number' ? value : String(value);
+  return [...rows].sort((a, b) => {
+    for (const { column, direction } of terms) {
+      const x = comparable(a[column]);
+      const y = comparable(b[column]);
+      if (x === y) {
+        continue;
+      }
+      if (x === null) {
+        return -direction;
+      }
+      if (y === null) {
+        return direction;
+      }
+      return (x < y ? -1 : 1) * direction;
+    }
+    return 0;
+  });
 }
 
 /**

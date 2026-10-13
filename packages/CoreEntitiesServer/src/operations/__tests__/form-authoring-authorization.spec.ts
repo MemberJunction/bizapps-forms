@@ -8,8 +8,12 @@ import {
   authorizeDistributionAuthoring,
   authorizeFormAuthoring,
   distributionAuthoringRefusal,
+  authorizeResponseReading,
   formAuthoringRefusal,
   refuseFormAuthoring,
+  RESPONSE_REPORTING_ENTITIES,
+  responseReadingRefusal,
+  responseRowFilterRefusal,
 } from '../form-authoring-authorization.js';
 import { makeFakeProvider } from '../../testing/index.js';
 
@@ -156,5 +160,48 @@ describe('distributionAuthoringRefusal', () => {
     expect(logged).toEqual([]);
     expect(authorizeDistributionAuthoring('Forms.OpenDistribution', user(), ['CanUpdate'], rights(true, true, false))).toBe(false);
     expect(logged.join('\n')).toMatch(/Forms\.OpenDistribution.*author-1.*Form Distributions/);
+  });
+});
+
+describe('responseReadingRefusal — the rule the response-reporting operations apply (#303 Task 9)', () => {
+  const readsAll = makeFakeProvider({}).provider;
+
+  it('admits a signed-in user with Read on every reporting entity — Update is not needed to read responses', () => {
+    expect(responseReadingRefusal(user(), readsAll)).toBeNull();
+  });
+
+  it('refuses an anonymous or magic-link-scoped session whatever it may read', () => {
+    expect(responseReadingRefusal(user({ IsMagicLinkAnonymous: true }), readsAll)).toMatch(/anonymous magic-link session cannot read a form's responses/);
+    expect(responseReadingRefusal(user({ MagicLinkScope: { ResourceID: 'dist-1' } }), readsAll)).toMatch(/magic-link session is scoped/);
+  });
+
+  it.each(RESPONSE_REPORTING_ENTITIES.map((entity) => [entity]))('refuses a user without Read on %s', (entity) => {
+    const provider = makeFakeProvider({ readPermissions: { [entity]: false } }).provider;
+    expect(responseReadingRefusal(user(), provider)).toBe(`the user lacks Read permission on ${entity}`);
+  });
+
+  it('logs a refusal with the operation key and the reason, and admits silently', () => {
+    logged.length = 0;
+    const provider = makeFakeProvider({ readPermissions: { 'MJ_BizApps_Forms: Form Response Answers': false } }).provider;
+
+    expect(authorizeResponseReading('Forms.ListResponses', user(), provider)).toBe(false);
+    expect(authorizeResponseReading('Forms.ListResponses', user(), readsAll)).toBe(true);
+    expect(logged).toEqual(['[Forms] Forms.ListResponses refused for user author-1: the user lacks Read permission on MJ_BizApps_Forms: Form Response Answers.']);
+  });
+});
+
+describe('responseRowFilterRefusal — who the summary may elevate for (#303 Task 9 fix round 1)', () => {
+  it('admits a user with no row filter on responses or answers', () => {
+    expect(responseRowFilterRefusal(user(), makeFakeProvider({}).provider)).toBeNull();
+  });
+
+  it.each([['MJ_BizApps_Forms: Form Responses'], ['MJ_BizApps_Forms: Form Response Answers']])('refuses a user whose reads of %s are row-filtered', (entity) => {
+    const provider = makeFakeProvider({ rowFilters: { [entity]: "ID = 'x'" } }).provider;
+    expect(responseRowFilterRefusal(user(), provider)).toBe(`the user's reads of ${entity} are row-filtered`);
+  });
+
+  it('fails closed on a missing entity', () => {
+    const empty = { EntityByName: () => undefined } as unknown as IMetadataProvider;
+    expect(responseRowFilterRefusal(user(), empty)).toMatch(/not in this host's metadata/);
   });
 });
