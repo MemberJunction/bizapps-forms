@@ -23,45 +23,45 @@ import { mjBizAppsFormsFormAutomationRunEntity, mjBizAppsFormsFormAutomationEnti
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Automation Runs
 //****************************************************************************
-@ObjectType({ description: `One execution attempt of an automation against one response, linking out to the MJ action or agent log that holds the detail` })
+@ObjectType({ description: "One execution attempt of an automation against one response, linking out to the MJ action or agent log that holds the detail" })
 export class mjBizAppsFormsFormAutomationRun_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    FormAutomationID: string;
+    FormAutomationID?: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    FormResponseID: string;
+    FormResponseID?: string;
         
-    @Field({description: `Outcome of this attempt. Skipped means a condition did not hold, which the MJ logs cannot record`}) 
+    @Field({nullable: true, description: "Outcome of this attempt. Skipped means a condition did not hold, which the MJ logs cannot record"}) 
     @MaxLength(20)
-    Status: string;
+    Status?: string;
         
-    @Field(() => Int, {description: `How many times this automation has been attempted for this response; the recovery sweep stops re-driving at the configured cap`}) 
-    AttemptCount: number;
+    @Field(() => Int, {nullable: true, description: "How many times this automation has been attempted for this response; the recovery sweep stops re-driving at the configured cap"}) 
+    AttemptCount?: number;
         
-    @Field({nullable: true, description: `When this attempt began`}) 
+    @Field({nullable: true, description: "When this attempt began"}) 
     StartedAt?: Date;
         
-    @Field({nullable: true, description: `When this attempt finished, successfully or not`}) 
+    @Field({nullable: true, description: "When this attempt finished, successfully or not"}) 
     CompletedAt?: Date;
         
-    @Field({nullable: true, description: `The MJ action execution log for this attempt, when an Action ran`}) 
+    @Field({nullable: true, description: "The MJ action execution log for this attempt, when an Action ran"}) 
     @MaxLength(36)
     ActionExecutionLogID?: string;
         
-    @Field({nullable: true, description: `The MJ agent run for this attempt, when an Agent ran`}) 
+    @Field({nullable: true, description: "The MJ agent run for this attempt, when an Agent ran"}) 
     @MaxLength(36)
     AIAgentRunID?: string;
         
-    @Field({nullable: true, description: `Why this attempt failed`}) 
+    @Field({nullable: true, description: "Why this attempt failed"}) 
     ErrorMessage?: string;
         
-    @Field({nullable: true, description: `JSON digest of the result, small enough to show in an activity view`}) 
+    @Field({nullable: true, description: "JSON digest of the result, small enough to show in an activity view"}) 
     OutputSummary?: string;
         
     @Field() 
@@ -70,9 +70,9 @@ export class mjBizAppsFormsFormAutomationRun_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(255)
-    FormAutomation: string;
+    FormAutomation?: string;
         
     @Field({nullable: true}) 
     @MaxLength(425)
@@ -81,6 +81,9 @@ export class mjBizAppsFormsFormAutomationRun_ {
     @Field({nullable: true}) 
     @MaxLength(255)
     AIAgentRun?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -261,64 +264,64 @@ export class mjBizAppsFormsFormAutomationRunResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Automations
 //****************************************************************************
-@ObjectType({ description: `One configured on-submit automation for a form: an Action, an Agent or an entity binding, with its trigger, ordering, condition and execution mode` })
+@ObjectType({ description: "One configured on-submit automation for a form: an Action, an Agent or an entity binding, with its trigger, ordering, condition and execution mode" })
 export class mjBizAppsFormsFormAutomation_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    FormID: string;
+    FormID?: string;
         
-    @Field({description: `Author-facing label, e.g. "Email confirmation"`}) 
+    @Field({nullable: true, description: "Author-facing label, e.g. \"Email confirmation\""}) 
     @MaxLength(255)
-    Name: string;
+    Name?: string;
         
-    @Field({nullable: true, description: `What this automation is for`}) 
+    @Field({nullable: true, description: "What this automation is for"}) 
     Description?: string;
         
-    @Field({description: `Which kind of target runs: Action, Agent or EntityBinding`}) 
+    @Field({nullable: true, description: "Which kind of target runs: Action, Agent or EntityBinding"}) 
     @MaxLength(20)
-    TargetType: string;
+    TargetType?: string;
         
-    @Field({nullable: true, description: `The MJ Action to run; set only when TargetType is Action`}) 
+    @Field({nullable: true, description: "The MJ Action to run; set only when TargetType is Action"}) 
     @MaxLength(36)
     ActionID?: string;
         
-    @Field({nullable: true, description: `The MJ AI Agent to run; set only when TargetType is Agent`}) 
+    @Field({nullable: true, description: "The MJ AI Agent to run; set only when TargetType is Agent"}) 
     @MaxLength(36)
     AgentID?: string;
         
-    @Field({nullable: true, description: `The entity binding to execute; set only when TargetType is EntityBinding`}) 
+    @Field({nullable: true, description: "The entity binding to execute; set only when TargetType is EntityBinding"}) 
     @MaxLength(36)
     BindingID?: string;
         
-    @Field({description: `Which save fires this automation: a completed submission, a partial autosave, or both`}) 
+    @Field({nullable: true, description: "Which save fires this automation: a completed submission, a partial autosave, or both"}) 
     @MaxLength(30)
-    Trigger: string;
+    Trigger?: string;
         
-    @Field({description: `Sync automations are awaited before the respondent sees a confirmation; Async are dispatched without waiting`}) 
+    @Field({nullable: true, description: "Sync automations are awaited before the respondent sees a confirmation; Async are dispatched without waiting"}) 
     @MaxLength(10)
-    ExecutionMode: string;
+    ExecutionMode?: string;
         
-    @Field(() => Int, {description: `Run order within an execution mode; Sync automations always run before Async ones regardless`}) 
-    DisplayOrder: number;
+    @Field(() => Int, {nullable: true, description: "Run order within an execution mode; Sync automations always run before Async ones regardless"}) 
+    DisplayOrder?: number;
         
-    @Field({nullable: true, description: `JSON condition over the response answers; when it does not hold the automation is recorded as skipped rather than run. Null means always run`}) 
+    @Field({nullable: true, description: "JSON condition over the response answers; when it does not hold the automation is recorded as skipped rather than run. Null means always run"}) 
     ConditionalRule?: string;
         
-    @Field({nullable: true, description: `JSON describing how the target's inputs are built from response context, static values and specific answers. Null means the standard response context ids`}) 
+    @Field({nullable: true, description: "JSON describing how the target's inputs are built from response context, static values and specific answers. Null means the standard response context ids"}) 
     ParameterMapping?: string;
         
-    @Field(() => Boolean, {description: `When false, a failure halts the remaining Sync automations for that response`}) 
-    ContinueOnError: boolean;
+    @Field(() => Boolean, {nullable: true, description: "When false, a failure halts the remaining Sync automations for that response"}) 
+    ContinueOnError?: boolean;
         
-    @Field(() => Int, {nullable: true, description: `Optional per-automation execution cap in milliseconds`}) 
+    @Field(() => Int, {nullable: true, description: "Optional per-automation execution cap in milliseconds"}) 
     TimeoutMS?: number;
         
-    @Field(() => Boolean, {description: `Whether this automation is eligible to run`}) 
-    IsActive: boolean;
+    @Field(() => Boolean, {nullable: true, description: "Whether this automation is eligible to run"}) 
+    IsActive?: boolean;
         
     @Field() 
     _mj__CreatedAt: Date;
@@ -326,9 +329,9 @@ export class mjBizAppsFormsFormAutomation_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(255)
-    Form: string;
+    Form?: string;
         
     @Field({nullable: true}) 
     @MaxLength(425)
@@ -341,6 +344,9 @@ export class mjBizAppsFormsFormAutomation_ {
     @Field({nullable: true}) 
     @MaxLength(255)
     Binding?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -551,32 +557,32 @@ export class mjBizAppsFormsFormAutomationResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Categories
 //****************************************************************************
-@ObjectType({ description: `Hierarchical categories that organize forms into a browsable tree` })
+@ObjectType({ description: "Hierarchical categories that organize forms into a browsable tree" })
 export class mjBizAppsFormsFormCategory_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field({description: `Display name of the category`}) 
+    @Field({nullable: true, description: "Display name of the category"}) 
     @MaxLength(255)
-    Name: string;
+    Name?: string;
         
-    @Field({nullable: true, description: `Detailed description of this category`}) 
+    @Field({nullable: true, description: "Detailed description of this category"}) 
     Description?: string;
         
     @Field({nullable: true}) 
     @MaxLength(36)
     ParentID?: string;
         
-    @Field({nullable: true, description: `Font Awesome icon class for UI display`}) 
+    @Field({nullable: true, description: "Font Awesome icon class for UI display"}) 
     @MaxLength(100)
     IconClass?: string;
         
-    @Field(() => Int, {description: `Sort order among siblings. Lower values appear first`}) 
-    DisplayRank: number;
+    @Field(() => Int, {nullable: true, description: "Sort order among siblings. Lower values appear first"}) 
+    DisplayRank?: number;
         
-    @Field(() => Boolean, {description: `Whether this category is available for selection. Inactive categories are hidden but preserved`}) 
-    IsActive: boolean;
+    @Field(() => Boolean, {nullable: true, description: "Whether this category is available for selection. Inactive categories are hidden but preserved"}) 
+    IsActive?: boolean;
         
     @Field() 
     _mj__CreatedAt: Date;
@@ -603,6 +609,9 @@ export class mjBizAppsFormsFormCategory_ {
         
     @Field(() => Int, {nullable: true}) 
     ParentIDChildCount?: number;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -759,53 +768,53 @@ export class mjBizAppsFormsFormCategoryResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Distributions
 //****************************************************************************
-@ObjectType({ description: `A published channel for a form (public link, embed, QR, or email); wraps an anonymous, multi-use, scoped magic link` })
+@ObjectType({ description: "A published channel for a form (public link, embed, QR, or email); wraps an anonymous, multi-use, scoped magic link" })
 export class mjBizAppsFormsFormDistribution_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    FormID: string;
+    FormID?: string;
         
-    @Field({description: `Internal name for this distribution`}) 
+    @Field({nullable: true, description: "Internal name for this distribution"}) 
     @MaxLength(255)
-    Name: string;
+    Name?: string;
         
-    @Field({nullable: true, description: `URL-friendly slug used in the public link (unique when set)`}) 
+    @Field({nullable: true, description: "URL-friendly slug used in the public link (unique when set)"}) 
     @MaxLength(255)
     Slug?: string;
         
-    @Field({description: `Channel type: PublicLink, Embed, QR, or Email`}) 
+    @Field({nullable: true, description: "Channel type: PublicLink, Embed, QR, or Email"}) 
     @MaxLength(20)
-    ChannelType: string;
+    ChannelType?: string;
         
-    @Field({description: `Distribution status: Draft, Active, or Closed`}) 
+    @Field({nullable: true, description: "Distribution status: Draft, Active, or Closed"}) 
     @MaxLength(20)
-    Status: string;
+    Status?: string;
         
-    @Field({nullable: true, description: `When this distribution opens for responses (null = immediately)`}) 
+    @Field({nullable: true, description: "When this distribution opens for responses (null = immediately)"}) 
     OpenAt?: Date;
         
-    @Field({nullable: true, description: `When this distribution stops accepting responses (null = no end)`}) 
+    @Field({nullable: true, description: "When this distribution stops accepting responses (null = no end)"}) 
     CloseAt?: Date;
         
-    @Field(() => Int, {nullable: true, description: `Maximum number of responses allowed through this distribution (null = unlimited)`}) 
+    @Field(() => Int, {nullable: true, description: "Maximum number of responses allowed through this distribution (null = unlimited)"}) 
     MaxResponses?: number;
         
-    @Field(() => Int, {description: `Running count of responses received through this distribution`}) 
-    ResponseCount: number;
+    @Field(() => Int, {nullable: true, description: "Running count of responses received through this distribution"}) 
+    ResponseCount?: number;
         
-    @Field({nullable: true, description: `ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.`}) 
+    @Field({nullable: true, description: "ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential."}) 
     @MaxLength(36)
     MagicLinkInviteID?: string;
         
-    @Field(() => Boolean, {description: `Whether a CAPTCHA (Cloudflare Turnstile) challenge is required for submissions via this distribution`}) 
-    CaptchaRequired: boolean;
+    @Field(() => Boolean, {nullable: true, description: "Whether a CAPTCHA (Cloudflare Turnstile) challenge is required for submissions via this distribution"}) 
+    CaptchaRequired?: boolean;
         
-    @Field(() => Boolean, {description: `Whether this distribution is active and usable`}) 
-    IsActive: boolean;
+    @Field(() => Boolean, {nullable: true, description: "Whether this distribution is active and usable"}) 
+    IsActive?: boolean;
         
     @Field() 
     _mj__CreatedAt: Date;
@@ -813,19 +822,22 @@ export class mjBizAppsFormsFormDistribution_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field({nullable: true, description: `Raw redeemable magic-link token for this distribution's public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written when the link is provisioned and cleared when its credential is revoked, so NULL means this link holds no working credential. Clearing it on an otherwise-live link is a REISSUE REQUEST: the server-side lifecycle hook revokes the linked invite and mints a replacement, leaving Slug (and therefore every shared URL) unchanged.`}) 
+    @Field({nullable: true, description: "Raw redeemable magic-link token for this distribution's public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written when the link is provisioned and cleared when its credential is revoked, so NULL means this link holds no working credential. Clearing it on an otherwise-live link is a REISSUE REQUEST: the server-side lifecycle hook revokes the linked invite and mints a replacement, leaving Slug (and therefore every shared URL) unchanged."}) 
     @MaxLength(255)
     PublicLinkToken?: string;
         
-    @Field(() => Boolean, {description: `Owner switch for same-device resume on this link. When 1 (the default) the respondent host mints a single-use device invite after the first partial save and holds its raw token in an HttpOnly cookie scoped to that form's route, so reopening the link in the same browser restores the draft; every resume rotates the token. Set 0 for kiosks and shared devices: no device invite is minted, and any cookie a browser still holds is cleared without being redeemed. It does not affect the emailed resume link, which works on any device.`}) 
-    AllowDeviceResume: boolean;
+    @Field(() => Boolean, {nullable: true, description: "Owner switch for same-device resume on this link. When 1 (the default) the respondent host mints a single-use device invite after the first partial save and holds its raw token in an HttpOnly cookie scoped to that form's route, so reopening the link in the same browser restores the draft; every resume rotates the token. Set 0 for kiosks and shared devices: no device invite is minted, and any cookie a browser still holds is cleared without being redeemed. It does not affect the emailed resume link, which works on any device."}) 
+    AllowDeviceResume?: boolean;
         
-    @Field({nullable: true, description: `JSON array of the browser ORIGINS permitted to embed this distribution and call the public form API with its link — e.g. ["https://careers.acme.com","https://acme.com:8443"]. Values are full origins exactly as a browser sends them (scheme, host, optional port), matched EXACTLY after case-normalising scheme and host. No wildcards and no subdomain implication: "acme.com" does not admit "https://careers.acme.com", and an author needing three subdomains names three origins — a pattern is refused at authoring time rather than accepted and ignored. Plain http is accepted only for loopback hosts, so a local harness is authorable without a proxy. NULL or an empty array (the default, and every distribution until an author sets one) means UNRESTRICTED, so no existing embed changes behaviour. Once ANY origin is authored the distribution is fail-closed: the respondent host page is served with a Content-Security-Policy frame-ancestors directive naming exactly these origins, and a public API call whose Origin is neither this API's own origin nor one of them is refused. An authored value that parses to nothing usable is a refusal of everything, never a fall back to unrestricted. Defense in depth behind the magic link, not a replacement for it: it bounds where a leaked multi-use link can be replayed. The array container differs deliberately from the keyed object bizapps-caliber uses for Step.AllowedOrigins, which is keyed only because Caliber steps inherit and must tombstone an inherited origin; a Forms distribution is a leaf and inherits from nothing. The per-entry grammar is identical.`}) 
+    @Field({nullable: true, description: "JSON array of the browser ORIGINS permitted to embed this distribution and call the public form API with its link — e.g. [\"https://careers.acme.com\",\"https://acme.com:8443\"]. Values are full origins exactly as a browser sends them (scheme, host, optional port), matched EXACTLY after case-normalising scheme and host. No wildcards and no subdomain implication: \"acme.com\" does not admit \"https://careers.acme.com\", and an author needing three subdomains names three origins — a pattern is refused at authoring time rather than accepted and ignored. Plain http is accepted only for loopback hosts, so a local harness is authorable without a proxy. NULL or an empty array (the default, and every distribution until an author sets one) means UNRESTRICTED, so no existing embed changes behaviour. Once ANY origin is authored the distribution is fail-closed: the respondent host page is served with a Content-Security-Policy frame-ancestors directive naming exactly these origins, and a public API call whose Origin is neither this API's own origin nor one of them is refused. An authored value that parses to nothing usable is a refusal of everything, never a fall back to unrestricted. Defense in depth behind the magic link, not a replacement for it: it bounds where a leaked multi-use link can be replayed. The array container differs deliberately from the keyed object bizapps-caliber uses for Step.AllowedOrigins, which is keyed only because Caliber steps inherit and must tombstone an inherited origin; a Forms distribution is a leaf and inherits from nothing. The per-entry grammar is identical."}) 
     AllowedOrigins?: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(255)
-    Form: string;
+    Form?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -1036,33 +1048,33 @@ export class mjBizAppsFormsFormDistributionResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Entity Binding Records
 //****************************************************************************
-@ObjectType({ description: `Durable record of which target record a submission produced, making re-execution idempotent and the lineage queryable` })
+@ObjectType({ description: "Durable record of which target record a submission produced, making re-execution idempotent and the lineage queryable" })
 export class mjBizAppsFormsFormEntityBindingRecord_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    BindingID: string;
+    BindingID?: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    FormResponseID: string;
+    FormResponseID?: string;
         
-    @Field({description: `Entity the record belongs to, captured at execution time`}) 
+    @Field({nullable: true, description: "Entity the record belongs to, captured at execution time"}) 
     @MaxLength(36)
-    TargetEntityID: string;
+    TargetEntityID?: string;
         
-    @Field({nullable: true, description: `Primary key of the record written, pipe-joined for a composite key. Null when the binding was skipped`}) 
+    @Field({nullable: true, description: "Primary key of the record written, pipe-joined for a composite key. Null when the binding was skipped"}) 
     @MaxLength(750)
     TargetRecordID?: string;
         
-    @Field({description: `What the binding did: created a record, merged into an existing one, changed nothing, or skipped`}) 
+    @Field({nullable: true, description: "What the binding did: created a record, merged into an existing one, changed nothing, or skipped"}) 
     @MaxLength(20)
-    Outcome: string;
+    Outcome?: string;
         
-    @Field({nullable: true, description: `JSON list of the field names actually written by this execution`}) 
+    @Field({nullable: true, description: "JSON list of the field names actually written by this execution"}) 
     WrittenFields?: string;
         
     @Field() 
@@ -1071,9 +1083,12 @@ export class mjBizAppsFormsFormEntityBindingRecord_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(255)
-    Binding: string;
+    Binding?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -1230,43 +1245,43 @@ export class mjBizAppsFormsFormEntityBindingRecordResolver extends ResolverBase 
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Entity Bindings
 //****************************************************************************
-@ObjectType({ description: `Declares that submissions to a form create or update a record of a target entity, via a field mapping, an identity rule and a merge policy` })
+@ObjectType({ description: "Declares that submissions to a form create or update a record of a target entity, via a field mapping, an identity rule and a merge policy" })
 export class mjBizAppsFormsFormEntityBinding_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    FormID: string;
+    FormID?: string;
         
-    @Field({description: `Author-facing label for this binding, e.g. "Create CRM Lead"`}) 
+    @Field({nullable: true, description: "Author-facing label for this binding, e.g. \"Create CRM Lead\""}) 
     @MaxLength(255)
-    Name: string;
+    Name?: string;
         
-    @Field({nullable: true, description: `What this binding is for`}) 
+    @Field({nullable: true, description: "What this binding is for"}) 
     Description?: string;
         
-    @Field({description: `Entity whose records this binding writes`}) 
+    @Field({nullable: true, description: "Entity whose records this binding writes"}) 
     @MaxLength(36)
-    TargetEntityID: string;
+    TargetEntityID?: string;
         
-    @Field({description: `Name of the target entity, stored alongside the ID because a runtime-created entity has a different ID in each environment and the name is the only portable handle`}) 
+    @Field({nullable: true, description: "Name of the target entity, stored alongside the ID because a runtime-created entity has a different ID in each environment and the name is the only portable handle"}) 
     @MaxLength(500)
-    TargetEntityName: string;
+    TargetEntityName?: string;
         
-    @Field({description: `JSON mapping of question GUIDs to target entity fields, with optional per-field transforms and conditions`}) 
-    FieldMappings: string;
+    @Field({nullable: true, description: "JSON mapping of question GUIDs to target entity fields, with optional per-field transforms and conditions"}) 
+    FieldMappings?: string;
         
-    @Field({description: `JSON rule deciding whether a submission updates an existing record or creates one: match fields, tenant scope, and what to do on no match or several`}) 
-    IdentityRule: string;
+    @Field({nullable: true, description: "JSON rule deciding whether a submission updates an existing record or creates one: match fields, tenant scope, and what to do on no match or several"}) 
+    IdentityRule?: string;
         
-    @Field({nullable: true, description: `JSON per-field merge policy (neverBlank, latestWins, writeOnce). Null means neverBlank throughout`}) 
+    @Field({nullable: true, description: "JSON per-field merge policy (neverBlank, latestWins, writeOnce). Null means neverBlank throughout"}) 
     MergePolicy?: string;
         
-    @Field({description: `Whether this binding is eligible to run`}) 
+    @Field({nullable: true, description: "Whether this binding is eligible to run"}) 
     @MaxLength(20)
-    Status: string;
+    Status?: string;
         
     @Field() 
     _mj__CreatedAt: Date;
@@ -1274,13 +1289,16 @@ export class mjBizAppsFormsFormEntityBinding_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(255)
-    Form: string;
+    Form?: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(255)
-    TargetEntity: string;
+    TargetEntity?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -1455,27 +1473,27 @@ export class mjBizAppsFormsFormEntityBindingResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Pages
 //****************************************************************************
-@ObjectType({ description: `An ordered page/section of a form` })
+@ObjectType({ description: "An ordered page/section of a form" })
 export class mjBizAppsFormsFormPage_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    FormID: string;
+    FormID?: string;
         
-    @Field({nullable: true, description: `Page title shown to respondents`}) 
+    @Field({nullable: true, description: "Page title shown to respondents"}) 
     @MaxLength(255)
     Title?: string;
         
-    @Field({nullable: true, description: `Page description / intro text`}) 
+    @Field({nullable: true, description: "Page description / intro text"}) 
     Description?: string;
         
-    @Field(() => Int, {description: `Sort order of the page within the form. Lower values appear first`}) 
-    DisplayOrder: number;
+    @Field(() => Int, {nullable: true, description: "Sort order of the page within the form. Lower values appear first"}) 
+    DisplayOrder?: number;
         
-    @Field({nullable: true, description: `JSON show/hide (and skip-to) rule evaluated against prior answers (see plan §6)`}) 
+    @Field({nullable: true, description: "JSON show/hide (and skip-to) rule evaluated against prior answers (see plan §6)"}) 
     ConditionalRule?: string;
         
     @Field() 
@@ -1484,12 +1502,15 @@ export class mjBizAppsFormsFormPage_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => Boolean, {description: `When set, advancing past this page banks a Partial response immediately instead of waiting for the autosave debounce`}) 
-    IsPartialSubmitPoint: boolean;
+    @Field(() => Boolean, {nullable: true, description: "When set, advancing past this page banks a Partial response immediately instead of waiting for the autosave debounce"}) 
+    IsPartialSubmitPoint?: boolean;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(255)
-    Form: string;
+    Form?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -1646,29 +1667,29 @@ export class mjBizAppsFormsFormPageResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Question Options
 //****************************************************************************
-@ObjectType({ description: `A selectable choice offered by a choice-style question` })
+@ObjectType({ description: "A selectable choice offered by a choice-style question" })
 export class mjBizAppsFormsFormQuestionOption_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    QuestionID: string;
+    QuestionID?: string;
         
-    @Field({description: `Label shown to the respondent for this option`}) 
+    @Field({nullable: true, description: "Label shown to the respondent for this option"}) 
     @MaxLength(500)
-    Label: string;
+    Label?: string;
         
-    @Field({nullable: true, description: `Stored value for this option (defaults to Label when omitted)`}) 
+    @Field({nullable: true, description: "Stored value for this option (defaults to Label when omitted)"}) 
     @MaxLength(500)
     Value?: string;
         
-    @Field(() => Int, {description: `Sort order of the option within its question. Lower values appear first`}) 
-    DisplayOrder: number;
+    @Field(() => Int, {nullable: true, description: "Sort order of the option within its question. Lower values appear first"}) 
+    DisplayOrder?: number;
         
-    @Field(() => Boolean, {description: `Whether this option is selected by default`}) 
-    IsDefault: boolean;
+    @Field(() => Boolean, {nullable: true, description: "Whether this option is selected by default"}) 
+    IsDefault?: boolean;
         
     @Field() 
     _mj__CreatedAt: Date;
@@ -1676,13 +1697,16 @@ export class mjBizAppsFormsFormQuestionOption_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field({nullable: true, description: `PictureChoice only: image shown above the option label. Ignored by every other question type`}) 
+    @Field({nullable: true, description: "PictureChoice only: image shown above the option label. Ignored by every other question type"}) 
     @MaxLength(1000)
     ImageURL?: string;
         
-    @Field({nullable: true, description: `Matrix only: whether this option is a Row or a Column of the grid. NULL for every other question type, and read as Row if left NULL on a Matrix`}) 
+    @Field({nullable: true, description: "Matrix only: whether this option is a Row or a Column of the grid. NULL for every other question type, and read as Row if left NULL on a Matrix"}) 
     @MaxLength(20)
     MatrixAxis?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -1845,46 +1869,46 @@ export class mjBizAppsFormsFormQuestionOptionResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Questions
 //****************************************************************************
-@ObjectType({ description: `A single question/field within a form page` })
+@ObjectType({ description: "A single question/field within a form page" })
 export class mjBizAppsFormsFormQuestion_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    FormID: string;
+    FormID?: string;
         
     @Field({nullable: true}) 
     @MaxLength(36)
     PageID?: string;
         
-    @Field({description: `Question input type (ShortText, Email, SingleChoice, Rating, NPS, FileUpload, Statement, etc.)`}) 
+    @Field({nullable: true, description: "Question input type (ShortText, Email, SingleChoice, Rating, NPS, FileUpload, Statement, etc.)"}) 
     @MaxLength(50)
-    QuestionType: string;
+    QuestionType?: string;
         
-    @Field({description: `The question text shown to the respondent`}) 
-    Prompt: string;
+    @Field({nullable: true, description: "The question text shown to the respondent"}) 
+    Prompt?: string;
         
-    @Field({nullable: true, description: `Optional helper/assistive text shown beneath the prompt`}) 
+    @Field({nullable: true, description: "Optional helper/assistive text shown beneath the prompt"}) 
     HelpText?: string;
         
-    @Field(() => Boolean, {description: `Whether an answer is required before the form can be submitted`}) 
-    IsRequired: boolean;
+    @Field(() => Boolean, {nullable: true, description: "Whether an answer is required before the form can be submitted"}) 
+    IsRequired?: boolean;
         
-    @Field(() => Int, {description: `Sort order of the question within its page. Lower values appear first`}) 
-    DisplayOrder: number;
+    @Field(() => Int, {nullable: true, description: "Sort order of the question within its page. Lower values appear first"}) 
+    DisplayOrder?: number;
         
-    @Field({nullable: true, description: `JSON validation rule (min/max, regex, length, etc.) applied client- and server-side`}) 
+    @Field({nullable: true, description: "JSON validation rule (min/max, regex, length, etc.) applied client- and server-side"}) 
     ValidationRule?: string;
         
-    @Field({nullable: true, description: `JSON show/hide rule evaluated against prior answers (see plan §6)`}) 
+    @Field({nullable: true, description: "JSON show/hide rule evaluated against prior answers (see plan §6)"}) 
     ConditionalRule?: string;
         
-    @Field({nullable: true, description: `JSON scoring configuration (e.g. LLM-judge prompt or numeric weights); null when unscored`}) 
+    @Field({nullable: true, description: "JSON scoring configuration (e.g. LLM-judge prompt or numeric weights); null when unscored"}) 
     ScoringConfig?: string;
         
-    @Field({nullable: true, description: `JSON per-type settings (e.g. rating scale, NPS labels, file constraints)`}) 
+    @Field({nullable: true, description: "JSON per-type settings (e.g. rating scale, NPS labels, file constraints)"}) 
     Settings?: string;
         
     @Field() 
@@ -1893,13 +1917,16 @@ export class mjBizAppsFormsFormQuestion_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(255)
-    Form: string;
+    Form?: string;
         
     @Field({nullable: true}) 
     @MaxLength(255)
     Page?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -2086,43 +2113,43 @@ export class mjBizAppsFormsFormQuestionResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Response Answers
 //****************************************************************************
-@ObjectType({ description: `One answer to one question. Typed columns for query-ability with a JSON fallback for complex/multi values.` })
+@ObjectType({ description: "One answer to one question. Typed columns for query-ability with a JSON fallback for complex/multi values." })
 export class mjBizAppsFormsFormResponseAnswer_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    ResponseID: string;
+    ResponseID?: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    QuestionID: string;
+    QuestionID?: string;
         
-    @Field({nullable: true, description: `Text answer value (short/long text, email, phone, single-choice label, etc.)`}) 
+    @Field({nullable: true, description: "Text answer value (short/long text, email, phone, single-choice label, etc.)"}) 
     TextValue?: string;
         
-    @Field(() => Float, {nullable: true, description: `Numeric answer value (Number, Rating, NPS)`}) 
+    @Field(() => Float, {nullable: true, description: "Numeric answer value (Number, Rating, NPS)"}) 
     NumericValue?: number;
         
-    @Field({nullable: true, description: `Date/time answer value (Date, Time)`}) 
+    @Field({nullable: true, description: "Date/time answer value (Date, Time)"}) 
     DateValue?: Date;
         
-    @Field(() => Boolean, {nullable: true, description: `Boolean answer value (YesNo)`}) 
+    @Field(() => Boolean, {nullable: true, description: "Boolean answer value (YesNo)"}) 
     BooleanValue?: boolean;
         
-    @Field({nullable: true, description: `JSON answer value for multi-select or complex/structured answers`}) 
+    @Field({nullable: true, description: "JSON answer value for multi-select or complex/structured answers"}) 
     JSONValue?: string;
         
     @Field({nullable: true}) 
     @MaxLength(36)
     FileID?: string;
         
-    @Field(() => Float, {nullable: true, description: `Numeric score assigned to this answer (e.g. by an LLM-judge); null when unscored`}) 
+    @Field(() => Float, {nullable: true, description: "Numeric score assigned to this answer (e.g. by an LLM-judge); null when unscored"}) 
     Score?: number;
         
-    @Field({nullable: true, description: `Rationale/explanation for the assigned score (LLM-judge output)`}) 
+    @Field({nullable: true, description: "Rationale/explanation for the assigned score (LLM-judge output)"}) 
     ScoreRationale?: string;
         
     @Field() 
@@ -2134,6 +2161,9 @@ export class mjBizAppsFormsFormResponseAnswer_ {
     @Field({nullable: true}) 
     @MaxLength(500)
     File?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -2314,25 +2344,25 @@ export class mjBizAppsFormsFormResponseAnswerResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Responses
 //****************************************************************************
-@ObjectType({ description: `One submission of a form. Anonymous or identified; pins the FormVersion it was filled against. Identified respondents link to a bizapps-common Person via RespondentPersonID.` })
+@ObjectType({ description: "One submission of a form. Anonymous or identified; pins the FormVersion it was filled against. Identified respondents link to a bizapps-common Person via RespondentPersonID." })
 export class mjBizAppsFormsFormResponse_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    FormID: string;
+    FormID?: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    FormVersionID: string;
+    FormVersionID?: string;
         
-    @Field({description: `Completion status: Partial or Complete`}) 
+    @Field({nullable: true, description: "Completion status: Partial or Complete"}) 
     @MaxLength(20)
-    Status: string;
+    Status?: string;
         
-    @Field({nullable: true, description: `Opaque anonymous session id (mj_sid) correlating this response to one anonymous magic-link session`}) 
+    @Field({nullable: true, description: "Opaque anonymous session id (mj_sid) correlating this response to one anonymous magic-link session"}) 
     @MaxLength(255)
     AnonymousSessionID?: string;
         
@@ -2340,13 +2370,13 @@ export class mjBizAppsFormsFormResponse_ {
     @MaxLength(36)
     RespondentPersonID?: string;
         
-    @Field({nullable: true, description: `Timestamp the respondent began the form`}) 
+    @Field({nullable: true, description: "Timestamp the respondent began the form"}) 
     StartedAt?: Date;
         
-    @Field({nullable: true, description: `Timestamp the response was submitted (null while Partial)`}) 
+    @Field({nullable: true, description: "Timestamp the response was submitted (null while Partial)"}) 
     SubmittedAt?: Date;
         
-    @Field({nullable: true, description: `JSON source metadata: hashed IP, user-agent, distribution id, referrer`}) 
+    @Field({nullable: true, description: "JSON source metadata: hashed IP, user-agent, distribution id, referrer"}) 
     SourceMetadata?: string;
         
     @Field() 
@@ -2355,13 +2385,13 @@ export class mjBizAppsFormsFormResponse_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field({nullable: true, description: `The distribution this response was submitted through, stamped once when the row is created and never rewritten. A resume session is scoped to one FormResponse, and it must still be able to load the definition of the link it came through — so the row-level-security filter that permits that read needs a real column to name. Putting it on JSON_VALUE(SourceMetadata) instead would make a free-form JSON blob the authorization key. NULL on rows created before resume shipped; those rows are not resumable by either channel.`}) 
+    @Field({nullable: true, description: "The distribution this response was submitted through, stamped once when the row is created and never rewritten. A resume session is scoped to one FormResponse, and it must still be able to load the definition of the link it came through — so the row-level-security filter that permits that read needs a real column to name. Putting it on JSON_VALUE(SourceMetadata) instead would make a free-form JSON blob the authorization key. NULL on rows created before resume shipped; those rows are not resumable by either channel."}) 
     @MaxLength(36)
     FormDistributionID?: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(255)
-    Form: string;
+    Form?: string;
         
     @Field({nullable: true}) 
     @MaxLength(201)
@@ -2370,6 +2400,9 @@ export class mjBizAppsFormsFormResponse_ {
     @Field({nullable: true}) 
     @MaxLength(255)
     FormDistribution?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -2544,49 +2577,49 @@ export class mjBizAppsFormsFormResponseResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Screens
 //****************************************************************************
-@ObjectType({ description: `Welcome and Ending screens for a form. Distinct from questions: a screen is never answered, produces no FormResponseAnswer row, appears in no aggregation and cannot be referenced by a conditional rule. It brackets the intake rather than sitting inside it` })
+@ObjectType({ description: "Welcome and Ending screens for a form. Distinct from questions: a screen is never answered, produces no FormResponseAnswer row, appears in no aggregation and cannot be referenced by a conditional rule. It brackets the intake rather than sitting inside it" })
 export class mjBizAppsFormsFormScreen_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    FormID: string;
+    FormID?: string;
         
-    @Field({description: `Whether this screen is shown before intake begins (Welcome) or after a successful submit (Ending)`}) 
+    @Field({nullable: true, description: "Whether this screen is shown before intake begins (Welcome) or after a successful submit (Ending)"}) 
     @MaxLength(20)
-    ScreenType: string;
+    ScreenType?: string;
         
-    @Field({description: `Headline shown on the screen`}) 
+    @Field({nullable: true, description: "Headline shown on the screen"}) 
     @MaxLength(500)
-    Title: string;
+    Title?: string;
         
-    @Field({nullable: true, description: `Body copy shown under the title. Plain text — the widget does not render HTML from this column`}) 
+    @Field({nullable: true, description: "Body copy shown under the title. Plain text — the widget does not render HTML from this column"}) 
     Body?: string;
         
-    @Field({nullable: true, description: `Label for the screens single button. The widget supplies Start / Done when this is blank`}) 
+    @Field({nullable: true, description: "Label for the screens single button. The widget supplies Start / Done when this is blank"}) 
     @MaxLength(100)
     ButtonLabel?: string;
         
-    @Field({nullable: true, description: `Optional image shown above the title`}) 
+    @Field({nullable: true, description: "Optional image shown above the title"}) 
     @MaxLength(1000)
     MediaURL?: string;
         
-    @Field({nullable: true, description: `Ending only: send the respondent here instead of showing this screen. Takes precedence over the form-wide redirect in Form.Settings`}) 
+    @Field({nullable: true, description: "Ending only: send the respondent here instead of showing this screen. Takes precedence over the form-wide redirect in Form.Settings"}) 
     @MaxLength(1000)
     RedirectURL?: string;
         
-    @Field(() => Int, {description: `Order among the forms Ending screens. Resolution walks them in this order and takes the first whose ConditionalRule the answers satisfy`}) 
-    DisplayOrder: number;
+    @Field(() => Int, {nullable: true, description: "Order among the forms Ending screens. Resolution walks them in this order and takes the first whose ConditionalRule the answers satisfy"}) 
+    DisplayOrder?: number;
         
-    @Field({nullable: true, description: `Ending only: JSON ConditionalRule deciding whether this ending applies to a given response. Unlike a page rule, a blank rule here does NOT mean always — it means this screen is only reachable as the default`}) 
+    @Field({nullable: true, description: "Ending only: JSON ConditionalRule deciding whether this ending applies to a given response. Unlike a page rule, a blank rule here does NOT mean always — it means this screen is only reachable as the default"}) 
     ConditionalRule?: string;
         
-    @Field(() => Boolean, {description: `Ending only: the fallback shown when no conditional ending matched`}) 
-    IsDefault: boolean;
+    @Field(() => Boolean, {nullable: true, description: "Ending only: the fallback shown when no conditional ending matched"}) 
+    IsDefault?: boolean;
         
-    @Field({nullable: true, description: `Ending screens only: JSON array of { platform, url } social links rendered as icons under the ending message. Absent or empty means no social links are shown; there is no separate enabled flag`}) 
+    @Field({nullable: true, description: "Ending screens only: JSON array of { platform, url } social links rendered as icons under the ending message. Absent or empty means no social links are shown; there is no separate enabled flag"}) 
     SocialLinks?: string;
         
     @Field() 
@@ -2595,12 +2628,15 @@ export class mjBizAppsFormsFormScreen_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => Boolean, {description: `Ending only: this screen is a disqualification — its ConditionalRule is evaluated while the respondent answers, and a match ends the form immediately with FormResponse.Status = Disqualified. The flag alone never fires; the rule arms it`}) 
-    IsDisqualification: boolean;
+    @Field(() => Boolean, {nullable: true, description: "Ending only: this screen is a disqualification — its ConditionalRule is evaluated while the respondent answers, and a match ends the form immediately with FormResponse.Status = Disqualified. The flag alone never fires; the rule arms it"}) 
+    IsDisqualification?: boolean;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(255)
-    Form: string;
+    Form?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -2793,40 +2829,43 @@ export class mjBizAppsFormsFormScreenResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Styles
 //****************************************************************************
-@ObjectType({ description: `Reusable visual themes (design-token overrides + custom CSS) that a Form can adopt` })
+@ObjectType({ description: "Reusable visual themes (design-token overrides + custom CSS) that a Form can adopt" })
 export class mjBizAppsFormsFormStyle_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field({description: `Display name of the style/theme`}) 
+    @Field({nullable: true, description: "Display name of the style/theme"}) 
     @MaxLength(255)
-    Name: string;
+    Name?: string;
         
-    @Field({nullable: true, description: `Detailed description of this style`}) 
+    @Field({nullable: true, description: "Detailed description of this style"}) 
     Description?: string;
         
-    @Field({nullable: true, description: `JSON object of --mj-* design-token overrides applied to the respondent widget`}) 
+    @Field({nullable: true, description: "JSON object of --mj-* design-token overrides applied to the respondent widget"}) 
     CSSVariables?: string;
         
-    @Field({nullable: true, description: `Optional raw CSS appended after the token overrides for advanced theming`}) 
+    @Field({nullable: true, description: "Optional raw CSS appended after the token overrides for advanced theming"}) 
     CustomCSS?: string;
         
-    @Field({nullable: true, description: `URL of a logo to display on forms using this style`}) 
+    @Field({nullable: true, description: "URL of a logo to display on forms using this style"}) 
     @MaxLength(1000)
     LogoURL?: string;
         
-    @Field(() => Int, {description: `Sort order in style pickers. Lower values appear first`}) 
-    DisplayRank: number;
+    @Field(() => Int, {nullable: true, description: "Sort order in style pickers. Lower values appear first"}) 
+    DisplayRank?: number;
         
-    @Field(() => Boolean, {description: `Whether this style is available for selection. Inactive styles are hidden but preserved`}) 
-    IsActive: boolean;
+    @Field(() => Boolean, {nullable: true, description: "Whether this style is available for selection. Inactive styles are hidden but preserved"}) 
+    IsActive?: boolean;
         
     @Field() 
     _mj__CreatedAt: Date;
         
     @Field() 
     _mj__UpdatedAt: Date;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -2989,58 +3028,58 @@ export class mjBizAppsFormsFormStyleResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Uploads
 //****************************************************************************
-@ObjectType({ description: `Records that a file was uploaded through the Forms upload endpoint, for a specific distribution and draft response, so a submitted file id can be told apart from an arbitrary one. __mj.File has no owner column, so this is the only evidence of who produced a file` })
+@ObjectType({ description: "Records that a file was uploaded through the Forms upload endpoint, for a specific distribution and draft response, so a submitted file id can be told apart from an arbitrary one. __mj.File has no owner column, so this is the only evidence of who produced a file" })
 export class mjBizAppsFormsFormUpload_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field({description: `The uploaded file`}) 
+    @Field({nullable: true, description: "The uploaded file"}) 
     @MaxLength(36)
-    FileID: string;
+    FileID?: string;
         
-    @Field({description: `The distribution the upload was made through. The hard scope every provenance check enforces`}) 
+    @Field({nullable: true, description: "The distribution the upload was made through. The hard scope every provenance check enforces"}) 
     @MaxLength(36)
-    DistributionID: string;
+    DistributionID?: string;
         
-    @Field({description: `The form the distribution belonged to at upload time, denormalized so the record survives a distribution being repointed`}) 
+    @Field({nullable: true, description: "The form the distribution belonged to at upload time, denormalized so the record survives a distribution being repointed"}) 
     @MaxLength(36)
-    FormID: string;
+    FormID?: string;
         
-    @Field({nullable: true, description: `The question the file answers`}) 
+    @Field({nullable: true, description: "The question the file answers"}) 
     @MaxLength(36)
     QuestionID?: string;
         
-    @Field({nullable: true, description: `The client-minted response id the upload was made for. The primary correlation key, because the anonymous session id is documented to be blank in otherwise valid flows`}) 
+    @Field({nullable: true, description: "The client-minted response id the upload was made for. The primary correlation key, because the anonymous session id is documented to be blank in otherwise valid flows"}) 
     @MaxLength(36)
     ResponseDraftID?: string;
         
-    @Field({nullable: true, description: `The anonymous session id at upload time. A fallback correlation key; blank is tolerated`}) 
+    @Field({nullable: true, description: "The anonymous session id at upload time. A fallback correlation key; blank is tolerated"}) 
     @MaxLength(255)
     AnonymousSessionID?: string;
         
-    @Field({nullable: true, description: `The session principal that made the upload. Audit only — never a correlation key, since anonymous sessions share one user record`}) 
+    @Field({nullable: true, description: "The session principal that made the upload. Audit only — never a correlation key, since anonymous sessions share one user record"}) 
     @MaxLength(36)
     UploadedByUserID?: string;
         
-    @Field({nullable: true, description: `Storage key of the file, so the Forms path prefix can be checked without loading the file row`}) 
+    @Field({nullable: true, description: "Storage key of the file, so the Forms path prefix can be checked without loading the file row"}) 
     @MaxLength(1000)
     ProviderKey?: string;
         
-    @Field({nullable: true, description: `Original sanitized filename`}) 
+    @Field({nullable: true, description: "Original sanitized filename"}) 
     @MaxLength(500)
     FileName?: string;
         
-    @Field({nullable: true, description: `Stored content type`}) 
+    @Field({nullable: true, description: "Stored content type"}) 
     @MaxLength(255)
     ContentType?: string;
         
-    @Field(() => Int, {nullable: true, description: `Size in bytes`}) 
+    @Field(() => Int, {nullable: true, description: "Size in bytes"}) 
     SizeBytes?: number;
         
-    @Field({description: `Revoked means the upload was withdrawn or garbage-collected; a revoked row fails provenance`}) 
+    @Field({nullable: true, description: "Revoked means the upload was withdrawn or garbage-collected; a revoked row fails provenance"}) 
     @MaxLength(20)
-    Status: string;
+    Status?: string;
         
     @Field() 
     _mj__CreatedAt: Date;
@@ -3048,21 +3087,24 @@ export class mjBizAppsFormsFormUpload_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(500)
-    File: string;
+    File?: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(255)
-    Distribution: string;
+    Distribution?: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(255)
-    Form: string;
+    Form?: string;
         
     @Field({nullable: true}) 
     @MaxLength(100)
     UploadedByUser?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -3255,27 +3297,27 @@ export class mjBizAppsFormsFormUploadResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Versions
 //****************************************************************************
-@ObjectType({ description: `Immutable published snapshots of a form; responses pin the version they were filled against` })
+@ObjectType({ description: "Immutable published snapshots of a form; responses pin the version they were filled against" })
 export class mjBizAppsFormsFormVersion_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(36)
-    FormID: string;
+    FormID?: string;
         
-    @Field(() => Int, {description: `Monotonic version number within a form`}) 
-    VersionNumber: number;
+    @Field(() => Int, {nullable: true, description: "Monotonic version number within a form"}) 
+    VersionNumber?: number;
         
-    @Field({description: `Version status: Draft, Published, or Retired`}) 
+    @Field({nullable: true, description: "Version status: Draft, Published, or Retired"}) 
     @MaxLength(20)
-    Status: string;
+    Status?: string;
         
-    @Field({nullable: true, description: `Timestamp this version was published (null while Draft)`}) 
+    @Field({nullable: true, description: "Timestamp this version was published (null while Draft)"}) 
     PublishedAt?: Date;
         
-    @Field({nullable: true, description: `Full pages/questions/options/logic as published, captured as a JSON snapshot`}) 
+    @Field({nullable: true, description: "Full pages/questions/options/logic as published, captured as a JSON snapshot"}) 
     DefinitionSnapshot?: string;
         
     @Field() 
@@ -3284,9 +3326,12 @@ export class mjBizAppsFormsFormVersion_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field() 
+    @Field({nullable: true}) 
     @MaxLength(255)
-    Form: string;
+    Form?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
@@ -3437,17 +3482,17 @@ export class mjBizAppsFormsFormVersionResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Forms
 //****************************************************************************
-@ObjectType({ description: `The root definition of a form/survey/intake instrument` })
+@ObjectType({ description: "The root definition of a form/survey/intake instrument" })
 export class mjBizAppsFormsForm_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field({description: `Display name of the form`}) 
+    @Field({nullable: true, description: "Display name of the form"}) 
     @MaxLength(255)
-    Name: string;
+    Name?: string;
         
-    @Field({nullable: true, description: `Detailed description / purpose of the form`}) 
+    @Field({nullable: true, description: "Detailed description / purpose of the form"}) 
     Description?: string;
         
     @Field({nullable: true}) 
@@ -3458,19 +3503,19 @@ export class mjBizAppsFormsForm_ {
     @MaxLength(36)
     StyleID?: string;
         
-    @Field({description: `Lifecycle status: Draft, Published, or Closed`}) 
+    @Field({nullable: true, description: "Lifecycle status: Draft, Published, or Closed"}) 
     @MaxLength(20)
-    Status: string;
+    Status?: string;
         
     @Field({nullable: true}) 
     @MaxLength(36)
     OwnerUserID?: string;
         
-    @Field({description: `Render mode for the respondent widget: Scroll (classic) or OneQuestion (Typeform-style)`}) 
+    @Field({nullable: true, description: "Render mode for the respondent widget: Scroll (classic) or OneQuestion (Typeform-style)"}) 
     @MaxLength(20)
-    RenderMode: string;
+    RenderMode?: string;
         
-    @Field({nullable: true, description: `JSON settings: anonymous-allowed, captcha-on, quota, open/close dates, confirmation message/redirect`}) 
+    @Field({nullable: true, description: "JSON settings: anonymous-allowed, captcha-on, quota, open/close dates, confirmation message/redirect"}) 
     Settings?: string;
         
     @Field() 
@@ -3479,10 +3524,10 @@ export class mjBizAppsFormsForm_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field(() => Boolean, {description: `When 1 this Form is a reusable template rather than a live form: it is hidden from the forms list, cannot be published or distributed, and is offered in the template gallery as a starting point. Creating a form from a template deep-copies it, so the two are independent afterwards. Templates are the only forms that may be deleted, which is safe precisely because CK_Form_TemplateNotPublished stops one ever collecting a response`}) 
-    IsTemplate: boolean;
+    @Field(() => Boolean, {nullable: true, description: "When 1 this Form is a reusable template rather than a live form: it is hidden from the forms list, cannot be published or distributed, and is offered in the template gallery as a starting point. Creating a form from a template deep-copies it, so the two are independent afterwards. Templates are the only forms that may be deleted, which is safe precisely because CK_Form_TemplateNotPublished stops one ever collecting a response"}) 
+    IsTemplate?: boolean;
         
-    @Field({nullable: true, description: `On a template row (IsTemplate = 1), the Form this template was saved from — what lets the builder show "Saved" instead of offering to save the same form twice. Never set on forms CREATED from a template: those are independent deep copies that diverge immediately, and a link would wrongly imply edits propagate. Null means the template has no living source`}) 
+    @Field({nullable: true, description: "On a template row (IsTemplate = 1), the Form this template was saved from — what lets the builder show \"Saved\" instead of offering to save the same form twice. Never set on forms CREATED from a template: those are independent deep copies that diverge immediately, and a link would wrongly imply edits propagate. Null means the template has no living source"}) 
     @MaxLength(36)
     TemplateSourceFormID?: string;
         
@@ -3501,6 +3546,9 @@ export class mjBizAppsFormsForm_ {
     @Field({nullable: true}) 
     @MaxLength(255)
     TemplateSourceForm?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
         
 }
 
