@@ -1,15 +1,17 @@
 /**
  * Pure model for the "Forms" section on Common's Person record form (#285).
  *
- * `relatedJoinField` is deliberately NOT set on the registration. Reproduced against MJ
- * 6.1.4's real `ResolveFormContributions` and filed upstream as MemberJunction/MJ#4990: with
- * both `contributionKey` and `relatedJoinField` set, the stock grid key
- * `related:<entity>:RespondentPersonID` is never claimed, so MJ's stock related-entity grid
- * still mounts beside this panel. Omitting it claims EVERY FK from Form Responses to People,
- * which is correct only while there is exactly one: `FK_FormResponse_RespondentPerson`
- * (FormResponse.RespondentPersonID -> Common Person). A second FK to Person would be silently
- * claimed by this panel too — revisit this registration if one is ever added. The spec pins the
- * counter-example, so if MJ fixes the resolver that test flips and the field may be added.
+ * The registration names `relatedJoinField: 'RespondentPersonID'`, so it claims exactly the
+ * `FK_FormResponse_RespondentPerson` grid (FormResponse.RespondentPersonID -> Common Person) and
+ * nothing else: a later second FK from Form Responses to People keeps MJ's stock grid instead of
+ * silently vanishing into this panel.
+ *
+ * It used to omit the field. Up to MJ 6.1.x, `ResolveFormContributions` never claimed the stock
+ * grid key when both `contributionKey` and `relatedJoinField` were set (MemberJunction/MJ#4990),
+ * so the stock grid mounted beside this panel; omitting the field claimed every FK to People as a
+ * workaround. MJ fixed the resolver by 6.2.0-edge.3 — verified against the published package —
+ * and that is the floor of `mjVersionRange`, so no supported host needs the workaround. The spec
+ * pins the precise claim with a second, hypothetical FK.
  */
 import type { FormPanelRegistrationMetadata } from '@memberjunction/ng-base-forms';
 import { FORMS_ENTITY } from '../shared/entity-names';
@@ -23,6 +25,7 @@ export const PERSON_FORMS_REGISTRATION: FormPanelRegistrationMetadata = {
   slot: 'after-related',
   sortKey: 60,
   relatedEntity: FORMS_ENTITY.FormResponse,
+  relatedJoinField: 'RespondentPersonID',
   contributionKey: PERSON_FORMS_SECTION_KEY,
 };
 
