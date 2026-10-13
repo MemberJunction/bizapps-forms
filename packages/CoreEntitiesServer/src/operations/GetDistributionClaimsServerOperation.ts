@@ -7,8 +7,9 @@
  * Replaces the `FormDistributionClaims` GraphQL query (`DistributionClaimsResolver`, deleted). That
  * resolver required Update on Form Distributions, plus an API key's `view:run` scope on them; this
  * keeps the Update bar and adds the authoring rule every Forms operation applies (no anonymous or
- * magic-link session). The scope half has no equivalent here: `Authorize` sees only the user, and the
- * operation rows deliberately declare no `RequiredScope` (see the remote-operations metadata).
+ * magic-link session). The API-key half is the operation's `RequiredScope`, `forms:read` (metadata),
+ * which MJ's `ExecuteRemoteOperation` checks for an API-key session before `Authorize` runs — a key
+ * must be granted `forms:read` (or `full_access`) to reach this at all.
  */
 import { BaseRemotableOperation, type IMetadataProvider, type UserInfo } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';

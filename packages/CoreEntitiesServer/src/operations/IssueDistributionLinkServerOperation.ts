@@ -42,7 +42,7 @@ export class IssueDistributionLinkServerOperation extends FormsIssueDistribution
     const key = this.OperationKey;
     const request = {
       formId: requireTextInput(input?.FormID, 'FormID', key),
-      // Required by the type, but absent on the wire means the builder's default (PublicLink).
+      // Optional: absent means the builder's default (PublicLink, the engine's DEFAULT_CHANNEL).
       channelType: optionalChoiceInput(input?.ChannelType, DISTRIBUTION_CHANNEL_TYPES, 'ChannelType', key),
       name: optionalTextInput(input?.Name, 'Name', key),
       slug: optionalTextInput(input?.Slug, 'Slug', key),

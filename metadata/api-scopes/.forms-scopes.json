@@ -1,0 +1,55 @@
+[
+  {
+    "_comments": [
+      "API-key scopes for the Forms Remote Operations (#303). A ceiling on what an API key may reach, never the",
+      "authorization itself: MJ checks an operation's RequiredScope for API-key sessions only (ExecuteRemoteOperation,",
+      "before the operation runs), and each operation's Authorize() still decides for every caller.",
+      "Modelled on MJ core's domain scopes (metadata/api-scopes/.workqueue-scopes.json): a parent plus children.",
+      "The MJAPI application's ceiling must allow each child too — see ../api-application-scopes/."
+    ],
+    "fields": {
+      "Name": "forms",
+      "FullPath": "forms",
+      "ParentID": null,
+      "Category": "Forms",
+      "Description": "Parent scope for the MJ Forms Remote Operations (forms, share links, automations and responses).",
+      "ResourceType": null,
+      "IsActive": true,
+      "UIConfig": {
+        "icon": "fa-solid fa-clipboard-list",
+        "color": "#0f766e"
+      }
+    },
+    "primaryKey": {
+      "ID": "C03D0945-22A2-400E-8711-2F9B2C30F449"
+    }
+  },
+  {
+    "fields": {
+      "Name": "read",
+      "FullPath": "forms:read",
+      "ParentID": "@lookup:MJ: API Scopes.FullPath=forms",
+      "Category": "Forms",
+      "Description": "Read Forms data through the Forms Remote Operations: response lists, response detail, response summaries and share-link claims. Resource: the operation key, e.g. Forms.ListResponses.",
+      "ResourceType": null,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "72BABE5C-ABD9-428A-8E4F-825E2DA8C238"
+    }
+  },
+  {
+    "fields": {
+      "Name": "write",
+      "FullPath": "forms:write",
+      "ParentID": "@lookup:MJ: API Scopes.FullPath=forms",
+      "Category": "Forms",
+      "Description": "Change Forms through the Forms Remote Operations: publish, clone, create from template, archive, restore, share-link verbs and automation edits. Resource: the operation key, e.g. Forms.PublishForm.",
+      "ResourceType": null,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "E816B2EA-F669-40B2-895B-3928245AF1B6"
+    }
+  }
+]

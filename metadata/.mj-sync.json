@@ -22,6 +22,8 @@
     "entity-relationships",
     "entity-permissions",
     "actions",
+    "api-scopes",
+    "api-application-scopes",
     "remote-operation-categories",
     "remote-operations",
     "work-queue-topics",

@@ -2,8 +2,9 @@
  * Who may run a Forms AUTHORING operation (publish, clone, template, archive/restore, distribution
  * and automation verbs) — one rule, applied by every one of them from its `Authorize()` (spec #303 §2).
  *
- * `Authorize()` is the only gate an operation controls. MJ enforces `RequiredScope` only for API-key
- * sessions, an in-process `.Execute()` skips the resolver gates entirely, and an anonymous
+ * `Authorize()` is the only gate an operation controls. MJ enforces `RequiredScope` (`forms:read` /
+ * `forms:write` on the Forms operations) only for API-key sessions — a ceiling on what a key may
+ * reach, not the authorization — an in-process `.Execute()` skips the resolver gates entirely, and an anonymous
  * magic-link session can reach any Active operation — so without this, a respondent's public link
  * would be a credential for publishing forms. The rule:
  *  - never an anonymous or magic-link-scoped session (`IsMagicLinkAnonymous`, `MagicLinkScope`),

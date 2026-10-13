@@ -131,40 +131,49 @@ const LIVE = () => distributionRow({ ID: 'd1', FormID: FORM, Slug: 'lobby', Magi
 const OPERATIONS = [
   {
     key: 'Forms.IssueDistributionLink',
+    scope: 'forms:write',
     make: () => new IssueDistributionLinkServerOperation(),
     load: LoadIssueDistributionLinkOperation,
     input: { FormID: FORM, ChannelType: 'PublicLink' },
   },
   {
     key: 'Forms.ReissueDistributionLink',
+    scope: 'forms:write',
     make: () => new ReissueDistributionLinkServerOperation(),
     load: LoadReissueDistributionLinkOperation,
     input: { FormDistributionID: 'd1' },
   },
   {
     key: 'Forms.OpenDistribution',
+    scope: 'forms:write',
     make: () => new OpenDistributionServerOperation(),
     load: LoadOpenDistributionOperation,
     input: { FormDistributionID: 'd1' },
   },
   {
     key: 'Forms.CloseDistribution',
+    scope: 'forms:write',
     make: () => new CloseDistributionServerOperation(),
     load: LoadCloseDistributionOperation,
     input: { FormDistributionID: 'd1' },
   },
   {
     key: 'Forms.GetDistributionClaims',
+    scope: 'forms:read',
     make: () => new GetDistributionClaimsServerOperation(),
     load: LoadGetDistributionClaimsOperation,
     input: { FormID: FORM },
   },
 ] as const;
 
-describe.each(OPERATIONS)('$key — registration and Authorize', ({ key, make, load, input }) => {
+describe.each(OPERATIONS)('$key — registration and Authorize', ({ key, scope, make, load, input }) => {
   it('is registered under its operation key, with an anchor the server bootstrap calls', () => {
     expect(make().OperationKey).toBe(key);
     expect(load()).toBeUndefined();
+  });
+
+  it(`carries the API-key scope MJ checks before Authorize runs (${scope})`, () => {
+    expect(make().RequiredScope).toBe(scope);
   });
 
   it('refuses an anonymous magic-link session with FORBIDDEN, and writes nothing', async () => {

@@ -49,7 +49,7 @@ type AssertExact<T extends true> = T;
 
 type _FormStatus = AssertExact<Exact<FormsFormLifecycleOutput['Status'], mjBizAppsFormsFormEntityType['Status']>>;
 type _ChannelType = AssertExact<
-  Exact<FormsIssueDistributionLinkInput['ChannelType'], mjBizAppsFormsFormDistributionEntityType['ChannelType']>
+  Exact<NonNullable<FormsIssueDistributionLinkInput['ChannelType']>, mjBizAppsFormsFormDistributionEntityType['ChannelType']>
 >;
 type _DistributionStatus = AssertExact<
   Exact<FormsDistributionLinkOutput['Status'], mjBizAppsFormsFormDistributionEntityType['Status']>

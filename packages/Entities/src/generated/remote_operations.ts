@@ -595,8 +595,8 @@ export interface FormsGetResponseSummaryOutput {
 export interface FormsIssueDistributionLinkInput {
     /** The form the link serves. */
     FormID: string;
-    /** The channel this link is shared through (the `FormDistribution.ChannelType` CHECK values). */
-    ChannelType: 'Email' | 'Embed' | 'PublicLink' | 'QR';
+    /** The channel this link is shared through (the `FormDistribution.ChannelType` CHECK values). Omitted: `PublicLink`. */
+    ChannelType?: 'Email' | 'Embed' | 'PublicLink' | 'QR';
     /** Display name for the link. Omitted or blank: the server derives one from the form and channel. */
     Name?: string;
     /** Preferred URL slug. Omitted: derived from the name. Taken: a random suffix is appended. */
@@ -1063,6 +1063,7 @@ export interface FormsSaveResponseOutput {
 export class FormsArchiveFormOperation extends BaseRemotableOperation<FormsFormLifecycleInput, FormsFormLifecycleOutput> {
     public readonly OperationKey = "Forms.ArchiveForm";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1078,6 +1079,7 @@ export class FormsArchiveFormOperation extends BaseRemotableOperation<FormsFormL
 export class FormsCloneFormOperation extends BaseRemotableOperation<FormsCloneFormInput, FormsCloneFormOutput> {
     public readonly OperationKey = "Forms.CloneForm";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1093,6 +1095,7 @@ export class FormsCloneFormOperation extends BaseRemotableOperation<FormsCloneFo
 export class FormsCloseDistributionOperation extends BaseRemotableOperation<FormsDistributionVerbInput, FormsDistributionLinkOutput> {
     public readonly OperationKey = "Forms.CloseDistribution";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1108,6 +1111,7 @@ export class FormsCloseDistributionOperation extends BaseRemotableOperation<Form
 export class FormsCreateFormFromTemplateOperation extends BaseRemotableOperation<FormsCreateFormFromTemplateInput, FormsCreateFormFromTemplateOutput> {
     public readonly OperationKey = "Forms.CreateFormFromTemplate";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1123,6 +1127,7 @@ export class FormsCreateFormFromTemplateOperation extends BaseRemotableOperation
 export class FormsGetDistributionClaimsOperation extends BaseRemotableOperation<FormsGetDistributionClaimsInput, FormsGetDistributionClaimsOutput> {
     public readonly OperationKey = "Forms.GetDistributionClaims";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:read";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1131,7 +1136,7 @@ export class FormsGetDistributionClaimsOperation extends BaseRemotableOperation<
 // ============================================================
 /**
  * Get Respondent Form
- * What an anonymous respondent loads to render a form: an allowlisted projection of the published definition (no answer key, ending screens, knockout conditions, automations or quota), the resume snapshot for a resumed draft, and the captcha flag. Authorized only for a magic-link session scoped to the slug's distribution.
+ * What an anonymous respondent loads to render a form: an allowlisted projection of the published definition (no answer key, ending screens, knockout conditions, automations or quota), the resume snapshot for a resumed draft, and the captcha flag. Authorized only for a magic-link session scoped to the slug's distribution. No RequiredScope: its Authorize() admits only a magic-link session scoped to the link, which is never an API key, so an API-key scope would gate nothing.
  * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
  * under 'Forms.GetRespondentForm'. This generated base provides the typed contract only (client-safe).
  */
@@ -1153,6 +1158,7 @@ export class FormsGetRespondentFormOperation extends BaseRemotableOperation<Form
 export class FormsGetResponseDetailOperation extends BaseRemotableOperation<FormsGetResponseDetailInput, FormsGetResponseDetailOutput> {
     public readonly OperationKey = "Forms.GetResponseDetail";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:read";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1168,6 +1174,7 @@ export class FormsGetResponseDetailOperation extends BaseRemotableOperation<Form
 export class FormsGetResponseSummaryOperation extends BaseRemotableOperation<FormsGetResponseSummaryInput, FormsGetResponseSummaryOutput> {
     public readonly OperationKey = "Forms.GetResponseSummary";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:read";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1183,6 +1190,7 @@ export class FormsGetResponseSummaryOperation extends BaseRemotableOperation<For
 export class FormsIssueDistributionLinkOperation extends BaseRemotableOperation<FormsIssueDistributionLinkInput, FormsDistributionLinkOutput> {
     public readonly OperationKey = "Forms.IssueDistributionLink";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1198,6 +1206,7 @@ export class FormsIssueDistributionLinkOperation extends BaseRemotableOperation<
 export class FormsListResponsesOperation extends BaseRemotableOperation<FormsListResponsesInput, FormsListResponsesOutput> {
     public readonly OperationKey = "Forms.ListResponses";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:read";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1213,6 +1222,7 @@ export class FormsListResponsesOperation extends BaseRemotableOperation<FormsLis
 export class FormsOpenDistributionOperation extends BaseRemotableOperation<FormsDistributionVerbInput, FormsDistributionLinkOutput> {
     public readonly OperationKey = "Forms.OpenDistribution";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1228,6 +1238,7 @@ export class FormsOpenDistributionOperation extends BaseRemotableOperation<Forms
 export class FormsPublishFormOperation extends BaseRemotableOperation<FormsPublishFormInput, FormsPublishFormOutput> {
     public readonly OperationKey = "Forms.PublishForm";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1243,6 +1254,7 @@ export class FormsPublishFormOperation extends BaseRemotableOperation<FormsPubli
 export class FormsReissueDistributionLinkOperation extends BaseRemotableOperation<FormsDistributionVerbInput, FormsDistributionLinkOutput> {
     public readonly OperationKey = "Forms.ReissueDistributionLink";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1258,6 +1270,7 @@ export class FormsReissueDistributionLinkOperation extends BaseRemotableOperatio
 export class FormsRemoveAutomationOperation extends BaseRemotableOperation<FormsRemoveAutomationInput, FormsRemoveAutomationOutput> {
     public readonly OperationKey = "Forms.RemoveAutomation";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1273,6 +1286,7 @@ export class FormsRemoveAutomationOperation extends BaseRemotableOperation<Forms
 export class FormsReorderAutomationsOperation extends BaseRemotableOperation<FormsReorderAutomationsInput, FormsReorderAutomationsOutput> {
     public readonly OperationKey = "Forms.ReorderAutomations";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1288,6 +1302,7 @@ export class FormsReorderAutomationsOperation extends BaseRemotableOperation<For
 export class FormsRestoreFormOperation extends BaseRemotableOperation<FormsFormLifecycleInput, FormsFormLifecycleOutput> {
     public readonly OperationKey = "Forms.RestoreForm";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1303,6 +1318,7 @@ export class FormsRestoreFormOperation extends BaseRemotableOperation<FormsFormL
 export class FormsSaveAutomationOperation extends BaseRemotableOperation<FormsSaveAutomationInput, FormsSaveAutomationOutput> {
     public readonly OperationKey = "Forms.SaveAutomation";
     public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
 }
 
@@ -1311,7 +1327,7 @@ export class FormsSaveAutomationOperation extends BaseRemotableOperation<FormsSa
 // ============================================================
 /**
  * Save Response
- * Every respondent write, partial autosave and final submit alike. Validates and settles visibility with the contracts rules, enforces the quota atomically, writes the response and answers and, on a final submit, enqueues the on-submit automations in the same transaction. The server decides whether the form has ended and which ending screen shows.
+ * Every respondent write, partial autosave and final submit alike. Validates and settles visibility with the contracts rules, enforces the quota atomically, writes the response and answers and, on a final submit, enqueues the on-submit automations in the same transaction. The server decides whether the form has ended and which ending screen shows. No RequiredScope: its Authorize() admits only a magic-link session scoped to the link, which is never an API key, so an API-key scope would gate nothing.
  * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
  * under 'Forms.SaveResponse'. This generated base provides the typed contract only (client-safe).
  */

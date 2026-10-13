@@ -117,9 +117,10 @@ these links:" and the error. A failed check is never shown as "nobody claims thi
 
 Only signed-in authors can ask: the lookup is the `Forms.GetDistributionClaims` Remote Operation
 (input `{ FormID }`), which refuses anonymous and magic-link sessions and requires Update rights on
-both Forms and Form Distributions. It replaced the GraphQL query `FormDistributionClaims(formId)`,
-which also checked an API key's `view:run` scope on Form Distributions; the operation has no
-equivalent of that scope check.
+both Forms and Form Distributions. A call made with an API key also needs that key to hold the
+`forms:read` scope (or `full_access`): it is the operation's `RequiredScope`. It replaced the GraphQL
+query `FormDistributionClaims(formId)`, which checked the key's `view:run` scope on Form
+Distributions instead.
 
 ## Things to know
 

@@ -38,6 +38,7 @@ interface RemoteOperationRecord {
     CodeApprovalStatus: string;
     Status: string;
     RequiredScope?: string;
+    Description: string;
   };
   primaryKey: { ID: string };
 }
@@ -63,6 +64,34 @@ const EXPECTED_KEYS = [
   'Forms.SaveAutomation',
   'Forms.SaveResponse',
 ];
+
+/**
+ * The API-key scope each operation requires (controller ruling, #303 Task 6 follow-up). `RequiredScope`
+ * narrows API-key sessions only — MJ checks it in `ExecuteRemoteOperation` before anything else — so it
+ * is a ceiling on what a key may reach, never the authorization itself (that is each `Authorize()`).
+ * The two respondent operations carry none: their `Authorize()` demands a magic-link session, which is
+ * never an API key, so a scope there would gate nothing.
+ */
+const EXPECTED_SCOPES: Record<string, string | undefined> = {
+  'Forms.GetDistributionClaims': 'forms:read',
+  'Forms.GetResponseSummary': 'forms:read',
+  'Forms.ListResponses': 'forms:read',
+  'Forms.GetResponseDetail': 'forms:read',
+  'Forms.PublishForm': 'forms:write',
+  'Forms.CloneForm': 'forms:write',
+  'Forms.CreateFormFromTemplate': 'forms:write',
+  'Forms.ArchiveForm': 'forms:write',
+  'Forms.RestoreForm': 'forms:write',
+  'Forms.IssueDistributionLink': 'forms:write',
+  'Forms.ReissueDistributionLink': 'forms:write',
+  'Forms.OpenDistribution': 'forms:write',
+  'Forms.CloseDistribution': 'forms:write',
+  'Forms.SaveAutomation': 'forms:write',
+  'Forms.ReorderAutomations': 'forms:write',
+  'Forms.RemoveAutomation': 'forms:write',
+  'Forms.GetRespondentForm': undefined,
+  'Forms.SaveResponse': undefined,
+};
 
 const records: RemoteOperationRecord[] = JSON.parse(
   readFileSync(join(OPS_DIR, '.forms-remote-operations.json'), 'utf8'),
@@ -99,15 +128,26 @@ describe('Forms remote operation metadata', () => {
     expect(records.map((r) => r.fields.OperationKey).sort()).toEqual(EXPECTED_KEYS);
   });
 
-  it('gives every record the decided rails: Manual, Sync, Approved, Active, no system user, no scope', () => {
+  it('gives every record the decided rails: Manual, Sync, Approved, Active, no system user', () => {
     for (const { fields } of records) {
       expect(fields.GenerationType, fields.OperationKey).toBe('Manual');
       expect(fields.ExecutionMode, fields.OperationKey).toBe('Sync');
       expect(fields.CodeApprovalStatus, fields.OperationKey).toBe('Approved');
       expect(fields.Status, fields.OperationKey).toBe('Active');
       expect(fields.RequiresSystemUser, fields.OperationKey).toBe(false);
-      // RequiredScope gates API keys only; authorization is each operation's Authorize().
-      expect(fields.RequiredScope, fields.OperationKey).toBeUndefined();
+    }
+  });
+
+  it('gives every operation the API-key scope the ruling assigns — and the respondent pair none', () => {
+    expect(Object.keys(EXPECTED_SCOPES).sort()).toEqual(EXPECTED_KEYS);
+    for (const { fields } of records) {
+      expect(fields.RequiredScope, fields.OperationKey).toBe(EXPECTED_SCOPES[fields.OperationKey]);
+    }
+  });
+
+  it('says in the Description of each unscoped operation why it carries no scope', () => {
+    for (const { fields } of records.filter((r) => r.fields.RequiredScope === undefined)) {
+      expect(fields.Description, fields.OperationKey).toMatch(/no RequiredScope.*magic-link session/i);
     }
   });
 
@@ -130,7 +170,8 @@ describe('generated Forms operation classes', () => {
     expect(instance.OperationKey).toBe(key);
     expect(instance.ExecutionMode).toBe('Sync');
     expect(instance.RequiresSystemUser).toBe(false);
-    expect(instance.RequiredScope).toBeUndefined();
+    // What MJ's ExecuteRemoteOperation reads to gate an API key: the generated class must carry it.
+    expect(instance.RequiredScope).toBe(EXPECTED_SCOPES[key]);
   });
 
   it('has no Forms operation class that metadata does not declare', () => {
@@ -180,5 +221,72 @@ describe('operation type files', () => {
       records.flatMap((r) => [r.fields.InputTypeDefinition, r.fields.OutputTypeDefinition]).map((ref) => ref.replace('@file:types/', '')),
     );
     expect(files.filter((f) => !referenced.has(f))).toEqual([]);
+  });
+});
+
+/**
+ * The scopes the operations require must exist, or MJ's API-key evaluator finds no scope by that path
+ * and refuses every key — and must be allowed by the MJAPI application's ceiling, or it refuses every
+ * key that is not `full_access` (`ScopeEvaluator.evaluateApplicationCeiling`: no matching application
+ * rule means "Application does not allow this scope/resource combination").
+ */
+describe('Forms API scopes', () => {
+  const METADATA_DIR = join(OPS_DIR, '..');
+  interface ScopeRecord {
+    fields: { Name: string; FullPath: string; ParentID: string | null; Category: string; Description: string; IsActive: boolean };
+    primaryKey: { ID: string };
+    sync?: unknown;
+  }
+  interface AppScopeRecord {
+    fields: { ApplicationID: string; ScopeID: string; ResourcePattern: string; PatternType: string; IsDeny: boolean; Priority: number };
+    primaryKey: { ID: string };
+    sync?: unknown;
+  }
+  const scopes = JSON.parse(readFileSync(join(METADATA_DIR, 'api-scopes', '.forms-scopes.json'), 'utf8')) as ScopeRecord[];
+  const appScopes = JSON.parse(
+    readFileSync(join(METADATA_DIR, 'api-application-scopes', '.forms-api-application-scopes.json'), 'utf8'),
+  ) as AppScopeRecord[];
+  const syncOrder = (JSON.parse(readFileSync(join(METADATA_DIR, '.mj-sync.json'), 'utf8')) as { directoryOrder: string[] }).directoryOrder;
+
+  it('seeds the forms parent and its read and write children', () => {
+    expect(scopes.map((s) => s.fields.FullPath).sort()).toEqual(['forms', 'forms:read', 'forms:write']);
+    expect(scopes.find((s) => s.fields.FullPath === 'forms')?.fields.ParentID).toBeNull();
+    for (const child of scopes.filter((s) => s.fields.FullPath !== 'forms')) {
+      expect(child.fields.ParentID, child.fields.FullPath).toBe('@lookup:MJ: API Scopes.FullPath=forms');
+      expect(child.fields.Name, child.fields.FullPath).toBe(child.fields.FullPath.split(':')[1]);
+      expect(child.fields.IsActive).toBe(true);
+    }
+  });
+
+  it('seeds every scope an operation requires', () => {
+    const seeded = new Set(scopes.map((s) => s.fields.FullPath));
+    for (const { fields } of records.filter((r) => r.fields.RequiredScope)) {
+      expect(seeded.has(fields.RequiredScope!), fields.OperationKey).toBe(true);
+    }
+  });
+
+  it("lets the MJAPI application's ceiling allow both required scopes, so a key granted one can use it", () => {
+    const allowed = appScopes
+      .filter((r) => r.fields.ApplicationID === '@lookup:MJ: API Applications.Name=MJAPI' && !r.fields.IsDeny)
+      .filter((r) => r.fields.ResourcePattern === '*' && r.fields.PatternType === 'Include')
+      .map((r) => r.fields.ScopeID);
+    expect(allowed.sort()).toEqual(['@lookup:MJ: API Scopes.FullPath=forms:read', '@lookup:MJ: API Scopes.FullPath=forms:write']);
+  });
+
+  it('carries no sync blocks and distinct, GUID-shaped primary keys', () => {
+    const all = [...scopes, ...appScopes];
+    expect(all.filter((r) => r.sync !== undefined)).toEqual([]);
+    const ids = all.map((r) => r.primaryKey.ID.toUpperCase());
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ids) {
+      expect(id).toMatch(/^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/);
+    }
+  });
+
+  it('pushes the scopes before the application ceiling, and both before the operations that name them', () => {
+    const at = (dir: string) => syncOrder.indexOf(dir);
+    expect(at('api-scopes')).toBeGreaterThanOrEqual(0);
+    expect(at('api-scopes')).toBeLessThan(at('api-application-scopes'));
+    expect(at('api-application-scopes')).toBeLessThan(at('remote-operations'));
   });
 });

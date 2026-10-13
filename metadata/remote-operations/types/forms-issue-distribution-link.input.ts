@@ -9,8 +9,8 @@
 export interface FormsIssueDistributionLinkInput {
     /** The form the link serves. */
     FormID: string;
-    /** The channel this link is shared through (the `FormDistribution.ChannelType` CHECK values). */
-    ChannelType: 'Email' | 'Embed' | 'PublicLink' | 'QR';
+    /** The channel this link is shared through (the `FormDistribution.ChannelType` CHECK values). Omitted: `PublicLink`. */
+    ChannelType?: 'Email' | 'Embed' | 'PublicLink' | 'QR';
     /** Display name for the link. Omitted or blank: the server derives one from the form and channel. */
     Name?: string;
     /** Preferred URL slug. Omitted: derived from the name. Taken: a random suffix is appended. */
