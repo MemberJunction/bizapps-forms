@@ -167,3 +167,13 @@ describe('toAnswerInputs — the types added with element parity', () => {
     ]);
   });
 });
+
+describe('toAnswerInputs — numeric columns', () => {
+  it('sends a blank as the text it is, never as Number(" ") === 0', () => {
+    expect(toAnswerInputs([q('num', 'Number')], new Map([['num', ' ']]))).toEqual([{ questionId: 'num', textValue: ' ' }]);
+  });
+
+  it('still sends a decimal spelling as the number', () => {
+    expect(toAnswerInputs([q('num', 'Number')], new Map([['num', ' 42 ']]))).toEqual([{ questionId: 'num', numericValue: 42 }]);
+  });
+});

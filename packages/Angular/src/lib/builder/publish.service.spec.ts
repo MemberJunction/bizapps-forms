@@ -356,6 +356,18 @@ describe('PublishService — settings in the snapshot', () => {
     expect(createdVersions).toHaveLength(0);
   });
 
+  it('refuses to publish stored settings the schema rejects, rather than freezing them into the snapshot', async () => {
+    // The tolerant parser cast `"quota": "ten"` straight through; the server then read a string
+    // quota out of an immutable snapshot. Refused now, with the column named, and nothing written.
+    reset(JSON.stringify({ anonymousAllowed: true, captchaRequired: false, quota: 'ten' }));
+
+    const result = await new PublishService().publish(tree());
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/settings cannot be read.*quota/);
+    expect(createdVersions).toHaveLength(0);
+  });
+
   it('refuses to publish when the form\'s settings cannot be read', async () => {
     // Same reasoning as the automations read: publishing settings we could not confirm is how a
     // form silently loses its declared mode and reverts to firing the built-ins.
@@ -599,6 +611,22 @@ describe('PublishService — rules the builder already calls broken', () => {
 
     expect(result.success).toBe(false);
     expect(result.brokenRules).toBeUndefined();
+  });
+
+  it('refuses a validation rule it cannot read, naming the question, and writes nothing (DW6)', async () => {
+    // Not a conditional rule, so the canvas badges do not see it — the snapshot builder does, and
+    // publish turns its refusal into a failure result instead of an exception out of the service.
+    const bad = question('q-1', 'Your age', null);
+    (bad.entity as { ValidationRule: string | null }).ValidationRule = '{"min":"eighteen"}';
+
+    const result = await new PublishService().publish(treeOf([bad]));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/question "Your age" \(q-1\) ValidationRule cannot be read — min/);
+    // The version entity exists by then (its client-minted id goes into the snapshot), but it is
+    // never saved: no row, no transaction.
+    expect(versionRows).toHaveLength(0);
+    expect(transactionGroups).toHaveLength(0);
   });
 
   it('publishes a form whose rules all work, with no extra friction', async () => {

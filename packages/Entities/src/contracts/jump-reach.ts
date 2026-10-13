@@ -23,7 +23,7 @@
  * canvas), and a second implementation of "what does this jump skip" is a second answer that can
  * disagree with the first.
  */
-import { isTerminalTarget, type JumpTarget } from '@mj-biz-apps/forms-entities';
+import { isTerminalTarget, type JumpTarget } from './conditional-rule';
 
 /** One question, reduced to what reach needs to know about it. */
 export interface ReachItem {

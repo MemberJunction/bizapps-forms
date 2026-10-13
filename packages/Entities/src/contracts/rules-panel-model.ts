@@ -11,7 +11,7 @@
  * Rules tab spells it out in full, and an author who reads one wording in the panel and another
  * in the hub has to work out whether the rule changed under them. Both call this.
  */
-import type { ConditionalCondition, ConditionalGroup, ConditionalRule } from '@mj-biz-apps/forms-entities';
+import type { ConditionalCondition, ConditionalGroup, ConditionalRule } from './conditional-rule';
 import { operatorLabel, operatorNeedsValue, type ConditionalSourceQuestion } from './condition-sources';
 
 /**

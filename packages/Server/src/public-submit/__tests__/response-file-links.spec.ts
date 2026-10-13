@@ -15,7 +15,7 @@ import type { FormAnswerInput, PublishedFormQuestion } from '@mj-biz-apps/forms-
 import { FILE_ENTITY_RECORD_LINK_ENTITY } from '../../file-links/file-links.service';
 import { persistSubmission, type PersistenceInputs } from '../persistence.service';
 import { FORM_RESPONSE_ENTITY } from '../entity-names';
-import type { ValidatedAnswer } from '../validation.service';
+import type { ValidatedAnswer } from '@mj-biz-apps/forms-entities';
 import { expectPersistSuccess, fakeEntityId, makeContextUser, makeDistribution, makeFakeProvider, respondentPermissions, type FakeProviderConfig, type SavedRecord } from './fakes';
 
 const RESPONSE_ID = 'cccccccc-0000-4000-8000-000000000001';

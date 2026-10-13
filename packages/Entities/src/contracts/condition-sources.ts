@@ -5,16 +5,18 @@
  */
 import {
   MAX_CONDITIONS_PER_GROUP,
-  impliedAnswerValues,
-  isFormQuestionType,
-  questionTypeBehavior,
   type ConditionalCondition,
   type ConditionalOperator,
   type ConditionValue,
+} from './conditional-rule';
+import { impliedAnswerValues } from './answer-format';
+import {
+  isFormQuestionType,
+  questionTypeBehavior,
   type FormQuestionType,
   type QuestionTypeBehavior,
-} from '@mj-biz-apps/forms-entities';
-import { parseQuestionSettings } from './json-fields';
+} from './question-types';
+import { parseQuestionSettings } from './stored-columns';
 import { publishedOptionIdentities, type PublishableOptionFields } from './option-labels';
 
 /**

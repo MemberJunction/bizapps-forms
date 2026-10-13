@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import type { FormAnswerInput, PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
-import { answerValueOf, validateSubmission } from '../validation.service';
+// Moved from forms-server's `public-submit/__tests__/validation.service.spec.ts` when the
+// validator moved to the contracts (#303), so the widget and the server run one implementation.
+// `validateSubmission` is now `validateAnswers`.
+import type { FormAnswerInput } from './submission';
+import type { PublishedFormDefinition } from './form-definition';
+import type { PublishedFormQuestion } from './form-definition';
+import { isAnswerSupplied } from './conditional-rule';
+import {
+  MAX_ANSWER_VALUE_BYTES,
+  UNKNOWN_QUESTION_MESSAGE,
+  answerValueOf,
+  validateAnswer,
+  validateAnswers,
+} from './answer-validation';
 
 /** A required-MultiChoice form (the RSVP "dietary" shape that was rejecting every complete submit). */
 function multiChoiceRequiredDefinition(): PublishedFormDefinition {
@@ -42,7 +54,7 @@ describe('answerValueOf (null typed-column precedence)', () => {
   });
 });
 
-describe('validateSubmission — FileUpload answered via fileId', () => {
+describe('validateAnswers — FileUpload answered via fileId', () => {
   /** A required-FileUpload form: the "attach your resume" shape. */
   function fileUploadRequiredDefinition(): PublishedFormDefinition {
     return {
@@ -69,7 +81,7 @@ describe('validateSubmission — FileUpload answered via fileId', () => {
   it('accepts a required FileUpload answered through fileId, and keeps the answer for persistence', () => {
     const answers: FormAnswerInput[] = [{ questionId: 'q-resume', fileId: 'file-guid-1' } as unknown as FormAnswerInput];
 
-    const outcome = validateSubmission(fileUploadRequiredDefinition(), answers, 'complete');
+    const outcome = validateAnswers(fileUploadRequiredDefinition(), answers, 'complete');
 
     // Before this was fixed, the file answer read as unanswered: the submit was rejected with
     // `"Resume" is required.` even though the upload had already succeeded, and — on an OPTIONAL
@@ -83,19 +95,21 @@ describe('validateSubmission — FileUpload answered via fileId', () => {
   it('still reports a required FileUpload that carries no file', () => {
     const answers: FormAnswerInput[] = [{ questionId: 'q-resume' } as unknown as FormAnswerInput];
 
-    const outcome = validateSubmission(fileUploadRequiredDefinition(), answers, 'complete');
+    const outcome = validateAnswers(fileUploadRequiredDefinition(), answers, 'complete');
 
-    expect(outcome.errors).toEqual([{ questionId: 'q-resume', message: '"Resume" is required.' }]);
+    // The respondent-facing wording the widget shows under the field; the server used to say
+    // `"Resume" is required.`, and #303 unified both sides on one sentence.
+    expect(outcome.errors).toEqual([{ questionId: 'q-resume', message: 'This question is required.' }]);
     expect(outcome.answers).toEqual([]);
   });
 });
 
-describe('validateSubmission — required MultiChoice via jsonValue', () => {
+describe('validateAnswers — required MultiChoice via jsonValue', () => {
   it('accepts a required multi-select answered through jsonValue with textValue null (regression)', () => {
     const answers: FormAnswerInput[] = [
       { questionId: 'q-diet', textValue: null, jsonValue: ['none'] } as unknown as FormAnswerInput,
     ];
-    const outcome = validateSubmission(multiChoiceRequiredDefinition(), answers, 'complete');
+    const outcome = validateAnswers(multiChoiceRequiredDefinition(), answers, 'complete');
     expect(outcome.errors).toEqual([]);
   });
 });
@@ -127,12 +141,12 @@ function typedQuestionsWithoutRulesDefinition(): PublishedFormDefinition {
   };
 }
 
-describe('validateSubmission — type-derived format (the client/server asymmetry)', () => {
+describe('validateAnswers — type-derived format (the client/server asymmetry)', () => {
   // The widget has always enforced these type checks; the server consulted only the declarative
   // rule, so a direct POST at the GraphQL mutation persisted `not-an-email` into an Email
   // question as a Complete response. The docstring claimed format could not be bypassed.
   it('rejects a malformed email for an Email question carrying no validationRule', () => {
-    const outcome = validateSubmission(
+    const outcome = validateAnswers(
       typedQuestionsWithoutRulesDefinition(),
       [{ questionId: 'q-email', textValue: 'not-an-email' }],
       'complete',
@@ -142,7 +156,7 @@ describe('validateSubmission — type-derived format (the client/server asymmetr
   });
 
   it('still accepts a well-formed email, and does not invent errors for unanswered optionals', () => {
-    const outcome = validateSubmission(
+    const outcome = validateAnswers(
       typedQuestionsWithoutRulesDefinition(),
       [{ questionId: 'q-email', textValue: 'someone@example.com' }],
       'complete',
@@ -152,7 +166,7 @@ describe('validateSubmission — type-derived format (the client/server asymmetr
   });
 
   it('rejects a non-numeric answer to a Number question carrying no validationRule', () => {
-    const outcome = validateSubmission(
+    const outcome = validateAnswers(
       typedQuestionsWithoutRulesDefinition(),
       [
         { questionId: 'q-email', textValue: 'someone@example.com' },
@@ -165,7 +179,7 @@ describe('validateSubmission — type-derived format (the client/server asymmetr
 
   it('does not apply a format check to a question left unanswered', () => {
     // An empty optional is the isRequired check's business; a format check must not fire on it.
-    const outcome = validateSubmission(
+    const outcome = validateAnswers(
       typedQuestionsWithoutRulesDefinition(),
       [
         { questionId: 'q-email', textValue: 'someone@example.com' },
@@ -240,14 +254,14 @@ function cappedDefinition(): PublishedFormDefinition {
   };
 }
 
-describe('validateSubmission — partial (autosave) saves', () => {
+describe('validateAnswers — partial (autosave) saves', () => {
   // The widget autosaves on a 1500ms debounce with no validity gate, so a respondent who
   // pauses while typing an address autosaves something like "someone@examp". A partial is a
   // snapshot of work in progress, not an assertion that the work is done — the same reason
   // `isRequired` is already skipped when partial. Blocking it loses the respondent's progress
   // for the most ordinary thing they can do: type slowly.
   it('accepts a half-typed email, so autosave does not fail mid-word', () => {
-    const outcome = validateSubmission(
+    const outcome = validateAnswers(
       partialSaveDefinition(),
       [{ questionId: 'q-email', textValue: 'someone@examp' }],
       'draft',
@@ -259,7 +273,7 @@ describe('validateSubmission — partial (autosave) saves', () => {
   // Pre-dates the type-format check: a minLength rule has always been evaluated on partials,
   // so any question with one failed every autosave until the respondent had typed enough.
   it('accepts a value still shorter than its minLength rule', () => {
-    const outcome = validateSubmission(
+    const outcome = validateAnswers(
       partialSaveDefinition(),
       [{ questionId: 'q-code', textValue: 'AB' }],
       'draft',
@@ -276,16 +290,16 @@ describe('validateSubmission — partial (autosave) saves', () => {
   // GraphQL body limit is 50mb and the widget sets no `maxlength` attribute, so autosave was
   // the one door left open to storing unbounded values.
   it('still enforces maxLength on a partial, because exceeding a cap is never work in progress', () => {
-    const outcome = validateSubmission(
+    const outcome = validateAnswers(
       cappedDefinition(),
       [{ questionId: 'q-capped', textValue: 'x'.repeat(500) }],
       'draft',
     );
-    expect(outcome.errors.map((e) => e.message)).toEqual(['Must be at most 50 characters.']);
+    expect(outcome.errors.map((e) => e.message)).toEqual(['Use at most 50 characters.']);
   });
 
   it('still lets a partial stay under the cap', () => {
-    const outcome = validateSubmission(
+    const outcome = validateAnswers(
       cappedDefinition(),
       [{ questionId: 'q-capped', textValue: 'still typing' }],
       'draft',
@@ -295,7 +309,7 @@ describe('validateSubmission — partial (autosave) saves', () => {
   });
 
   it('still enforces both format and rule on the real submit', () => {
-    const outcome = validateSubmission(
+    const outcome = validateAnswers(
       partialSaveDefinition(),
       [
         { questionId: 'q-email', textValue: 'someone@examp' },
@@ -331,19 +345,19 @@ function temporalDefinition(): PublishedFormDefinition {
   };
 }
 
-describe('validateSubmission — the date column, in every mode (#116)', () => {
+describe('validateAnswers — the date column, in every mode (#116)', () => {
   // `<input type="time">` emits `14:30`. There was no Time format case, so the value passed
   // validation untouched, persistence did `new Date('14:30')`, and the Invalid Date threw from
   // inside Save() as an unattributed "Invalid time value". Every form carrying a Time question
   // was unsubmittable the moment someone answered it.
   it('accepts a Time answered as the control emits it, and keeps it for persistence', () => {
-    const outcome = validateSubmission(temporalDefinition(), [{ questionId: 'q-time', dateValue: '14:30' }], 'complete');
+    const outcome = validateAnswers(temporalDefinition(), [{ questionId: 'q-time', dateValue: '14:30' }], 'complete');
     expect(outcome.errors).toEqual([]);
     expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-time']);
   });
 
   it('rejects a Time the column cannot store, attributed to its question', () => {
-    const outcome = validateSubmission(temporalDefinition(), [{ questionId: 'q-time', dateValue: '25:99' }], 'complete');
+    const outcome = validateAnswers(temporalDefinition(), [{ questionId: 'q-time', dateValue: '25:99' }], 'complete');
     expect(outcome.errors).toEqual([{ questionId: 'q-time', message: 'Enter a valid time.' }]);
     expect(outcome.answers).toEqual([]);
   });
@@ -354,17 +368,17 @@ describe('validateSubmission — the date column, in every mode (#116)', () => {
   // DATETIMEOFFSET, which cannot hold the string as a draft any more than as a submission. On
   // `next`, a draft `Date` + "garbage" reached Save() and came back as "Invalid time value".
   it('rejects an unstorable Date on a DRAFT too, since the column will not hold it either way', () => {
-    const outcome = validateSubmission(temporalDefinition(), [{ questionId: 'q-date', dateValue: 'garbage' }], 'draft');
+    const outcome = validateAnswers(temporalDefinition(), [{ questionId: 'q-date', dateValue: 'garbage' }], 'draft');
     expect(outcome.errors).toEqual([{ questionId: 'q-date', message: 'Enter a valid date.' }]);
   });
 
   it('rejects an unstorable Time on a DRAFT', () => {
-    const outcome = validateSubmission(temporalDefinition(), [{ questionId: 'q-time', dateValue: 'garbage' }], 'draft');
+    const outcome = validateAnswers(temporalDefinition(), [{ questionId: 'q-time', dateValue: 'garbage' }], 'draft');
     expect(outcome.errors).toEqual([{ questionId: 'q-time', message: 'Enter a valid time.' }]);
   });
 
   it('still lets a DRAFT carry a whole date or time', () => {
-    const outcome = validateSubmission(
+    const outcome = validateAnswers(
       temporalDefinition(),
       [
         { questionId: 'q-date', dateValue: '2026-09-01' },
@@ -409,20 +423,20 @@ function conditionalDefinition(): PublishedFormDefinition {
   };
 }
 
-describe('validateSubmission', () => {
+describe('validateAnswers', () => {
   it('drops a hidden conditional answer and does not require it', () => {
-    const outcome = validateSubmission(conditionalDefinition(), [{ questionId: 'q-choice', textValue: 'Yes' }], 'complete');
+    const outcome = validateAnswers(conditionalDefinition(), [{ questionId: 'q-choice', textValue: 'Yes' }], 'complete');
     expect(outcome.errors).toHaveLength(0);
     expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-choice']);
   });
 
   it('requires the conditional answer when its trigger condition is met', () => {
-    const outcome = validateSubmission(conditionalDefinition(), [{ questionId: 'q-choice', textValue: 'Other' }], 'complete');
+    const outcome = validateAnswers(conditionalDefinition(), [{ questionId: 'q-choice', textValue: 'Other' }], 'complete');
     expect(outcome.errors.some((e) => e.questionId === 'q-other')).toBe(true);
   });
 
   it('keeps a visible conditional answer when both questions are answered', () => {
-    const outcome = validateSubmission(
+    const outcome = validateAnswers(
       conditionalDefinition(),
       [
         { questionId: 'q-choice', textValue: 'Other' },
@@ -468,15 +482,15 @@ describe('validateSubmission', () => {
       ],
     };
     for (const over of [{ numericValue: 9999 }, { textValue: '9999' }]) {
-      const outcome = validateSubmission(def, [{ questionId: 'q-num', ...over }], 'complete');
+      const outcome = validateAnswers(def, [{ questionId: 'q-num', ...over }], 'complete');
       expect(outcome.errors.map((e) => e.message)).toEqual(['Must be at most 100.']);
     }
     for (const under of [{ numericValue: 0 }, { textValue: '0' }]) {
-      const outcome = validateSubmission(def, [{ questionId: 'q-num', ...under }], 'complete');
+      const outcome = validateAnswers(def, [{ questionId: 'q-num', ...under }], 'complete');
       expect(outcome.errors.map((e) => e.message)).toEqual(['Must be at least 1.']);
     }
     for (const good of [{ numericValue: 42 }, { textValue: '42' }]) {
-      expect(validateSubmission(def, [{ questionId: 'q-num', ...good }], 'complete').errors).toEqual([]);
+      expect(validateAnswers(def, [{ questionId: 'q-num', ...good }], 'complete').errors).toEqual([]);
     }
   });
 
@@ -508,15 +522,15 @@ describe('validateSubmission', () => {
         },
       ],
     };
-    const bad = validateSubmission(def, [{ questionId: 'q-zip', textValue: 'abc' }], 'complete');
+    const bad = validateAnswers(def, [{ questionId: 'q-zip', textValue: 'abc' }], 'complete');
     expect(bad.errors[0].message).toBe('Five digits required.');
 
-    const good = validateSubmission(def, [{ questionId: 'q-zip', textValue: '12345' }], 'complete');
+    const good = validateAnswers(def, [{ questionId: 'q-zip', textValue: '12345' }], 'complete');
     expect(good.errors).toHaveLength(0);
   });
 
   it('skips required enforcement for partial submissions', () => {
-    const outcome = validateSubmission(conditionalDefinition(), [], 'draft');
+    const outcome = validateAnswers(conditionalDefinition(), [], 'draft');
     expect(outcome.errors).toHaveLength(0);
   });
 
@@ -552,7 +566,7 @@ describe('validateSubmission', () => {
         },
       ],
     };
-    const outcome = validateSubmission(def, [{ questionId: 'q-code', textValue: 'ABC' }], 'complete');
+    const outcome = validateAnswers(def, [{ questionId: 'q-code', textValue: 'ABC' }], 'complete');
     expect(outcome.errors).toEqual([]);
     expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-code']);
   });
@@ -590,7 +604,7 @@ describe('validateSubmission', () => {
         },
       ],
     };
-    const outcome = validateSubmission(def, [{ questionId: 'q-trigger', textValue: '   ' }], 'complete');
+    const outcome = validateAnswers(def, [{ questionId: 'q-trigger', textValue: '   ' }], 'complete');
     // The branch stayed hidden, so nothing asks for `q-dependent`. The one error left is the
     // form-level "nothing to submit" (#124): a whitespace-only answer stores nothing, and a
     // completion that stores nothing is refused rather than sealed.
@@ -622,7 +636,7 @@ describe('validateSubmission', () => {
         },
       ],
     };
-    const outcome = validateSubmission(def, [{ questionId: 'q-date', numericValue: 999999 }], 'complete');
+    const outcome = validateAnswers(def, [{ questionId: 'q-date', numericValue: 999999 }], 'complete');
     expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-date']);
     expect(outcome.answers).toEqual([]);
   });
@@ -639,7 +653,7 @@ describe('validateSubmission', () => {
  * never reached. Waiving format as well meant the one path where an author's own validation was
  * silently off was the path that writes a permanent row.
  */
-describe('validateSubmission — what each mode waives', () => {
+describe('validateAnswers — what each mode waives', () => {
   function emailForm(): PublishedFormDefinition {
     return {
       formId: 'f',
@@ -667,19 +681,19 @@ describe('validateSubmission — what each mode waives', () => {
 
   describe('happy', () => {
     it("'screened-out' does not ask for what the respondent never reached", () => {
-      const outcome = validateSubmission(emailForm(), [{ questionId: 'q-email', textValue: 'a@b.com' }], 'screened-out');
+      const outcome = validateAnswers(emailForm(), [{ questionId: 'q-email', textValue: 'a@b.com' }], 'screened-out');
       expect(outcome.errors).toEqual([]);
     });
 
     it("'complete' asks for everything", () => {
-      const outcome = validateSubmission(emailForm(), [{ questionId: 'q-email', textValue: 'a@b.com' }], 'complete');
+      const outcome = validateAnswers(emailForm(), [{ questionId: 'q-email', textValue: 'a@b.com' }], 'complete');
       expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-name']);
     });
   });
 
   describe('edge', () => {
     it("'draft' waives the format of a value still being typed", () => {
-      expect(validateSubmission(emailForm(), malformed, 'draft').errors).toEqual([]);
+      expect(validateAnswers(emailForm(), malformed, 'draft').errors).toEqual([]);
     });
   });
 
@@ -687,7 +701,7 @@ describe('validateSubmission — what each mode waives', () => {
     it("'screened-out' still refuses a malformed answer the respondent DID supply", () => {
       // The terminal write that seals a disqualification is the last chance to catch this; the
       // row it writes is permanent and nothing revalidates it afterwards.
-      expect(validateSubmission(emailForm(), malformed, 'screened-out').errors.map((e) => e.questionId)).toEqual([
+      expect(validateAnswers(emailForm(), malformed, 'screened-out').errors.map((e) => e.questionId)).toEqual([
         'q-email',
       ]);
     });
@@ -700,7 +714,7 @@ describe('validateSubmission — what each mode waives', () => {
  * an input nothing looks up is neither an error nor an answer. Persistence then sealed whatever
  * was left — including nothing — as `Complete` and counted it against the quota.
  */
-describe('validateSubmission — answers that match no question (#124)', () => {
+describe('validateAnswers — answers that match no question (#124)', () => {
   /** Two OPTIONAL questions plus a Statement, so "nothing answered" is reachable without a required error. */
   function optionalForm(): PublishedFormDefinition {
     return {
@@ -772,14 +786,14 @@ describe('validateSubmission — answers that match no question (#124)', () => {
 
   describe('unknown question id', () => {
     it('refuses an answer set that matches nothing, naming the id it could not place', () => {
-      const outcome = validateSubmission(optionalForm(), [ghost], 'complete');
+      const outcome = validateAnswers(optionalForm(), [ghost], 'complete');
       expect(outcome.errors).toHaveLength(1);
       expect(outcome.errors[0].questionId).toBe('q-ghost');
       expect(outcome.answers).toEqual([]);
     });
 
     it('refuses a MIXED set whole, and names only the unknown id', () => {
-      const outcome = validateSubmission(
+      const outcome = validateAnswers(
         optionalForm(),
         [{ questionId: 'q-first', textValue: 'Ada' }, ghost],
         'complete',
@@ -788,11 +802,11 @@ describe('validateSubmission — answers that match no question (#124)', () => {
     });
 
     it('is malformed input in every mode, so a draft is refused too', () => {
-      expect(validateSubmission(optionalForm(), [ghost], 'draft').errors.map((e) => e.questionId)).toEqual(['q-ghost']);
+      expect(validateAnswers(optionalForm(), [ghost], 'draft').errors.map((e) => e.questionId)).toEqual(['q-ghost']);
     });
 
     it('still drops a KNOWN question hidden by a rule silently (an autosave may predate the rule)', () => {
-      const outcome = validateSubmission(
+      const outcome = validateAnswers(
         conditionalDefinition(),
         [
           { questionId: 'q-choice', textValue: 'Yes' },
@@ -805,7 +819,7 @@ describe('validateSubmission — answers that match no question (#124)', () => {
     });
 
     it('still drops an answer to a display-only question silently', () => {
-      const outcome = validateSubmission(
+      const outcome = validateAnswers(
         optionalForm(),
         [
           { questionId: 'q-first', textValue: 'Ada' },
@@ -820,23 +834,23 @@ describe('validateSubmission — answers that match no question (#124)', () => {
 
   describe('a completion that stores nothing', () => {
     it('refuses an empty answer set on a final submit with a form-level error', () => {
-      const outcome = validateSubmission(optionalForm(), [], 'complete');
+      const outcome = validateAnswers(optionalForm(), [], 'complete');
       expect(outcome.errors).toHaveLength(1);
       expect(outcome.errors[0].questionId).toBeUndefined();
       expect(outcome.errors[0].message).toMatch(/at least one/i);
     });
 
     it('refuses a final submit whose only answers are blank', () => {
-      const outcome = validateSubmission(optionalForm(), [{ questionId: 'q-first', textValue: '   ' }], 'complete');
+      const outcome = validateAnswers(optionalForm(), [{ questionId: 'q-first', textValue: '   ' }], 'complete');
       expect(outcome.errors.map((e) => e.questionId)).toEqual([undefined]);
     });
 
     it('lets an empty draft through — an autosave with nothing typed yet is normal', () => {
-      expect(validateSubmission(optionalForm(), [], 'draft').errors).toEqual([]);
+      expect(validateAnswers(optionalForm(), [], 'draft').errors).toEqual([]);
     });
 
     it('does not double up on a required-field error', () => {
-      const outcome = validateSubmission(conditionalDefinition(), [], 'complete');
+      const outcome = validateAnswers(conditionalDefinition(), [], 'complete');
       expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-choice']);
     });
   });
@@ -852,25 +866,25 @@ describe('validateSubmission — answers that match no question (#124)', () => {
    */
   describe('a form that asked the respondent nothing', () => {
     it('completes an acknowledgement form, which has only display-only copy to show', () => {
-      const outcome = validateSubmission(acknowledgementForm(), [], 'complete');
+      const outcome = validateAnswers(acknowledgementForm(), [], 'complete');
       expect(outcome.errors).toEqual([]);
       expect(outcome.answers).toEqual([]);
     });
 
     it('completes when every answerable question is hidden on this respondent\'s path', () => {
-      const outcome = validateSubmission(allHiddenForm(), [], 'complete');
+      const outcome = validateAnswers(allHiddenForm(), [], 'complete');
       expect(outcome.errors).toEqual([]);
     });
 
     it('still refuses a blank submission when the form DID ask something', () => {
-      expect(validateSubmission(optionalForm(), [], 'complete').errors.map((e) => e.message))
+      expect(validateAnswers(optionalForm(), [], 'complete').errors.map((e) => e.message))
         .toEqual(['Please answer at least one question before submitting.']);
     });
   });
 
   describe('one error per unknown question, not per answer', () => {
     it('reports a repeated unknown id once', () => {
-      const outcome = validateSubmission(
+      const outcome = validateAnswers(
         optionalForm(),
         [{ questionId: 'q-ghost', textValue: 'a' }, { questionId: 'q-ghost', textValue: 'b' }],
         'complete',
@@ -882,7 +896,7 @@ describe('validateSubmission — answers that match no question (#124)', () => {
     });
 
     it('still reports each DISTINCT unknown id', () => {
-      const outcome = validateSubmission(
+      const outcome = validateAnswers(
         optionalForm(),
         [{ questionId: 'q-ghost', textValue: 'a' }, { questionId: 'q-phantom', textValue: 'b' }],
         'complete',
@@ -899,7 +913,201 @@ describe('validateSubmission — answers that match no question (#124)', () => {
    * answers, identically on this branch and on `next`.
    */
   it('seals a screened-out submission that carries no visible answer at all', () => {
-    const outcome = validateSubmission(optionalForm(), [], 'screened-out');
+    const outcome = validateAnswers(optionalForm(), [], 'screened-out');
     expect(outcome.errors).toEqual([]);
+  });
+});
+
+// --- Per-question verdicts (moved from forms-ng `widget/core/validation.spec.ts`) -----------------
+//
+// The widget validates one field at a time as the respondent types; the server validates the whole
+// payload. Both now call the same `validateAnswer`, so a message the widget shows under a field is
+// the message the server would refuse with.
+
+function q(overrides: Partial<PublishedFormQuestion>): PublishedFormQuestion {
+  return {
+    id: 'q',
+    type: 'ShortText',
+    prompt: 'P',
+    isRequired: false,
+    displayOrder: 1,
+    options: [],
+    ...overrides,
+  };
+}
+
+describe('isAnswerSupplied (was the widget\'s hasValue)', () => {
+  it('treats null/undefined/empty string/empty array as missing', () => {
+    expect(isAnswerSupplied(null)).toBe(false);
+    expect(isAnswerSupplied(undefined)).toBe(false);
+    expect(isAnswerSupplied('   ')).toBe(false);
+    expect(isAnswerSupplied([])).toBe(false);
+  });
+  it('treats supplied scalars/arrays as present', () => {
+    expect(isAnswerSupplied('x')).toBe(true);
+    expect(isAnswerSupplied(0)).toBe(true);
+    expect(isAnswerSupplied(false)).toBe(true);
+    expect(isAnswerSupplied(['a'])).toBe(true);
+  });
+});
+
+describe('validateAnswer', () => {
+  it('flags an empty required question', () => {
+    expect(validateAnswer(q({ isRequired: true }), '', 'complete')).toBeDefined();
+  });
+  it('passes an empty optional question', () => {
+    expect(validateAnswer(q({ isRequired: false }), '', 'complete')).toBeUndefined();
+  });
+  it('never validates a Statement', () => {
+    expect(validateAnswer(q({ type: 'Statement', isRequired: true }), '', 'complete')).toBeUndefined();
+  });
+  it('validates email format', () => {
+    expect(validateAnswer(q({ type: 'Email' }), 'nope', 'complete')).toBeDefined();
+    expect(validateAnswer(q({ type: 'Email' }), 'a@b.co', 'complete')).toBeUndefined();
+  });
+  it('enforces numeric range', () => {
+    const num = q({ type: 'Number', validationRule: { min: 0, max: 10 } });
+    expect(validateAnswer(num, 11, 'complete')).toBeDefined();
+    expect(validateAnswer(num, 5, 'complete')).toBeUndefined();
+  });
+  it('enforces maxLength', () => {
+    const t = q({ validationRule: { maxLength: 3 } });
+    expect(validateAnswer(t, 'abcd', 'complete')).toBeDefined();
+    expect(validateAnswer(t, 'abc', 'complete')).toBeUndefined();
+  });
+  it('enforces a pattern with a custom message', () => {
+    const t = q({ validationRule: { pattern: '\\d+', patternMessage: 'Digits only.' } });
+    const res = validateAnswer(t, 'abc', 'complete');
+    expect(res?.message).toBe('Digits only.');
+  });
+  it('does not block on an invalid pattern source', () => {
+    const t = q({ validationRule: { pattern: '[' } });
+    expect(validateAnswer(t, 'anything', 'complete')).toBeUndefined();
+  });
+});
+
+describe('validateAnswer on composites', () => {
+  const contact = q({ type: 'ContactInfo' });
+
+  it('names the sub-fields that are wrong so each message can sit under its own input', () => {
+    const result = validateAnswer(contact, { email: 'fsa', phone: '12' }, 'complete');
+
+    expect(result?.parts).toEqual({
+      email: 'Enter a valid email address.',
+      phone: 'Enter a valid phone number.',
+    });
+  });
+
+  it('leaves parts empty for a group-level failure, which belongs to the whole question', () => {
+    const result = validateAnswer(q({ type: 'ContactInfo', isRequired: true }), null, 'complete');
+
+    expect(result?.message).toBe('This question is required.');
+    expect(result?.parts).toBeUndefined();
+  });
+});
+
+describe('validateAnswer on consent boxes', () => {
+  it('refuses to accept a required consent box that was never ticked', () => {
+    // `false` is a SUPPLIED answer, so the plain required check waves it through. For a Legal
+    // or Checkbox question that is the whole point of the field: an unticked box is not consent.
+    const result = validateAnswer(q({ type: 'Legal', isRequired: true }), false, 'complete');
+
+    expect(result?.message).toBe('Please tick this box to continue.');
+  });
+
+  it('accepts a ticked one', () => {
+    expect(validateAnswer(q({ type: 'Legal', isRequired: true }), true, 'complete')).toBeUndefined();
+  });
+
+  it('leaves an OPTIONAL consent box alone when unticked', () => {
+    expect(validateAnswer(q({ type: 'Checkbox', isRequired: false }), false, 'complete')).toBeUndefined();
+  });
+});
+
+/**
+ * ONE set of messages for both sides (#303). The widget said "Use at least N characters." where the
+ * server said "Must be at least N characters.", and the server named the prompt in its required
+ * message where the widget did not. The respondent-facing wording won; these pin it.
+ */
+describe('validateAnswer — the unified messages', () => {
+  it.each<[string, Partial<PublishedFormQuestion>, Parameters<typeof validateAnswer>[1], string]>([
+    ['required', { isRequired: true }, '', 'This question is required.'],
+    ['required consent', { type: 'Checkbox', isRequired: true }, false, 'Please tick this box to continue.'],
+    ['minLength', { validationRule: { minLength: 3 } }, 'ab', 'Use at least 3 characters.'],
+    ['maxLength', { validationRule: { maxLength: 3 } }, 'abcd', 'Use at most 3 characters.'],
+    ['min', { type: 'Number', validationRule: { min: 2 } }, 1, 'Must be at least 2.'],
+    ['max', { type: 'Number', validationRule: { max: 2 } }, 3, 'Must be at most 2.'],
+    ['pattern', { validationRule: { pattern: '^x$' } }, 'y', 'Value is not in the expected format.'],
+  ])('%s', (_name, overrides, value, message) => {
+    expect(validateAnswer(q(overrides), value, 'complete')?.message).toBe(message);
+  });
+
+  it('says the same thing through validateAnswers as through validateAnswer', () => {
+    const question = q({ id: 'q1', validationRule: { minLength: 3 } });
+    const definition = { pages: [{ id: 'p', displayOrder: 0, questions: [question] }] };
+    expect(validateAnswers(definition, [{ questionId: 'q1', textValue: 'ab' }], 'complete').errors).toEqual([
+      { questionId: 'q1', message: validateAnswer(question, 'ab', 'complete')?.message },
+    ]);
+  });
+
+  it('holds a draft to the ceilings only', () => {
+    expect(validateAnswer(q({ validationRule: { minLength: 3 } }), 'ab', 'draft')).toBeUndefined();
+    expect(validateAnswer(q({ validationRule: { maxLength: 3 } }), 'abcd', 'draft')?.message).toBe('Use at most 3 characters.');
+    expect(validateAnswer(q({ isRequired: true }), '', 'draft')).toBeUndefined();
+  });
+
+  it('refuses an oversized answer in every mode, before any author rule', () => {
+    const huge = 'x'.repeat(MAX_ANSWER_VALUE_BYTES + 1);
+    for (const mode of ['complete', 'draft', 'screened-out'] as const) {
+      expect(validateAnswer(q({}), huge, mode)?.message).toBe('That answer is too large. Answers are limited to 64KB each.');
+    }
+  });
+
+  it('measures the cap in UTF-8 bytes, not characters, and without Node\'s Buffer (the widget has none)', () => {
+    // 'é' is two bytes. Half the cap in characters is the whole cap in bytes — one more is over.
+    const atCap = 'é'.repeat(MAX_ANSWER_VALUE_BYTES / 2);
+    expect(validateAnswer(q({}), atCap, 'complete')).toBeUndefined();
+    expect(validateAnswer(q({}), `${atCap}x`, 'complete')).toBeDefined();
+  });
+
+  it('names an unknown question with the server-only refusal', () => {
+    const definition = { pages: [{ id: 'p', displayOrder: 0, questions: [q({ id: 'q1' })] }] };
+    expect(validateAnswers(definition, [{ questionId: 'ghost', textValue: 'x' }], 'draft').errors).toEqual([
+      { questionId: 'ghost', message: UNKNOWN_QUESTION_MESSAGE },
+    ]);
+  });
+});
+
+/**
+ * validateAnswers settles visibility the way the widget does (`settleVisibility`), so the server no
+ * longer requires a question the widget never rendered.
+ */
+describe('validateAnswers — settled visibility', () => {
+  it('does not require a question the widget hid, even when the payload carries a stale answer that reveals it on one pass', () => {
+    // `why` shows when `detail` is NOT answered; `detail` shows only for a Company. A crafted (or
+    // stale) payload carrying `detail` while `gate` says Individual used to make the server hide
+    // `why` on its single pass. Settled, `detail` is hidden and dropped, `why` shows — and is
+    // required, exactly as the widget renders it.
+    const definition = {
+      pages: [
+        {
+          id: 'p',
+          displayOrder: 0,
+          questions: [
+            q({ id: 'gate', displayOrder: 0 }),
+            q({ id: 'detail', displayOrder: 1, conditionalRule: { show: { all: [{ questionId: 'gate', op: 'equals', value: 'Company' }] } } }),
+            q({ id: 'why', displayOrder: 2, isRequired: true, conditionalRule: { show: { all: [{ questionId: 'detail', op: 'isNotAnswered' }] } } }),
+          ],
+        },
+      ],
+    };
+    const outcome = validateAnswers(
+      definition,
+      [{ questionId: 'gate', textValue: 'Individual' }, { questionId: 'detail', textValue: 'Acme' }],
+      'complete',
+    );
+    expect(outcome.errors).toEqual([{ questionId: 'why', message: 'This question is required.' }]);
+    expect([...outcome.answerMap.keys()]).toEqual(['gate']);
+    expect(outcome.visibility.settled).toBe(true);
   });
 });

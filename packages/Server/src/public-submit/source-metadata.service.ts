@@ -76,7 +76,7 @@ export interface SourceMetadataInputs {
    * Recorded because a `Disqualified` row can be EMPTY. A knockout's `when` group is evaluated
    * against the RAW answer map while the answers that get stored are the rendered ones, so a jump
    * fires on an answer to a question the walk hid and that answer is dropped on the way to
-   * persistence — measured: a `Disqualified` row with 0 answers. `validateSubmission` lets that
+   * persistence — measured: a `Disqualified` row with 0 answers. `validateAnswers` lets that
    * row through deliberately, on the stated grounds that it records the SCREENING rather than
    * answers; `Status` alone does not, on a form carrying more than one knockout screen. Without
    * this the row cannot say what screened them, which is the only question anyone reading a

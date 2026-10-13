@@ -30,8 +30,6 @@ const stripped = (file: string): string =>
 
 const builder = (): string => stripped('form-builder.component.ts');
 const builderHtml = (): string => stripped('form-builder.component.html');
-/** Where the rule sentences — and the one source-list definition — actually live. */
-const inventory = (): string => stripped('rules-inventory.ts');
 
 /**
  * Just the shared reorder path, so a guard about it cannot be satisfied by another method.
@@ -143,22 +141,13 @@ describe('what the builder offers a rule to read', () => {
     // drift, and the first thing that had to be excluded (a Statement, which collects no
     // answer) would have needed adding to all six.
     //
-    // The helper moved OUT of the component with issue #79: publish has to read the same list
-    // the badges resolve against, and a private method on a component is not somewhere a service
-    // can reach. The invariant did not move — it got wider — so it is now asserted where the one
-    // definition lives, plus the fact that the component no longer keeps a copy.
-    expect(inventory()).toMatch(/export function conditionSourcesOf\(/);
-    expect(inventory().match(/toConditionalSource\(/g) ?? []).toHaveLength(1);
+    // The helper moved OUT of the component with issue #79, and into the contracts with #303, so
+    // publish runs the same gate wherever publish runs. What it does is now EXECUTED there
+    // (`conditionSourcesOf` in the contracts' `rules-inventory.spec.ts` — it drops a Statement
+    // rather than rendering a ghost); what is left to check here is that the component calls it
+    // and keeps no copy of its own.
     expect(builder()).not.toMatch(/toConditionalSource\(/);
     expect(builder()).toMatch(/conditionSourcesOf\(/);
-  });
-
-  it('drops a question that cannot be a source rather than rendering a ghost', () => {
-    // `toConditionalSource` returns undefined for a question that collects no answer. Mapping
-    // it straight into the array would put `undefined` in a list every consumer then indexes.
-    expect(inventory()).toMatch(
-      /conditionSourcesOf\([\s\S]{0,220}?toConditionalSource\([\s\S]{0,80}?\?\?\s*\[\]/,
-    );
   });
 });
 

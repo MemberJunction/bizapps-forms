@@ -43,7 +43,7 @@ import {
 } from './entity-names';
 import { isTerminalResponseStatus } from './response-status';
 import { stampFormDistribution } from './resume-columns';
-import type { ValidatedAnswer } from './validation.service';
+import type { ValidatedAnswer } from '@mj-biz-apps/forms-entities';
 
 /** Everything the persistence step needs from the resolved/validated submission. */
 export interface PersistenceInputs {

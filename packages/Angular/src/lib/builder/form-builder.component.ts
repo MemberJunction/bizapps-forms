@@ -48,9 +48,31 @@ import { ResponsesTabComponent } from '../responses/responses-tab.component';
 import type { ResponseRecordLink } from '../responses/response-models';
 import { DesignPanelComponent } from './design-panel.component';
 import { FormPreviewModalComponent } from './form-preview-modal.component';
-import { buildPublishedDefinition } from './snapshot-builder';
+import {
+  allQuestions,
+  brokenRuleLines,
+  collectRuleEntries,
+  conditionSourcesOf,
+  endingReachFor,
+  endScreensOf,
+  jumpReach,
+  nextOptionLabel,
+  reachNote,
+  readHorizon,
+  ruleBadgesFor,
+  ruleInventoryFormOf,
+  SCORE_SOURCE,
+  tryBuildPublishedDefinition,
+  welcomeScreenOf,
+  type ConditionalSourceQuestion,
+  type EndingReach,
+  type ReachPage,
+  type ReachSource,
+  type RuleBadge,
+  type RuleEntry,
+  type RuleInventoryForm,
+} from '@mj-biz-apps/forms-entities/contracts';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
-import { allQuestions, endScreensOf, welcomeScreenOf } from './builder-models';
 import { defaultEndingId } from './default-ending';
 import { resolveInlineEdit } from './inline-edit';
 import { QuestionTypePickerComponent } from './question-type-picker.component';
@@ -64,27 +86,16 @@ import {
   type QuestionPaletteGroup,
   type QuestionTypeMeta,
 } from './question-type-catalog';
-import { SCORE_SOURCE, type ConditionalSourceQuestion } from './condition-sources';
 import { jumpTargetOptions, targetValue, type JumpTargetOption } from './jump-target-options';
-import { jumpReach, reachNote, readHorizon, type ReachPage, type ReachSource } from './jump-reach';
 import { RuleBadgeComponent } from './rule-badge.component';
-import {
-  brokenRuleLines,
-  collectRuleEntries,
-  conditionSourcesOf,
-  endingReachFor,
-  ruleBadgesFor,
-  ruleInventoryFormOf,
-  type EndingReach,
-  type RuleBadge,
-  type RuleEntry,
-  type RuleInventoryForm,
-} from './rules-inventory';
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
 import {
-  definitionFingerprint,
+  draftComparand,
+  draftDiffers,
   storedSnapshotFingerprint,
   publishControlState,
+  unreadableDraftMessage,
+  type DraftComparand,
   type PublishControlState,
 } from './publish-fingerprint';
 import {
@@ -98,7 +109,6 @@ import {
   type ReorderNotice,
   type UndoMove,
 } from './reorder';
-import { nextOptionLabel } from './option-labels';
 import {
   NOTHING_SELECTED,
   clearIfPage,
@@ -137,6 +147,24 @@ type BuilderTab = 'build' | 'design' | 'distribute' | 'automate' | 'responses';
  * deterministic rather than relying on the exclusion to hide a value that changes.
  */
 const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
+
+/**
+ * The draft as a published definition, or `null` when one of its stored rule columns cannot be
+ * read (`UnreadableColumnError`).
+ *
+ * For the builder's PASSIVE readers — the Design tab's sample and the template comparison — which
+ * rebuild the snapshot on every change-detection pass. A form carrying a malformed rule (authored
+ * outside the builder) must not take the builder down with it, and these readers have no one to
+ * tell: `draftProblem` names the column beside the publish control, which `dirty` keeps on screen
+ * (the change check carries the reason — see `draftComparand` — rather than reading this null).
+ * `null` is what both readers treat as "nothing to show or compare".
+ */
+function draftDefinition(
+  ...args: Parameters<typeof tryBuildPublishedDefinition>
+): PublishedFormDefinition | null {
+  const built = tryBuildPublishedDefinition(...args);
+  return built.ok ? built.definition : null;
+}
 
 /**
  * The visual form builder — registered as the override for the
@@ -267,11 +295,10 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   /** This form's own content fingerprint, in the same terms the template was measured in. */
   private get templateDraftFingerprint(): string | null {
-    return this.tree
-      ? templateFingerprint(
-          buildPublishedDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, []),
-        )
+    const draft = this.tree
+      ? draftDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, [])
       : null;
+    return draft ? templateFingerprint(draft) : null;
   }
 
   /**
@@ -280,8 +307,11 @@ export class FormBuilderComponent extends BaseFormComponent {
    */
   private publishedFingerprint: string | null = null;
 
-  /** Fingerprint of the draft as it stands. Recomputed after every edit. */
-  private draftFingerprint: string | null = null;
+  /**
+   * The draft as it stands — its fingerprint, or the stored column that stops it building.
+   * Recomputed after every edit; null only while no tree is loaded.
+   */
+  private draft: DraftComparand | null = null;
 
   /**
    * The form's authored automations, as the published snapshot would carry them.
@@ -324,11 +354,19 @@ export class FormBuilderComponent extends BaseFormComponent {
    * claiming unpublished changes it did not have.
    */
   protected get dirty(): boolean {
-    return (
-      this.publishedFingerprint !== null &&
-      this.draftFingerprint !== null &&
-      this.publishedFingerprint !== this.draftFingerprint
-    );
+    return draftDiffers(this.publishedFingerprint, this.draft);
+  }
+
+  /**
+   * Why the draft cannot be published as it stands, or null when it can be.
+   *
+   * Shown beside the publish control for as long as it is true, because nothing else may say it: a
+   * `ValidationRule` or `Settings` column the schema rejects has no canvas badge, and the passive
+   * readers (Design sample, template state) just stand down. `dirty` keeps Update on screen for the
+   * same draft, so pressing it produces the refusal this sentence previews.
+   */
+  protected get draftProblem(): string | null {
+    return this.draft?.kind === 'unreadable' ? unreadableDraftMessage('publish', this.draft) : null;
   }
 
   /** Non-null while the full-screen WYSIWYG Preview is open (holds the draft definition). */
@@ -404,9 +442,9 @@ export class FormBuilderComponent extends BaseFormComponent {
   private markDirty(): void {
     this.retireStaleNotice();
     this.retireStaleRefusal();
-    this.draftFingerprint = this.tree
-      ? definitionFingerprint(
-          buildPublishedDefinition(
+    this.draft = this.tree
+      ? draftComparand(
+          tryBuildPublishedDefinition(
             this.tree,
             this.appliedStyle,
             FINGERPRINT_VERSION_ID,
@@ -425,7 +463,7 @@ export class FormBuilderComponent extends BaseFormComponent {
    */
   protected get designPreviewDefinition(): PublishedFormDefinition | null {
     return this.tree
-      ? buildPublishedDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, [])
+      ? draftDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, [])
       : null;
   }
 
@@ -1899,9 +1937,13 @@ export class FormBuilderComponent extends BaseFormComponent {
         const style = templateForm.StyleID
           ? await this.design.loadStyleById(templateForm.StyleID)
           : undefined;
-        this.savedTemplateFingerprint = templateFingerprint(
-          buildPublishedDefinition(templateTree, style ?? undefined, FINGERPRINT_VERSION_ID, []),
+        const templateDraft = draftDefinition(
+          templateTree,
+          style ?? undefined,
+          FINGERPRINT_VERSION_ID,
+          [],
         );
+        this.savedTemplateFingerprint = templateDraft ? templateFingerprint(templateDraft) : null;
       }
     }
     this.cdr.markForCheck();
@@ -2020,7 +2062,13 @@ export class FormBuilderComponent extends BaseFormComponent {
       ? (await this.design.loadStyleById(this.record.StyleID)) ?? undefined
       : undefined;
     // No automations: Preview renders the form, it never runs a submission's side effects.
-    this.previewDef = buildPublishedDefinition(this.tree, style, 'draft-preview', []);
+    const built = tryBuildPublishedDefinition(this.tree, style, 'draft-preview', []);
+    if (built.ok) {
+      this.previewDef = built.definition;
+    } else {
+      // The author asked to see the form, so say why they cannot, naming the column.
+      this.statusMessage = unreadableDraftMessage('preview', built.error);
+    }
     this.cdr.markForCheck();
   }
 

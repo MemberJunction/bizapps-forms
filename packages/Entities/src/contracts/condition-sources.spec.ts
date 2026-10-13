@@ -1,9 +1,5 @@
-import {
-  MAX_CONDITIONS_PER_GROUP,
-  QUESTION_TYPE_BEHAVIOR,
-  isAnswerableQuestionType,
-  type FormQuestionType,
-} from '@mj-biz-apps/forms-entities';
+import { MAX_CONDITIONS_PER_GROUP } from './conditional-rule';
+import { QUESTION_TYPE_BEHAVIOR, isAnswerableQuestionType, type FormQuestionType } from './question-types';
 import { describe, expect, it } from 'vitest';
 import {
   OPERATOR_CHOICES,

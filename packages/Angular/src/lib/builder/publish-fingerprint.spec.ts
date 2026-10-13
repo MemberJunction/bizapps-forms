@@ -6,9 +6,13 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   return { ...actual, LogError: (message: string) => logged.push(message) };
 });
 
+import { tryBuildPublishedDefinition, type AuthoredFormTree } from '@mj-biz-apps/forms-entities/contracts';
 import {
   canonicalJson,
   definitionFingerprint,
+  draftComparand,
+  draftDiffers,
+  unreadableDraftMessage,
   storedSnapshotFingerprint,
   publishControlState,
 } from './publish-fingerprint';
@@ -254,6 +258,85 @@ describe('publishControlState', () => {
     );
     expect(publishControlState({ dirty: true, hasPublishedBaseline: true, status: 'Draft' })).toBe(
       'update',
+    );
+  });
+});
+
+/**
+ * #303 review, Important 1: an unreadable draft column must read as a change that cannot publish.
+ *
+ * The builder rebuilds the draft on every edit to decide whether the live form is current. When a
+ * stored rule or settings column stopped parsing, that rebuild produced nothing, `dirty` went false
+ * for lack of evidence, and a published form showed the "Published" chip — no Update button, so no
+ * way to reach the refusal that names the broken column. Same principle the component already
+ * applies to an unreadable automation list: no evidence of "current" means the control stays.
+ */
+describe('the draft side of the change check', () => {
+  function draftWith(validationRule: string | null): AuthoredFormTree {
+    return {
+      form: { ID: 'f1', Name: 'F', Description: null, RenderMode: 'Scroll', Settings: null },
+      pages: [
+        {
+          entity: { ID: 'p1', Title: null, Description: null, DisplayOrder: 0, IsPartialSubmitPoint: false, ConditionalRule: null },
+          questions: [
+            {
+              entity: {
+                ID: 'q1', QuestionType: 'Number', Prompt: 'Age', HelpText: null, IsRequired: false, DisplayOrder: 0,
+                ConditionalRule: null, ValidationRule: validationRule, ScoringConfig: null, Settings: null,
+              },
+              options: [],
+            },
+          ],
+        },
+      ],
+      screens: [],
+    };
+  }
+  const comparandOf = (validationRule: string | null) =>
+    draftComparand(tryBuildPublishedDefinition(draftWith(validationRule), undefined, 'v', []));
+
+  it('fingerprints a draft that builds', () => {
+    const comparand = comparandOf('{"min":0}');
+    expect(comparand.kind).toBe('built');
+  });
+
+  it('carries the unreadable column and why, instead of nothing', () => {
+    expect(comparandOf('{"min":"zero"}')).toEqual({
+      kind: 'unreadable',
+      column: 'question "Age" (q1) ValidationRule',
+      reason: expect.stringMatching(/^min: /),
+    });
+  });
+
+  it('counts an unreadable draft as differing from a published baseline, so Update stays on screen', () => {
+    const unreadable = comparandOf('{"min":"zero"}');
+    const built = comparandOf('{"min":0}');
+    const baseline = built.kind === 'built' ? built.fingerprint : '';
+
+    expect(draftDiffers(baseline, unreadable)).toBe(true);
+    expect(publishControlState({ dirty: draftDiffers(baseline, unreadable), hasPublishedBaseline: true, status: 'Published' }))
+      .toBe('update');
+  });
+
+  it('compares a built draft with its baseline exactly as before', () => {
+    const built = comparandOf('{"min":0}');
+    const baseline = built.kind === 'built' ? built.fingerprint : '';
+    expect(draftDiffers(baseline, built)).toBe(false);
+    expect(draftDiffers(baseline, comparandOf('{"min":1}'))).toBe(true);
+  });
+
+  it('claims no difference without a baseline or a draft — the control is already available then', () => {
+    expect(draftDiffers(null, comparandOf('{"min":"zero"}'))).toBe(false);
+    expect(draftDiffers('x', null)).toBe(false);
+  });
+
+  it('names the column and the reason, worded for the action the author took', () => {
+    const problem = { column: 'question "Age" (q1) ValidationRule', reason: 'min: Expected number' };
+    expect(unreadableDraftMessage('publish', problem)).toBe(
+      'Cannot publish: the question "Age" (q1) ValidationRule cannot be read — min: Expected number.',
+    );
+    expect(unreadableDraftMessage('preview', problem)).toBe(
+      'Cannot preview: the question "Age" (q1) ValidationRule cannot be read — min: Expected number.',
     );
   });
 });

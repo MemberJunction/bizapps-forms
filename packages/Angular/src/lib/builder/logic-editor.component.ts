@@ -25,7 +25,7 @@ import {
   defaultConditionSource,
   newCondition,
   type ConditionalSourceQuestion,
-} from './condition-sources';
+} from '@mj-biz-apps/forms-entities/contracts';
 import {
   addJumpRule,
   canAddJumpRule,

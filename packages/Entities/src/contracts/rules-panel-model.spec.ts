@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ConditionalRule } from '@mj-biz-apps/forms-entities';
+import type { ConditionalRule } from './conditional-rule';
 import type { ConditionalSourceQuestion } from './condition-sources';
 import { describeCondition, groupConditions, verbGroup, withVerbGroup } from './rules-panel-model';
 

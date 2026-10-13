@@ -31,7 +31,7 @@ import { CommonModule } from '@angular/common';
 
 import { FORMS_UI_CSS } from '../shared';
 import { resolveApiBase } from '../shared/mj-api-origin';
-import { resolveAssetUrl } from '../widget/core/asset-ref';
+import { resolveAssetUrl } from '@mj-biz-apps/forms-entities/contracts';
 import { ImagePickerDialogComponent } from './image-picker-dialog.component';
 import type { ImageUse } from './image-optimize';
 

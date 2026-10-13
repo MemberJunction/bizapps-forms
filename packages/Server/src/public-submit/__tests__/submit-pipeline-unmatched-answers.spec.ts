@@ -4,7 +4,7 @@
  * hooks. Measured on `next`, such a submission returned `success: true`, wrote a `Complete` row
  * with zero answers, and spent a quota slot a real respondent then could not have.
  *
- * The rules themselves are unit-tested at the validator seam (`validation.service.spec.ts`);
+ * The rules themselves are unit-tested at the validator seam (the contracts' `answer-validation.spec.ts`);
  * these tests prove the pipeline lets nothing through to persistence and that the quota fills
  * only on real responses.
  */

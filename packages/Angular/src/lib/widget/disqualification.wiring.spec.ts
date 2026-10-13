@@ -250,20 +250,21 @@ describe('a screened-out respondent is never told they succeeded', () => {
 });
 
 describe('the client judges exactly what it sends', () => {
-  it('the knockout reads visibleAnswers, never the raw map', () => {
-    // `buildAnswerInputs` sends only the visible set and the server judges from what arrives, so
-    // any client verdict reached on `currentAnswers()` can disagree with the recorded outcome.
+  it('the knockout is judged by the contract that settles the answers first', () => {
+    // `buildAnswerInputs` sends only the settled visible set and the server judges from what
+    // arrives, so a verdict reached on the raw map can disagree with the recorded outcome. That
+    // the contract's `resolveResponseOutcome` settles before it scores and resolves is EXECUTED in
+    // the contracts (`response-outcome.spec.ts` — a stale answer to a hidden question is not
+    // scored); what is left to check here is that the component hands its answers to it rather
+    // than resolving an outcome itself.
     const body = methodBody('private outcomeForAnswers');
-    expect(body).toMatch(/transmittedView\(\)/);
-    expect(body).not.toMatch(/currentAnswers\(\)/);
-    // Not the RENDERED question list either — that is derived from the raw map.
-    expect(body).not.toMatch(/visibleAnswerableQuestions\(\)/);
+    expect(body).toMatch(/resolveResponseOutcome\(/);
+    expect(body).not.toMatch(/resolveFormOutcome\(|computeScore\(/);
   });
 
   it('and so does the ending resolution, through the same one query', () => {
-    // It reached `transmittedView()` itself until both paths were folded into
-    // `outcomeForAnswers`. The guarantee is unchanged and now has one place to hold: the ending
-    // shown must be resolved from the payload the server judges, never from the raw map.
+    // Both paths were folded into `outcomeForAnswers`, so the guarantee has one place to hold:
+    // the ending shown must be resolved from the settled answers, never from the raw map.
     expect(methodBody('private resolveEnding')).toMatch(/outcomeForAnswers\(\)/);
   });
 });
@@ -304,8 +305,8 @@ describe('an early finish waits for Submit unless it is a screening', () => {
   });
 
   it('both paths read one resolver, so the sealed and submitted endings cannot differ', () => {
-    expect(methodBody('private outcomeForAnswers')).toMatch(/resolveFormOutcome\(/);
+    expect(methodBody('private outcomeForAnswers')).toMatch(/resolveResponseOutcome\(/);
     // ...and it is the ONLY place the component resolves an outcome.
-    expect(source().match(/resolveFormOutcome\(/g) ?? []).toHaveLength(1);
+    expect(source().match(/resolveResponseOutcome\(|resolveFormOutcome\(/g) ?? []).toHaveLength(1);
   });
 });

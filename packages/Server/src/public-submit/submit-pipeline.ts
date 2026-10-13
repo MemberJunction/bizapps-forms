@@ -72,7 +72,7 @@ import {
   warnOnceIfAbuseKeyingDegraded,
 } from './source-metadata.service';
 import { captchaRequired, TURNSTILE_NOT_CONFIGURED, verifyTurnstile } from './turnstile.service';
-import { buildAnswerMap, validateSubmission, type ValidationMode } from './validation.service';
+import { buildAnswerMap, validateAnswers, type ValidationMode } from '@mj-biz-apps/forms-entities';
 import {
   evaluateProvenance,
   loadUploadLedger,
@@ -645,7 +645,16 @@ async function runSubmitPipelineInner(
 
   // 8. Server-side re-validation (conditional visibility + required + format). Which mode, and
   //    why, is `validationModeFor`.
-  const validation = validateSubmission(resolved.definition, submission.answers, validationModeFor(complete, disqualifiedBy));
+  const validation = validateAnswers(resolved.definition, submission.answers, validationModeFor(complete, disqualifiedBy));
+  if (!validation.visibility.settled) {
+    // Not a refusal — the last derivation is a usable verdict, and the widget reaches the same one
+    // from the same capped iteration — but a form whose show rules never settle is an authoring
+    // defect, and this is the only place the server sees it.
+    LogStatus(
+      `[Forms] version ${resolved.version.ID}: visibility did not settle within its pass cap; ` +
+        'the form has show rules that depend on each other with no stable answer.',
+    );
+  }
   if (validation.errors.length > 0) {
     return report({ success: false, errors: validation.errors });
   }

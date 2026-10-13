@@ -33,7 +33,11 @@
  */
 import { LogError } from '@memberjunction/core';
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
-import { mapDefinitionAssets, toAssetRef } from '../widget/core/asset-ref';
+import {
+  mapDefinitionAssets,
+  toAssetRef,
+  type PublishedDefinitionBuild,
+} from '@mj-biz-apps/forms-entities/contracts';
 
 /**
  * Keys excluded from the comparison.
@@ -177,6 +181,56 @@ export function storedSnapshotFingerprint(
     );
     return null;
   }
+}
+
+/**
+ * The draft side of the change check: its fingerprint, or the stored column that stops it being
+ * built at all.
+ *
+ * Not `string | null`. A null fingerprint used to mean both "no draft loaded" and "the draft has a
+ * column the snapshot builder refuses" — and the second then read as "no unpublished changes", so
+ * a published form showed the Published chip and hid the one control that would explain the
+ * problem. Keeping the reason is what lets the toolbar say it.
+ */
+export type DraftComparand =
+  | { readonly kind: 'built'; readonly fingerprint: string }
+  | { readonly kind: 'unreadable'; readonly column: string; readonly reason: string };
+
+/** The comparand for one attempt to build the draft. */
+export function draftComparand(build: PublishedDefinitionBuild): DraftComparand {
+  return build.ok
+    ? { kind: 'built', fingerprint: definitionFingerprint(build.definition) }
+    : { kind: 'unreadable', column: build.error.column, reason: build.error.reason };
+}
+
+/**
+ * Whether the draft differs from the published baseline.
+ *
+ * An UNREADABLE draft differs: it cannot be shown to match what is live, and claiming it does would
+ * put the static Published chip where the Update button — and the refusal pressing it produces —
+ * belongs. The same rule the builder applies to an unreadable automation list. Without a baseline
+ * (never published, or unreadable) nothing is claimed either way; {@link publishControlState}
+ * already offers Publish then.
+ */
+export function draftDiffers(publishedFingerprint: string | null, draft: DraftComparand | null): boolean {
+  if (publishedFingerprint === null || draft === null) {
+    return false;
+  }
+  return draft.kind === 'unreadable' || draft.fingerprint !== publishedFingerprint;
+}
+
+/**
+ * What the author is told about an unreadable draft column, for the action they tried (or, for
+ * `publish`, the one the toolbar is holding back).
+ *
+ * Composed from the column and the reason rather than by rewriting another message's text, so a
+ * change of wording in one place cannot silently break the other.
+ */
+export function unreadableDraftMessage(
+  action: 'publish' | 'preview',
+  problem: { readonly column: string; readonly reason: string },
+): string {
+  return `Cannot ${action}: the ${problem.column} cannot be read — ${problem.reason}.`;
 }
 
 /** What the publish control should offer the author. */

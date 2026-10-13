@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { MAX_ANSWER_VALUE_BYTES, validateSubmission, type ValidationMode } from '../validation.service';
+import { MAX_ANSWER_VALUE_BYTES, validateAnswers, type ValidationMode } from '@mj-biz-apps/forms-entities';
 import { MAX_CLIENT_META_CHARS, buildSourceMetadata } from '../source-metadata.service';
 import type { ClientMeta, FormAnswerInput, PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
 
@@ -61,7 +61,7 @@ function oversizeErrors(
   answers: FormAnswerInput[],
   mode: ValidationMode = 'complete',
 ): Array<string | undefined> {
-  return validateSubmission(definition, answers, mode)
+  return validateAnswers(definition, answers, mode)
     .errors.filter((e) => /too large/i.test(e.message))
     .map((e) => e.questionId);
 }
@@ -116,7 +116,7 @@ describe('the global answer-size ceiling', () => {
   it('tells the respondent the SAME number the ceiling actually is', () => {
     // The message used to spell "64KB" as a literal beside the constant that also meant 64KB.
     // Deriving it from the bound is only worth anything if something checks the two agree.
-    const [error] = validateSubmission(
+    const [error] = validateAnswers(
       definition,
       [{ questionId: 'q1', textValue: 'a'.repeat(MAX_ANSWER_VALUE_BYTES + 1) }],
       'complete',

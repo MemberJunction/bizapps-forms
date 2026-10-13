@@ -1,16 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type {
-  ConditionalRule,
-  mjBizAppsFormsFormPageEntity,
-  mjBizAppsFormsFormQuestionEntity,
-  mjBizAppsFormsFormScreenEntity,
-} from '@mj-biz-apps/forms-entities';
-import type { FormTree } from './builder-models';
+import type { ConditionalRule } from './conditional-rule';
+import type { AuthoredFormTree, AuthoredPageRow, AuthoredQuestionRow, AuthoredScreenRow } from './authored-form';
 import type { ConditionalSourceQuestion } from './condition-sources';
 import { describeCondition } from './rules-panel-model';
 import {
   brokenRuleLines,
   collectRuleEntries,
+  conditionSourcesOf,
   endingReachFor,
   ruleBadgesFor,
   ruleInventoryFormOf,
@@ -1136,7 +1132,7 @@ describe('a rule reading a source answered later than it runs', () => {
  * that dropped either would report a healthy form while the canvas badged it.
  */
 describe('ruleInventoryFormOf', () => {
-  function screen(overrides: Partial<mjBizAppsFormsFormScreenEntity>): mjBizAppsFormsFormScreenEntity {
+  function screen(overrides: Partial<AuthoredScreenRow>): AuthoredScreenRow {
     return {
       ID: 'screen-1',
       ScreenType: 'Ending',
@@ -1146,15 +1142,15 @@ describe('ruleInventoryFormOf', () => {
       IsDisqualification: false,
       IsDefault: false,
       ...overrides,
-    } as mjBizAppsFormsFormScreenEntity;
+    } as AuthoredScreenRow;
   }
 
-  function treeWith(screens: mjBizAppsFormsFormScreenEntity[]): FormTree {
+  function treeWith(screens: AuthoredScreenRow[]): AuthoredFormTree {
     return {
-      form: { ID: 'form-1' } as FormTree['form'],
+      form: { ID: 'form-1' } as AuthoredFormTree['form'],
       pages: [
         {
-          entity: { ID: 'p1', Title: 'Page 1', DisplayOrder: 1, ConditionalRule: null } as mjBizAppsFormsFormPageEntity,
+          entity: { ID: 'p1', Title: 'Page 1', DisplayOrder: 1, ConditionalRule: null } as AuthoredPageRow,
           questions: [
             {
               entity: {
@@ -1165,7 +1161,7 @@ describe('ruleInventoryFormOf', () => {
                 DisplayOrder: 1,
                 ConditionalRule: null,
                 Settings: null,
-              } as mjBizAppsFormsFormQuestionEntity,
+              } as AuthoredQuestionRow,
               options: [],
             },
           ],
@@ -1186,7 +1182,34 @@ describe('ruleInventoryFormOf', () => {
     ]);
   });
 
-  it('reads the ending screens only — a welcome screen is not an ending', () => {
+  it('reports a stored rule the schema rejects as broken, naming why, instead of reading it as no rule', () => {
+    // `bogus` is not an operator. The tolerant builder parser used to cast this through as a
+    // ConditionalRule; publish froze it, and the server's parser dropped it on every load — so
+    // the question became visible to everyone with no badge anywhere saying so.
+    const tree = treeWith([]);
+    const question = tree.pages[0].questions[0].entity as { ConditionalRule: string | null };
+    question.ConditionalRule = JSON.stringify({ show: { all: [{ questionId: 'q0', op: 'bogus' }] } });
+
+    const form = ruleInventoryFormOf(tree);
+    expect(form.pages[0].questions[0].conditionalRule).toBeUndefined();
+    expect(form.pages[0].questions[0].unreadableRule).toMatch(/op/);
+
+    const lines = brokenRuleLines(tree);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('"Ticket type"');
+    expect(lines[0]).toContain('a rule that cannot be read');
+
+    // The badge and the gate say the same thing.
+    const badges = ruleBadgesFor(collectRuleEntries(form)).get('q1') ?? [];
+    expect(badges.map((badge) => badge.broken)).toEqual([true]);
+  });
+
+  it('reports a rule column that is not JSON at all as broken too', () => {
+    const tree = treeWith([screen({ ID: 'e1', Title: 'Thanks', ConditionalRule: '{not json' })]);
+    expect(brokenRuleLines(tree)).toEqual([expect.stringContaining('not valid JSON')]);
+  });
+
+    it('reads the ending screens only — a welcome screen is not an ending', () => {
     const tree = treeWith([
       screen({ ID: 'w1', ScreenType: 'Welcome', Title: 'Hello' }),
       screen({ ID: 'e1', Title: 'Thanks', IsDefault: true }),
@@ -1195,5 +1218,23 @@ describe('ruleInventoryFormOf', () => {
     expect(ruleInventoryFormOf(tree).endings.map((ending) => ending.id)).toEqual(['e1']);
     // A plain default ending carries no rule at all, so a healthy form stays publishable.
     expect(brokenRuleLines(tree)).toEqual([]);
+  });
+});
+
+/**
+ * The ONE definition of "which questions may a rule read". It used to be asserted by regex over
+ * this file's source from forms-ng (`rule-badges.wiring.spec.ts`); now that it lives here it is
+ * executed instead.
+ */
+describe('conditionSourcesOf', () => {
+  const node = (ID: string, QuestionType: AuthoredQuestionRow['QuestionType']) => ({
+    entity: { ID, Prompt: ID, QuestionType, Settings: null } as AuthoredQuestionRow,
+    options: [],
+  });
+
+  it('drops a question that collects no answer rather than putting a ghost in the list', () => {
+    const sources = conditionSourcesOf([node('q1', 'ShortText'), node('note', 'Statement'), node('q2', 'YesNo')]);
+    expect(sources.map((source) => source.id)).toEqual(['q1', 'q2']);
+    expect(sources.every((source) => source !== undefined)).toBe(true);
   });
 });

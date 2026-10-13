@@ -15,7 +15,7 @@ import type {
  */
 type LegacyConditionalRule = ConditionalRule & { require: ConditionalGroup };
 import { parsePublishedDefinition } from '../snapshot-parser';
-import { validateSubmission } from '../validation.service';
+import { validateAnswers } from '@mj-biz-apps/forms-entities';
 
 /**
  * Server-side enforcement of the rule verbs (RULES_AND_BRANCHING_PLAN C1/C2). The evaluators'
@@ -87,7 +87,7 @@ describe('requiredness on the server, after the require verb was removed (C1)', 
       const parsed = parsePublishedDefinition(legacySnapshot());
       expect(parsed).toBeDefined();
 
-      const outcome = validateSubmission(parsed!, [{ questionId: 'q1', textValue: 'Other' }], 'complete');
+      const outcome = validateAnswers(parsed!, [{ questionId: 'q1', textValue: 'Other' }], 'complete');
 
       expect(outcome.errors).toEqual([]);
     });
@@ -134,7 +134,7 @@ describe('requiredness on the server, after the require verb was removed (C1)', 
         },
       ];
 
-      const outcome = validateSubmission(
+      const outcome = validateAnswers(
         definition(hiddenButRequired),
         [{ questionId: 'q1', textValue: 'something-else' }],
         'complete',
@@ -160,7 +160,7 @@ describe('requiredness on the server, after the require verb was removed (C1)', 
         },
       ];
 
-      const outcome = validateSubmission(
+      const outcome = validateAnswers(
         definition(shownAndRequired),
         [{ questionId: 'q1', textValue: 'yes' }],
         'complete',
@@ -191,19 +191,19 @@ describe('jump-to-page on the server (C2)', () => {
 
   describe('happy', () => {
     it('a fired jump waives the skipped page, required questions included', () => {
-      const outcome = validateSubmission(definition(pages), [{ questionId: 'q1', textValue: 'skip' }], 'complete');
+      const outcome = validateAnswers(definition(pages), [{ questionId: 'q1', textValue: 'skip' }], 'complete');
       expect(outcome.errors).toEqual([]);
     });
 
     it('with no jump the skipped page is reachable and its required question enforced', () => {
-      const outcome = validateSubmission(definition(pages), [{ questionId: 'q1', textValue: 'stay' }], 'complete');
+      const outcome = validateAnswers(definition(pages), [{ questionId: 'q1', textValue: 'stay' }], 'complete');
       expect(outcome.errors.map((e) => e.questionId)).toEqual(['q2']);
     });
   });
 
   describe('worst', () => {
     it("a jumped-over page's answers are DROPPED — a client cannot smuggle them through", () => {
-      const outcome = validateSubmission(
+      const outcome = validateAnswers(
         definition(pages),
         [
           { questionId: 'q1', textValue: 'skip' },
@@ -259,12 +259,12 @@ describe('question-level Go to on the server', () => {
 
   describe('happy', () => {
     it('a jump to Submit waives every required question after it, on its own page and beyond', () => {
-      const outcome = validateSubmission(definition(toSubmit), [{ questionId: 'q1', textValue: 'Soham' }], 'complete');
+      const outcome = validateAnswers(definition(toSubmit), [{ questionId: 'q1', textValue: 'Soham' }], 'complete');
       expect(outcome.errors).toEqual([]);
     });
 
     it('a jump to a later question waives only what it skipped over', () => {
-      const outcome = validateSubmission(
+      const outcome = validateAnswers(
         definition(toQ3),
         [
           { questionId: 'q1', textValue: 'Soham' },
@@ -279,14 +279,14 @@ describe('question-level Go to on the server', () => {
 
   describe('edge', () => {
     it('an unfired jump leaves every required question in force', () => {
-      const outcome = validateSubmission(definition(toSubmit), [{ questionId: 'q1', textValue: 'someone else' }], 'complete');
+      const outcome = validateAnswers(definition(toSubmit), [{ questionId: 'q1', textValue: 'someone else' }], 'complete');
       expect(outcome.errors.map((e) => e.questionId)).toEqual(['q2', 'q3', 'q4']);
     });
   });
 
   describe('worst', () => {
     it('a skipped question\'s answer is DROPPED, so a crafted payload cannot revive it', () => {
-      const outcome = validateSubmission(
+      const outcome = validateAnswers(
         definition(toQ3),
         [
           { questionId: 'q1', textValue: 'Soham' },
@@ -301,7 +301,7 @@ describe('question-level Go to on the server', () => {
     });
 
     it('nothing after a terminal jump is persisted, whatever the payload claims', () => {
-      const outcome = validateSubmission(
+      const outcome = validateAnswers(
         definition(toSubmit),
         [
           { questionId: 'q1', textValue: 'Soham' },

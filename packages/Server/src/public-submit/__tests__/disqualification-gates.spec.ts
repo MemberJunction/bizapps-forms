@@ -607,7 +607,7 @@ function hiddenKnockoutDefinition(): PublishedFormDefinition {
 /**
  * WHAT A CONTENTLESS DISQUALIFICATION IS ALLOWED TO LEAVE BEHIND (#124 follow-up).
  *
- * `validateSubmission` deliberately exempts `screened-out` from the nothing-to-submit rule, and
+ * `validateAnswers` deliberately exempts `screened-out` from the nothing-to-submit rule, and
  * the stated reason is that such a row "records the SCREENING, not answers" — refusing it would
  * throw away the one fact it exists to record. That justification only holds if the row actually
  * carries that fact. `Status = 'Disqualified'` says a knockout fired SOMEWHERE on a form that may

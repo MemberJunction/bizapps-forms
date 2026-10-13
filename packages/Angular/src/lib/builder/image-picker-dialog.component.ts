@@ -31,7 +31,7 @@ import { CommonModule } from '@angular/common';
 import { FORMS_UI_CSS } from '../shared';
 import { FormAssetService } from './form-asset.service';
 import type { ImageUse } from './image-optimize';
-import { toAssetRef } from '../widget/core/asset-ref';
+import { toAssetRef } from '@mj-biz-apps/forms-entities/contracts';
 import {
   ACCEPTED_FORMATS_LABEL,
   ACCEPT_ATTRIBUTE,

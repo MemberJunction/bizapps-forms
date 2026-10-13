@@ -30,9 +30,10 @@ import {
 import { RulesPanelComponent } from './rules-panel.component';
 import {
   authoredAnswerOptions,
+  parseQuestionSettings,
   type AuthoredAnswerOption,
   type ConditionalSourceQuestion,
-} from './condition-sources';
+} from '@mj-biz-apps/forms-entities/contracts';
 import type { JumpTargetOption } from './jump-target-options';
 import { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 import { ImageFieldComponent } from './image-field.component';
@@ -41,9 +42,8 @@ import { isOptionalOpen, toggleOptional } from './optional-setting';
 import { optionLetter } from '../shared/option-letter';
 import type { FormSection } from './section-groups';
 import {
-  parseConditionalRule,
-  parseQuestionSettings,
-  parseValidationRule,
+  editableConditionalRule,
+  editableValidationRule,
   serializeConditionalRule,
   serializeQuestionSettings,
   serializeValidationRule,
@@ -392,7 +392,7 @@ export class QuestionEditorComponent {
   }
 
   protected get conditionalRule(): ConditionalRule | undefined {
-    return this.node ? parseConditionalRule(this.node.entity.ConditionalRule) : undefined;
+    return this.node ? editableConditionalRule(this.node.entity.ConditionalRule) : undefined;
   }
 
   /**
@@ -420,7 +420,7 @@ export class QuestionEditorComponent {
   protected get validationRule(): ValidationRule | undefined {
     const raw = this.node?.entity.ValidationRule ?? null;
     if (!this.ruleCache || this.ruleCache.node !== this.node || this.ruleCache.raw !== raw) {
-      this.ruleCache = { node: this.node, raw, rule: parseValidationRule(raw) };
+      this.ruleCache = { node: this.node, raw, rule: editableValidationRule(raw) };
     }
     return this.ruleCache.rule;
   }

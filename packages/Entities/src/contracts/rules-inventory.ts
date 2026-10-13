@@ -26,19 +26,22 @@
  * answer depends on which endings the form's `Go to` rules point at, which this module already
  * has to walk.
  *
- * Pure and Angular-free: the component renders these sentences, it does not compose them.
+ * Pure and Angular-free: the component renders these sentences, it does not compose them. It lives
+ * in the contracts rather than the builder because publish runs the same gate
+ * ({@link brokenRuleLines}) wherever publish runs, and a gate the server ran from its own copy
+ * would be a second opinion.
  */
 import type {
   ConditionalCondition,
   ConditionalGroup,
   ConditionalRule,
   JumpTarget,
-} from '@mj-biz-apps/forms-entities';
+} from './conditional-rule';
 
-import { allQuestions, endScreensOf, type FormTree, type QuestionNode } from './builder-models';
+import { allQuestions, endScreensOf, type AuthoredFormTree, type AuthoredQuestionNode } from './authored-form';
 import { SCORE_SOURCE_ID, toConditionalSource, type ConditionalSourceQuestion } from './condition-sources';
 import { jumpReach, reachNote, readHorizon, type ReachSource } from './jump-reach';
-import { parseConditionalRule } from './json-fields';
+import { readStoredConditionalRule } from './stored-columns';
 import { describeCondition, groupConditions, type RuleVerb } from './rules-panel-model';
 
 /** Which kind of item a rule hangs off — what the hub needs to route a click back to. */
@@ -56,6 +59,15 @@ export interface RuleInventoryItem {
   isDefault?: boolean;
   /** Questions only — counted when a `Go to` reports what it passes over. */
   isRequired?: boolean;
+  /**
+   * Why the stored rule could not be read, when it could not — the item then carries no
+   * `conditionalRule` here, and {@link collectRuleEntries} reports it broken.
+   *
+   * Without this the inventory had to pick between two lies: treat the column as "no rule"
+   * (the badge says nothing while publish refuses), or crash the canvas. Reporting it as a broken
+   * rule is what makes the badge and the publish gate say the same thing.
+   */
+  unreadableRule?: string;
 }
 
 export interface RuleInventoryPage extends RuleInventoryItem {
@@ -95,17 +107,17 @@ export interface RuleInventoryForm {
  * `sources` drops a question that collects no answer (a `Statement`), because a condition
  * naming one can never read anything — see {@link RuleInventoryForm.sources}.
  */
-export function ruleInventoryFormOf(tree: FormTree): RuleInventoryForm {
+export function ruleInventoryFormOf(tree: AuthoredFormTree): RuleInventoryForm {
   return {
     sources: conditionSourcesOf(allQuestions(tree)),
     pages: tree.pages.map((page, index) => ({
       id: page.entity.ID,
       label: page.entity.Title || `Page ${index + 1}`,
-      conditionalRule: parseConditionalRule(page.entity.ConditionalRule),
+      ...storedRule(page.entity.ConditionalRule),
       questions: page.questions.map((q) => ({
         id: q.entity.ID,
         label: q.entity.Prompt,
-        conditionalRule: parseConditionalRule(q.entity.ConditionalRule),
+        ...storedRule(q.entity.ConditionalRule),
         // Carried so a `Go to` can say how many REQUIRED questions it passes over, which is
         // the half of "this rule skips things" an author actually needs to weigh.
         isRequired: q.entity.IsRequired === true,
@@ -114,11 +126,17 @@ export function ruleInventoryFormOf(tree: FormTree): RuleInventoryForm {
     endings: endScreensOf(tree).map((screen) => ({
       id: screen.ID,
       label: screen.Title || 'Ending screen',
-      conditionalRule: parseConditionalRule(screen.ConditionalRule),
+      ...storedRule(screen.ConditionalRule),
       isDisqualification: screen.IsDisqualification === true,
       isDefault: screen.IsDefault === true,
     })),
   };
+}
+
+/** An item's stored rule as the inventory carries it: the rule, or why it cannot be read. */
+function storedRule(raw: string | null): Pick<RuleInventoryItem, 'conditionalRule' | 'unreadableRule'> {
+  const read = readStoredConditionalRule(raw);
+  return read.ok ? { conditionalRule: read.value } : { unreadableRule: read.reason };
 }
 
 /**
@@ -138,7 +156,7 @@ export function ruleInventoryFormOf(tree: FormTree): RuleInventoryForm {
  * lists from the same rule: {@link ruleInventoryFormOf} wants the whole form, and a source
  * picker wants the prefix its rule may legally reach.
  */
-export function conditionSourcesOf(questions: readonly QuestionNode[]): ConditionalSourceQuestion[] {
+export function conditionSourcesOf(questions: readonly AuthoredQuestionNode[]): ConditionalSourceQuestion[] {
   return questions.flatMap((q) => toConditionalSource(q.entity, q.options) ?? []);
 }
 
@@ -205,6 +223,11 @@ const NO_CONDITIONS = 'no conditions, so it never runs';
  * the answer map under that id, decides the same way for every respondent, and then CHANGES ITS
  * MIND once the source is answered — the widget re-derives visibility on every keystroke.
  */
+/**
+ * A stored rule the schema rejects. Publish refuses it (the snapshot builder throws), so the badge
+ * has to say so first — and it cannot say what the rule does, because nothing could read it.
+ */
+const UNREADABLE_RULE = 'a rule that cannot be read';
 const UNREADABLE_SOURCE =
   'a question that is answered later than this rule runs, so the rule reads a blank';
 
@@ -219,14 +242,17 @@ export function collectRuleEntries(form: RuleInventoryForm): RuleEntry[] {
   const entries: RuleEntry[] = [];
 
   for (const page of form.pages) {
+    entries.push(...unreadableEntries('page', page, page.id));
     entries.push(...pageEntries(page, form));
     for (const question of page.questions) {
+      entries.push(...unreadableEntries('question', question, page.id));
       entries.push(...itemEntries('question', question, page.id, form));
     }
   }
 
   const targeted = targetedEndings(form);
   for (const ending of form.endings) {
+    entries.push(...unreadableEntries('ending', ending, null));
     const entry = endingEntry(ending, form, targeted);
     if (entry) {
       entries.push(entry);
@@ -240,7 +266,7 @@ export function collectRuleEntries(form: RuleInventoryForm): RuleEntry[] {
  *
  * The question "may this form go live?" and the question "does this item wear a broken badge?"
  * are ONE question, answered here, from one walk of one projection. The publish gate consumes
- * this (see `publish.service.ts`); the canvas consumes {@link ruleBadgesFor} over the same
+ * this (forms-ng's `publish.service.ts` today); the canvas consumes {@link ruleBadgesFor} over the same
  * entries. Neither can start disagreeing with the other, and any breakage class
  * {@link collectRuleEntries} learns later blocks publish without this function being touched.
  *
@@ -248,10 +274,38 @@ export function collectRuleEntries(form: RuleInventoryForm): RuleEntry[] {
  * it can no longer reach. `detailFor` is what writes it, so the refusal an author reads is
  * verbatim the tooltip they were already being shown.
  */
-export function brokenRuleLines(tree: FormTree): string[] {
+export function brokenRuleLines(tree: AuthoredFormTree): string[] {
   return collectRuleEntries(ruleInventoryFormOf(tree))
     .filter((entry) => entry.broken.length > 0)
     .map((entry) => detailFor(entry));
+}
+
+/**
+ * The row for an item whose stored rule cannot be read — none when it can.
+ *
+ * Filed under the `show` verb and its icon because the badge needs one and "this item's
+ * visibility is not what the author wrote" is the honest reading of an unreadable rule: the
+ * server's snapshot parser drops such a rule, and a dropped show rule makes the item visible to
+ * everyone. The reason is the schema's own message, so an author (or an engineer reading a refused
+ * publish) can find the condition that is wrong.
+ */
+function unreadableEntries(kind: RuleItemKind, item: RuleInventoryItem, pageId: string | null): RuleEntry[] {
+  if (item.unreadableRule === undefined) {
+    return [];
+  }
+  return [
+    {
+      id: `${kind}:${item.id}:unreadable`,
+      itemKind: kind,
+      itemId: item.id,
+      pageId,
+      verb: 'show',
+      icon: ROW_ICONS.show,
+      sentence: `The rule on ${quoted(item.label)}`,
+      broken: [`${UNREADABLE_RULE} (${item.unreadableRule})`],
+      note: '',
+    },
+  ];
 }
 
 /** A page's own rules: its show gate, then its forward jump. */

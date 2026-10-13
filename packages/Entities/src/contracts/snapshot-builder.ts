@@ -1,5 +1,4 @@
 import type {
-  mjBizAppsFormsFormStyleEntity,
   FormSettings,
   FormStyleTokens,
   PublishedFormAutomation,
@@ -8,26 +7,47 @@ import type {
   PublishedFormQuestion,
   PublishedFormQuestionOption,
   PublishedFormScreen,
-  FormRenderMode,
-  mjBizAppsFormsFormScreenEntity,
-} from '@mj-biz-apps/forms-entities';
-import type { FormTree, PageNode, QuestionNode } from './builder-models';
-import { publishedOptionIdentities } from './option-labels';
-import { endScreensOf, welcomeScreenOf } from './builder-models';
+} from './form-definition';
+import type { ConditionalRule, ValidationRule } from './conditional-rule';
 import {
-  parseConditionalRule,
-  parseValidationRule,
-  parseQuestionSettings,
-  parseFormSettings,
+  endScreensOf,
+  welcomeScreenOf,
+  type AuthoredFormTree,
+  type AuthoredPageNode,
+  type AuthoredQuestionNode,
+  type AuthoredScreenRow,
+  type AuthoredStyleRow,
+} from './authored-form';
+import { publishedOptionIdentities } from './option-labels';
+import {
   buildStyleTokens,
-} from './json-fields';
-import { parseQuestionScoring, parseSocialLinks } from '@mj-biz-apps/forms-entities';
-import { mapDefinitionAssets, toAssetRef } from '../widget/core/asset-ref';
+  parseQuestionSettings,
+  readStoredConditionalRule,
+  readStoredFormSettings,
+  readStoredValidationRule,
+  type StoredColumnRead,
+} from './stored-columns';
+import { parseQuestionScoring } from './scoring';
+import { parseSocialLinks } from './social-links';
+import { mapDefinitionAssets, toAssetRef } from './asset-ref';
 
 /**
- * Pure transform from the live builder tree to the immutable
- * {@link PublishedFormDefinition} stored in `FormVersion.DefinitionSnapshot` (the S1
- * contract). No I/O, no MJ services — so it is the unit-testable core of publish.
+ * Pure transform from an authored draft to the immutable {@link PublishedFormDefinition} stored in
+ * `FormVersion.DefinitionSnapshot` (the S1 contract). No I/O, no MJ services — so it is the
+ * unit-testable core of publish, and the ONE implementation of it: the builder calls it for the
+ * live Preview and the draft/publish fingerprint, the server calls it to publish. It lives in the
+ * contracts rather than the builder because two copies of "what a draft publishes as" can only
+ * ever drift.
+ *
+ * Takes {@link AuthoredFormTree} — structural rows, not live entities — so the builder passes its
+ * own entity tree and the server passes `simple` RunView rows, with no adapter on either side.
+ *
+ * REFUSES A RULE IT CANNOT READ. Every rule column is read through the zod schemas, and one that
+ * fails throws {@link UnreadableColumnError}, naming the item. It used to be cast through unchecked, frozen into the immutable
+ * snapshot, and then dropped by the server's parser on every public load — which for a show rule
+ * made the guarded item visible to everyone, with nothing anywhere to say so. The builder's rule
+ * gate (`brokenRuleLines`) reports the same column as broken first, so an author meets this as a
+ * badge rather than as a failed publish.
  *
  * Pages and questions are re-numbered to a dense 0-based `displayOrder` reflecting
  * their sorted position, so the snapshot order is canonical regardless of any gaps
@@ -55,8 +75,8 @@ import { mapDefinitionAssets, toAssetRef } from '../widget/core/asset-ref';
  * this same output, which is fine: the preview stage resolves the references again before drawing.
  */
 export function buildPublishedDefinition(
-  tree: FormTree,
-  style: mjBizAppsFormsFormStyleEntity | undefined,
+  tree: AuthoredFormTree,
+  style: AuthoredStyleRow | undefined,
   formVersionId: string,
   automations: readonly PublishedFormAutomation[],
   styleTokensOverride?: FormStyleTokens,
@@ -68,12 +88,12 @@ export function buildPublishedDefinition(
     formVersionId,
     name: form.Name,
     description: form.Description ?? undefined,
-    renderMode: form.RenderMode as FormRenderMode,
+    renderMode: form.RenderMode,
     // The override is what publish supplies, and it is authoritative: the builder's tree is loaded
     // once and never refreshed, so `form.Settings` here can be older than what the database holds
-    // — see `PublishService.loadStoredSettings`. Deriving from the tree remains right for the live
-    // Preview, which renders unsaved edits.
-    settings: settingsOverride ?? parseFormSettings(form.Settings),
+    // — so a publisher re-reads the stored column and passes it here. Deriving from the tree
+    // remains right for the live Preview, which renders unsaved edits.
+    settings: settingsOverride ?? readable(readStoredFormSettings(form.Settings), `form "${form.Name}" (${form.ID}) Settings`),
     styleTokens:
       styleTokensOverride ??
       buildStyleTokens(
@@ -98,6 +118,32 @@ export function buildPublishedDefinition(
   }, toAssetRef);
 }
 
+/** The outcome of {@link tryBuildPublishedDefinition}. */
+export type PublishedDefinitionBuild =
+  | { readonly ok: true; readonly definition: PublishedFormDefinition }
+  | { readonly ok: false; readonly error: UnreadableColumnError };
+
+/**
+ * {@link buildPublishedDefinition}, with an unreadable draft column returned as a result.
+ *
+ * For callers that must go on working when a draft cannot publish — the builder rebuilds the
+ * snapshot on every edit for its live Preview and change fingerprint, and publish turns the refusal
+ * into a message — so each does not write its own try/catch. Catches ONLY
+ * {@link UnreadableColumnError}; anything else is a bug and propagates.
+ */
+export function tryBuildPublishedDefinition(
+  ...args: Parameters<typeof buildPublishedDefinition>
+): PublishedDefinitionBuild {
+  try {
+    return { ok: true, definition: buildPublishedDefinition(...args) };
+  } catch (err) {
+    if (err instanceof UnreadableColumnError) {
+      return { ok: false, error: err };
+    }
+    throw err;
+  }
+}
+
 /**
  * Freeze one screen into the snapshot.
  *
@@ -105,13 +151,13 @@ export function buildPublishedDefinition(
  * are renumbered above: ending resolution walks this list in order, so a gap left by a deleted
  * screen must not survive into the published form.
  */
-function buildWelcomeScreen(tree: FormTree): PublishedFormScreen | undefined {
+function buildWelcomeScreen(tree: AuthoredFormTree): PublishedFormScreen | undefined {
   const welcome = welcomeScreenOf(tree);
   return welcome ? buildScreen(welcome, 0) : undefined;
 }
 
 function buildScreen(
-  screen: mjBizAppsFormsFormScreenEntity,
+  screen: AuthoredScreenRow,
   displayOrder: number,
 ): PublishedFormScreen {
   const built: PublishedFormScreen = {
@@ -138,7 +184,7 @@ function buildScreen(
   if (screen.IsDisqualification) {
     built.isDisqualification = true;
   }
-  const conditional = parseConditionalRule(screen.ConditionalRule);
+  const conditional = conditionalRuleOf(screen.ConditionalRule, `screen "${screen.Title}" (${screen.ID})`);
   if (conditional) {
     built.conditionalRule = conditional;
   }
@@ -152,7 +198,7 @@ function buildScreen(
   return built;
 }
 
-function buildPage(page: PageNode, displayOrder: number): PublishedFormPage {
+function buildPage(page: AuthoredPageNode, displayOrder: number): PublishedFormPage {
   const result: PublishedFormPage = {
     id: page.entity.ID,
     displayOrder,
@@ -169,14 +215,17 @@ function buildPage(page: PageNode, displayOrder: number): PublishedFormPage {
   if (page.entity.IsPartialSubmitPoint) {
     result.isPartialSubmitPoint = true;
   }
-  const conditional = parseConditionalRule(page.entity.ConditionalRule);
+  const conditional = conditionalRuleOf(
+    page.entity.ConditionalRule,
+    `page "${page.entity.Title ?? ''}" (${page.entity.ID})`,
+  );
   if (conditional) {
     result.conditionalRule = conditional;
   }
   return result;
 }
 
-function buildQuestion(node: QuestionNode, displayOrder: number): PublishedFormQuestion {
+function buildQuestion(node: AuthoredQuestionNode, displayOrder: number): PublishedFormQuestion {
   const q = node.entity;
   const result: PublishedFormQuestion = {
     id: q.ID,
@@ -189,11 +238,14 @@ function buildQuestion(node: QuestionNode, displayOrder: number): PublishedFormQ
   if (q.HelpText) {
     result.helpText = q.HelpText;
   }
-  const conditional = parseConditionalRule(q.ConditionalRule);
+  const conditional = conditionalRuleOf(q.ConditionalRule, `question "${q.Prompt}" (${q.ID})`);
   if (conditional) {
     result.conditionalRule = conditional;
   }
-  const validation = parseValidationRule(q.ValidationRule);
+  const validation: ValidationRule | undefined = readable(
+    readStoredValidationRule(q.ValidationRule),
+    `question "${q.Prompt}" (${q.ID}) ValidationRule`,
+  );
   if (validation) {
     result.validationRule = validation;
   }
@@ -219,7 +271,7 @@ function buildQuestion(node: QuestionNode, displayOrder: number): PublishedFormQ
  * than in the widget is deliberate — the widget would only be papering over a definition that
  * was already ambiguous, and the ambiguity would survive into the stored response.
  */
-function buildOptions(node: QuestionNode): PublishedFormQuestionOption[] {
+function buildOptions(node: AuthoredQuestionNode): PublishedFormQuestionOption[] {
   return publishedOptionIdentities(node.options).map(({ source, label, value }, index) => {
     const built: PublishedFormQuestionOption = {
       id: source.ID,
@@ -238,4 +290,45 @@ function buildOptions(node: QuestionNode): PublishedFormQuestionOption[] {
     }
     return built;
   });
+}
+
+/** An item's conditional rule, or a throw naming the item when the column cannot be read. */
+function conditionalRuleOf(raw: string | null, item: string): ConditionalRule | undefined {
+  return readable(readStoredConditionalRule(raw), `${item} ConditionalRule`);
+}
+
+/**
+ * A draft column the snapshot builder refused to read — the ONE failure it throws on purpose.
+ *
+ * Its own class so an interactive caller (the builder's live Preview and change fingerprint, which
+ * rebuild the snapshot on every edit) can catch exactly this and re-throw anything else: an
+ * unreadable rule there is an authoring state the canvas badge already reports, while any other
+ * throw is a bug that must not be mistaken for one.
+ */
+export class UnreadableColumnError extends Error {
+  /** Which column, on which item — e.g. `question "Your age" (<id>) ConditionalRule`. */
+  public readonly column: string;
+  /** Why it could not be read — the JSON parser's or the schema's own message. */
+  public readonly reason: string;
+
+  constructor(column: string, reason: string) {
+    super(`Cannot publish: the ${column} cannot be read — ${reason}.`);
+    this.name = 'UnreadableColumnError';
+    this.column = column;
+    this.reason = reason;
+  }
+}
+
+/**
+ * The value of a column read, or a throw saying which column and why.
+ *
+ * The message names the item because the person reading it is an author (or an engineer reading
+ * a refused publish), and "invalid rule" without a "where" sends them clicking through every
+ * question on the form.
+ */
+function readable<T>(read: StoredColumnRead<T>, column: string): T {
+  if (!read.ok) {
+    throw new UnreadableColumnError(column, read.reason);
+  }
+  return read.value;
 }

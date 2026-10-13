@@ -60,7 +60,6 @@ export {
   shownScreenFor,
   type ShownScreen,
 } from './core/shown-screen';
-export { validateQuestion, hasValue, type FieldValidationResult } from './core/validation';
 export { toAnswerInputs, type AnswerMap } from './core/answer-value';
 export {
   captchaRequired,

@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { settingsUpdateToMarkAuthoritative } from './on-submit-mode';
-import { parseFormSettings, serializeFormSettings } from './json-fields';
+import { readStoredFormSettings, type FormSettings } from '@mj-biz-apps/forms-entities/contracts';
+import { serializeFormSettings } from './json-fields';
+
+/** The settings a written blob reads back as — through the same reader publish uses. */
+function parseFormSettings(raw: string | null): FormSettings {
+  const read = readStoredFormSettings(raw);
+  if (!read.ok) {
+    throw new Error(`settings did not read back: ${read.reason}`);
+  }
+  return read.value;
+}
 
 /**
  * Marking a form's automations authoritative is what stops the four legacy hooks coming back.
@@ -68,5 +78,14 @@ describe('settingsUpdateToMarkAuthoritative', () => {
     });
 
     expect(parseFormSettings(settingsUpdateToMarkAuthoritative(raw)).onSubmitMode).toBe('Configured');
+  });
+
+  it('refuses to rewrite settings it cannot read, rather than replacing them with what it could', () => {
+    // This writes the WHOLE blob back. The tolerant parser it used to call cast a mistyped value
+    // straight through; a validating reader that defaulted instead would silently replace an
+    // author's settings with the defaults the first time they added a step. Refusing is the only
+    // option that loses nothing — the Automate tab surfaces the message and abandons the add.
+    expect(() => settingsUpdateToMarkAuthoritative('{"quota":"fifty"}')).toThrow(/settings cannot be read.*quota/);
+    expect(() => settingsUpdateToMarkAuthoritative('{oops')).toThrow(/settings cannot be read/);
   });
 });

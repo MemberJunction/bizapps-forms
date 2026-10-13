@@ -28,7 +28,7 @@ export interface FormStyleTokens {
   customCSS?: string;
   /**
    * Optional logo image. An uploaded image is stored as `/forms/asset/<id>`, relative to the API
-   * base, and renderers resolve it (see forms-ng `widget/core/asset-ref.ts`).
+   * base, and renderers resolve it (see `asset-ref.ts` beside this file).
    */
   logoURL?: string;
 }
@@ -95,8 +95,8 @@ export interface PublishedFormQuestionOption {
   isDefault?: boolean;
   /**
    * `PictureChoice` only: the image shown above the label. An uploaded image is stored as
-   * `/forms/asset/<id>`, relative to the API base, and renderers resolve it (see forms-ng
-   * `widget/core/asset-ref.ts`).
+   * `/forms/asset/<id>`, relative to the API base, and renderers resolve it (see `asset-ref.ts`
+   * beside this file).
    */
   imageURL?: string;
   /** `Matrix` only: which axis this option is part of. Absent is treated as `Row`. */
@@ -237,7 +237,7 @@ export interface PublishedFormScreen {
   buttonLabel?: string;
   /**
    * Optional image shown above the title. An uploaded image is stored as `/forms/asset/<id>`,
-   * relative to the API base, and renderers resolve it (see forms-ng `widget/core/asset-ref.ts`).
+   * relative to the API base, and renderers resolve it (see `asset-ref.ts` beside this file).
    */
   mediaURL?: string;
   /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
+import type { PublishedFormDefinition } from './form-definition';
 
 import {
   apiBaseOf,

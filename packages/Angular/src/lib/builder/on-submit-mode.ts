@@ -13,12 +13,12 @@
  * writes are correct. Everything that matters about this operation is decidable from the settings
  * JSON alone, so this is the part worth testing and the tab keeps only the load/save around it.
  */
-import type { FormSettings } from '@mj-biz-apps/forms-entities';
-import { parseFormSettings, serializeFormSettings } from './json-fields';
+import { readStoredFormSettings } from '@mj-biz-apps/forms-entities/contracts';
+import { serializeFormSettings } from './json-fields';
 
 /**
  * The `Form.Settings` JSON that marks this form's automations authoritative, or `null` when it
- * already is.
+ * already is. Throws when the stored settings cannot be read — see the body for why.
  *
  * `null` means "no write needed", not "failed" — every added step asks, and rewriting identical
  * settings each time is a wasted round-trip and a meaningless entry in the form's history.
@@ -29,7 +29,14 @@ import { parseFormSettings, serializeFormSettings } from './json-fields';
  * asked for".
  */
 export function settingsUpdateToMarkAuthoritative(raw: string | null | undefined): string | null {
-  const settings: FormSettings = parseFormSettings(raw);
+  const read = readStoredFormSettings(raw);
+  if (!read.ok) {
+    // This replaces the whole blob, so carrying on would mean writing back either the unreadable
+    // value or the defaults in its place — both lose the author's settings. The Automate tab
+    // surfaces this and abandons the operation, which loses nothing.
+    throw new Error(`This form's settings cannot be read (${read.reason}), so they were not changed.`);
+  }
+  const settings = read.value;
   if (settings.onSubmitMode === 'Configured') {
     return null;
   }

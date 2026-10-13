@@ -11,11 +11,13 @@ import {
   type FormSettings,
   type PublishedFormAutomation,
 } from '@mj-biz-apps/forms-entities';
+import {
+  brokenRuleLines,
+  readStoredFormSettings,
+  tryBuildPublishedDefinition,
+} from '@mj-biz-apps/forms-entities/contracts';
 import { FORMS_ENTITY } from '../shared/entity-names';
-import { parseFormSettings } from './json-fields';
 import type { FormTree } from './builder-models';
-import { brokenRuleLines } from './rules-inventory';
-import { buildPublishedDefinition } from './snapshot-builder';
 
 /**
  * The versions serving this form's public link right now — one, once the publish swap and
@@ -135,12 +137,12 @@ export class PublishService {
     }
     const style = await this.loadStyle(tree.form.StyleID);
     const automations = await this.loadAutomations(tree.form.ID);
-    const settings = await this.loadStoredSettings(tree.form.ID);
-    if (settings === null) {
-      const error = 'Could not read the form\'s settings; nothing was published.';
-      LogError(`Forms publish: ${error}`);
-      return { success: false, error };
+    const storedSettings = await this.loadStoredSettings(tree.form.ID);
+    if (!storedSettings.ok) {
+      LogError(`Forms publish: form ${tree.form.ID}: ${storedSettings.error}`);
+      return { success: false, error: storedSettings.error };
     }
+    const settings = storedSettings.settings;
     if (!automations) {
       // Publishing a snapshot with no automations when the form HAS automations would disable
       // every one of them silently, and the author's only signal would be side effects that stop
@@ -176,7 +178,22 @@ export class PublishService {
     // half-published row needing a follow-up save to complete it). An unpopulated PK leaves
     // formVersionId empty, which the reconcile below then fills in from the row the server wrote.
     const versionId = version.ID && version.ID.length > 0 ? version.ID : '';
-    const definition = buildPublishedDefinition(tree, style, versionId, automations, undefined, settings);
+    // An unreadable rule column is refused here with the column named — a status, not an error:
+    // it is an authoring state the author can fix, like the broken-rule refusal above.
+    const built = tryBuildPublishedDefinition(
+      tree,
+      style,
+      versionId,
+      automations,
+      undefined,
+      settings,
+    );
+    if (!built.ok) {
+      const error = `${built.error.message} Nothing was published.`;
+      LogStatus(`Forms publish: refused form ${tree.form.ID} — ${error}`);
+      return { success: false, error };
+    }
+    const definition = built.definition;
     version.DefinitionSnapshot = JSON.stringify(definition);
     const swapError = await this.swapLiveVersion(incumbents, version);
     if (swapError) {
@@ -327,7 +344,7 @@ export class PublishService {
    * automations the form actually has, for every response until someone republished.
    */
   /**
-   * Read `Form.Settings` from the database, or null when the read itself failed.
+   * Read `Form.Settings` from the database, or why it cannot be published.
    *
    * NOT from `tree.form`. The builder loads its tree once and never refreshes it, while the
    * Automate tab writes settings through its own Form entity and has no output to announce it —
@@ -335,10 +352,17 @@ export class PublishService {
    * snapshotted the settings as they were when the builder OPENED. The mode that removal had just
    * written was absent, the snapshot inferred `legacy`, and all four built-in hooks came back.
    *
-   * Null means "we do not know" and refuses the publish, exactly as {@link loadAutomations} does.
-   * Publishing settings we could not confirm is how a form silently loses its declared mode.
+   * A failure means "we do not know" (or "we cannot read it") and refuses the publish, exactly as
+   * {@link loadAutomations} does. Publishing settings we could not confirm is how a form silently
+   * loses its declared mode.
    */
-  private async loadStoredSettings(formId: string): Promise<FormSettings | null> {
+  private async loadStoredSettings(
+    formId: string,
+  ): Promise<{ ok: true; settings: FormSettings } | { ok: false; error: string }> {
+    const unreadable = {
+      ok: false,
+      error: 'Could not read the form\'s settings; nothing was published.',
+    } as const;
     const rv = new RunView();
     const result = await rv.RunView<{ Settings: string | null }>(
       {
@@ -351,13 +375,13 @@ export class PublishService {
     );
     if (!result.Success) {
       LogError(`Forms publish: could not load settings for form ${formId}: ${result.ErrorMessage}`);
-      return null;
+      return unreadable;
     }
     // A read that SUCCEEDS and returns nothing is still "we do not know", not "this form has no
     // settings". The form demonstrably exists — its automations were read a moment ago and a
     // version row is about to be written against it — so an empty result is an anomaly, and
     // publishing the defaults in its place is a silent downgrade well beyond the on-submit mode:
-    // `parseFormSettings(null)` yields anonymousAllowed=true and captchaRequired=false and drops
+    // reading a null column yields anonymousAllowed=true and captchaRequired=false and drops
     // quota, opensAt, closesAt, confirmationMessage and redirectUrl. A private, captcha-gated,
     // capped form would publish as open, ungated and uncapped.
     //
@@ -366,9 +390,14 @@ export class PublishService {
     const row = result.Results?.[0];
     if (!row) {
       LogError(`Forms publish: form ${formId} returned no row when reading its settings; nothing was published.`);
-      return null;
+      return unreadable;
     }
-    return parseFormSettings(row.Settings);
+    // A stored value the schema rejects is refused too, rather than cast through into an
+    // immutable snapshot the server would then read a mistyped quota or captcha flag out of.
+    const read = readStoredFormSettings(row.Settings);
+    return read.ok
+      ? { ok: true, settings: read.value }
+      : { ok: false, error: `The form's settings cannot be read (${read.reason}); nothing was published.` };
   }
 
   public async loadAutomations(formId: string): Promise<PublishedFormAutomation[] | null> {

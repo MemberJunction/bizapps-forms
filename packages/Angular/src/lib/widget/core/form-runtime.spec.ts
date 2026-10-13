@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { PublishedFormDefinition, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
-import { resolveVisibleQuestions } from '@mj-biz-apps/forms-entities/contracts';
+import { validateAnswers } from '@mj-biz-apps/forms-entities/contracts';
 import { FormRuntime } from './form-runtime';
 
 /** A small two-page form with a conditional follow-up + a required field. */
@@ -198,16 +198,21 @@ function formOf(
   return def;
 }
 
-describe('FormRuntime.transmittedAnswers', () => {
+/** The ids the widget would SEND right now. */
+const sentIds = (rt: FormRuntime): string[] => rt.buildAnswerInputs().map((a) => a.questionId);
+
+/**
+ * What the server derives from what the widget sends — the server's own call (`validateAnswers`)
+ * over the widget's own payload. The invariant these cases pin is that the widget RENDERS exactly
+ * that set; the derivation itself (`settleVisibility`) is tested in the contracts.
+ */
+const serverSees = (def: PublishedFormDefinition, rt: FormRuntime): string[] =>
+  validateAnswers(def, rt.buildAnswerInputs(), 'complete').visibility.answerable.map((q) => q.id);
+
+describe('FormRuntime — what is sent', () => {
   /**
-   * The set the widget SENDS is `visibleAnswerableQuestions` (see `buildAnswerInputs`), and the
-   * server judges knockouts, endings and score from exactly what arrives. So any client-side
-   * verdict has to be reached on the same set, or the two sides disagree about the same
-   * submission — and the client's copy is the one the respondent sees while the server's is the
-   * one that gets recorded.
-   *
    * The raw map keeps an answer whose question has since been hidden: `setValue` deletes a key
-   * only on null/undefined, and nothing prunes on visibility change.
+   * only on null/undefined, and nothing prunes on visibility change. The payload must not.
    */
   it('drops an answer whose question is no longer visible', () => {
     const rt = new FormRuntime(
@@ -218,36 +223,20 @@ describe('FormRuntime.transmittedAnswers', () => {
     );
     rt.setValue('gate', 'Company');
     rt.setValue('detail', 'left over');
-    expect([...rt.transmittedAnswers().keys()].sort()).toEqual(['detail', 'gate']);
+    expect(sentIds(rt).sort()).toEqual(['detail', 'gate']);
 
     rt.setValue('gate', 'Individual');
     // Still in the raw map — nothing prunes it — but no longer part of what this form is saying.
     expect(rt.currentAnswers().has('detail')).toBe(true);
-    expect([...rt.transmittedAnswers().keys()]).toEqual(['gate']);
-  });
-
-  it('is exactly what buildAnswerInputs will send', () => {
-    const rt = new FormRuntime(
-      formOf([
-        { id: 'gate' },
-        { id: 'detail', conditionalRule: { show: { all: [{ questionId: 'gate', op: 'equals', value: 'Company' }] } } },
-        { id: 'note', type: 'Statement' },
-      ]),
-    );
-    rt.setValue('gate', 'Individual');
-    rt.setValue('detail', 'left over');
-
-    expect([...rt.transmittedAnswers().keys()].sort()).toEqual(rt.buildAnswerInputs().map((a) => a.questionId).sort());
+    expect(sentIds(rt)).toEqual(['gate']);
   });
 });
 
-describe('FormRuntime.transmittedView', () => {
+describe('FormRuntime renders what the server derives from the payload', () => {
   /**
-   * The server does TWO things with a submission: it reads the answers that arrive, and it
-   * re-derives the visible question set FROM those answers. Matching only the first is not
-   * matching. `visibleAnswers()` restricted the values while `visibleAnswerableQuestions` still
-   * resolved over the RAW map, so a show-rule naming a question that is itself hidden made the two
-   * sets differ — and the client's verdict was reached on a set the server would never compute.
+   * The server reads the answers that arrive AND re-derives the visible question set from them.
+   * The widget used to keep a one-pass mirror of that (`transmittedView`) beside its own fixed
+   * point; both sides now call `settleVisibility`, and these pin the agreement end to end.
    */
   const chained = () =>
     formOf([
@@ -256,65 +245,38 @@ describe('FormRuntime.transmittedView', () => {
       { id: 'risk', conditionalRule: { show: { all: [{ questionId: 'sector', op: 'equals', value: 'Energy' }] } } },
     ]);
 
-  it('derives the question set from what will be SENT, not from the raw map', () => {
-    const rt = new FormRuntime(chained());
+  it('drops an orphaned question whose rule reads an answer that is itself hidden', () => {
+    const def = chained();
+    const rt = new FormRuntime(def);
     rt.setValue('type', 'Company');
     rt.setValue('sector', 'Energy');
     rt.setValue('risk', 'High');
-    expect(rt.transmittedView().questions.map((q) => q.id)).toEqual(['type', 'sector', 'risk']);
+    expect(rt.visibleAnswerableQuestions().map((q) => q.id)).toEqual(['type', 'sector', 'risk']);
 
-    // Hiding `sector` orphans `risk`'s rule: it reads `sector` from the raw map and still passes,
-    // so the widget would render and send `risk` — but the server, resolving over the payload,
-    // sees no `sector` and drops `risk`. That gap is the divergence.
+    // Hiding `sector` orphans `risk`'s rule: it reads `sector` from the raw map and would still
+    // pass. Settled, `risk` is not rendered, so it is not sent, so there is nothing to disagree on.
     rt.setValue('type', 'Individual');
-    // Both halves now agree, and an earlier version of this case asserted that they would NOT —
-    // it expected the payload to carry an orphaned `risk` while the server dropped it, which
-    // described the divergence rather than the fix. Once the rendered set is a fixed point, `risk`
-    // is not rendered, so it is not sent, so there is nothing for the server to disagree about.
-    expect([...rt.transmittedView().answers.keys()]).toEqual(['type']);
-    expect(rt.transmittedView().questions.map((q) => q.id)).toEqual(['type']);
-  });
-
-  it('renders the same set the server will derive from the payload', () => {
-    // THE invariant, and the one an earlier version of this case could not test: it compared
-    // `resolveVisibleQuestions(pages, view.answers)` against `view.questions`, which is how
-    // `view.questions` is defined — `f(x) === f(x)`, unfailable. What actually matters is whether
-    // the RENDERED set agrees, because that is the set whose answers get sent.
-    const rt = new FormRuntime(chained());
-    rt.setValue('type', 'Company');
-    rt.setValue('sector', 'Energy');
-    rt.setValue('risk', 'High');
-    rt.setValue('type', 'Individual');
-
-    expect(rt.visibleAnswerableQuestions().map((q) => q.id)).toEqual(
-      rt.transmittedView().questions.map((q) => q.id),
-    );
+    expect(sentIds(rt)).toEqual(['type']);
+    expect(rt.visibleAnswerableQuestions().map((q) => q.id)).toEqual(serverSees(def, rt));
   });
 
   it('renders a question the server will REQUIRE, even when the raw map hides it', () => {
-    // The mirror of the divergence `transmittedView` fixed, and it is unrecoverable rather than
-    // merely wrong. `why` is shown when `detail isNotAnswered` — an operator this PR added. The
-    // respondent picks Company, types a detail, switches to Individual: nothing prunes `detail`
-    // from the raw map, so the widget reads it as answered and hides `why`, and sends neither.
-    // The server, seeing no `detail`, finds `isNotAnswered` true, makes `why` visible AND required,
-    // and rejects the submission naming a field that was never on screen. Every retry sends the
-    // identical payload, so the respondent cannot get out of it.
-    const rt = new FormRuntime(
-      formOf([
-        { id: 'gate' },
-        { id: 'detail', conditionalRule: { show: { all: [{ questionId: 'gate', op: 'equals', value: 'Company' }] } } },
-        {
-          id: 'why',
-          isRequired: true,
-          conditionalRule: { show: { all: [{ questionId: 'detail', op: 'isNotAnswered' }] } },
-        },
-      ]),
-    );
+    // `why` is shown when `detail isNotAnswered`. The respondent picks Company, types a detail,
+    // switches to Individual: nothing prunes `detail` from the raw map, so a one-pass reading
+    // hides `why` — while the server, seeing no `detail`, shows it AND requires it, rejecting the
+    // submission over a field that was never on screen, on every retry.
+    const def = formOf([
+      { id: 'gate' },
+      { id: 'detail', conditionalRule: { show: { all: [{ questionId: 'gate', op: 'equals', value: 'Company' }] } } },
+      { id: 'why', isRequired: true, conditionalRule: { show: { all: [{ questionId: 'detail', op: 'isNotAnswered' }] } } },
+    ]);
+    const rt = new FormRuntime(def);
     rt.setValue('gate', 'Company');
     rt.setValue('detail', 'Acme');
     rt.setValue('gate', 'Individual');
 
     expect(rt.visibleAnswerableQuestions().map((q) => q.id)).toEqual(['gate', 'why']);
+    expect(serverSees(def, rt)).toEqual(['gate', 'why']);
   });
 });
 
@@ -740,34 +702,29 @@ describe('a rule whose source is answered after it runs', () => {
     );
     rt.setValue('q1', 'a');
     rt.setValue('q2', 'typed by the respondent');
-    expect([...rt.transmittedView().answers.keys()]).toContain('q2');
+    expect(sentIds(rt)).toContain('q2');
 
     rt.setValue('q3', 'yes');
     expect(rt.renderedQuestions().map((q) => q.id)).toEqual(['q1', 'q3', 'tail']);
-    expect([...rt.transmittedView().answers.keys()]).not.toContain('q2');
+    expect(sentIds(rt)).not.toContain('q2');
   });
 
-  it('warns rather than looping when two rules can never agree', () => {
+  it('reports rather than loops when two rules can never agree', () => {
     // Visibility is NOT monotone: `isNotAnswered` means removing an answer can REVEAL a
-    // question, so the iteration has no guaranteed fixed point. This is where the builder's
-    // badge and the respondent's screen diverge most, and it is capped, not solved.
-    const warnings: string[] = [];
-    const original = console.warn;
-    console.warn = (message: string) => void warnings.push(message);
-    try {
-      const rt = new FormRuntime(
-        formOf([
-          { id: 'a', conditionalRule: { show: { all: [{ questionId: 'b', op: 'isNotAnswered' }] } } },
-          { id: 'b', conditionalRule: { show: { all: [{ questionId: 'a', op: 'isAnswered' }] } } },
-        ]),
-      );
-      rt.setValue('a', '1');
-      rt.setValue('b', '2');
-      rt.renderedQuestions();
-    } finally {
-      console.warn = original;
-    }
-    expect(warnings.join('\n')).toContain('visibility did not settle');
+    // question, so the iteration has no guaranteed fixed point. It is capped, not solved — and the
+    // cap is now an explicit signal the caller reads, not a console warning from inside the
+    // derivation.
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'a', conditionalRule: { show: { all: [{ questionId: 'b', op: 'isNotAnswered' }] } } },
+        { id: 'b', conditionalRule: { show: { all: [{ questionId: 'a', op: 'isAnswered' }] } } },
+      ]),
+    );
+    expect(rt.rulesSettle()).toBe(true);
+    rt.setValue('a', '1');
+    rt.setValue('b', '2');
+    rt.renderedQuestions();
+    expect(rt.rulesSettle()).toBe(false);
   });
 });
 
@@ -817,5 +774,41 @@ describe('FormRuntime.wouldSubmitNothing (#124)', () => {
       },
     ]));
     expect(rt.wouldSubmitNothing()).toBe(false);
+  });
+});
+
+/**
+ * #303 review: the per-field verdict judged the RAW value while `isFormValid` judged the payload,
+ * and the payload coerced a blank numeric answer with `Number(' ') === 0` — so a required Number
+ * holding `' '` was "required" under the field and valid (and sent as 0) for the form. Both now
+ * judge the value that would be sent, and a blank numeric answer is not turned into 0.
+ */
+describe('FormRuntime — the field and the form judge the same value', () => {
+  const numberForm = (isRequired: boolean): PublishedFormDefinition =>
+    formOf([{ id: 'q-num', type: 'Number', isRequired }]);
+
+  it('reads a blank Number as unanswered under the field AND for the form', () => {
+    const rt = new FormRuntime(numberForm(true));
+    rt.setValue('q-num', ' ');
+    const question = rt.visibleAnswerableQuestions()[0];
+
+    expect(rt.errorFor(question)).toBe('This question is required.');
+    expect(rt.areValid([question])).toBe(false);
+    expect(rt.isFormValid()).toBe(false);
+  });
+
+  it('never sends a blank Number as the number 0', () => {
+    const rt = new FormRuntime(numberForm(false));
+    rt.setValue('q-num', ' ');
+    expect(rt.buildAnswerInputs().some((input) => input.numericValue === 0)).toBe(false);
+    expect(rt.errorFor(rt.visibleAnswerableQuestions()[0])).toBeNull();
+    expect(rt.isFormValid()).toBe(true);
+  });
+
+  it('still says "Enter a number." for text that is not one, on both sides', () => {
+    const rt = new FormRuntime(numberForm(false));
+    rt.setValue('q-num', 'abc');
+    expect(rt.errorFor(rt.visibleAnswerableQuestions()[0])).toBe('Enter a number.');
+    expect(rt.isFormValid()).toBe(false);
   });
 });

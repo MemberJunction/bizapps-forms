@@ -40,6 +40,11 @@
     @if (statusMessage) {
       <span class="fb-status" role="status">{{ statusMessage }}</span>
     }
+    <!-- A draft column the publish would refuse. Standing, not transient like statusMessage: it is
+         true until the column is fixed, and Update stays on screen meanwhile (see draftProblem). -->
+    @if (draftProblem; as problem) {
+      <span class="fb-status" role="status">{{ problem }}</span>
+    }
     <!-- ORDER IS THE DESIGN: reuse → check → commit, left to right.
          Each step is a larger commitment than the one before it, and the terminal, hardest-to-undo
          action sits last where the eye finishes and the primary style claims it. Save-as-template

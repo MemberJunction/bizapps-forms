@@ -6,12 +6,14 @@
  */
 import { computed, signal } from '@angular/core';
 import {
-  isAnswerableQuestionType,
-  resolveRenderedQuestions,
+  NOTHING_TO_SUBMIT_MESSAGE,
   resolveVisiblePages,
-  resolveVisibleQuestions,
   answerCompleteness,
   isAnswerSupplied,
+  settleVisibility,
+  validateAnswer,
+  validateAnswers,
+  type AnswerProblem,
   type AnswerValue,
   type FormAnswerInput,
   type PublishedFormDefinition,
@@ -19,39 +21,8 @@ import {
   type PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities/contracts';
 
-import { toAnswerInputs } from './answer-value';
+import { toAnswerInputs, transmittedValue } from './answer-value';
 import { computeProgress } from './progress';
-import { validateQuestion } from './validation';
-
-/**
- * How many times visibility is re-derived before giving up.
- *
- * Visibility is NOT monotone: `isNotAnswered` means removing an answer can REVEAL a question, so
- * "restrict, then re-derive" is not guaranteed to converge — a pair of rules can oscillate. A cap
- * with an explicit outcome is the honest shape for that, per this repo's design principles: every
- * loop bounded, and the limit case handled rather than assumed unreachable. Five is far above any
- * real form (the scenario that motivated this settles in two) and small enough to stay cheap.
- */
-const MAX_VISIBILITY_PASSES = 5;
-
-/** The answers belonging to `questions`, dropping every other entry. */
-function restrictAnswers(
-  answers: ReadonlyMap<string, AnswerValue>,
-  questions: readonly PublishedFormQuestion[],
-): ReadonlyMap<string, AnswerValue> {
-  const restricted = new Map<string, AnswerValue>();
-  for (const question of questions) {
-    if (answers.has(question.id)) {
-      restricted.set(question.id, answers.get(question.id));
-    }
-  }
-  return restricted;
-}
-
-/** Whether two derivations picked the same questions, in the same order. */
-function sameQuestions(a: readonly PublishedFormQuestion[], b: readonly PublishedFormQuestion[]): boolean {
-  return a.length === b.length && a.every((question, index) => question.id === b[index].id);
-}
 
 export class FormRuntime {
   private readonly answers = signal<Map<string, AnswerValue>>(new Map());
@@ -69,10 +40,11 @@ export class FormRuntime {
    *
    * Deliberately not the basis for any verdict, and it used to name ending-screen resolution as
    * its example consumer, which is exactly the call site that had to move off it: a verdict
-   * reached here is reached on answers the widget will not transmit. {@link transmittedView} is
-   * what every rule now evaluates against. What remains true of this map is that it must keep the
-   * hidden answers — re-showing a question should bring its answer back — which is precisely why
-   * it cannot also be the thing rules read.
+   * reached here is reached on answers the widget will not transmit; every rule evaluates against
+   * the SETTLED answers instead (`settleVisibility`, which `resolveResponseOutcome` runs over this
+   * map). What remains true of this map is that it must keep the hidden answers — re-showing a
+   * question should bring its answer back — which is precisely why it cannot also be the thing
+   * rules read.
    *
    * Read-only by type so a caller cannot mutate the runtime's state behind its back: every
    * write goes through `setValue`, which is what keeps the derived signals correct.
@@ -132,7 +104,7 @@ export class FormRuntime {
    * the shared resolver the server also uses.
    */
   public readonly visiblePages = computed<PublishedFormPage[]>(() => {
-    return resolveVisiblePages(this.orderedPages(), this.settledAnswers());
+    return resolveVisiblePages(this.orderedPages(), this.visibility().answers);
   });
 
   /**
@@ -151,61 +123,35 @@ export class FormRuntime {
   }
 
   /**
-   * The answers the whole widget derives from: a FIXED POINT of the server's own derivation,
-   * which is the property that makes the two sides agree.
-   *
-   * Resolving once over the raw map is not enough, and the failure is worse than a wrong number.
-   * The raw map keeps an answer whose question is hidden (nothing prunes on a visibility change),
-   * the payload carries only the visible set, and the server re-derives visibility FROM that
-   * payload. A rule reading an answer that is not being sent therefore reaches a different verdict
-   * on each side — and with `isNotAnswered`, removing an answer can REVEAL a question, so the
-   * server could make a question visible and REQUIRED that the widget never rendered. The
-   * respondent then gets "«prompt» is required" for a field that is not on screen, and every retry
-   * sends the identical payload: unrecoverable, on the anonymous path.
-   *
-   * So this iterates until the set is stable under "restrict the answers to this set, then re-derive
-   * from them", and returns THE RESTRICTED MAP — the answers whose single-pass derivation is that
-   * set, which is exactly the pass the server makes over the payload. Everything else here is a
-   * reading of this map. See {@link MAX_VISIBILITY_PASSES} for why it is capped rather than
-   * looped until stable.
+   * The settled visibility the whole widget derives from — `settleVisibility`, the ONE derivation
+   * the server runs over the payload too, so what renders, what is sent and what the server
+   * re-derives from it are readings of one answer set. Why it is a fixed point, and why that is
+   * what makes the two sides agree, is written down there.
    */
-  private readonly settledAnswers = computed<ReadonlyMap<string, AnswerValue>>(() => {
-    const pages = this.orderedPages();
-    const raw = this.answers();
-    let set = resolveVisibleQuestions(pages, raw);
-    for (let pass = 0; pass < MAX_VISIBILITY_PASSES; pass++) {
-      const restricted = restrictAnswers(raw, set);
-      const next = resolveVisibleQuestions(pages, restricted);
-      if (sameQuestions(next, set)) {
-        return restricted;
-      }
-      set = next;
-    }
-    // Cap reached: the rules do not settle, so no client set can match the server's single pass.
-    // Say so once and use the last derivation — the alternative is looping forever on a form whose
-    // own rules contradict each other.
-    console.warn(
-      '[mj-form] visibility did not settle after ' +
-        `${MAX_VISIBILITY_PASSES} passes; this form's show rules depend on each other in a way ` +
-        'that has no stable answer (an `is not answered` rule revealing a question whose own answer ' +
-        'then hides it). The server may disagree with what is on screen.',
-    );
-    return restrictAnswers(raw, set);
-  });
+  private readonly visibility = computed(() => settleVisibility(this.definition, this.answers()));
+
+  /**
+   * Whether this form's show rules settle for the current answers.
+   *
+   * False only on a form whose rules contradict each other (an `is not answered` rule revealing a
+   * question whose own answer then hides it): visibility is then the last of a capped number of
+   * derivations, and the server, settling the payload, may disagree with what is on screen. An
+   * explicit signal rather than a console warning from inside the derivation, so the caller
+   * decides whether and where to say so.
+   */
+  public readonly rulesSettle = computed(() => this.visibility().settled);
 
   /**
    * Every question that RENDERS, in document order — display-only types included.
    *
-   * The one walk both renderers read. Derived from {@link settledAnswers} rather than the raw
-   * map so that what renders, what submits and what the server re-derives are three readings of
-   * one answer set instead of three derivations that agree most of the time.
+   * The one walk both renderers read, from the settled visibility rather than the raw map.
    */
-  public readonly renderedQuestions = computed<PublishedFormQuestion[]>(() =>
-    resolveRenderedQuestions(this.orderedPages(), this.settledAnswers()),
+  public readonly renderedQuestions = computed<PublishedFormQuestion[]>(
+    () => this.visibility().rendered,
   );
 
-  public readonly visibleAnswerableQuestions = computed<PublishedFormQuestion[]>(() =>
-    this.renderedQuestions().filter((question) => isAnswerableQuestionType(question.type)),
+  public readonly visibleAnswerableQuestions = computed<PublishedFormQuestion[]>(
+    () => this.visibility().answerable,
   );
 
   /**
@@ -219,55 +165,11 @@ export class FormRuntime {
     () => this.visibleAnswerableQuestions().length > 0,
   );
 
-  /**
-   * Exactly the answers this widget will transmit — derived FROM the payload builder, not
-   * alongside it.
-   *
-   * Built by asking {@link buildAnswerInputs} what it will send and keying those ids, rather than
-   * re-deriving the filter here. A previous version restricted the raw map with its own
-   * `answers.has(id)` test, which agreed with the payload for every ordinary answer and disagreed
-   * for a blank one — `buildAnswerInputs` drops what is not submittable, and a blank value is
-   * still a map entry. One definition of "what gets sent" removes that class outright.
-   */
-  public transmittedAnswers(): ReadonlyMap<string, AnswerValue> {
-    const raw = this.answers();
-    const map = new Map<string, AnswerValue>();
-    for (const input of this.buildAnswerInputs()) {
-      map.set(input.questionId, raw.get(input.questionId));
-    }
-    return map;
-  }
-
-  /**
-   * What the server will see, AND what it will make of it — the basis for every client-side
-   * verdict.
-   *
-   * The server does two things with a submission: it reads the answers that arrive, and it
-   * RE-DERIVES the visible question set from them (`resolveVisibleQuestions` over the payload).
-   * Matching only the first is not matching. An earlier fix restricted the answer values and left
-   * `visibleAnswerableQuestions` resolving over the raw map, so a show-rule naming a question that
-   * is itself hidden kept an orphaned question "visible" on the client while the server — seeing no
-   * answer for the question that rule reads — dropped it. Client and server then scored, banded and
-   * judged knockouts over different sets, which is the failure that fix claimed to have removed
-   * "by construction".
-   *
-   * One pass, deliberately, because that is what the server makes. Iterating to a fixed point here
-   * would be a different answer from the authoritative one, which is worse than an imperfect
-   * agreement — the point is to agree, not to be independently cleverer.
-   */
-  public transmittedView(): {
-    readonly answers: ReadonlyMap<string, AnswerValue>;
-    readonly questions: PublishedFormQuestion[];
-  } {
-    const answers = this.transmittedAnswers();
-    return { answers, questions: resolveVisibleQuestions(this.orderedPages(), answers) };
-  }
-
   // --- Validation ----------------------------------------------------------
 
   /** Validation message for a question, or `null` when valid. */
   public errorFor(question: PublishedFormQuestion): string | null {
-    return validateQuestion(question, this.valueFor(question.id)).message;
+    return this.problemFor(question)?.message ?? null;
   }
 
   /** Error shown in the UI only after the field has been touched. */
@@ -286,12 +188,12 @@ export class FormRuntime {
     if (!this.isTouched(question.id)) {
       return {};
     }
-    return validateQuestion(question, this.valueFor(question.id)).parts ?? {};
+    return { ...(this.problemFor(question)?.parts ?? {}) };
   }
 
   /** True when every supplied list of questions currently validates. */
   public areValid(questions: PublishedFormQuestion[]): boolean {
-    return questions.every((q) => validateQuestion(q, this.valueFor(q.id)).valid);
+    return questions.every((q) => this.problemFor(q) === undefined);
   }
 
   /** Mark a set of questions touched (e.g. on a failed next/submit) to surface errors. */
@@ -303,11 +205,28 @@ export class FormRuntime {
     this.touched.set(next);
   }
 
-  /** Whole-form validity over all currently-visible answerable questions. */
+  /**
+   * What the server would say about a final submit right now — `validateAnswers`, the same call
+   * the server makes, over exactly the payload {@link buildAnswerInputs} would send.
+   *
+   * The pre-submit check (#303): the widget used to restate the server's rules — its own
+   * per-field loop for validity, its own predicate for "nothing to submit" — and the restatements
+   * drifted. Reading the server's verdict is what keeps "the button says ready" and "the server
+   * accepts it" the same sentence.
+   */
+  private readonly submitVerdict = computed(() =>
+    validateAnswers(this.definition, this.buildAnswerInputs(), 'complete'),
+  );
+
+  /**
+   * Whole-form validity: no QUESTION the respondent can see is in error.
+   *
+   * Question-scoped errors only. The one form-level error a respondent's own form can raise is
+   * "nothing to submit", which is {@link wouldSubmitNothing}'s to report — a form of blank optional
+   * questions has nothing wrong with any field.
+   */
   public readonly isFormValid = computed(() =>
-    this.visibleAnswerableQuestions().every(
-      (q) => validateQuestion(q, this.valueFor(q.id)).valid,
-    ),
+    this.submitVerdict().errors.every((error) => error.questionId === undefined),
   );
 
   // --- Progress ------------------------------------------------------------
@@ -352,30 +271,27 @@ export class FormRuntime {
   /**
    * Would a final submit right now store nothing, on a form that asked for something? (#124)
    *
-   * The client half of the server's step 4. The server refuses such a submission, so without this
-   * the respondent presses Submit, waits for a round trip, and gets a banner — while every other
-   * validation rule in this widget blocks or annotates inline. Asked here rather than reimplemented
-   * in the component so the two facts come from the same place the payload does.
-   *
-   * Both halves matter, and the second is the one that is easy to leave out: a form that asked
-   * NOTHING — pure `Statement` copy, or one whose every answerable question is hidden on this path
-   * — is completable, and pressing Submit on it must go through. That half CALLS
-   * {@link hasAnswerableQuestions} rather than re-spelling `length > 0`, so the progress bar's
-   * "is there anything here" and this one cannot drift into two answers.
-   *
-   * Judged with the contract's `isAnswerSupplied` — the server's own definition of a supplied
-   * answer — and NOT with what the payload builder happens to send. The two disagree on exactly
-   * one case, and it is a case a respondent reaches by accident: `isSubmittable` (answer-value.ts)
-   * rejects only the empty string, so a whitespace-only answer IS transmitted, while
-   * `isAnswerSupplied` trims and calls it unanswered, so the server stores nothing and refuses.
-   * Mirroring the payload would leave that submit going out to be refused — the one round trip
-   * this method exists to prevent.
+   * The server refuses such a submission, so without this the respondent presses Submit, waits for
+   * a round trip, and gets a banner — while every other rule in this widget blocks or annotates
+   * inline. Read off {@link submitVerdict}, i.e. off the server's own rule rather than a restatement
+   * of it, so it also inherits the server's exemptions: a form that asked NOTHING on this path
+   * (pure `Statement` copy, or every answerable question hidden) is completable, and a whitespace-
+   * only answer counts as no answer even though the payload builder transmits it.
    */
-  public readonly wouldSubmitNothing = computed(
-    () =>
-      this.hasAnswerableQuestions() &&
-      !this.visibleAnswerableQuestions().some((question) => isAnswerSupplied(this.valueFor(question.id))),
+  public readonly wouldSubmitNothing = computed(() =>
+    this.submitVerdict().errors.some((error) => error.message === NOTHING_TO_SUBMIT_MESSAGE),
   );
+
+  /**
+   * One question's verdict — `validateAnswer`, the call the server makes for each answer — over
+   * the value that would be SENT (`transmittedValue`), which is what {@link isFormValid} judges
+   * through the payload. Judging the held value here let the two disagree whenever the payload
+   * conversion changed an answer.
+   */
+  private problemFor(question: PublishedFormQuestion): AnswerProblem | undefined {
+    const sent = transmittedValue(question, this.valueFor(question.id));
+    return validateAnswer(question, sent, 'complete');
+  }
 
   private orderedPages(): PublishedFormPage[] {
     return [...this.definition.pages].sort((a, b) => a.displayOrder - b.displayOrder);

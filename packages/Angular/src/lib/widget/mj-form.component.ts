@@ -23,17 +23,19 @@ import {
 } from '@angular/core';
 import {
   CAPTCHA_NOT_CONFIGURED_MESSAGE,
-  computeScore,
+  collectLaterImageUrls,
   endingMessage,
   endingRedirectUrl,
   endsWithoutSubmit,
   NOTHING_TO_SUBMIT_MESSAGE,
-  resolveFormOutcome,
+  resolveDefinitionForRender,
+  resolveResponseOutcome,
+  resolveStyleTokensForRender,
   SCREENED_OUT_MESSAGE,
   type FormOutcome,
+  type FormStyleTokens,
   type FormSubmissionInput,
   type FormSubmissionResult,
-  type FormStyleTokens,
   type PublishedFormDefinition,
   type PublishedFormScreen,
   type ResumeSnapshot,
@@ -43,7 +45,6 @@ import { FORMS_API_SERVICE, SessionExpiredError } from './api/forms-api.interfac
 import { FORMS_API_CONFIG } from './api/forms-api.config';
 import { submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
-import { collectLaterImageUrls, resolveDefinitionForRender, resolveStyleTokensForRender } from './core/asset-ref';
 import { gateWelcomeScreen } from './core/welcome-gate';
 import { prefetchImages, type PrefetchHandle } from './core/image-prefetch';
 import { FormRuntime } from './core/form-runtime';
@@ -603,9 +604,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * A ONE-WAY transition driven by their own action, deliberately, rather than a view-level
    * suppression of the sentence. Suppressing it in the view would also blank the SERVER's copy of
    * the same message whenever the two predicates disagree — the client settles visibility to a
-   * fixed point while the server makes a single pass, and `settledAnswers` says in so many words
-   * that the two can differ — and the server's refusal is the one that exists to catch what the
-   * client missed, so the respondent would be left with a failed submit and nothing on screen. It
+   * fixed point and the server re-settles from the payload, and on a form whose rules do not settle
+   * the two can differ (`FormRuntime.rulesSettle`) — and the server's refusal is the one that
+   * exists to catch what the client missed, so the respondent would be left with a failed submit and nothing on screen. It
    * would also re-mount the `role="alert"` node every time the condition came back, re-announcing
    * mid-edit with no submit attempt in between. Cleared once, it stays cleared until something
    * raises it again.
@@ -667,20 +668,23 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (!def || !rt) {
       return undefined;
     }
-    // `visibleAnswers()`, not the raw map — the set this widget will SEND, which is the set the
-    // server judges. The score already folded over the visible questions while the conditions were
-    // read from the raw map, so the two halves of this one expression disagreed: a knockout could
-    // fire here on an answer to a question the respondent had since hidden, be omitted from the
-    // payload, and leave the server writing `Complete` — SubmittedAt stamped, quota counted, every
-    // on-submit automation fired — while the respondent was shown the knockout screen.
-    // The server's view — the answers it will receive AND the question set it will derive from
-    // them. Using the rendered question list here instead was the divergence: an orphaned question
-    // stays "visible" on the client when the rule that reveals it reads an answer that is no
-    // longer being sent.
-    const sent = rt.transmittedView();
-    return resolveFormOutcome(def.pages, def.endScreens ?? [], sent.answers, {
-      score: computeScore(sent.questions, sent.answers),
-    });
+    // Over the SETTLED answers, not the raw map: `resolveResponseOutcome` settles visibility,
+    // scores the settled questions and resolves over the settled answers. Reading the raw map here
+    // once let a knockout fire on an answer to a question the respondent had since hidden, be
+    // omitted from the payload, and leave the server writing `Complete` while the respondent was
+    // shown the knockout screen. The server's validator settles the payload the same way; its
+    // knockout verdict does not yet (#303 Task 8), which only matters for a crafted payload.
+    const resolved = resolveResponseOutcome(def, rt.currentAnswers());
+    if (!resolved.visibility.settled) {
+      // Not fatal — the last derivation is still a usable verdict — but the server, settling the
+      // payload, may reach a different one, and nothing on screen would say why.
+      console.warn(
+        `[mj-form] form version ${def.formVersionId}: visibility did not settle; this form's show ` +
+          'rules depend on each other in a way that has no stable answer, so the server may judge ' +
+          'this response differently from what is on screen.',
+      );
+    }
+    return resolved.outcome;
   }
 
   /**

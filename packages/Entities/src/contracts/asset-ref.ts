@@ -21,7 +21,7 @@
  *
  * WHICH PREFIX IS SUPPORTED. MJServer mounts every Forms route (`/forms/*`, and core's
  * `/magic-link/redeem`) at its app ROOT; only GraphQL moves under `GRAPHQL_ROOT_PATH`. So the rule
- * here — the same one `deriveUploadUrl` in `../api/forms-api.config.ts` already uses for respondent
+ * here — the same one `deriveUploadUrl` in forms-ng's `widget/api/forms-api.config.ts` already uses for respondent
  * uploads — is "Forms routes live at the api-url minus a trailing `/graphql`". That holds for a
  * reverse-proxy path prefix carried in `MJAPI_PUBLIC_URL` (the proxy strips it before MJAPI sees the
  * request, so everything lives under it), and for a `GRAPHQL_ROOT_PATH` of `/` or exactly
@@ -32,12 +32,13 @@
  * Pure and dependency-free on purpose: the respondent widget uses it, and the widget must not reach
  * the Explorer shell.
  */
-import type { FormStyleTokens, PublishedFormDefinition, PublishedFormScreen } from '@mj-biz-apps/forms-entities/contracts';
+import type { FormStyleTokens, PublishedFormDefinition, PublishedFormScreen } from './form-definition';
 
 /**
- * Mirrors `ASSET_ROUTE` in forms-server's `src/asset/config.ts`, which mounts the route. Duplicated
- * on purpose: sharing one constant would need a dependency between the two packages, and the
- * widget must stay free of server code. Change both together.
+ * The base path both asset routes hang off. ONE definition: forms-server mounts the routes on it
+ * (`src/asset/config.ts`) and every renderer recognises stored references by it. This used to be
+ * two literals, one per package, because the two had no shared dependency; living in the contracts
+ * both already import, it no longer needs a "change both together" note.
  */
 export const ASSET_ROUTE = '/forms/asset';
 
