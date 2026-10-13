@@ -34,7 +34,7 @@ import type {
   mjBizAppsFormsFormEntityBindingEntity,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
-import { remapConditionalRule, remapFieldMappings, type RemapResult } from './clone-remap';
+import { remapConditionalRule, remapFieldMappings, type RemapResult } from '@mj-biz-apps/forms-entities';
 
 /** What the caller wants the copy to be. */
 export interface CloneOptions {

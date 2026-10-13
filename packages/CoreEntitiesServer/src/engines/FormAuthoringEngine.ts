@@ -1,15 +1,21 @@
 /**
- * `FormAuthoringEngine` — server-side form authoring (spec #303 §4).
+ * `FormAuthoringEngine` — server-side form authoring (spec #303 §4). Every verb is one unit of work
+ * (`runEngineUnitOfWork`): it lands whole or not at all, and a failure is logged once with what was
+ * being attempted, for whom.
  *
- * Today: {@link FormAuthoringEngine.BuildFromBlueprint}, the deterministic Builder half of the AI
- * Designer→Builder split, moved here from forms-actions so the two authoring Actions, the template
- * operation and anything else that authors a form share one implementation. Clone, template
- * instantiation, archive and restore join it in later #303 tasks.
+ *  - {@link FormAuthoringEngine.BuildFromBlueprint} — the deterministic Builder half of the AI
+ *    Designer→Builder split, shared by the two authoring Actions and the starter templates.
+ *  - {@link FormAuthoringEngine.Clone} — the deep copy (`form-clone.ts`): form → form, form →
+ *    template ("save as template", name checked here), template → form.
+ *  - {@link FormAuthoringEngine.CreateFromTemplate} — a saved template (a clone) or a starter
+ *    blueprint (a build).
+ *  - {@link FormAuthoringEngine.Archive} / {@link FormAuthoringEngine.Restore} — `Form.Status`
+ *    moves the engine decides and `FormEntityServer` enforces (`form-status-rules.ts`).
  *
- * It does NO LLM work and NO guessing: everything it writes comes from a blueprint that passes
- * `formBlueprintSchema`, checked again here because this is the boundary every blueprint crosses.
+ * It does NO LLM work and NO guessing: a blueprint must pass `formBlueprintSchema`, checked again
+ * here because this is the boundary every blueprint crosses.
  */
-import { LogError, type DatabaseProviderBase, type UserInfo } from '@memberjunction/core';
+import { LogError, LogStatus, type DatabaseProviderBase, type UserInfo } from '@memberjunction/core';
 import { BaseSingleton } from '@memberjunction/global';
 import {
   blueprintOnSubmitMode,
@@ -25,10 +31,16 @@ import {
   type mjBizAppsFormsFormPageEntity,
   type mjBizAppsFormsFormQuestionEntity,
   type mjBizAppsFormsFormQuestionOptionEntity,
+  type mjBizAppsFormsFormVersionEntityType,
 } from '@mj-biz-apps/forms-entities';
+import { FormEntityServer } from '../entities/FormEntityServer.js';
+import type { FormStatus } from '../entities/form-status-rules.js';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
+import { FormAuthoringError, saveOrThrow } from './authoring-errors.js';
+import { readSourceForm, writeCopy, type ClonedForm, type CopyPlan, type SourceForm } from './form-clone.js';
 import { FormPublishingEngine, type FormPublishResult } from './FormPublishingEngine.js';
-import { requireEntityTransactions, runEngineUnitOfWork, saveFailure } from './engine-guards.js';
+import { getStarterTemplate, STARTER_TEMPLATES } from './starter-templates.js';
+import { requireEntityTransactions, requireServerEntity, runEngineUnitOfWork, saveFailure } from './engine-guards.js';
 
 const ENTITY = { ...FORMS_ENTITY, Action: 'MJ: Actions' } as const;
 
@@ -55,20 +67,37 @@ export interface BuiltForm {
   published: FormPublishResult | null;
 }
 
-/** A build that did not happen: a blueprint the schema rejects, an Action that cannot be resolved, a failed save. */
-export class FormAuthoringError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'FormAuthoringError';
-  }
+/** How to copy a form. */
+export interface CloneFormOptions {
+  /** `true` makes a template whose `TemplateSourceFormID` is the source; `false` a working Draft form. */
+  asTemplate: boolean;
+  /**
+   * Name for the copy. Absent or blank: a form saved as a template keeps the form's name; anything
+   * else — a working copy, or a template copied as a template — is "<name> (copy)".
+   */
+  name?: string;
+  /** Description for the copy. Absent keeps the source's; `null` clears it. */
+  description?: string | null;
 }
 
-type AuthoredEntity =
-  | mjBizAppsFormsFormEntity
-  | mjBizAppsFormsFormPageEntity
-  | mjBizAppsFormsFormQuestionEntity
-  | mjBizAppsFormsFormQuestionOptionEntity
-  | mjBizAppsFormsFormAutomationEntity;
+/** Which template to start a form from: a saved one (a `Form` row) or a starter gallery key. */
+export type TemplateSource = { templateFormId: string } | { templateKey: string };
+
+/** What creating a form from a template produced. */
+export interface FormFromTemplate {
+  formId: string;
+  /**
+   * References a saved template's copy could not carry over (see `ClonedForm.warnings`); always
+   * empty for a starter, whose blueprint names nothing by id.
+   */
+  warnings: string[];
+}
+
+/** A form's status after `Archive` or `Restore`. */
+export interface FormLifecycleResult {
+  formId: string;
+  status: FormStatus;
+}
 
 export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
   public static get Instance(): FormAuthoringEngine {
@@ -116,6 +145,174 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
         : null;
       return { ...built, published };
     });
+  }
+
+  /**
+   * Copy a form's whole authored tree into a new Draft form — or, with `asTemplate`, into a
+   * template whose `TemplateSourceFormID` is the source (the builder's "save as template") — in one
+   * transaction. A template's name must differ (trimmed, any case) from every other template's.
+   *
+   * Throws {@link FormAuthoringError} for a source that does not exist, a taken template name, an
+   * unreadable source or a failed write; nothing is left behind. References the copy could not
+   * carry over come back as `warnings` (and are logged once, with the forms and the user).
+   */
+  public async Clone(
+    sourceFormId: string,
+    provider: DatabaseProviderBase,
+    user: UserInfo,
+    options: CloneFormOptions,
+  ): Promise<ClonedForm> {
+    const id = requireFormId(sourceFormId, 'copy');
+    requireUser(user, `Copying form ${id}`);
+    return this.copyInUnitOfWork(id, provider, user, { doing: `Copying form ${id}`, failed: `form ${id} was not copied` }, (source) =>
+      this.clonePlan(source, options, provider, user),
+    );
+  }
+
+  /**
+   * The blueprint a starter gallery key (any case) expands to, renamed when `name` is given — or a
+   * refusal naming the keys there are. A pure read, and the ONE place a key is looked up: the
+   * operation (through {@link CreateFromTemplate}) and the `Forms: Create Form From Template` Action
+   * both expand keys here, so they refuse an unknown key in the same words.
+   */
+  public GetStarterBlueprint(templateKey: string, name?: string): FormBlueprint {
+    const key = templateKey?.trim() ?? '';
+    const template = getStarterTemplate(key);
+    if (!template) {
+      const known = STARTER_TEMPLATES.map((t) => t.key).join(', ');
+      throw new FormAuthoringError(`Unknown template key '${key}'. Known templates: ${known}.`);
+    }
+    const rename = name?.trim();
+    return rename ? { ...template.blueprint, name: rename } : template.blueprint;
+  }
+
+  /**
+   * A new Draft form from a template: a SAVED template is deep-copied (`Clone` into a working form,
+   * named after the template unless `name` is given); a STARTER key is expanded through
+   * {@link BuildFromBlueprint}, exactly as the `Forms: Create Form From Template` Action does. Either
+   * way it is one transaction and the caller owns the result.
+   */
+  public async CreateFromTemplate(
+    source: TemplateSource,
+    provider: DatabaseProviderBase,
+    user: UserInfo,
+    options: { name?: string } = {},
+  ): Promise<FormFromTemplate> {
+    requireUser(user, 'Creating a form from a template');
+    const name = options.name?.trim() || undefined;
+    if ('templateKey' in source) {
+      return this.createFromStarter(source.templateKey, provider, user, name);
+    }
+    return this.createFromSavedTemplate(source.templateFormId, provider, user, name);
+  }
+
+  /**
+   * Archive a form: `Closed`, and — in the same transaction, by `FormEntityServer` — every Active
+   * share link of it closed with it.
+   *
+   * Archiving an already-archived form closes any link still Active (one written before archive
+   * closed links, or reopened since), so a retry repairs instead of doing nothing; with none, nothing
+   * is written.
+   */
+  public async Archive(formId: string, provider: DatabaseProviderBase, user: UserInfo): Promise<FormLifecycleResult> {
+    const id = requireFormId(formId, 'archive');
+    requireUser(user, `Archiving form ${id}`);
+    requireEntityTransactions(provider, `Archiving form ${id}`);
+    return runEngineUnitOfWork(provider, `[FormAuthoringEngine] form ${id} was not archived (user ${user.ID})`, async () => {
+      const form = await loadForm(id, provider, user, 'archived');
+      if (form.Status === 'Closed') {
+        await closeStrayLinks(form);
+      } else {
+        await saveStatus(form, 'Closed', 'archive');
+      }
+      return { formId: form.ID, status: form.Status };
+    });
+  }
+
+  /**
+   * Restore an archived form to what its versions say it is: `Published` when it has a Published
+   * version, else `Draft` — and a template always `Draft`, since it is never published. Its share
+   * links stay closed: reopening one is its own decision. A form that is not archived is returned
+   * as it is, with nothing written.
+   *
+   * The engine reads the version to CHOOSE the destination; `FormEntityServer` reads it again to
+   * CHECK the choice, because it holds that rule for every writer, not just this one. Two reads of
+   * one row, on purpose.
+   */
+  public async Restore(formId: string, provider: DatabaseProviderBase, user: UserInfo): Promise<FormLifecycleResult> {
+    const id = requireFormId(formId, 'restore');
+    requireUser(user, `Restoring form ${id}`);
+    requireEntityTransactions(provider, `Restoring form ${id}`);
+    return runEngineUnitOfWork(provider, `[FormAuthoringEngine] form ${id} was not restored (user ${user.ID})`, async () => {
+      const form = await loadForm(id, provider, user, 'restored');
+      if (form.Status !== 'Closed') {
+        return { formId: form.ID, status: form.Status };
+      }
+      const live = await hasPublishedVersion(form.ID, provider, user);
+      await saveStatus(form, live && !form.IsTemplate ? 'Published' : 'Draft', 'restore');
+      return { formId: form.ID, status: form.Status };
+    });
+  }
+
+  /** The copy's root row: its name (checked, for a template), description and kind. */
+  private async clonePlan(source: SourceForm, options: CloneFormOptions, provider: DatabaseProviderBase, user: UserInfo): Promise<CopyPlan> {
+    const name = options.name?.trim() || derivedCopyName(source.form, options.asTemplate);
+    if (options.asTemplate) {
+      await requireFreeTemplateName(name, provider, user);
+    }
+    return { name, description: options.description, asTemplate: options.asTemplate };
+  }
+
+  private async createFromStarter(
+    templateKey: string,
+    provider: DatabaseProviderBase,
+    user: UserInfo,
+    name: string | undefined,
+  ): Promise<FormFromTemplate> {
+    const blueprint = this.GetStarterBlueprint(templateKey, name);
+    // The caller owns what it creates — the rule a clone follows, so a form made from a starter and
+    // one made from a saved template are owned alike. (The Action applies the same default, unless
+    // its caller names an owner.)
+    const built = await this.BuildFromBlueprint(blueprint, provider, user, { ownerUserId: user.ID });
+    return { formId: built.formId, warnings: [] };
+  }
+
+  private async createFromSavedTemplate(
+    templateFormId: string,
+    provider: DatabaseProviderBase,
+    user: UserInfo,
+    name: string | undefined,
+  ): Promise<FormFromTemplate> {
+    const id = requireFormId(templateFormId, 'create a form from');
+    const what = { doing: `Creating a form from template ${id}`, failed: `no form was created from template ${id}` };
+    const copied = await this.copyInUnitOfWork(id, provider, user, what, async (source) => {
+      if (!source.form.IsTemplate) {
+        throw new FormAuthoringError(`Form ${id} is not a template, so no form was created from it. Copy a form with CloneForm instead.`);
+      }
+      return { name: name ?? source.form.Name, asTemplate: false };
+    });
+    return { formId: copied.formId, warnings: copied.warnings };
+  }
+
+  /**
+   * The skeleton both copy verbs share, so the transaction and logging decisions live once: one
+   * unit of work that reads the source, lets the verb decide the plan (or refuse, before the first
+   * write), and writes the copy — then, once committed, logs what the copy could not carry over.
+   */
+  private async copyInUnitOfWork(
+    sourceId: string,
+    provider: DatabaseProviderBase,
+    user: UserInfo,
+    what: { doing: string; failed: string },
+    planFor: (source: SourceForm) => Promise<CopyPlan>,
+  ): Promise<ClonedForm> {
+    requireEntityTransactions(provider, what.doing);
+    const copied = await runEngineUnitOfWork(provider, `[FormAuthoringEngine] ${what.failed} (user ${user.ID})`, async () => {
+      const source = await readSourceForm(sourceId, provider, user);
+      return writeCopy(source, await planFor(source), provider, user);
+    });
+    logCopyNotes(sourceId, copied, user);
+    return copied;
   }
 
   private async writeBlueprint(
@@ -167,6 +364,7 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
     if (!result.Success) {
       throw new FormAuthoringError(
         `Could not read the Action catalogue to resolve this form's on-submit steps: ${result.ErrorMessage || 'unknown error'}`,
+        { fault: true },
       );
     }
     const byName = new Map((result.Results ?? []).map((a) => [a.Name, a.ID]));
@@ -197,7 +395,7 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
       form.OwnerUserID = ownerUserId;
     }
     form.Settings = JSON.stringify(blueprintSettings(blueprint));
-    await save(form, 'Form');
+    await saveOrThrow(form, 'Form');
     return form;
   }
 
@@ -218,7 +416,7 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
       entity.Description = page.description;
     }
     entity.DisplayOrder = index;
-    await save(entity, 'FormPage');
+    await saveOrThrow(entity, 'FormPage');
     return entity.ID;
   }
 
@@ -244,7 +442,7 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
     if (question.settings && Object.keys(question.settings).length > 0) {
       entity.Settings = JSON.stringify(question.settings);
     }
-    await save(entity, 'FormQuestion');
+    await saveOrThrow(entity, 'FormQuestion');
     return entity.ID;
   }
 
@@ -277,7 +475,7 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
       if (option.matrixAxis) {
         entity.MatrixAxis = option.matrixAxis;
       }
-      await save(entity, 'FormQuestionOption');
+      await saveOrThrow(entity, 'FormQuestionOption');
     }
     return question.options.length;
   }
@@ -296,7 +494,7 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
       const actionId = actionIdByName.get(step.actionName);
       if (!actionId) {
         // Unreachable when resolveActionIds ran over this blueprint; a postcondition, not a branch.
-        throw new FormAuthoringError(`On-submit step "${step.actionName}" was not resolved to an Action.`);
+        throw new FormAuthoringError(`On-submit step "${step.actionName}" was not resolved to an Action.`, { fault: true });
       }
       const automation = await provider.GetEntityObject<mjBizAppsFormsFormAutomationEntity>(ENTITY.FormAutomation, user);
       automation.NewRecord();
@@ -312,10 +510,146 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
       automation.DisplayOrder = index + 1;
       automation.ContinueOnError = step.continueOnError ?? true;
       automation.IsActive = step.isActive ?? true;
-      await save(automation, 'FormAutomation');
+      await saveOrThrow(automation, 'FormAutomation');
     }
     return authored.length;
   }
+}
+
+/** The id, trimmed, or a refusal naming the verb. */
+function requireFormId(formId: string, verb: string): string {
+  const id = formId?.trim() ?? '';
+  if (!id) {
+    throw new FormAuthoringError(`A form id is required to ${verb} a form.`);
+  }
+  return id;
+}
+
+function requireUser(user: UserInfo | undefined, what: string): asserts user is UserInfo {
+  if (!user) {
+    throw new FormAuthoringError(`${what} needs the acting user; none was given.`);
+  }
+}
+
+/**
+ * The name a copy gets when the caller gave none. A form saved as a template keeps the form's name —
+ * saving "Client intake" as a template is the natural reading. Anything else says it is a copy: a
+ * working copy, so it is not mistaken for its source in the forms list, and a template copied as a
+ * template, whose source's name is by definition already a template's and would refuse itself.
+ */
+function derivedCopyName(source: Pick<SourceForm['form'], 'Name' | 'IsTemplate'>, asTemplate: boolean): string {
+  return asTemplate && !source.IsTemplate ? source.Name : `${source.Name} (copy)`;
+}
+
+/**
+ * Refuse a template name another template already has (trimmed, any case): two cards reading
+ * "Client intake" are indistinguishable in the gallery, and the author who saved the second has no
+ * way to tell them apart afterwards. Checked inside the copy's transaction, before the first write.
+ *
+ * Unlike the builder's check it replaces — which let the save proceed when the read failed — an
+ * unreadable list refuses: on the server a failed read inside the transaction is a fault, and the
+ * writes behind it would be running on the same broken connection.
+ *
+ * The names are compared here rather than in SQL so trimming and case-folding mean the same thing
+ * on every database; a host has tens of templates, not thousands.
+ */
+async function requireFreeTemplateName(name: string, provider: DatabaseProviderBase, user: UserInfo): Promise<void> {
+  const result = await provider.RunView<{ ID: string; Name: string }>(
+    { EntityName: ENTITY.Form, ExtraFilter: 'IsTemplate=1', Fields: ['ID', 'Name'], ResultType: 'simple', BypassCache: true },
+    user,
+  );
+  if (!result.Success) {
+    throw new FormAuthoringError(
+      `The template names could not be read (${result.ErrorMessage || 'no detail'}), so the template was not saved.`,
+      { fault: true },
+    );
+  }
+  const wanted = templateNameKey(name);
+  if ((result.Results ?? []).some((template) => templateNameKey(template.Name) === wanted)) {
+    throw new FormAuthoringError(`A template called “${name}” already exists. Give this one a name that tells them apart.`);
+  }
+}
+
+function templateNameKey(name: string | null | undefined): string {
+  return (name ?? '').trim().toLowerCase();
+}
+
+/**
+ * The form as its server subclass, read fresh. Through a view rather than `Load()`: `Load()` would
+ * also fill the form's `immediate` page and screen collections, and a status change needs neither.
+ */
+async function loadForm(formId: string, provider: DatabaseProviderBase, user: UserInfo, verbed: string): Promise<FormEntityServer> {
+  const result = await provider.RunView<unknown>(
+    { EntityName: ENTITY.Form, ExtraFilter: `ID=${quoteSqlString(formId)}`, ResultType: 'entity_object', BypassCache: true },
+    user,
+  );
+  if (!result.Success) {
+    throw new FormAuthoringError(`Could not read form ${formId} (${result.ErrorMessage || 'no detail'}), so it was not ${verbed}.`, {
+      fault: true,
+    });
+  }
+  const [form] = result.Results ?? [];
+  if (!form) {
+    throw new FormAuthoringError(`Form ${formId} does not exist, so it cannot be ${verbed}.`);
+  }
+  // The subclass is what closes the links on archive and checks the restore: without it the verb
+  // would write a bare status, so the engine refuses rather than write anyway.
+  return requireServerEntity(form, FormEntityServer, ENTITY.Form);
+}
+
+async function hasPublishedVersion(formId: string, provider: DatabaseProviderBase, user: UserInfo): Promise<boolean> {
+  const result = await provider.RunView<Pick<mjBizAppsFormsFormVersionEntityType, 'ID'>>(
+    {
+      EntityName: ENTITY.FormVersion,
+      ExtraFilter: `FormID=${quoteSqlString(formId)} AND Status='Published'`,
+      Fields: ['ID'],
+      ResultType: 'simple',
+      MaxRows: 1,
+      BypassCache: true,
+    },
+    user,
+  );
+  if (!result.Success) {
+    throw new FormAuthoringError(
+      `Could not read whether form ${formId} has a published version (${result.ErrorMessage || 'no detail'}), so it was not restored.`,
+      { fault: true },
+    );
+  }
+  return (result.Results ?? []).length > 0;
+}
+
+/** Move the form to `status` through its server subclass, or throw with the subclass's reason. */
+async function saveStatus(form: FormEntityServer, status: FormStatus, verb: string): Promise<void> {
+  form.Status = status;
+  if (!(await form.Save())) {
+    throw new FormAuthoringError(`Could not ${verb} form ${form.ID}: ${saveFailure(form)}`, { fault: true });
+  }
+}
+
+/**
+ * Close the links still Active under an archived form — the subclass's own close, so "what Closed
+ * means for links" stays one implementation — or throw, which rolls back every link it closed.
+ */
+async function closeStrayLinks(form: FormEntityServer): Promise<void> {
+  try {
+    await form.CloseActiveDistributions();
+  } catch (err) {
+    throw new FormAuthoringError(
+      `Could not close the links still open on archived form ${form.ID}: ${err instanceof Error ? err.message : String(err)}. Nothing was changed.`,
+      { fault: true },
+    );
+  }
+}
+
+/** One log line for what a copy had to discard — the author sees it in the result; an operator here. */
+function logCopyNotes(sourceFormId: string, copied: ClonedForm, user: UserInfo): void {
+  if (copied.warnings.length === 0) {
+    return;
+  }
+  LogStatus(
+    `[FormAuthoringEngine] form ${sourceFormId} copied to ${copied.formId} for user ${user.ID} with ` +
+      `${copied.warnings.length} note(s): ${copied.warnings.join(' ')}`,
+  );
 }
 
 /** The `Form.Settings` a blueprint builds (the contract's `FormSettings` shape). */
@@ -331,11 +665,4 @@ function blueprintSettings(blueprint: FormBlueprint): FormSettings {
     settings.onSubmitMode = mode;
   }
   return settings;
-}
-
-/** Save, or throw naming the row and MJ's reason — which rolls the build back. */
-async function save(entity: AuthoredEntity, label: string): Promise<void> {
-  if (!(await entity.Save())) {
-    throw new FormAuthoringError(`Failed to save ${label}: ${saveFailure(entity)}`);
-  }
 }

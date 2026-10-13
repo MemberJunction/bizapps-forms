@@ -386,7 +386,7 @@ export const MUTANTS = [
     name: 'entities/archive-leaves-distributions-open',
     behaviour: 'archiving a form closes its Active distributions in the same transaction (DW15)',
     file: 'packages/CoreEntitiesServer/src/entities/FormEntityServer.ts',
-    find: '        await this.closeActiveDistributions();',
+    find: '        await this.CloseActiveDistributions();',
     replace: '        /* distributions left open */',
     suite: 'packages/CoreEntitiesServer',
     killedBy: ['src/entities/__tests__/FormEntityServer.behaviour.spec.ts'],
@@ -421,7 +421,11 @@ export const MUTANTS = [
     find: '    return await RunInEntityTransaction(provider, work);',
     replace: '    return await work();',
     suite: 'packages/CoreEntitiesServer',
-    killedBy: ['src/engines/__tests__/FormPublishingEngine.spec.ts', 'src/engines/__tests__/FormAuthoringEngine.spec.ts'],
+    killedBy: [
+      'src/engines/__tests__/FormPublishingEngine.spec.ts',
+      'src/engines/__tests__/FormAuthoringEngine.spec.ts',
+      'src/engines/__tests__/FormAuthoringEngine.clone.spec.ts',
+    ],
   },
   {
     name: 'engine/flag-left-raised',
@@ -441,6 +445,58 @@ export const MUTANTS = [
     suite: 'packages/CoreEntitiesServer',
     killedBy: ['src/engines/__tests__/FormPublishingEngine.spec.ts'],
   },
+  // --- FormAuthoringEngine: clone, templates, archive/restore (#303 Task 5) ---------------------
+  {
+    name: 'engine/clone-shares-source-binding',
+    behaviour: "a copied automation runs through the COPY's binding, never the source form's map",
+    file: 'packages/CoreEntitiesServer/src/engines/form-clone.ts',
+    find: '      copy.BindingID = source.BindingID ? (bindingIdMap.get(source.BindingID) ?? null) : null;',
+    replace: '      copy.BindingID = source.BindingID;',
+    suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/engines/__tests__/FormAuthoringEngine.clone.spec.ts'],
+  },
+  {
+    name: 'engine/clone-drops-disqualification',
+    behaviour: 'a copied knockout ending stays a knockout (IsDisqualification is carried, not just its rule)',
+    file: 'packages/CoreEntitiesServer/src/engines/form-clone.ts',
+    find: '      copy.IsDisqualification = source.IsDisqualification;',
+    replace: '      /* IsDisqualification not copied */',
+    suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/engines/__tests__/FormAuthoringEngine.clone.spec.ts'],
+  },
+  {
+    name: 'engine/template-name-unchecked',
+    behaviour: 'a template cannot be saved under a name another template already has (trimmed, any case)',
+    file: 'packages/CoreEntitiesServer/src/engines/FormAuthoringEngine.ts',
+    find: '    if (options.asTemplate) {\n      await requireFreeTemplateName(name, provider, user);',
+    replace: '    if (false && options.asTemplate) {\n      await requireFreeTemplateName(name, provider, user);',
+    suite: 'packages/CoreEntitiesServer',
+    killedBy: [
+      'src/engines/__tests__/FormAuthoringEngine.clone.spec.ts',
+      'src/operations/__tests__/AuthoringServerOperations.spec.ts',
+    ],
+  },
+  {
+    name: 'engine/restore-ignores-published-version',
+    behaviour: 'restoring an archived form with a live version returns it to Published, not Draft (DW15)',
+    file: 'packages/CoreEntitiesServer/src/engines/FormAuthoringEngine.ts',
+    find: "live && !form.IsTemplate ? 'Published' : 'Draft'",
+    replace: "'Draft'",
+    suite: 'packages/CoreEntitiesServer',
+    killedBy: [
+      'src/engines/__tests__/FormAuthoringEngine.lifecycle.spec.ts',
+      'src/operations/__tests__/AuthoringServerOperations.spec.ts',
+    ],
+  },
+  {
+    name: 'engine/archive-again-leaves-links-open',
+    behaviour: 'archiving an already-archived form closes any link still Active, in the same transaction',
+    file: 'packages/CoreEntitiesServer/src/engines/FormAuthoringEngine.ts',
+    find: '      if (form.Status === \'Closed\') {\n        await closeStrayLinks(form);',
+    replace: '      if (form.Status === \'Closed\') {\n        void closeStrayLinks;',
+    suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/engines/__tests__/FormAuthoringEngine.lifecycle.spec.ts'],
+  },
   {
     name: 'ops/authoring-authorize-admits-magic-link',
     behaviour: 'an anonymous or magic-link session can never run an authoring operation (FORBIDDEN)',
@@ -451,6 +507,7 @@ export const MUTANTS = [
     killedBy: [
       'src/operations/__tests__/form-authoring-authorization.spec.ts',
       'src/operations/__tests__/PublishFormServerOperation.spec.ts',
+      'src/operations/__tests__/AuthoringServerOperations.spec.ts',
     ],
   },
   {

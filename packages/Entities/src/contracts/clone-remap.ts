@@ -24,17 +24,20 @@
  * which is wrong in the loud, obvious, fixable direction. The count comes back to the caller so
  * the copy can say what it did rather than quietly differing from its source.
  *
- * Pure and Angular-free on purpose: this is the half of the clone that can actually be tested.
+ * Pure on purpose: this is the half of the clone that can be tested without a database. It lives
+ * in the contracts because two writers run it — the browser's `FormCloneService` until #303 moves
+ * every clone to the server, and `FormAuthoringEngine.Clone` — and one remap must not become two.
+ * It is exported from the package root only, not the `./contracts` barrel the respondent widget
+ * bundles: no respondent ever copies a form.
  */
 import type {
   ConditionalCondition,
   ConditionalGroup,
   ConditionalJumpRule,
   ConditionalRule,
-  FieldMapping,
-  FieldMappings,
   JumpTarget,
-} from '@mj-biz-apps/forms-entities';
+} from './conditional-rule';
+import type { FieldMapping, FieldMappings } from './entity-binding';
 
 export interface RemapResult {
   json: string | null;

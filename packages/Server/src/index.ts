@@ -17,8 +17,12 @@ import '@mj-biz-apps/forms-actions';
 // (`Forms.<Name>`) — importing registers them. The operations register over the CodeGen-emitted
 // bases in forms-entities, which is one more reason that package must load first.
 import {
+  LoadArchiveFormOperation,
+  LoadCloneFormOperation,
+  LoadCreateFormFromTemplateOperation,
   LoadFormsEntityServerSubclasses,
   LoadPublishFormOperation,
+  LoadRestoreFormOperation,
   MagicLinkMinterRegistry,
 } from '@mj-biz-apps/forms-core-entities-server';
 
@@ -127,6 +131,10 @@ export function LoadBizAppsFormsServer(): void {
     // dropping the entity server subclasses and the operation server subclasses as unused.
     LoadFormsEntityServerSubclasses();
     LoadPublishFormOperation();
+    LoadCloneFormOperation();
+    LoadCreateFormFromTemplateOperation();
+    LoadArchiveFormOperation();
+    LoadRestoreFormOperation();
     // Register the concrete magic-link minter so the FormDistribution hook can provision anonymous
     // links. Idempotent: re-registering simply replaces the instance.
     MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());

@@ -647,13 +647,23 @@ function runTableView<T>(
 }
 
 /**
- * A generic row matches when every `Column='value'` equality and every `Column IN ('a','b')` list in
- * the filter holds for it. Anything else in the filter is ignored — so a test that depends on a
- * richer predicate must assert on the filter text too, rather than trusting this to have applied it.
+ * A generic row matches when every `Column='value'` equality, every bit equality (`Column=1`,
+ * `Column = 0`) and every `Column IN ('a','b')` list in the filter holds for it. Anything else in the
+ * filter is ignored — so a test that depends on a richer predicate must assert on the filter text
+ * too, rather than trusting this to have applied it.
+ *
+ * Bit equalities are honoured because a flag is often the whole point of a read (`IsTemplate=1`):
+ * ignoring it answered with every row, so a check meant to look only at templates also "found" the
+ * ordinary forms. A row holds a bit as a boolean or as 0/1, and both read the same here.
  */
 function matchesRowFilter(row: FakeRow, filter: string): boolean {
   for (const m of filter.matchAll(/(?:^|[^\w.])\[?(\w+)\]?\s*=\s*N?'((?:[^']|'')*)'/g)) {
     if (String(row[m[1]] ?? '') !== m[2].replace(/''/g, "'")) {
+      return false;
+    }
+  }
+  for (const m of filter.matchAll(/(?:^|[^\w.])\[?(\w+)\]?\s*=\s*([01])(?![\w.'])/g)) {
+    if (Number(row[m[1]] ?? 0) !== Number(m[2])) {
       return false;
     }
   }

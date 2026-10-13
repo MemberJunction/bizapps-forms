@@ -73,7 +73,6 @@ export {
   type ConfirmationEmailConfig,
   type ConfirmationEmailEngine,
 } from './on-submit/confirmation-email-sender';
-export * from './templates/starter-templates';
 
 /**
  * The set of action classes this package contributes. Referencing them here (and

@@ -237,6 +237,18 @@ describe('Forms: Create Form From Template', () => {
     expect(rowsOf(db, VERSIONS)).toEqual([]);
   });
 
+  it('stamps the caller as owner unless OwnerUserID names someone — the same rule as Forms.CreateFormFromTemplate', async () => {
+    const db = freshWorld();
+
+    await fromTemplate(db, { TemplateKey: 'contact', Name: 'Mine' });
+    await fromTemplate(db, { TemplateKey: 'contact', Name: 'Theirs', OwnerUserID: 'owner-9' });
+
+    expect(rowsOf(db, FORMS).map((f) => [f.Name, f.OwnerUserID])).toEqual([
+      ['Mine', AUTHOR.ID],
+      ['Theirs', 'owner-9'],
+    ]);
+  });
+
   it('publishes it in the same transaction when PublishImmediately is true', async () => {
     const db = freshWorld();
 
@@ -252,6 +264,8 @@ describe('Forms: Create Form From Template', () => {
     const result = await fromTemplate(db, { TemplateKey: 'nope', PublishImmediately: true });
 
     expect(result.ResultCode).toBe('UNKNOWN_TEMPLATE');
+    // One wording for an unknown key, whoever asks: the engine's (the operation returns the same).
+    expect(result.Message).toBe("Unknown template key 'nope'. Known templates: contact, rsvp, nps, lead-capture, application.");
     expect(db.transactions).toEqual([]);
   });
 

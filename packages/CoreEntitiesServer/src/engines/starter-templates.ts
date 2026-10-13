@@ -11,6 +11,11 @@
  * file supplies only the half that is server-side — the blueprint each key expands to — and
  * the `Record<StarterTemplateKey, …>` below makes that mapping total, so adding a key to the
  * catalogue fails THIS file's compile until its blueprint exists.
+ *
+ * Lives beside `FormAuthoringEngine` (moved from forms-actions, #303) because two callers expand a
+ * key: the `Forms.CreateFormFromTemplate` operation, through the engine, and the
+ * `Forms: Create Form From Template` Action. forms-actions depends on this package, never the
+ * reverse, so this is the one place both can read it from.
  */
 import {
   STARTER_TEMPLATE_CATALOG,

@@ -6,7 +6,6 @@
  * each would be two implementations of one deep copy, which is exactly the drift this feature
  * was added to stop.
  */
-export * from './clone-remap';
 export * from './form-clone.service';
 export * from './form-templates.service';
 export * from './templates-gallery.component';

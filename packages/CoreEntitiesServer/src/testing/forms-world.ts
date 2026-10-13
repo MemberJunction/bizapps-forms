@@ -22,11 +22,13 @@ export const SCREENS = 'MJ_BizApps_Forms: Form Screens';
 export const STYLES = 'MJ_BizApps_Forms: Form Styles';
 export const AUTOMATIONS = 'MJ_BizApps_Forms: Form Automations';
 export const BINDINGS = 'MJ_BizApps_Forms: Form Entity Bindings';
+export const DISTRIBUTIONS = 'MJ_BizApps_Forms: Form Distributions';
 export const ACTIONS = 'MJ: Actions';
 
 /** The columns each real subclass loads from its row — every one the engine or the rules read. */
 export const FORM_COLUMNS = [
   'ID', 'Name', 'Description', 'Status', 'RenderMode', 'Settings', 'IsTemplate', 'StyleID', 'OwnerUserID',
+  'CategoryID', 'TemplateSourceFormID',
 ] as const;
 export const VERSION_COLUMNS = ['ID', 'FormID', 'VersionNumber', 'Status', 'PublishedAt', 'DefinitionSnapshot'] as const;
 
@@ -54,6 +56,8 @@ export function formRow(overrides: Partial<FakeRow> = {}): FakeRow {
     IsTemplate: false,
     StyleID: null,
     OwnerUserID: null,
+    CategoryID: null,
+    TemplateSourceFormID: null,
     ...overrides,
   };
 }
@@ -131,6 +135,28 @@ export function bindingRow(overrides: Partial<FakeRow> & { ID: string }): FakeRo
     Status: 'Active',
     ...overrides,
   };
+}
+
+export function screenRow(overrides: Partial<FakeRow> & { ID: string }): FakeRow {
+  return {
+    FormID: 'form-1',
+    ScreenType: 'Ending',
+    Title: overrides.ID,
+    Body: null,
+    ButtonLabel: null,
+    MediaURL: null,
+    RedirectURL: null,
+    DisplayOrder: 0,
+    IsDefault: false,
+    SocialLinks: null,
+    ConditionalRule: null,
+    IsDisqualification: false,
+    ...overrides,
+  };
+}
+
+export function distributionRow(overrides: Partial<FakeRow> & { ID: string }): FakeRow {
+  return { FormID: 'form-1', Name: overrides.ID, Slug: overrides.ID, ChannelType: 'PublicLink', Status: 'Active', IsActive: true, ...overrides };
 }
 
 /** A draft with one page, a text question and a choice question with two options. */

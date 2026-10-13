@@ -88,7 +88,7 @@ export class FormEntityServer extends mjBizAppsFormsFormEntity {
         if (!(await super.Save(options))) {
           return false;
         }
-        await this.closeActiveDistributions();
+        await this.CloseActiveDistributions();
         return true;
       });
     } catch (e) {
@@ -135,8 +135,13 @@ export class FormEntityServer extends mjBizAppsFormsFormEntity {
     return read.Results.length > 0;
   }
 
-  /** Close every Active distribution of this form, or throw naming the one that would not close. */
-  private async closeActiveDistributions(): Promise<void> {
+  /**
+   * Close every Active distribution of this form, or throw naming the one that would not close.
+   * Run by `Save()` on the transition into `Closed`, and by the authoring engine when an
+   * already-archived form still has a link open — public so both use this one implementation of
+   * what `Closed` means for links. Joins the caller's transaction; it opens none of its own.
+   */
+  public async CloseActiveDistributions(): Promise<void> {
     const provider = this.ProviderToUse;
     if (!runsViews(provider)) {
       throw new Error('the provider cannot run views, so the form\'s distributions could not be read');

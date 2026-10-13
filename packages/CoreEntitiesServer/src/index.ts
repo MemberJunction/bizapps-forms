@@ -4,7 +4,8 @@
  * The server-side domain layer of MJ Forms (spec #303 §1):
  *  - entity server subclasses — invariants that hold for every writer (builder, AI action, engine,
  *    import, `MJ.SaveEntityGraph`, direct API), registered over the generated classes;
- *  - engines (`engines/`) — the domain operations, each one transaction: publishing, authoring;
+ *  - engines (`engines/`) — the domain operations, each one transaction: publishing, authoring
+ *    (build, clone, create from template, archive, restore);
  *  - Remote Operation server subclasses (`operations/`) — thin typed wrappers over one engine call
  *    each, registered under their `Forms.<Name>` keys;
  *  - the helpers both `forms-actions` and `forms-server` run: the per-response context loader, the
@@ -111,15 +112,28 @@ export {
 } from './engines/FormPublishingEngine.js';
 export {
   FormAuthoringEngine,
-  FormAuthoringError,
   type BuildFromBlueprintOptions,
   type BuiltForm,
+  type CloneFormOptions,
+  type FormFromTemplate,
+  type FormLifecycleResult,
+  type TemplateSource,
 } from './engines/FormAuthoringEngine.js';
+export { FormAuthoringError } from './engines/authoring-errors.js';
+export type { ClonedForm } from './engines/form-clone.js';
+export { STARTER_TEMPLATES, getStarterTemplate, type StarterTemplate } from './engines/starter-templates.js';
 export { requireDatabaseProvider } from './shared/database-provider.js';
 export { FORMS_ENTITY } from './shared/entity-names.js';
 
 // Remote Operation server subclasses (spec #303 §2) and the authoring rule they share.
 export { PublishFormServerOperation, LoadPublishFormOperation } from './operations/PublishFormServerOperation.js';
+export { CloneFormServerOperation, LoadCloneFormOperation } from './operations/CloneFormServerOperation.js';
+export {
+  CreateFormFromTemplateServerOperation,
+  LoadCreateFormFromTemplateOperation,
+} from './operations/CreateFormFromTemplateServerOperation.js';
+export { ArchiveFormServerOperation, LoadArchiveFormOperation } from './operations/ArchiveFormServerOperation.js';
+export { RestoreFormServerOperation, LoadRestoreFormOperation } from './operations/RestoreFormServerOperation.js';
 export {
   authorizeFormAuthoring,
   formAuthoringRefusal,

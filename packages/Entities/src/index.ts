@@ -6,6 +6,8 @@ export * from './contracts'
 // barrel, and esbuild cannot drop zod's top-level schema construction, so listing it there would
 // ship the authoring schema to every respondent. Its only consumers are server-side.
 export * from './contracts/form-blueprint'
+// The clone remap is authoring-only for the same reason: no respondent ever copies a form.
+export * from './contracts/clone-remap'
 
 /**
  * Forces the generated entity subclasses to be loaded so their @RegisterClass

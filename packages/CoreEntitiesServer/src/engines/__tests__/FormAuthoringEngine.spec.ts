@@ -45,7 +45,8 @@ vi.mock('@mj-biz-apps/forms-entities', async () => {
   };
 });
 
-const { FormAuthoringEngine, FormAuthoringError } = await import('../FormAuthoringEngine.js');
+const { FormAuthoringEngine } = await import('../FormAuthoringEngine.js');
+const { FormAuthoringError } = await import('../authoring-errors.js');
 const { FormEntityServer } = await import('../../entities/FormEntityServer.js');
 const { FormVersionEntityServer } = await import('../../entities/FormVersionEntityServer.js');
 

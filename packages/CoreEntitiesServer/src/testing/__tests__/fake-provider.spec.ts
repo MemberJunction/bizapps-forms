@@ -137,6 +137,26 @@ describe('generic tables — RunView honours the filter and the result type', ()
     expect(active.Results.map((r) => r.ID)).toEqual(['d1']);
   });
 
+  it('filters on bit equalities, reading a stored boolean and a stored 0/1 alike', async () => {
+    const fake = makeFakeProvider({
+      tables: {
+        Forms: [
+          { ID: 'f1', Name: 'Intake', IsTemplate: true },
+          { ID: 'f2', Name: 'Intake', IsTemplate: false },
+          { ID: 'f3', Name: 'Survey', IsTemplate: 1 },
+        ],
+      },
+    });
+    const templates = await view(fake).RunView<{ ID: string }>({ EntityName: 'Forms', ExtraFilter: 'IsTemplate=1', ResultType: 'simple' });
+    expect(templates.Results.map((r) => r.ID)).toEqual(['f1', 'f3']);
+    const forms = await view(fake).RunView<{ ID: string }>({
+      EntityName: 'Forms',
+      ExtraFilter: "IsTemplate = 0 AND Name='Intake'",
+      ResultType: 'simple',
+    });
+    expect(forms.Results.map((r) => r.ID)).toEqual(['f2']);
+  });
+
   it('answers count_only with a total and no rows, and caps rows at MaxRows', async () => {
     const fake = db();
     const count = await view(fake).RunView({ EntityName: DISTRIBUTIONS, ExtraFilter: "Status='Active'", ResultType: 'count_only' });
