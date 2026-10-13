@@ -2,9 +2,15 @@
  * Form authoring blueprint — the structured, validated intermediate shape that the
  * AI Designer step emits and the deterministic Builder step persists.
  *
+ * TWO shapes, by trust (#303 security). The Designer — an LLM reading a user's brief — emits a
+ * {@link DesignerBlueprint} (`designerBlueprintSchema`): the form's content and nothing about what
+ * runs on submit. A {@link FormBlueprint} (`formBlueprintSchema`) adds `onSubmitMode` and
+ * `automations`, and is assembled only by trusted code: an Action from its caller's params, or a
+ * code-authored starter template.
+ *
  * In the contracts (moved from forms-actions, #303) because the Builder is now
  * `FormAuthoringEngine.BuildFromBlueprint` in forms-core-entities-server, which forms-actions
- * depends on and not the reverse. The LLM-output parsing (`parseFormBlueprint`, `extractJSON`)
+ * depends on and not the reverse. The LLM-output parsing (`parseDesignerBlueprint`, `extractJSON`)
  * stayed with the Designer in forms-actions: it is the Designer's boundary, not the contract's.
  *
  * This mirrors the Designer→Builder split proven by MJ's Form Builder agent
@@ -120,12 +126,65 @@ export const blueprintAutomationSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
-/** The full authoring blueprint the Designer emits and the Builder persists. */
-export const formBlueprintSchema = z.object({
+/**
+ * What a form IS — its name, look and questions — with nothing about what happens on submit.
+ * The part of a blueprint an untrusted author (the Designer LLM) may write.
+ */
+const blueprintContentSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   renderMode: formRenderModeSchema.optional(),
   confirmationMessage: z.string().optional(),
+  pages: z.array(blueprintPageSchema).min(1),
+});
+
+/**
+ * The keys of a blueprint that decide what RUNS on submit. Only a trusted caller may set them —
+ * an Action's own `OnSubmitMode` / `Automations` params, a code-authored starter template — never
+ * the Designer LLM (#303 security).
+ */
+export const DESIGNER_SIDE_EFFECT_KEYS = ['automations', 'onSubmitMode'] as const;
+
+/** Which {@link DESIGNER_SIDE_EFFECT_KEYS} a raw reply carries — present at all, whatever the value. */
+export function designerSideEffectKeys(raw: unknown): string[] {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return [];
+  }
+  return DESIGNER_SIDE_EFFECT_KEYS.filter((key) => key in raw);
+}
+
+/**
+ * The Designer LLM's output: a blueprint with NO on-submit side effects.
+ *
+ * The Designer reads a user's brief, so its reply is untrusted input. `automations` names arbitrary
+ * MJ Actions by free-text name, so a brief carrying injected instructions could otherwise wire any
+ * Action to fire on every anonymous submission — and `PublishImmediately` would make that live with
+ * no human review. So a reply carrying either key is REFUSED, not stripped: a model emitting side
+ * effects is a signal worth surfacing (the Designer logs it and tells the model why on its retry),
+ * and `[]` / `null` are refused too, since an empty step list is itself a side effect (it declines
+ * the built-in steps). Every other key is read as `blueprintContentSchema` reads it.
+ */
+export const designerBlueprintSchema = z
+  .record(z.unknown())
+  .superRefine((raw, ctx) => {
+    const present = designerSideEffectKeys(raw);
+    if (present.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [present[0]],
+        message:
+          `The Designer authors the form only, never its on-submit side effects; remove ${present.join(', ')}. ` +
+          'What runs on submit is set by the caller, not by the model.',
+      });
+    }
+  })
+  .pipe(blueprintContentSchema);
+
+/**
+ * The full authoring blueprint a TRUSTED caller hands the Builder: the content plus its on-submit
+ * side effects. Built from the Designer's output only by an Action, which adds the caller's params.
+ */
+export const formBlueprintSchema = blueprintContentSchema.extend({
   /**
    * Whether this form's own automations are what run on submit — see `OnSubmitMode` in
    * `@mj-biz-apps/forms-entities`.
@@ -144,11 +203,9 @@ export const formBlueprintSchema = z.object({
    * absent says "say nothing, and let the server infer as it always has".
    */
   automations: z.array(blueprintAutomationSchema).optional(),
-  pages: z.array(blueprintPageSchema).min(1),
 }).superRefine((blueprint, ctx) => {
   // The invariant lives HERE rather than only in `applyOnSubmitConfig`, because this schema is the
-  // boundary every blueprint crosses — LLM output through `parseFormBlueprint`, and any direct
-  // caller of `FormAuthoringEngine.BuildFromBlueprint`. Guarding one layer above left the state
+  // boundary every blueprint crosses on its way to `FormAuthoringEngine.BuildFromBlueprint`. Guarding one layer above left the state
   // reachable by anything that did not route through the two shipping actions.
   //
   // `Legacy` runs the built-in steps; `automations` names steps that then never run. A caller
@@ -182,6 +239,8 @@ export type BlueprintQuestion = z.infer<typeof blueprintQuestionSchema>;
 export type BlueprintPage = z.infer<typeof blueprintPageSchema>;
 export type BlueprintAutomation = z.infer<typeof blueprintAutomationSchema>;
 export type FormBlueprint = z.infer<typeof formBlueprintSchema>;
+/** The Designer's output: {@link FormBlueprint} without `automations` / `onSubmitMode`. */
+export type DesignerBlueprint = z.infer<typeof designerBlueprintSchema>;
 
 // --- Drift guard (compile-time) -------------------------------------------------
 // Fails `tsc` if the blueprint question-type union ever diverges from the shared

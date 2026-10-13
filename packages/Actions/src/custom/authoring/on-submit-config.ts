@@ -16,7 +16,12 @@
  * layer up.
  */
 import { z } from 'zod';
-import { blueprintAutomationSchema, type BlueprintAutomation, type FormBlueprint } from '@mj-biz-apps/forms-entities';
+import {
+  blueprintAutomationSchema,
+  type BlueprintAutomation,
+  type DesignerBlueprint,
+  type FormBlueprint,
+} from '@mj-biz-apps/forms-entities';
 
 const ON_SUBMIT_MODES = ['Legacy', 'Configured'] as const;
 const automationsSchema = z.array(blueprintAutomationSchema);
@@ -73,6 +78,28 @@ export function withOnSubmitConfig(blueprint: FormBlueprint, config: OnSubmitCon
   }
   refuseLegacyWithSteps(configured.onSubmitMode, configured.automations);
   return configured;
+}
+
+/**
+ * The Designer path's buildable blueprint: the model's CONTENT, copied field by field, plus the
+ * caller's on-submit config — the only source of side effects (#303 security).
+ *
+ * Field by field rather than a spread, on purpose: `parseDesignerBlueprint` already refuses a reply
+ * carrying `automations` / `onSubmitMode`, and this makes the guarantee structural as well — a
+ * design value that somehow carried them still cannot pass them to the Builder.
+ */
+export function blueprintFromDesign(design: DesignerBlueprint, config: OnSubmitConfig): FormBlueprint {
+  const content: FormBlueprint = { name: design.name, pages: design.pages };
+  if (design.description !== undefined) {
+    content.description = design.description;
+  }
+  if (design.renderMode !== undefined) {
+    content.renderMode = design.renderMode;
+  }
+  if (design.confirmationMessage !== undefined) {
+    content.confirmationMessage = design.confirmationMessage;
+  }
+  return withOnSubmitConfig(content, config);
 }
 
 /** {@link readOnSubmitConfig} then {@link withOnSubmitConfig}, for a caller that holds the blueprint already. */

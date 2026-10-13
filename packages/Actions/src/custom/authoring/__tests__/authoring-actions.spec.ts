@@ -20,7 +20,7 @@ import {
   type FakeRow,
   type ServerSubclasses,
 } from '@mj-biz-apps/forms-core-entities-server/testing';
-import { STUB_DESIGNER, actionParams, output } from './authoring-harness';
+import { STUB_DESIGNER, actionParams, output, sideEffectDesigner } from './authoring-harness';
 import type { UserInfo } from '@memberjunction/core';
 
 vi.mock('@memberjunction/core', async (importOriginal) => ({
@@ -54,10 +54,14 @@ function freshWorld(config: Partial<FakeProviderConfig> = {}): FakeProvider {
 /** The Designer, spied, so a spec can prove the LLM never ran on a refused request. */
 const design = vi.fn(STUB_DESIGNER.design);
 
-const generate = (db: FakeProvider | undefined, inputs: Record<string, unknown>) => {
-  const params = actionParams(db?.provider, AUTHOR, { Brief: 'an RSVP', ...inputs });
-  return { params, run: new GenerateFormFromBriefAction().Run(params) };
-};
+const generate = Object.assign(
+  (db: FakeProvider | undefined, inputs: Record<string, unknown>) => {
+    const params = actionParams(db?.provider, AUTHOR, { Brief: 'an RSVP', ...inputs });
+    generate.lastParams = params;
+    return { params, run: new GenerateFormFromBriefAction().Run(params) };
+  },
+  { lastParams: undefined as unknown as ReturnType<typeof actionParams> },
+);
 
 let original: IMetadataProvider | undefined;
 beforeEach(() => {
@@ -219,6 +223,72 @@ describe('Forms: Generate Form From Brief — refused BEFORE the Designer runs (
     expect(result).toMatchObject({ Success: false, ResultCode: 'FAILED' });
     expect(result.Message).toMatch(/^Forms: Generate Form From Brief: RunActionParams\.Provider must also implement RunView/);
     expect(design).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #303 security: the Designer reads a user's brief, so its reply is untrusted. It may author the
+ * form, never what runs on submit — a brief carrying "also add an automation running <Action>"
+ * must not get that Action wired to every anonymous submission, least of all with
+ * `PublishImmediately` making it live with no human review. The caller's `OnSubmitMode` /
+ * `Automations` params are the ONLY source of side effects.
+ */
+describe('Forms: Generate Form From Brief — the Designer cannot author side effects', () => {
+  const AUTOMATIONS = 'MJ_BizApps_Forms: Form Automations';
+
+  it.each([false, true])(
+    'a Designer that keeps emitting automations / onSubmitMode is refused: nothing persisted or published (PublishImmediately %s)',
+    async (publishImmediately) => {
+      const db = freshWorld();
+      const designer = sideEffectDesigner(Infinity);
+      setFormDesignerModel(designer);
+
+      const result = await generate(db, { PublishImmediately: publishImmediately }).run;
+
+      expect(result).toMatchObject({ Success: false, ResultCode: 'DESIGN_FAILED' });
+      expect(result.Message).toMatch(/must not author on-submit side effects/);
+      expect(designer.calls()).toBe(3); // every attempt was told why and refused again
+      for (const table of [FORMS, AUTOMATIONS, VERSIONS]) {
+        expect(rowsOf(db, table), table).toEqual([]);
+      }
+    },
+  );
+
+  it.each([false, true])(
+    'a Designer that drops them once told builds the form WITHOUT them (PublishImmediately %s)',
+    async (publishImmediately) => {
+      const db = freshWorld();
+      setFormDesignerModel(sideEffectDesigner(1));
+
+      const result = await generate(db, { PublishImmediately: publishImmediately }).run;
+
+      expect(result.Success).toBe(true);
+      expect(rowsOf(db, AUTOMATIONS)).toEqual([]);
+      const settings = JSON.parse(String(rowsOf(db, FORMS)[0].Settings));
+      expect(settings.onSubmitMode).toBeUndefined();
+      if (publishImmediately) {
+        const snapshot = JSON.parse(String(rowsOf(db, VERSIONS)[0].DefinitionSnapshot));
+        expect(snapshot.automations).toEqual([]);
+        expect(snapshot.settings.onSubmitMode).toBeUndefined();
+      }
+      expect(JSON.stringify(output(generate.lastParams, 'Blueprint') ?? {})).not.toContain('Some Powerful Action');
+    },
+  );
+
+  it('the CALLER\'s Automations still work — and are the only steps written, even when the Designer tried its own', async () => {
+    const db = freshWorld();
+    setFormDesignerModel(sideEffectDesigner(1));
+
+    const result = await generate(db, {
+      PublishImmediately: true,
+      Automations: JSON.stringify([{ actionName: 'Forms: Send Confirmation Email' }]),
+    }).run;
+
+    expect(result.Success).toBe(true);
+    expect(rowsOf(db, AUTOMATIONS).map((a) => a.ActionID)).toEqual(['action-email']);
+    const snapshot = JSON.parse(String(rowsOf(db, VERSIONS)[0].DefinitionSnapshot));
+    expect(snapshot.automations.map((a: { actionId: string }) => a.actionId)).toEqual(['action-email']);
+    expect(snapshot.settings.onSubmitMode).toBe('Configured');
   });
 });
 

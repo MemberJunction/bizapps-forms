@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyOnSubmitConfig, readOnSubmitConfig, withOnSubmitConfig } from './on-submit-config';
+import { applyOnSubmitConfig, blueprintFromDesign, readOnSubmitConfig, withOnSubmitConfig } from './on-submit-config';
+import type { DesignerBlueprint } from '@mj-biz-apps/forms-entities';
 import type { FormBlueprint } from '@mj-biz-apps/forms-entities';
 
 const base: FormBlueprint = {
@@ -156,5 +157,29 @@ describe('readOnSubmitConfig — the params alone, before the Designer runs', ()
   it('still refuses the pair when the Legacy half came from the blueprint itself', () => {
     const config = readOnSubmitConfig(undefined, [{ actionName: 'Forms: Send Confirmation Email' }]);
     expect(() => withOnSubmitConfig({ ...base, onSubmitMode: 'Legacy' }, config)).toThrow(/Legacy/);
+  });
+});
+
+/**
+ * The Designer path's ONLY way from a model's design to a buildable blueprint (#303 security): the
+ * content is copied field by field, and side effects come from the caller's config alone — so even
+ * a value that somehow carried the model's steps cannot pass them on.
+ */
+describe('blueprintFromDesign', () => {
+  const design = { name: 'RSVP', pages: base.pages } as DesignerBlueprint;
+  const smuggled = { ...design, automations: [{ actionName: 'Some Powerful Action' }], onSubmitMode: 'Configured' } as DesignerBlueprint;
+
+  it('takes side effects only from the caller', () => {
+    expect(blueprintFromDesign(smuggled, {})).toEqual({ name: 'RSVP', pages: base.pages });
+    expect(blueprintFromDesign(smuggled, readOnSubmitConfig(undefined, '[{"actionName":"Forms: Send Confirmation Email"}]'))).toEqual({
+      name: 'RSVP',
+      pages: base.pages,
+      automations: [{ actionName: 'Forms: Send Confirmation Email' }],
+    });
+  });
+
+  it('copies every content field', () => {
+    const full = { ...design, description: 'd', renderMode: 'OneQuestion', confirmationMessage: 'c' } as DesignerBlueprint;
+    expect(blueprintFromDesign(full, readOnSubmitConfig('Legacy', undefined))).toEqual({ ...full, onSubmitMode: 'Legacy' });
   });
 });

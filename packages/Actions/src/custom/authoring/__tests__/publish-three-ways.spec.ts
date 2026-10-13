@@ -37,7 +37,7 @@ import {
   type FakeRow,
   type ServerSubclasses,
 } from '@mj-biz-apps/forms-core-entities-server/testing';
-import { FIXED_BLUEPRINT, STUB_DESIGNER, actionParams } from './authoring-harness';
+import { CALLER_AUTOMATIONS, FIXED_BLUEPRINT, STUB_DESIGNER, actionParams } from './authoring-harness';
 
 vi.mock('@memberjunction/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@memberjunction/core')>()),
@@ -200,7 +200,12 @@ describe('one draft, three ways to publish it (#303 DW4)', () => {
 
     // (b) the Action, building and publishing in one go
     const viaAction = freshWorld();
-    const params = actionParams(viaAction.provider, AUTHOR, { Brief: 'an RSVP', PublishImmediately: true });
+    // The Designer authors the content; the on-submit step comes from the caller, as it must (#303).
+    const params = actionParams(viaAction.provider, AUTHOR, {
+      Brief: 'an RSVP',
+      PublishImmediately: true,
+      Automations: JSON.stringify(CALLER_AUTOMATIONS),
+    });
     const actionResult = await new GenerateFormFromBriefAction().Run(params);
     expect(actionResult.Success).toBe(true);
 
@@ -234,7 +239,9 @@ describe('one draft, three ways to publish it (#303 DW4)', () => {
     for (const publishVia of ['operation', 'action', 'engine'] as const) {
       const db = freshWorld();
       if (publishVia === 'action') {
-        await new GenerateFormFromBriefAction().Run(actionParams(db.provider, AUTHOR, { Brief: 'x', PublishImmediately: true }));
+        await new GenerateFormFromBriefAction().Run(
+          actionParams(db.provider, AUTHOR, { Brief: 'x', PublishImmediately: true, Automations: JSON.stringify(CALLER_AUTOMATIONS) }),
+        );
       } else {
         const formId = await draftFromBlueprint(db);
         if (publishVia === 'operation') {

@@ -7,7 +7,9 @@
  * `PublishImmediately` is set.
  *
  * It reuses the deterministic Designer→Builder split proven by MJ's Form Builder
- * agent: the LLM (Designer) emits a structured JSON {@link FormBlueprint}; the Builder —
+ * agent: the LLM (Designer) emits a structured JSON `DesignerBlueprint` — the form's content
+ * only — and this action adds the caller's on-submit config to make the {@link FormBlueprint}
+ * the Builder —
  * `FormAuthoringEngine.BuildFromBlueprint` in forms-core-entities-server — validates it
  * against the §5.3 taxonomy and persists it in one transaction. The model is chosen by
  * MemberJunction from the 'Forms: Form Designer' AI Prompt's metadata — there is no model
@@ -23,7 +25,10 @@
  *      inference, so an existing caller's forms are unaffected.
  *   - `Automations` (JSON array, optional) — the on-submit steps this form runs, in order, each
  *      naming an MJ Action. Supplying it implies `Configured`. These are the CALLER's, not the
- *      Designer's: the LLM authors questions, never side effects.
+ *      Designer's: the LLM authors questions, never side effects. ENFORCED (#303 security): the
+ *      Designer's reply is parsed with a schema that has no `automations` / `onSubmitMode`, a
+ *      reply carrying either is refused (and logged), and `blueprintFromDesign` copies only the
+ *      content — so a brief carrying injected instructions cannot wire an Action to submissions.
  *   - `PublishImmediately` (boolean, optional, default false) — publish the form in the same
  *      transaction, so the caller gets a published form or nothing (#303).
  * Output params:
@@ -45,9 +50,9 @@ import type { ActionResultSimple, RunActionParams } from '@memberjunction/action
 import { RegisterClass } from '@memberjunction/global';
 import type { UserInfo } from '@memberjunction/core';
 import type { DatabaseProviderBase } from '@memberjunction/core';
-import type { FormBlueprint } from '@mj-biz-apps/forms-entities';
+import type { DesignerBlueprint, FormBlueprint } from '@mj-biz-apps/forms-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
-import { OnSubmitConfigError, withOnSubmitConfig } from './on-submit-config';
+import { blueprintFromDesign, OnSubmitConfigError } from './on-submit-config';
 import { buildForm, describeBuilt, onActionProvider, prepareAuthoring, type AuthoringRequest } from './persist-blueprint';
 import {
   AIPromptFormDesignerModel,
@@ -94,17 +99,18 @@ export async function runAuthoring(
   provider: DatabaseProviderBase,
   request: AuthoringRequest,
 ): Promise<ActionResultSimple> {
-  let blueprint: FormBlueprint;
+  let design: DesignerBlueprint;
   try {
-    blueprint = await designFormFromBrief(brief, activeDesignerModel, contextUser);
+    design = await designFormFromBrief(brief, activeDesignerModel, contextUser);
   } catch (error) {
     return fail(`AI form design failed: ${asText(error)}`, 'DESIGN_FAILED');
   }
 
+  let blueprint: FormBlueprint;
   try {
-    // The params were validated up front; what can still fail here is the PAIR, when the Designer's
-    // own blueprint says `Legacy` and the caller supplied steps.
-    blueprint = withOnSubmitConfig(blueprint, request.onSubmit);
+    // The model's design carries no side effects (refused at parse); the caller's params are the
+    // only source of what runs on submit. `withOnSubmitConfig`'s pair check stays as a guard.
+    blueprint = blueprintFromDesign(design, request.onSubmit);
   } catch (error) {
     const code = error instanceof OnSubmitConfigError ? 'INVALID_ON_SUBMIT_CONFIG' : 'FAILED';
     return fail(asText(error), code);

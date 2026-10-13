@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { formBlueprintSchema, formQuestionTypeSchema, CHOICE_QUESTION_TYPES } from './form-blueprint';
+import {
+  CHOICE_QUESTION_TYPES,
+  DESIGNER_SIDE_EFFECT_KEYS,
+  designerBlueprintSchema,
+  formBlueprintSchema,
+  formQuestionTypeSchema,
+} from './form-blueprint';
 import { FORM_QUESTION_TYPES, questionTypeBehavior } from './question-types';
 
 describe('taxonomy', () => {
@@ -52,5 +58,39 @@ describe('formBlueprintSchema — Legacy with authored steps', () => {
     const steps = [{ actionName: 'Forms: Send Confirmation Email' }];
     expect(formBlueprintSchema.parse({ ...base, onSubmitMode: 'Configured', automations: steps }).automations).toHaveLength(1);
     expect(formBlueprintSchema.parse({ ...base, automations: steps }).automations).toHaveLength(1);
+  });
+});
+
+/**
+ * #303 security: the Designer (an LLM reading a user's brief) authors QUESTIONS, never on-submit
+ * side effects. Its output is parsed with `designerBlueprintSchema`, which has no `automations` or
+ * `onSubmitMode` — and REFUSES a reply that carries either, rather than stripping it, because a
+ * model emitting side effects (a brief with injected instructions, say) is worth surfacing.
+ */
+describe('designerBlueprintSchema — the LLM\'s output, without side effects', () => {
+  const content = { name: 'RSVP', pages: [{ questions: [{ type: 'Email', prompt: 'Email' }] }] };
+
+  it('accepts a blueprint that only describes the form', () => {
+    expect(designerBlueprintSchema.parse(content)).toEqual(content);
+  });
+
+  it.each([
+    ['automations', { automations: [{ actionName: 'Some Powerful Action' }] }],
+    ['an empty automations list (it still declines the built-in steps)', { automations: [] }],
+    ['onSubmitMode', { onSubmitMode: 'Configured' }],
+    ['a null onSubmitMode', { onSubmitMode: null }],
+  ])('refuses %s', (_label, extra) => {
+    const parsed = designerBlueprintSchema.safeParse({ ...content, ...extra });
+    expect(parsed.success).toBe(false);
+    expect(!parsed.success && parsed.error.issues[0].message).toMatch(/side effects/);
+  });
+
+  it('names exactly the two side-effect keys', () => {
+    expect([...DESIGNER_SIDE_EFFECT_KEYS].sort()).toEqual(['automations', 'onSubmitMode']);
+  });
+
+  it('cannot yield a side effect even from a value the full schema accepts', () => {
+    const trusted = formBlueprintSchema.parse({ ...content, onSubmitMode: 'Configured', automations: [{ actionName: 'X' }] });
+    expect(designerBlueprintSchema.safeParse(trusted).success).toBe(false);
   });
 });

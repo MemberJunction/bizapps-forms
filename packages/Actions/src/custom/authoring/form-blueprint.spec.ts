@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { parseFormBlueprint, extractJSON } from './form-blueprint';
+import { DesignerSideEffectError, parseDesignerBlueprint, extractJSON } from './form-blueprint';
 
-describe('parseFormBlueprint', () => {
+describe('parseDesignerBlueprint', () => {
   it('parses a valid blueprint object', () => {
-    const bp = parseFormBlueprint({
+    const bp = parseDesignerBlueprint({
       name: 'RSVP',
       pages: [{ questions: [{ type: 'Email', prompt: 'Email' }] }],
     });
@@ -17,7 +17,7 @@ describe('parseFormBlueprint', () => {
     // example became valid stops testing rejection and starts asserting nothing. `Payment` is a
     // type we have deliberately NOT implemented, so it is a stable stand-in for "not a type".
     expect(() =>
-      parseFormBlueprint({
+      parseDesignerBlueprint({
         name: 'Bad',
         pages: [{ questions: [{ type: 'Payment', prompt: 'Pay here' }] }],
       }),
@@ -25,16 +25,16 @@ describe('parseFormBlueprint', () => {
   });
 
   it('rejects a form with no pages', () => {
-    expect(() => parseFormBlueprint({ name: 'Empty', pages: [] })).toThrow();
+    expect(() => parseDesignerBlueprint({ name: 'Empty', pages: [] })).toThrow();
   });
 
   it('rejects a page with no questions', () => {
-    expect(() => parseFormBlueprint({ name: 'Empty page', pages: [{ questions: [] }] })).toThrow();
+    expect(() => parseDesignerBlueprint({ name: 'Empty page', pages: [{ questions: [] }] })).toThrow();
   });
 
   it('parses JSON wrapped in a markdown fence + prose', () => {
     const text = 'Here is your form:\n```json\n{"name":"X","pages":[{"questions":[{"type":"ShortText","prompt":"Q"}]}]}\n```\nEnjoy!';
-    const bp = parseFormBlueprint(text);
+    const bp = parseDesignerBlueprint(text);
     expect(bp.name).toBe('X');
   });
 });
@@ -48,5 +48,28 @@ describe('extractJSON', () => {
   });
   it('returns the trimmed string when no braces are present', () => {
     expect(extractJSON('  no json here  ')).toBe('no json here');
+  });
+});
+
+describe('parseDesignerBlueprint — the model authors questions, never side effects (#303)', () => {
+  const content = { name: 'RSVP', pages: [{ questions: [{ type: 'Email', prompt: 'Email' }] }] };
+
+  it('refuses a reply carrying automations or onSubmitMode with a typed error naming them', () => {
+    const reply = JSON.stringify({ ...content, onSubmitMode: 'Configured', automations: [{ actionName: 'Some Powerful Action' }] });
+    let caught: unknown;
+    try {
+      parseDesignerBlueprint(reply);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(DesignerSideEffectError);
+    expect((caught as DesignerSideEffectError).keys).toEqual(['automations', 'onSubmitMode']);
+    expect((caught as Error).message).toMatch(/must not author on-submit side effects .*automations, onSubmitMode/);
+  });
+
+  it('returns a value with no side-effect keys for a clean reply', () => {
+    const parsed = parseDesignerBlueprint(content);
+    expect('automations' in parsed).toBe(false);
+    expect('onSubmitMode' in parsed).toBe(false);
   });
 });
