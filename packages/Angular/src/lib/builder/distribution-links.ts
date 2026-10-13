@@ -4,9 +4,12 @@
  * unit-testable and reusable by {@link DistributionService}.
  *
  * The slug and respondent-URL RULES are the contracts' (`share-link.ts` in
- * `@mj-biz-apps/forms-entities`): the server's `FormDistributionEngine` composes the same URL
- * from the same function, so the link this builder shows and the one a distribution verb
- * returns cannot differ. These keep their names because they are forms-ng's public API.
+ * `@mj-biz-apps/forms-entities`), and the server's `FormDistributionEngine` uses the same
+ * function, so the two cannot disagree about the URL's SHAPE. They can still differ in its BASE:
+ * this builder passes its configured API origin, the server `MJAPI_PUBLIC_URL` — different behind a
+ * path-prefixing proxy or a split internal/public address, and the server returns no URL when
+ * `MJAPI_PUBLIC_URL` is unset. That lasts until the builder shows the URL the server returns.
+ * These keep their names because they are forms-ng's public API.
  */
 import { randomSlugSuffix, respondentUrl, slugify as slugifyName } from '@mj-biz-apps/forms-entities';
 

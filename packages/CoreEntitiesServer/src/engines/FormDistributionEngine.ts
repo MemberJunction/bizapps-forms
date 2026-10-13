@@ -17,15 +17,20 @@
  *  - Open, Close and Reissue each run as one unit of work (`runEngineUnitOfWork`). The subclass's
  *    save joins it as a savepoint, row lock and credential writes included, so a refusal rolls the
  *    whole verb back.
- *  - Issue does NOT open one (`runEngineCall`). Its slug retry depends on a failed INSERT leaving the
- *    connection usable, and inside a transaction a failed statement can doom it. A new row also
- *    has nothing to roll back to: each attempt either inserts or does not, and the create's mint
- *    runs on the minter's own connection (a create has no row lock to share — see the subclass), so
- *    an enclosing rollback would orphan a live invite rather than undo it.
+ *  - Issue does NOT open one (`runEngineCall`), and refuses to run inside a caller's. Its slug retry
+ *    depends on a failed INSERT leaving the connection usable, and inside a transaction a failed
+ *    statement can doom it (PostgreSQL aborts the whole transaction). A new row also has nothing to
+ *    roll back to: each attempt either inserts or does not, and the create's mint runs on the
+ *    minter's own connection (a create has no row lock to share — see the subclass), so an enclosing
+ *    rollback would orphan a live invite rather than undo it.
+ *
+ * What a caller is told is safe to tell them. A row the caller cannot read (row-level security, no
+ * Read grant) gets the same "does not exist" answer as one that does not exist — every read runs as
+ * the caller, so it simply is not there — and no message carries provider or database text, which
+ * may hold SQL or other records' values: that rides on `FormDistributionError.logDetail` to the log.
  */
 import {
   EntitySaveOptions,
-  LogError,
   LogStatus,
   type DatabaseProviderBase,
   type UserInfo,
@@ -37,6 +42,7 @@ import {
   respondentUrl,
   slugify,
   slugRefusal,
+  suffixedSlug,
   type mjBizAppsFormsFormDistributionEntityType,
   type mjBizAppsFormsFormEntityType,
 } from '@mj-biz-apps/forms-entities';
@@ -120,14 +126,20 @@ export interface DistributionLink {
 /**
  * A share-link verb that did not happen. `fault: true` when the system failed (a read or a save) —
  * logged as an error; otherwise a refusal over what was asked — logged as a status.
+ *
+ * `message` is what the caller sees (an operation returns it as `ErrorMessage`), so it never carries
+ * provider or database text. That goes in `logDetail`, which `runEngineCall` appends to the one log
+ * line it writes.
  */
 export class FormDistributionError extends Error {
   public readonly fault: boolean;
+  public readonly logDetail?: string;
 
-  constructor(message: string, options: { fault?: boolean } = {}) {
+  constructor(message: string, options: { fault?: boolean; logDetail?: string } = {}) {
     super(message);
     this.name = 'FormDistributionError';
     this.fault = options.fault === true;
+    this.logDetail = options.logDetail;
   }
 }
 
@@ -163,8 +175,16 @@ export class FormDistributionEngine extends BaseSingleton<FormDistributionEngine
     if (refusal) {
       throw new FormDistributionError(refusal);
     }
-    requireEntityTransactions(provider, `Issuing a share link for form ${formId}`);
-    return runEngineCall(provider, `[FormDistributionEngine] no share link was issued for form ${formId} (user ${user.ID})`, async () => {
+    // No `requireEntityTransactions`: Issue opens none (see the header), so it needs none.
+    if ((provider.TransactionDepth ?? 0) > 0) {
+      throw new FormDistributionError(
+        `Issuing a share link for form ${formId} cannot run inside a transaction: a slug collision would ` +
+          'abort the enclosing transaction before the retry could run, and rolling it back would orphan ' +
+          "the link's newly minted credential. Issue it on its own.",
+      );
+    }
+    return runEngineCall(provider, `[FormDistributionEngine] no share link was issued for form ${formId} (user ${user.ID})`, () =>
+      callerSafe('Issuing a share link', async () => {
       const form = await readShareableForm(formId, provider, user);
       const channel = request.channelType ?? DEFAULT_CHANNEL;
       const name = request.name?.trim() || derivedLinkName(form.Name, channel);
@@ -183,7 +203,7 @@ export class FormDistributionEngine extends BaseSingleton<FormDistributionEngine
       link.CloseAt = request.closeAt ?? null;
       await saveWithFreeSlug(link, request.slug ?? slugify(name, randomSlugSuffix), provider, user);
       return linkOf(link);
-    });
+    }));
   }
 
   /**
@@ -225,27 +245,35 @@ export class FormDistributionEngine extends BaseSingleton<FormDistributionEngine
       throw new FormDistributionError(id ? 'The form id must be a form ID.' : 'A form id is required to look up share-link claims.');
     }
     requireUser(user, `Looking up share-link claims for form ${id}`);
-    const read = await provider.RunView<{ Slug: string }>(
-      {
-        EntityName: ENTITY.FormDistribution,
-        ExtraFilter: `FormID=${quoteSqlString(id)} AND Slug IS NOT NULL`,
-        Fields: ['Slug'],
-        ResultType: 'simple',
-      },
-      user,
+    return runEngineCall(provider, `[FormDistributionEngine] share-link claims for form ${id} were not read (user ${user.ID})`, () =>
+      callerSafe('Looking up share-link claims', async () => {
+        // Read AS THE CALLER: claimants are asked only about slugs the caller can see, so a claim on
+        // a link the caller may not read can never come back to them.
+        const read = await provider.RunView<{ Slug: string }>(
+          {
+            EntityName: ENTITY.FormDistribution,
+            ExtraFilter: `FormID=${quoteSqlString(id)} AND Slug IS NOT NULL`,
+            Fields: ['Slug'],
+            ResultType: 'simple',
+          },
+          user,
+        );
+        if (!read.Success) {
+          // The view error can carry the SQL statement; it goes to the log, never to the caller.
+          throw new FormDistributionError(`Could not read share links for form ${id}.`, {
+            fault: true,
+            logDetail: read.ErrorMessage || 'no detail',
+          });
+        }
+        const registry = readClaimProviders(GetGlobalObjectStore());
+        const found = await findDistributionClaims(
+          (read.Results ?? []).map((row) => row.Slug),
+          user,
+          registry.providers,
+        );
+        return { claims: found.claims, failures: [...registry.failures, ...found.failures] };
+      }),
     );
-    if (!read.Success) {
-      // The view error can carry the SQL statement; it goes to the log, never to the caller.
-      LogError(`[FormDistributionEngine] could not read share links for form ${id} (user ${user.ID}): ${read.ErrorMessage}`);
-      throw new FormDistributionError(`Could not read share links for form ${id}.`, { fault: true });
-    }
-    const registry = readClaimProviders(GetGlobalObjectStore());
-    const found = await findDistributionClaims(
-      (read.Results ?? []).map((row) => row.Slug),
-      user,
-      registry.providers,
-    );
-    return { claims: found.claims, failures: [...registry.failures, ...found.failures] };
   }
 
   /** Load the link, let `verb` refuse or change it, save it through the subclass — one transaction. */
@@ -261,14 +289,16 @@ export class FormDistributionEngine extends BaseSingleton<FormDistributionEngine
     }
     requireUser(user, `To ${verb.name} share link ${id}`);
     requireEntityTransactions(provider, `To ${verb.name} share link ${id}`);
-    return runEngineUnitOfWork(provider, `[FormDistributionEngine] share link ${id} was not ${verb.past} (user ${user.ID})`, async () => {
-      const link = await loadDistribution(id, provider, user);
-      await verb.apply(link, provider, user);
-      if (!(await link.Save(verb.saveOptions?.()))) {
-        throw new FormDistributionError(`Could not ${verb.name} share link ${id}: ${saveFailure(link)}`, { fault: true });
-      }
-      return linkOf(link);
-    });
+    return runEngineUnitOfWork(provider, `[FormDistributionEngine] share link ${id} was not ${verb.past} (user ${user.ID})`, () =>
+      callerSafe(`To ${verb.name} share link ${id}`, async () => {
+        const link = await loadDistribution(id, provider, user);
+        await verb.apply(link, provider, user);
+        if (!(await link.Save(verb.saveOptions?.()))) {
+          throw saveRefusal(`Could not ${verb.name} share link ${id}`, link);
+        }
+        return linkOf(link);
+      }),
+    );
   }
 }
 
@@ -306,18 +336,51 @@ const REISSUE: LinkVerb = {
   },
 };
 
+/**
+ * Run `work`, turning any error that is not already a {@link FormDistributionError} into one whose
+ * message says only that `what` failed. An operation returns a thrown message to its caller as
+ * `ErrorMessage`, and an unexpected throw — a dropped connection, a driver error, a misconfigured
+ * host — speaks in SQL and other records' values; its words go to `logDetail`, for the log.
+ */
+async function callerSafe<T>(what: string, work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (err) {
+    if (err instanceof FormDistributionError) {
+      throw err;
+    }
+    throw new FormDistributionError(`${what} failed on the server; the server log has the detail.`, {
+      fault: true,
+      logDetail: err instanceof Error ? (err.stack ?? err.message) : String(err),
+    });
+  }
+}
+
 function requireUser(user: UserInfo | undefined, what: string): asserts user is UserInfo {
   if (!user) {
     throw new FormDistributionError(`${what} needs the acting user; none was given.`);
   }
 }
 
-/** Why the request's own values cannot make a link, or `null`. Checked before any read. */
+/**
+ * Why the request's own values cannot make a link, or `null`. Checked before any read, so a value the
+ * database would reject is a refusal over the request rather than a failed insert logged as a fault.
+ * The operation checks the wire; this is what an in-process caller (an Action, an agent) meets.
+ */
 function issueRequestRefusal(request: IssueLinkRequest): string | null {
   if (request.slug !== undefined) {
     const refusal = slugRefusal(request.slug);
     if (refusal) {
       return refusal;
+    }
+  }
+  const name = request.name?.trim() ?? '';
+  if (name.length > MAX_NAME_LENGTH) {
+    return `The link name is longer than ${MAX_NAME_LENGTH} characters (${name.length}).`;
+  }
+  for (const [field, value] of [['OpenAt', request.openAt], ['CloseAt', request.closeAt]] as const) {
+    if (value !== undefined && value !== null && (!(value instanceof Date) || Number.isNaN(value.getTime()))) {
+      return `${field} is not a valid date.`;
     }
   }
   if (request.openAt && request.closeAt && request.closeAt.getTime() <= request.openAt.getTime()) {
@@ -352,7 +415,7 @@ async function readShareableForm(formId: string, provider: DatabaseProviderBase,
     user,
   );
   if (!read.Success) {
-    throw new FormDistributionError(`Could not read form ${formId} (${read.ErrorMessage || 'no detail'}).`, { fault: true });
+    throw new FormDistributionError(`Could not read form ${formId}.`, { fault: true, logDetail: read.ErrorMessage || 'no detail' });
   }
   const [form] = read.Results ?? [];
   if (!form) {
@@ -375,7 +438,7 @@ async function loadDistribution(id: string, provider: DatabaseProviderBase, user
     user,
   );
   if (!read.Success) {
-    throw new FormDistributionError(`Could not read share link ${id} (${read.ErrorMessage || 'no detail'}).`, { fault: true });
+    throw new FormDistributionError(`Could not read share link ${id}.`, { fault: true, logDetail: read.ErrorMessage || 'no detail' });
   }
   const [row] = read.Results ?? [];
   if (!row) {
@@ -405,13 +468,12 @@ async function saveWithFreeSlug(
 ): Promise<void> {
   const takenAlready = await slugTaken(preferred, provider, user);
   for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt++) {
-    link.Slug = attempt === 0 && !takenAlready ? preferred : `${preferred}-${randomSlugSuffix()}`;
+    link.Slug = attempt === 0 && !takenAlready ? preferred : suffixedSlug(preferred, randomSlugSuffix());
     if (await link.Save()) {
       return;
     }
-    const why = saveFailure(link);
-    if (!why.includes(SLUG_INDEX)) {
-      throw new FormDistributionError(`Could not create a share link for form ${link.FormID}: ${why}`, { fault: true });
+    if (!saveFailure(link).includes(SLUG_INDEX)) {
+      throw saveRefusal(`Could not create a share link for form ${link.FormID}`, link);
     }
   }
   throw new FormDistributionError(
@@ -431,11 +493,30 @@ async function slugTaken(slug: string, provider: DatabaseProviderBase, user: Use
     user,
   );
   if (!read.Success) {
-    throw new FormDistributionError(`Could not check whether the slug "${slug}" is free (${read.ErrorMessage || 'no detail'}).`, {
+    throw new FormDistributionError(`Could not check whether the slug "${slug}" is free.`, {
       fault: true,
+      logDetail: read.ErrorMessage || 'no detail',
     });
   }
   return (read.TotalRowCount ?? 0) > 0;
+}
+
+/**
+ * A refused save as the caller may see it. A rule the entity enforces (a validation failure, such as
+ * the origins grammar or a link opened on an archived form) is written for authors, so its message is
+ * passed on. Anything else — a database error, the subclass's rolled-back write — may carry SQL or
+ * other records' values, so the caller is told only that it failed and the log gets the detail.
+ */
+function saveRefusal(what: string, link: FormDistributionEntityServer): FormDistributionError {
+  const rules = (link.LatestResult?.Errors ?? [])
+    .filter((e: unknown): e is { Source: string; Message: string } =>
+      typeof e === 'object' && e !== null && typeof (e as { Message?: unknown }).Message === 'string' && 'Source' in e,
+    )
+    .map((e) => e.Message);
+  return new FormDistributionError(rules.length > 0 ? `${what}: ${rules.join(' ')}` : `${what}.`, {
+    fault: rules.length === 0,
+    logDetail: saveFailure(link),
+  });
 }
 
 /** The link as it landed — the instance holds what the save and the provisioning hook wrote. */

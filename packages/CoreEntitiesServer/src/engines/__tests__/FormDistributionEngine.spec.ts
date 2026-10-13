@@ -125,6 +125,22 @@ function enforcingUniqueSlugs(db: () => ReturnType<typeof world> | undefined) {
   };
 }
 
+/**
+ * Make one row invisible to the caller, as row-level security or a missing Read grant does: the view
+ * succeeds and the row is simply not in it.
+ */
+function hideFromCaller(db: ReturnType<typeof world>, entityName: string, id: string): void {
+  const read = db.provider.RunView.bind(db.provider);
+  (db.provider as unknown as { RunView: typeof read }).RunView = (async (params, user) => {
+    const result = await read(params, user);
+    if (params.EntityName !== entityName) {
+      return result;
+    }
+    const visible = (result.Results ?? []).filter((row) => (row as { ID?: string }).ID !== id);
+    return { ...result, Results: visible, TotalRowCount: visible.length } as typeof result;
+  }) as typeof read;
+}
+
 const linkRow = (db: ReturnType<typeof world>, id: string) => rowsOf(db, DISTRIBUTIONS).find((row) => row.ID === id);
 const onlyLink = (db: ReturnType<typeof world>) => {
   const rows = rowsOf(db, DISTRIBUTIONS);
@@ -276,8 +292,13 @@ describe('Issue', () => {
       },
     });
 
-    await expect(engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR)).rejects.toThrow(/FK_FormDistribution_Form/);
+    const error = await engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR).catch((e: unknown) => e);
+
     expect(attempts).toBe(1);
+    // The database's words go to the log, never to the caller.
+    expect((error as Error).message).toMatch(/Could not create a share link for form form-1/);
+    expect((error as Error).message).not.toMatch(/FK_FormDistribution_Form|INSERT/);
+    expect(logged.errors.join('\n')).toMatch(/FK_FormDistribution_Form/);
   });
 
   it('refuses when the slug probe cannot be read, rather than guessing the slug is free', async () => {
@@ -286,6 +307,8 @@ describe('Issue', () => {
     const error = await engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR).catch((e: unknown) => e);
 
     expect((error as Error).message).toMatch(/could not check whether the slug "intake-public-link" is free/i);
+    expect((error as Error).message).not.toMatch(/forced runview failure/);
+    expect(logged.errors.join('\n')).toMatch(/forced runview failure/);
     expect((error as InstanceType<typeof FormDistributionError>).fault).toBe(true);
     expect(rowsOf(db, DISTRIBUTIONS)).toEqual([]);
   });
@@ -303,6 +326,22 @@ describe('Issue', () => {
     expect((error as InstanceType<typeof FormDistributionError>).fault).toBe(false);
     expect(rowsOf(db, DISTRIBUTIONS)).toEqual([]);
     expect(logged.statuses.join('\n')).toMatch(message);
+  });
+
+  it.each([
+    ['an archived form', { Status: 'Closed' }],
+    ['a template', { IsTemplate: true }],
+    ['a live form', {}],
+  ])('answers %s the caller cannot read exactly as a form that does not exist', async (_label, form) => {
+    const absent = world([], {}, { ID: 'form-other' });
+    const hidden = world([], {}, form);
+    hideFromCaller(hidden, FORMS, 'form-1');
+
+    const notThere = await engine.Issue({ formId: 'form-1' }, absent.provider, AUTHOR).catch((e: unknown) => e);
+    const notVisible = await engine.Issue({ formId: 'form-1' }, hidden.provider, AUTHOR).catch((e: unknown) => e);
+
+    expect((notVisible as Error).message).toBe((notThere as Error).message);
+    expect(rowsOf(hidden, DISTRIBUTIONS)).toEqual([]);
   });
 
   it('refuses a preferred slug that is not slug-shaped, before reading anything', async () => {
@@ -358,10 +397,51 @@ describe('Issue', () => {
     expect(logged.statuses.join('\n')).toMatch(/MJAPI_PUBLIC_URL/);
   });
 
-  it('refuses a provider without entity transactions', async () => {
+  it('issues on a provider without entity transactions — Issue opens none, so it needs none', async () => {
     const db = world([], { noTransactions: true });
 
-    await expect(engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR)).rejects.toThrow(/supports entity transactions/);
+    const link = await engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR);
+
+    expect(link.status).toBe('Active');
+  });
+
+  it("refuses to run inside a caller's transaction, writing nothing — a slug collision there would doom it", async () => {
+    const db = world();
+    const scope = await db.provider.BeginEntityTransaction();
+    try {
+      const error = await engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR).catch((e: unknown) => e);
+
+      expect((error as Error).message).toMatch(/inside a transaction/);
+      expect((error as InstanceType<typeof FormDistributionError>).fault).toBe(false);
+      expect(rowsOf(db, DISTRIBUTIONS)).toEqual([]);
+      expect(minter.minted).toEqual([]);
+    } finally {
+      await scope.Rollback();
+    }
+  });
+
+  it(`keeps a de-duplicated slug within the slug grammar, even for a ${'60'}-character preferred slug`, async () => {
+    const long = 'a'.repeat(60);
+    const db = world([distributionRow({ ID: 'other', FormID: 'form-2', Slug: long })]);
+
+    const link = await engine.Issue({ formId: 'form-1', slug: long }, db.provider, AUTHOR);
+
+    expect(link.slug).not.toBe(long);
+    expect(link.slug!.length).toBeLessThanOrEqual(60);
+    expect(link.slug).toMatch(/^a+-[a-z0-9]{5}$/);
+  });
+
+  it.each([
+    ['a name longer than the column holds', { name: 'n'.repeat(256) }, /name is longer than 255 characters/],
+    ['an OpenAt that is not a date', { openAt: new Date('not a date') }, /OpenAt is not a valid date/],
+    ['a CloseAt that is not a date', { closeAt: new Date('nope') }, /CloseAt is not a valid date/],
+  ])('refuses %s as a refusal, not a fault, before reading anything', async (_label, extra, message) => {
+    const db = world([], { failRunViewFor: FORMS });
+
+    const error = await engine.Issue({ formId: 'form-1', ...extra }, db.provider, AUTHOR).catch((e: unknown) => e);
+
+    expect((error as Error).message).toMatch(message);
+    expect((error as InstanceType<typeof FormDistributionError>).fault).toBe(false);
   });
 
   it('refuses to write through the plain generated class — the provisioning hook would never run', async () => {
@@ -370,7 +450,8 @@ describe('Issue', () => {
       [DISTRIBUTIONS]: [],
     });
 
-    await expect(engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR)).rejects.toThrow(/Expected FormDistributionEntityServer/);
+    await expect(engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR)).rejects.toThrow(/failed on the server/);
+    expect(logged.errors.join('\n')).toMatch(/Expected FormDistributionEntityServer/);
     expect(rowsOf(db, DISTRIBUTIONS)).toEqual([]);
   });
 });
@@ -432,12 +513,15 @@ describe('Close', () => {
     expect(db.transactions.at(-1)).toBe('commit');
   });
 
-  it('rolls back and reports a refused save, naming the link and the user', async () => {
+  it('rolls back and reports a refused save — the reason to the log with the link and the user, not to the caller', async () => {
     const db = world([distributionRow({ ID: 'd1' })], { failSaveWhen: (name) => (name === DISTRIBUTIONS ? 'disk full' : false) });
 
-    await expect(engine.Close('d1', db.provider, AUTHOR)).rejects.toThrow(/Could not close share link d1: .*disk full/);
+    const error = await engine.Close('d1', db.provider, AUTHOR).catch((e: unknown) => e);
+
+    expect((error as Error).message).toMatch(/Could not close share link d1/);
+    expect((error as Error).message).not.toMatch(/disk full/);
     expect(linkRow(db, 'd1')?.Status).toBe('Active');
-    expect(logged.errors.join('\n')).toMatch(/d1.*author-1/);
+    expect(logged.errors.join('\n')).toMatch(/d1.*author-1.*disk full/);
   });
 });
 
@@ -477,13 +561,27 @@ describe.each([
     expect((error as InstanceType<typeof FormDistributionError>).fault).toBe(false);
   });
 
-  it('refuses when the link cannot be read', async () => {
+  it('refuses when the link cannot be read, keeping the provider\'s words out of the answer', async () => {
     const db = world([distributionRow({ ID: 'd1' })], { failRunViewFor: DISTRIBUTIONS });
 
     const error = await run('d1', db, AUTHOR).catch((e: unknown) => e);
 
     expect((error as Error).message).toMatch(/Could not read share link d1/);
+    expect((error as Error).message).not.toMatch(/forced runview failure/);
+    expect(logged.errors.join('\n')).toMatch(/forced runview failure/);
     expect((error as InstanceType<typeof FormDistributionError>).fault).toBe(true);
+  });
+
+  it('answers a link the caller cannot read exactly as one that does not exist — no existence or state oracle', async () => {
+    const absent = world();
+    const hidden = world([distributionRow({ ID: 'd1', Status: 'Closed', IsActive: false })]);
+    hideFromCaller(hidden, DISTRIBUTIONS, 'd1');
+
+    const notThere = await run('d1', absent, AUTHOR).catch((e: unknown) => e);
+    const notVisible = await run('d1', hidden, AUTHOR).catch((e: unknown) => e);
+
+    expect((notVisible as Error).message).toBe((notThere as Error).message);
+    expect(linkRow(hidden, 'd1')).toMatchObject({ Status: 'Closed', IsActive: false });
   });
 
   it('refuses a blank id and a missing user before touching the database', async () => {
@@ -556,5 +654,37 @@ describe('GetClaims', () => {
 
     expect((error as Error).message).toBe(`Could not read share links for form ${FORM}.`);
     expect(logged.errors.join('\n')).toMatch(/forced runview failure/);
+  });
+});
+
+/**
+ * A provider that THROWS (a dropped connection, a driver error) rather than reporting failure: its
+ * message can carry SQL and other records' values, and an operation returns a thrown message as its
+ * `ErrorMessage`. Every verb turns it into a generic answer and sends the detail to the log.
+ */
+describe('an unexpected exception never reaches the caller in its own words', () => {
+  const SECRET = "Invalid column 'PublicLinkToken' in SELECT ... WHERE ID='other-form'";
+
+  function throwingWorld(links: FakeRow[] = [distributionRow({ ID: 'd1' })]) {
+    const db = world(links);
+    (db.provider as unknown as { RunView: () => Promise<never> }).RunView = async () => {
+      throw new Error(SECRET);
+    };
+    return db;
+  }
+
+  it.each([
+    ['Issue', (db: ReturnType<typeof world>) => engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR)],
+    ['Open', (db: ReturnType<typeof world>) => engine.Open('d1', db.provider, AUTHOR)],
+    ['Close', (db: ReturnType<typeof world>) => engine.Close('d1', db.provider, AUTHOR)],
+    ['Reissue', (db: ReturnType<typeof world>) => engine.Reissue('d1', db.provider, AUTHOR)],
+    ['GetClaims', (db: ReturnType<typeof world>) => engine.GetClaims('11111111-1111-4111-8111-111111111111', db.provider, AUTHOR)],
+  ])('%s', async (_verb, run) => {
+    const error = await run(throwingWorld()).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(FormDistributionError);
+    expect((error as Error).message).not.toContain('PublicLinkToken');
+    expect((error as Error).message).toMatch(/failed on the server/);
+    expect(logged.errors.join('\n')).toContain(SECRET);
   });
 });

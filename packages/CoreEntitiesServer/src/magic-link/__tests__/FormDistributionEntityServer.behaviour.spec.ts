@@ -61,6 +61,7 @@ interface FakeProvider extends InviteWriteHost {
   QuoteIdentifier(name: string): string;
   QuoteSchemaAndView(schema: string, object: string): string;
   ExecuteSQL<T>(sql: string): Promise<T[]>;
+  RunView(): Promise<{ Success: boolean; Results: { ID: string; Status: string }[]; ErrorMessage: string }>;
 }
 
 /**
@@ -147,6 +148,9 @@ vi.mock('@mj-biz-apps/forms-entities', async () => {
       PlatformKey: 'sqlserver',
       QuoteIdentifier: (name: string) => `[${name}]`,
       QuoteSchemaAndView: (schema: string, object: string) => `[${schema}].[${object}]`,
+      // The archived-form rule's read of the link's form: a Draft form, so that rule never refuses
+      // here — it has its own spec (`FormDistributionEntityServer.closed-form.spec.ts`).
+      RunView: async () => ({ Success: true, Results: [{ ID: 'form-1', Status: 'Draft' }], ErrorMessage: '' }),
       // The hook's one statement: the locked re-read of the credential pair. Answered from `store`.
       ExecuteSQL: async <T,>(sql: string): Promise<T[]> => {
         this.events.push('lock');

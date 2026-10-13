@@ -92,7 +92,7 @@ export async function runEngineUnitOfWork<T>(
  * Only the call that found no transaction open on entry (depth 0) logs: it is the boundary the
  * failure leaves, and its `context` says what was being attempted for whom. Inside a caller's
  * transaction the caller logs. A refusal over the request (`fault === false`) is a status, not an
- * error.
+ * error. An error's `logDetail`, when it has one, is appended to that line and nowhere else.
  */
 export async function runEngineCall<T>(provider: DatabaseProviderBase, context: string, work: () => Promise<T>): Promise<T> {
   const outermost = (provider.TransactionDepth ?? 0) === 0;
@@ -101,7 +101,10 @@ export async function runEngineCall<T>(provider: DatabaseProviderBase, context: 
   } catch (err) {
     if (outermost) {
       const refusal = err instanceof Error && 'fault' in err && err.fault === false;
-      (refusal ? LogStatus : LogError)(`${context}: ${err instanceof Error ? err.message : String(err)}`);
+      // `logDetail` is what an engine kept OUT of the caller-facing message (provider or database
+      // text); the log is the one place it belongs.
+      const detail = err instanceof Error && 'logDetail' in err && typeof err.logDetail === 'string' && err.logDetail ? ` [detail: ${err.logDetail}]` : '';
+      (refusal ? LogStatus : LogError)(`${context}: ${err instanceof Error ? err.message : String(err)}${detail}`);
     }
     throw err;
   }

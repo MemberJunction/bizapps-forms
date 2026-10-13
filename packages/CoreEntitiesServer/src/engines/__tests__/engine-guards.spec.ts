@@ -125,6 +125,16 @@ describe('runEngineCall — one log line, no transaction', () => {
     expect(logged.statuses).toEqual(['issuing a link (user u1): form is archived']);
   });
 
+  it("appends an error's logDetail to the log line only — the message the caller sees stays without it", async () => {
+    const db = makeFakeProvider({});
+    const error = Object.assign(new Error('Could not read form f1.'), { fault: true, logDetail: 'SELECT * FROM secret failed' });
+
+    const thrown = await runEngineCall(db.provider, 'ctx', async () => Promise.reject(error)).catch((e: unknown) => e);
+
+    expect((thrown as Error).message).toBe('Could not read form f1.');
+    expect(logged.errors).toEqual(['ctx: Could not read form f1. [detail: SELECT * FROM secret failed]']);
+  });
+
   it("leaves the log to the caller whose transaction it runs inside", async () => {
     const db = makeFakeProvider({});
 

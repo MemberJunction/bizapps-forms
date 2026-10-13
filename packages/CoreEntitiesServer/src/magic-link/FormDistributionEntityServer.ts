@@ -24,8 +24,8 @@
  * same transaction ({@link Delete}). Each exists because a concrete interleaving produced either an
  * orphaned live invite or a dead link badged Live; the docstring on each names it.
  *
- * It also holds the one rule about the row's CONTENT that every writer must meet: `AllowedOrigins`
- * follows the embed-origin grammar ({@link ValidateAsync}).
+ * It also holds the rules about the row's CONTENT that every writer must meet ({@link ValidateAsync}):
+ * `AllowedOrigins` follows the embed-origin grammar, and a link is never opened on an archived form.
  *
  * See FORMS_BUILD_PLAN §4 item 4.
  */
@@ -33,6 +33,8 @@ import {
   BaseEntity,
   LogError,
   RunInEntityTransaction,
+  RunView,
+  type IRunViewProvider,
   type DatabaseProviderBase,
   type EntityDeleteOptions,
   type EntitySaveOptions,
@@ -47,7 +49,8 @@ import {
   quoteSqlString,
   type mjBizAppsFormsFormDistributionEntityType,
 } from '@mj-biz-apps/forms-entities';
-import { addViolations, refuse, refuseIfUnvalidated, tracksStoredValues } from '../entities/entity-refusal.js';
+import { addViolations, refuse, refuseIfUnvalidated, tracksStoredValues, type RuleViolation } from '../entities/entity-refusal.js';
+import { FORMS_ENTITY } from '../shared/entity-names.js';
 import { getMagicLinkProvisioningConfig } from './config.js';
 import { MagicLinkMinterRegistry, type IAnonymousMagicLinkMinter, type InviteWriteHost } from './minter.js';
 import { runProvisioning, DISTRIBUTION_ENTITY_NAME, type MintedLink } from './provision-runner.js';
@@ -76,6 +79,11 @@ function locksRows(provider: IEntityDataProvider | undefined): provider is RowLo
     'PlatformKey' in provider &&
     typeof provider.PlatformKey === 'string'
   );
+}
+
+/** Whether the row's provider can run a view — every server provider can; the read below needs one. */
+function runsViews(provider: IEntityDataProvider | undefined): provider is IEntityDataProvider & IRunViewProvider {
+  return !!provider && 'RunView' in provider && typeof provider.RunView === 'function';
 }
 
 /**
@@ -199,10 +207,82 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    */
   public override async ValidateAsync(): Promise<ValidationResult> {
     const result = await super.ValidateAsync();
-    const changed =
-      !this.IsSaved || !tracksStoredValues(this) || this.GetFieldByName('AllowedOrigins')?.Dirty === true;
-    const refusal = changed ? allowedOriginsRefusal(this.AllowedOrigins) : null;
-    return addViolations(result, refusal ? [{ field: 'AllowedOrigins', message: refusal }] : [], () => this.AllowedOrigins);
+    const violations: RuleViolation[] = [];
+    if (this.changed('AllowedOrigins')) {
+      const refusal = allowedOriginsRefusal(this.AllowedOrigins);
+      if (refusal) {
+        violations.push({ field: 'AllowedOrigins', message: refusal });
+      }
+    }
+    const archived = await this.openOnArchivedFormRefusal();
+    if (archived) {
+      violations.push({ field: 'Status', message: archived });
+    }
+    return addViolations(result, violations, (field) => (field === 'Status' ? this.Status : this.AllowedOrigins));
+  }
+
+  /**
+   * Whether `field` may differ from what the database holds — on a create, on a host that does not
+   * track record changes (MJ's dirty flag is then the client's claim; see `tracksStoredValues`), or
+   * when MJ says it changed.
+   */
+  private changed(field: string): boolean {
+    return !this.IsSaved || !tracksStoredValues(this) || this.GetFieldByName(field)?.Dirty === true;
+  }
+
+  /**
+   * An archived (Closed) form has no live link — whoever writes the link. Archiving closes every link
+   * in the same transaction (`FormEntityServer`), and `FormDistributionEngine` refuses to issue or open
+   * one on a Closed form before it writes anything; this is the rule behind both, so a plain save (the
+   * generated Explorer form, a direct API write, `MJ.SaveEntityGraph`) cannot open one either. The
+   * engine's check stays as the early refusal — it reads nothing twice that matters, and it also
+   * refuses templates.
+   *
+   * Checked only when this save OPENS the link (it ends Active and IsActive, and one of those or its
+   * form changed): a stray live link left on a Closed form must still take a save that opens nothing,
+   * such as a submission's response count, and closing it is always allowed.
+   *
+   * The form is read as the writer, inside the save. A form the writer cannot see answers exactly as
+   * one that does not exist, so the refusal reveals nothing about a form the writer cannot read; a
+   * read that fails refuses too (fail closed), its detail to the log only.
+   *
+   * Not a lock: an archive committing between this read and the write can still leave a live link
+   * behind, which archiving again repairs (`FormAuthoringEngine.Archive`'s stray-link path).
+   */
+  private async openOnArchivedFormRefusal(): Promise<string | null> {
+    const opens =
+      this.Status === 'Active' &&
+      this.IsActive === true &&
+      (this.changed('Status') || this.changed('IsActive') || this.changed('FormID'));
+    if (!opens) {
+      return null;
+    }
+    const provider = this.ProviderToUse;
+    if (!runsViews(provider)) {
+      return 'This link cannot be opened: its form could not be read, so whether the form is archived is unknown.';
+    }
+    const read = await new RunView(provider).RunView<{ ID: string; Status: string }>(
+      {
+        EntityName: FORMS_ENTITY.Form,
+        ExtraFilter: `ID=${quoteSqlString(this.FormID ?? '')}`,
+        Fields: ['ID', 'Status'],
+        ResultType: 'simple',
+        BypassCache: true,
+      },
+      this.ContextCurrentUser,
+    );
+    if (!read.Success) {
+      LogError(
+        `[FormDistributionEntityServer] Could not read form ${this.FormID} to check distribution ${this.ID} opens on a ` +
+          `form that is not archived: ${read.ErrorMessage}`,
+      );
+      return 'This link cannot be opened: its form could not be read, so whether the form is archived is unknown.';
+    }
+    const [form] = read.Results ?? [];
+    if (!form) {
+      return 'This link cannot be opened: its form was not found.';
+    }
+    return form.Status === 'Closed' ? 'This link cannot be opened: its form is archived. Restore the form first.' : null;
   }
 
   private async saveAndProvision(options?: EntitySaveOptions, host?: InviteWriteHost): Promise<boolean> {

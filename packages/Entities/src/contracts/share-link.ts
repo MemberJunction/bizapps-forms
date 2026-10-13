@@ -1,11 +1,14 @@
 /**
  * The shape of a share link's public address and of the slug in it — one rule for every writer.
  *
- * Two places compose a respondent URL: the server's `FormDistributionEngine` (from the host's public
- * API address, returned by every distribution verb) and the builder (from the API it is configured
- * to talk to, for links it lists). They must agree to the character, or the link an author copies
- * from one surface differs from the link another shows them. Two places also derive a slug until
- * the builder stops creating links itself. So the rule lives here, once.
+ * Two places compose a respondent URL: the server's `FormDistributionEngine` (against
+ * `MJAPI_PUBLIC_URL`, returned by every distribution verb) and the builder (against the origin of the
+ * API it is configured to talk to, for links it lists). This function fixes the SHAPE both produce —
+ * `<base>/f/<encoded slug>` — so they cannot disagree about it. It does not make them agree: the two
+ * bases differ on a host behind a path-prefixing proxy, where the internal API address differs from
+ * the public one, or where `MJAPI_PUBLIC_URL` is unset (the server then returns no URL), until the
+ * builder takes the URL from the server instead of composing its own. Two places also derive a slug
+ * until the builder stops creating links itself. So the rule lives here, once.
  *
  * Exported from the package root only, not the `./contracts` barrel the respondent widget bundles:
  * no respondent ever builds a share link.
@@ -14,7 +17,10 @@
 /** Path segment the respondent host page is served under (`/f/:slug`, `RespondentHostMiddleware`). */
 const RESPONDENT_PATH = '/f/';
 
-/** The longest slug the derivation produces, and the longest one a caller may ask for. */
+/**
+ * The longest slug Forms produces — derived ({@link slugify}) or de-duplicated ({@link suffixedSlug})
+ * — and the longest one a caller may ask for, so any slug Forms hands out is also a valid request.
+ */
 export const SLUG_MAX_LENGTH = 60;
 
 /** Lowercase words of letters and digits joined by single hyphens. */
@@ -52,6 +58,15 @@ export function slugify(name: string, randomSuffix: () => string): string {
 /** A short random token for a slug (5 base-36 characters). Not a secret: the slug is public. */
 export function randomSlugSuffix(): string {
   return Math.random().toString(36).slice(2, 7).padEnd(5, '0');
+}
+
+/**
+ * `base` made distinct with `-<suffix>`, trimming `base` first so the result still fits
+ * {@link SLUG_MAX_LENGTH} and the grammar (a trim that lands on a hyphen drops it).
+ */
+export function suffixedSlug(base: string, suffix: string): string {
+  const room = SLUG_MAX_LENGTH - suffix.length - 1;
+  return `${base.slice(0, room).replace(/-+$/, '')}-${suffix}`;
 }
 
 /** Why `slug` is not a usable slug, or `null` when it is. */

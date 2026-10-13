@@ -24,7 +24,7 @@ import {
 
 const UNKNOWN_APP = 'unknown';
 const MAX_LABEL_LENGTH = 200;
-/** An unasked slug is echoed to the author and the log; a provider must not be able to flood either. */
+/** An unasked slug is echoed to the log (never the author); a provider must not be able to flood it. */
 const MAX_ECHOED_SLUG_LENGTH = 100;
 
 /**
@@ -211,7 +211,9 @@ function acceptClaim(raw: unknown, appName: string, asked: ReadonlySet<string>, 
     return null;
   }
   if (!asked.has(slug)) {
-    log.record(appName, `claimed slug "${capForEcho(slug)}" that was not asked about`);
+    // The slug goes to the log only. A provider answering with slugs it was not asked about may be
+    // naming ANOTHER form's link, one the author asking may have no right to read.
+    log.record(appName, 'claimed a slug that was not asked about', `claimed slug "${capForEcho(slug)}" that was not asked about`);
     return null;
   }
   if (!isUsableName(ownerLabel)) {

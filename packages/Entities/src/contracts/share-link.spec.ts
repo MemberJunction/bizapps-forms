@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SLUG_MAX_LENGTH, respondentUrl, slugRefusal, slugify } from './share-link';
+import { SLUG_MAX_LENGTH, respondentUrl, slugRefusal, slugify, suffixedSlug } from './share-link';
 
 describe('respondentUrl', () => {
   it('joins base + /f/ + slug', () => {
@@ -71,5 +71,20 @@ describe('slugRefusal', () => {
     ['an over-long slug', 'a'.repeat(SLUG_MAX_LENGTH + 1)],
   ])('refuses %s, saying what a slug must be', (_label, slug) => {
     expect(slugRefusal(slug)).toMatch(/lowercase letters and digits/);
+  });
+});
+
+describe('suffixedSlug', () => {
+  it('appends the suffix with a hyphen', () => {
+    expect(suffixedSlug('lobby', 'ab12c')).toBe('lobby-ab12c');
+  });
+
+  it(`stays within ${SLUG_MAX_LENGTH} characters and inside the grammar, so a suffixed slug is a valid preferred slug too`, () => {
+    for (const base of ['a'.repeat(SLUG_MAX_LENGTH), `${'a'.repeat(SLUG_MAX_LENGTH - 7)}-bcdef`, `${'a'.repeat(54)}-b`]) {
+      const slug = suffixedSlug(base, 'xyz12');
+      expect(slug.length, slug).toBeLessThanOrEqual(SLUG_MAX_LENGTH);
+      expect(slugRefusal(slug), slug).toBeNull();
+      expect(slug.endsWith('-xyz12')).toBe(true);
+    }
   });
 });

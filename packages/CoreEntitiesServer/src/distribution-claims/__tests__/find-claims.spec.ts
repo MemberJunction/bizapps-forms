@@ -77,11 +77,12 @@ describe('findDistributionClaims', () => {
     const out = await findDistributionClaims(['intake'], user, [hung], 20);
     expect(out.failures).toEqual([{ appName: 'Hung', message: expect.stringContaining('did not answer within') }]);
   });
-  it('drops a claim for a slug that was not asked', async () => {
+  it("drops a claim for a slug that was not asked, and never shows the author that other slug — it may be another form's", async () => {
     const greedy = provider({ FindClaims: async () => [{ slug: 'someone-elses', ownerLabel: 'x', respondentUrl: null }] });
     const out = await findDistributionClaims(['intake'], user, [greedy]);
     expect(out.claims).toEqual([]);
-    expect(out.failures[0].message).toContain('someone-elses');
+    expect(out.failures).toEqual([{ appName: 'Caliber', message: 'claimed a slug that was not asked about' }]);
+    expect(LogError).toHaveBeenCalledWith(expect.stringContaining('someone-elses'));
   });
   it('nulls a respondentUrl that is not absolute http(s)', async () => {
     for (const bad of ['javascript:alert(1)', '/interview?blueprint=1', 'ftp://x/y', '']) {
@@ -128,13 +129,12 @@ describe('findDistributionClaims', () => {
     expect(out.claims.map((c) => c.appName)).toEqual(['Caliber', 'Other']);
     expect(out.failures).toEqual([]);
   });
-  it('caps an echoed unasked slug at 100 characters in the failure and the log', async () => {
+  it('caps an unasked slug at 100 characters in the log, and keeps it out of the failure', async () => {
     const long = 'z'.repeat(300);
     const greedy = provider({ FindClaims: async () => [{ slug: long, ownerLabel: 'x', respondentUrl: null }] });
     const out = await findDistributionClaims(['intake'], user, [greedy]);
     const capped = `${'z'.repeat(100)}…`;
-    expect(out.failures[0].message).toContain(capped);
-    expect(out.failures[0].message).not.toContain('z'.repeat(101));
+    expect(out.failures[0].message).not.toContain('zzz');
     expect(LogError).toHaveBeenCalledWith(expect.stringContaining(capped));
     expect(vi.mocked(LogError).mock.calls[0][0]).not.toContain('z'.repeat(101));
   });
