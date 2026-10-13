@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { UnreadableColumnError, buildPublishedDefinition, tryBuildPublishedDefinition } from './snapshot-builder';
+import {
+  UnreadableColumnError,
+  buildPublishedDefinition,
+  tryBuildPublishedDefinition,
+  unreadableDraftMessage,
+} from './snapshot-builder';
 import { buildPublishedAutomations, type AuthoredAutomationRow } from './published-automation-builder';
 import type {
   AuthoredFormRow,
@@ -211,7 +216,7 @@ describe('buildPublishedDefinition', () => {
   });
 
   it('carries the automations it is given into the snapshot', () => {
-    const automations = buildPublishedAutomations([automationRow({ ID: 'a1' })]);
+    const automations = buildPublishedAutomations([automationRow({ ID: 'a1' })], []);
 
     const def = buildPublishedDefinition({ form: form({}), pages: [], screens: [] }, undefined, 'v', automations);
 
@@ -412,5 +417,22 @@ describe('tryBuildPublishedDefinition', () => {
     expect(built.ok).toBe(false);
     expect(!built.ok && built.error).toBeInstanceOf(UnreadableColumnError);
     expect(!built.ok && built.error.column).toBe('page "About you" (p1) ConditionalRule');
+  });
+});
+
+describe('unreadableDraftMessage — the one wording of an unreadable column (#303)', () => {
+  it('names the column and the reason, worded for the action the author took', () => {
+    const problem = { column: 'question "Age" (q1) ValidationRule', reason: 'min: Expected number' };
+    expect(unreadableDraftMessage('publish', problem)).toBe(
+      'Cannot publish: the question "Age" (q1) ValidationRule cannot be read — min: Expected number.',
+    );
+    expect(unreadableDraftMessage('preview', problem)).toBe(
+      'Cannot preview: the question "Age" (q1) ValidationRule cannot be read — min: Expected number.',
+    );
+  });
+
+  it('is what UnreadableColumnError says, so the publish refusal and the builder banner cannot drift', () => {
+    const error = new UnreadableColumnError('page "About you" (p1) ConditionalRule', 'not valid JSON');
+    expect(error.message).toBe(unreadableDraftMessage('publish', error));
   });
 });

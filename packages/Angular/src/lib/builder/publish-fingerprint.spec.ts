@@ -12,7 +12,6 @@ import {
   definitionFingerprint,
   draftComparand,
   draftDiffers,
-  unreadableDraftMessage,
   storedSnapshotFingerprint,
   publishControlState,
 } from './publish-fingerprint';
@@ -328,15 +327,5 @@ describe('the draft side of the change check', () => {
   it('claims no difference without a baseline or a draft — the control is already available then', () => {
     expect(draftDiffers(null, comparandOf('{"min":"zero"}'))).toBe(false);
     expect(draftDiffers('x', null)).toBe(false);
-  });
-
-  it('names the column and the reason, worded for the action the author took', () => {
-    const problem = { column: 'question "Age" (q1) ValidationRule', reason: 'min: Expected number' };
-    expect(unreadableDraftMessage('publish', problem)).toBe(
-      'Cannot publish: the question "Age" (q1) ValidationRule cannot be read — min: Expected number.',
-    );
-    expect(unreadableDraftMessage('preview', problem)).toBe(
-      'Cannot preview: the question "Age" (q1) ValidationRule cannot be read — min: Expected number.',
-    );
   });
 });

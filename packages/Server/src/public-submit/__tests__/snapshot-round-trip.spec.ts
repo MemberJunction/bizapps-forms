@@ -182,6 +182,41 @@ describe('builder → parser round trip', () => {
         ContinueOnError: false,
         IsActive: true,
       },
+      {
+        ID: 'a2',
+        Name: 'Write applicant',
+        TargetType: 'EntityBinding',
+        ActionID: null,
+        AgentID: null,
+        BindingID: 'bind-1',
+        Trigger: 'OnComplete',
+        ExecutionMode: 'Async',
+        DisplayOrder: 2,
+        ConditionalRule: null,
+        ContinueOnError: true,
+        IsActive: true,
+      },
+    ], [
+      {
+        ID: 'bind-1',
+        Name: 'Applicant',
+        TargetEntityName: 'MJ_BizApps_Common: People',
+        FieldMappings: JSON.stringify({
+          version: 1,
+          fields: [
+            { targetField: 'Email', source: { kind: 'question', questionId: 'q-age' }, required: true },
+            { targetField: 'Source', source: { kind: 'static', value: 'web' } },
+          ],
+        }),
+        IdentityRule: JSON.stringify({
+          mode: 'MatchThenCreate',
+          match: [{ targetField: 'Email', normalize: 'LowerCaseTrim' }],
+          scope: [{ targetField: 'TenantID', value: 't-1' }],
+          onMultipleMatch: 'Fail',
+        }),
+        MergePolicy: JSON.stringify({ default: 'latestWins', fields: { Email: 'writeOnce' } }),
+        Status: 'Disabled',
+      },
     ]);
     const built = buildPublishedDefinition(
       everyFieldDraft(),
@@ -200,6 +235,7 @@ describe('builder → parser round trip', () => {
     expect(parsed?.endScreens.map((e) => e.id)).toEqual(['end-high', 'end-ko', 'end-default']);
     expect(parsed?.settings.onSubmitMode).toBe('Configured');
     expect(parsed?.automations[0].conditionalRule).toBeDefined();
+    expect(parsed?.automations[1].binding?.mergePolicy.fields).toEqual({ email: 'writeOnce' });
   });
 
   it('round-trips the smallest draft too, where every optional field is absent', () => {

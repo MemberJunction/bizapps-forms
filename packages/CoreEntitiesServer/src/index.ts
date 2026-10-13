@@ -4,12 +4,16 @@
  * The server-side domain layer of MJ Forms (spec #303 §1):
  *  - entity server subclasses — invariants that hold for every writer (builder, AI action, engine,
  *    import, `MJ.SaveEntityGraph`, direct API), registered over the generated classes;
+ *  - engines (`engines/`) — the domain operations, each one transaction: publishing, authoring;
+ *  - Remote Operation server subclasses (`operations/`) — thin typed wrappers over one engine call
+ *    each, registered under their `Forms.<Name>` keys;
  *  - the helpers both `forms-actions` and `forms-server` run: the per-response context loader, the
  *    entity-binding executor/ledger/gateway, and the action-provider seam.
  *
  * Import this package from the server bootstrap AFTER `@mj-biz-apps/forms-entities`, so these
  * subclasses register after the generated ones they extend; call
- * {@link LoadFormsEntityServerSubclasses} from the startup export so a bundler cannot drop them.
+ * {@link LoadFormsEntityServerSubclasses} and each operation's `Load…Operation()` anchor from the
+ * startup export so a bundler cannot drop them.
  *
  * Test support is at `@mj-biz-apps/forms-core-entities-server/testing` and is deliberately NOT
  * reachable from this entry.
@@ -97,3 +101,28 @@ export * from './shared/save-entity.js';
 export * from './binding/binding-executor.js';
 export * from './binding/binding-ledger.js';
 export * from './binding/mj-binding-gateway.js';
+
+// Engines (spec #303 §4).
+export {
+  FormPublishingEngine,
+  FormPublishError,
+  PUBLISH_IN_PROGRESS_MESSAGE,
+  type FormPublishResult,
+} from './engines/FormPublishingEngine.js';
+export {
+  FormAuthoringEngine,
+  FormAuthoringError,
+  type BuildFromBlueprintOptions,
+  type BuiltForm,
+} from './engines/FormAuthoringEngine.js';
+export { requireDatabaseProvider } from './shared/database-provider.js';
+export { FORMS_ENTITY } from './shared/entity-names.js';
+
+// Remote Operation server subclasses (spec #303 §2) and the authoring rule they share.
+export { PublishFormServerOperation, LoadPublishFormOperation } from './operations/PublishFormServerOperation.js';
+export {
+  authorizeFormAuthoring,
+  formAuthoringRefusal,
+  refuseFormAuthoring,
+  type FormPermissionSource,
+} from './operations/form-authoring-authorization.js';

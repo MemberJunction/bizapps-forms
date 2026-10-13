@@ -281,6 +281,35 @@ export function brokenRuleLines(tree: AuthoredFormTree): string[] {
 }
 
 /**
+ * How many broken rules a refusal names before it stops listing them.
+ *
+ * The message lands in one line of the toolbar's status text (and in an operation's
+ * `ErrorMessage`), so an uncapped list on a form with thirty broken rules is a paragraph nobody
+ * reads — and the count, which is the part that says how much work is waiting, would be buried in
+ * it. Three is enough to recognise the problem; the canvas badges carry every one of them against
+ * the item it is about, which is where an author goes to fix them anyway.
+ */
+const MAX_NAMED_BROKEN_RULES = 3;
+
+/**
+ * Why a publish was refused over {@link brokenRuleLines}, and which rules to go and fix.
+ *
+ * Here rather than beside either publisher so the server's refusal and the builder's are one
+ * sentence: an author told different things by the two would reasonably trust neither.
+ */
+export function brokenRuleRefusal(broken: readonly string[]): string {
+  const named = broken.slice(0, MAX_NAMED_BROKEN_RULES);
+  const unnamed = broken.length - named.length;
+  const one = broken.length === 1;
+  const count = one ? '1 broken rule' : `${broken.length} broken rules`;
+  const rest = unnamed > 0 ? ` (and ${unnamed} more)` : '';
+  return (
+    `Publish refused — ${count} would ship with this form. ` +
+    `${one ? 'Fix it' : 'Fix them'} and publish again: ${named.join('; ')}${rest}.`
+  );
+}
+
+/**
  * The row for an item whose stored rule cannot be read — none when it can.
  *
  * Filed under the `show` verb and its icon because the badge needs one and "this item's

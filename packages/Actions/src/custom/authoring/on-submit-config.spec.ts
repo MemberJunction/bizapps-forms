@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyOnSubmitConfig } from './on-submit-config';
-import type { FormBlueprint } from './form-blueprint';
+import { applyOnSubmitConfig, readOnSubmitConfig, withOnSubmitConfig } from './on-submit-config';
+import type { FormBlueprint } from '@mj-biz-apps/forms-entities';
 
 const base: FormBlueprint = {
   name: 'Intake',
@@ -123,5 +123,38 @@ describe('applyOnSubmitConfig', () => {
 
     expect(base.onSubmitMode).toBeUndefined();
     expect(base.automations).toBeUndefined();
+  });
+});
+
+/**
+ * The params read on their own, BEFORE any blueprint exists — so `Forms: Generate Form From Brief`
+ * refuses a malformed `OnSubmitMode` / `Automations` without running the Designer (#303).
+ */
+describe('readOnSubmitConfig — the params alone, before the Designer runs', () => {
+  it('reads both params with no blueprint at all', () => {
+    expect(readOnSubmitConfig('configured', '[{"actionName":"Forms: Send Confirmation Email"}]')).toEqual({
+      mode: 'Configured',
+      automations: [{ actionName: 'Forms: Send Confirmation Email' }],
+    });
+    expect(readOnSubmitConfig(undefined, null)).toEqual({});
+  });
+
+  it.each([
+    ['configured-ish', undefined],
+    [undefined, 'not json'],
+    [undefined, '[{"trigger":"OnComplete"}]'],
+    ['Legacy', '[{"actionName":"Forms: Send Confirmation Email"}]'],
+  ])('refuses %j / %j up front', (mode, automations) => {
+    expect(() => readOnSubmitConfig(mode, automations)).toThrow();
+  });
+
+  it('applies to a blueprint exactly as applyOnSubmitConfig does', () => {
+    const config = readOnSubmitConfig('Configured', '[]');
+    expect(withOnSubmitConfig(base, config)).toEqual(applyOnSubmitConfig(base, 'Configured', '[]'));
+  });
+
+  it('still refuses the pair when the Legacy half came from the blueprint itself', () => {
+    const config = readOnSubmitConfig(undefined, [{ actionName: 'Forms: Send Confirmation Email' }]);
+    expect(() => withOnSubmitConfig({ ...base, onSubmitMode: 'Legacy' }, config)).toThrow(/Legacy/);
   });
 });

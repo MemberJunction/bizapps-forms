@@ -4,3 +4,5 @@
  * host loading the package never evaluates it.
  */
 export * from './fake-provider.js';
+export * from './write-through-entity.js';
+export * from './forms-world.js';

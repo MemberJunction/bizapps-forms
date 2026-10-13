@@ -12,6 +12,7 @@ import {
   ruleInventoryFormOf,
   type EndingReach,
   type RuleInventoryForm,
+  brokenRuleRefusal,
 } from './rules-inventory';
 
 const SOURCES: ConditionalSourceQuestion[] = [
@@ -1236,5 +1237,21 @@ describe('conditionSourcesOf', () => {
     const sources = conditionSourcesOf([node('q1', 'ShortText'), node('note', 'Statement'), node('q2', 'YesNo')]);
     expect(sources.map((source) => source.id)).toEqual(['q1', 'q2']);
     expect(sources.every((source) => source !== undefined)).toBe(true);
+  });
+});
+
+describe('brokenRuleRefusal — the one wording of a rule-gate refusal (#303)', () => {
+  it('names a single broken rule in full', () => {
+    expect(brokenRuleRefusal(['Show "Age" when Q1 is Yes — Q1 no longer exists'])).toBe(
+      'Publish refused — 1 broken rule would ship with this form. Fix it and publish again: ' +
+        'Show "Age" when Q1 is Yes — Q1 no longer exists.',
+    );
+  });
+
+  it('names the first three and counts the rest, so the count is never buried', () => {
+    const message = brokenRuleRefusal(['a', 'b', 'c', 'd', 'e']);
+    expect(message).toBe(
+      'Publish refused — 5 broken rules would ship with this form. Fix them and publish again: a; b; c (and 2 more).',
+    );
   });
 });

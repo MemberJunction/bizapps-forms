@@ -49,8 +49,10 @@ export {
   type AnalyzedAnswer,
 } from './on-submit/response-analyzer-model';
 export * from './shared/action-params';
+// The blueprint schema and the Builder moved to forms-entities (contracts) and
+// forms-core-entities-server (FormAuthoringEngine) in #303; what stays here is the Designer's
+// LLM-output parsing.
 export * from './authoring/form-blueprint';
-export * from './authoring/form-blueprint-builder';
 export * from './authoring/llm-form-designer';
 export {
   GenerateFormFromBriefAction as GenerateFormAction,

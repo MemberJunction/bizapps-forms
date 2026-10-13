@@ -35,8 +35,9 @@ import {
 } from './form-status-rules.js';
 import { FORM_VERSION_ENTITY_NAME } from './FormVersionEntityServer.js';
 import { DISTRIBUTION_ENTITY_NAME } from '../magic-link/provision-runner.js';
+import { FORMS_ENTITY } from '../shared/entity-names.js';
 
-export const FORM_ENTITY_NAME = 'MJ_BizApps_Forms: Forms';
+export const FORM_ENTITY_NAME = FORMS_ENTITY.Form;
 
 /** Whether the row's provider also runs views — every server provider does. */
 function runsViews(provider: IEntityDataProvider | undefined): provider is IEntityDataProvider & IRunViewProvider {

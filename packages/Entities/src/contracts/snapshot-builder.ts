@@ -312,11 +312,26 @@ export class UnreadableColumnError extends Error {
   public readonly reason: string;
 
   constructor(column: string, reason: string) {
-    super(`Cannot publish: the ${column} cannot be read — ${reason}.`);
+    super(unreadableDraftMessage('publish', { column, reason }));
     this.name = 'UnreadableColumnError';
     this.column = column;
     this.reason = reason;
   }
+}
+
+/**
+ * What an author is told about an unreadable draft column, for the action they tried (or, for
+ * `publish`, the one being held back) — the ONE wording, used by {@link UnreadableColumnError} (the
+ * server's publish refusal) and by the builder's banner and live Preview.
+ *
+ * Composed from the column and the reason rather than by rewriting another message's text, so a
+ * change of wording in one place cannot silently break the other.
+ */
+export function unreadableDraftMessage(
+  action: 'publish' | 'preview',
+  problem: { readonly column: string; readonly reason: string },
+): string {
+  return `Cannot ${action}: the ${problem.column} cannot be read — ${problem.reason}.`;
 }
 
 /**

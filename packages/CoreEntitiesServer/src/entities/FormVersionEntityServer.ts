@@ -19,6 +19,7 @@ import {
 } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { mjBizAppsFormsFormVersionEntity } from '@mj-biz-apps/forms-entities';
+import { FORMS_ENTITY } from '../shared/entity-names.js';
 import {
   addViolations,
   changedFields,
@@ -34,7 +35,7 @@ import {
   type FormVersionStatus,
 } from './form-version-rules.js';
 
-export const FORM_VERSION_ENTITY_NAME = 'MJ_BizApps_Forms: Form Versions';
+export const FORM_VERSION_ENTITY_NAME = FORMS_ENTITY.FormVersion;
 
 @RegisterClass(BaseEntity, FORM_VERSION_ENTITY_NAME)
 export class FormVersionEntityServer extends mjBizAppsFormsFormVersionEntity {

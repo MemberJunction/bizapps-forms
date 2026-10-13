@@ -63,6 +63,11 @@ export interface FakeProviderConfig {
   formResponseCount?: number;
   /** Per-entity CanCreate for the scope check; an entity absent from the map is refused. */
   createPermissions?: CreatePermissions;
+  /**
+   * Per-entity CanUpdate, for the authoring operations' `Authorize` (which require Update on
+   * `MJ_BizApps_Forms: Forms`). An entity absent from the map is refused, like `createPermissions`.
+   */
+  updatePermissions?: Record<string, boolean>;
   /** Force a RunView failure for a given entity name (to exercise fail-closed paths). */
   failRunViewFor?: string;
   /** Force a Save() to return false for a given entity name. */
@@ -70,8 +75,10 @@ export interface FakeProviderConfig {
   /**
    * Force a generic-table entity's Save() to return false when this says so — for failing ONE row
    * of several, which is what a rollback test needs (the rows saved before it must be undone).
+   * Return a string instead of `true` to fail with that message on `LatestResult.CompleteMessage`
+   * — how a test stands in for a specific database error, such as a unique-index violation.
    */
-  failSaveWhen?: (entityName: string, values: Record<string, unknown>) => boolean;
+  failSaveWhen?: (entityName: string, values: Record<string, unknown>) => boolean | string;
   /**
    * Existing FormResponse rows the session-response lookup should return. The fake filters
    * these by the requested `Status` (parsed out of the ExtraFilter). Used to exercise dedupe
@@ -307,9 +314,9 @@ export function fakeEntityId(entityName: string): string {
   return id;
 }
 
-/** Build a fake EntityInfo whose GetUserPermisions reflects the configured CanCreate. */
-function makeFakeEntityInfo(entityName: string, canCreate: boolean): EntityInfo {
-  const permissions = { CanCreate: canCreate, CanRead: true, CanUpdate: false, CanDelete: false } as EntityUserPermissionInfo;
+/** Build a fake EntityInfo whose GetUserPermisions reflects the configured CanCreate / CanUpdate. */
+function makeFakeEntityInfo(entityName: string, canCreate: boolean, canUpdate: boolean): EntityInfo {
+  const permissions = { CanCreate: canCreate, CanRead: true, CanUpdate: canUpdate, CanDelete: false } as EntityUserPermissionInfo;
   const info = {
     ID: fakeEntityId(entityName),
     Name: entityName,
@@ -417,7 +424,11 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
       return makeFakeEntity(entityName, saved, deleted, config.failSaveFor === entityName, responseStore);
     },
     EntityByName: (entityName: string) =>
-      makeFakeEntityInfo(entityName, config.createPermissions?.[entityName] ?? false),
+      makeFakeEntityInfo(
+        entityName,
+        config.createPermissions?.[entityName] ?? false,
+        config.updatePermissions?.[entityName] ?? false,
+      ),
     SupportsEntityTransactions: config.noTransactions !== true,
     BeginEntityTransaction: async (): Promise<EntityTransactionScope> => tx.begin(),
     get TransactionDepth(): number {
@@ -520,7 +531,7 @@ interface TableEntityHost {
   deleted: SavedRecord[];
   tx: FakeTransactionLog;
   failSave: boolean;
-  failSaveWhen?: (entityName: string, values: Record<string, unknown>) => boolean;
+  failSaveWhen?: (entityName: string, values: Record<string, unknown>) => boolean | string;
 }
 
 /**
@@ -554,7 +565,12 @@ function makeTableEntity(entityName: string, table: FakeRow[], row: FakeRow | nu
         return found !== null;
       },
       Save: async () => {
-        if (host.failSave || host.failSaveWhen?.(entityName, { ...values }) === true) {
+        const forced = host.failSaveWhen?.(entityName, { ...values });
+        if (typeof forced === 'string') {
+          record.LatestResult = { CompleteMessage: forced };
+          return false;
+        }
+        if (host.failSave || forced === true) {
           return false;
         }
         if (current === null) {

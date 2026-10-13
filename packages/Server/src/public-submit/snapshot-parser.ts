@@ -11,7 +11,11 @@
  */
 import { LogError } from '@memberjunction/core';
 import {
+  BindingConfigError,
   parseConditionalRule,
+  parseFieldMappings,
+  parseIdentityRule,
+  parseMergePolicy,
   parseFormSettings,
   parseQuestionScoring,
   parseValidationRule,
@@ -22,6 +26,7 @@ import {
   type FormAutomationTrigger,
   type FormRenderMode,
   type FormScreenType,
+  type PublishedAutomationBinding,
   type PublishedFormAutomation,
   type FormSettings,
   type FormStyleTokens,
@@ -228,7 +233,7 @@ function parseAutomation(obj: JSONObject | undefined): PublishedFormAutomation |
   if (!id || name === undefined || !targetType || !trigger || !executionMode || displayOrder === undefined) {
     return undefined;
   }
-  return {
+  const automation: PublishedFormAutomation = {
     id,
     name,
     targetType,
@@ -242,6 +247,50 @@ function parseAutomation(obj: JSONObject | undefined): PublishedFormAutomation |
     continueOnError: asBoolean(obj.continueOnError) ?? true,
     isActive: asBoolean(obj.isActive) ?? true,
   };
+  const binding = parseOptionalBinding(obj.binding, id);
+  if (binding) {
+    automation.binding = binding;
+  }
+  return automation;
+}
+
+/**
+ * The binding settings a #303 publish froze beside an `EntityBinding` automation, or `undefined`.
+ *
+ * Absent on every snapshot published before #303, which is a normal state, not an error. A block
+ * that is present but unreadable is dropped and logged rather than failing the snapshot — the same
+ * posture as the rest of the automation parse, since a side effect's config must not take the form
+ * down for respondents. Read with the executor's own parsers, so a block that parses here is one
+ * the executor can run.
+ */
+function parseOptionalBinding(value: JSONValue | undefined, automationId: string): PublishedAutomationBinding | undefined {
+  const obj = asObject(value);
+  if (!obj) {
+    return undefined;
+  }
+  const targetEntityName = asString(obj.targetEntityName);
+  const status = obj.status === 'Active' || obj.status === 'Disabled' ? obj.status : undefined;
+  try {
+    if (!targetEntityName || !status) {
+      throw new BindingConfigError('targetEntityName and status are required.');
+    }
+    return {
+      targetEntityName,
+      fieldMappings: parseFieldMappings(obj.fieldMappings),
+      identityRule: parseIdentityRule(obj.identityRule),
+      mergePolicy: parseMergePolicy(obj.mergePolicy),
+      status,
+    };
+  } catch (err) {
+    if (!(err instanceof BindingConfigError)) {
+      throw err;
+    }
+    LogError(
+      `[Forms] automation ${automationId} carries binding settings this server cannot read; they were ` +
+        `dropped from the parsed snapshot. ${err.message}`,
+    );
+    return undefined;
+  }
 }
 
 function parseTargetType(value: JSONValue | undefined): FormAutomationTargetType | undefined {

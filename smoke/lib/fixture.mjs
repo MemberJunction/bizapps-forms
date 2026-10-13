@@ -20,6 +20,7 @@
  * say which form it looked at and what it wanted from it, because the alternative — as the two
  * failures above show — is a message that sends people to the wrong bug.
  */
+import { AUTHORED_BINDING_FIELDS } from '@mj-biz-apps/forms-entities';
 import { requireDbEnv, sql, sqlWide } from './sqlcmd.mjs';
 
 /** A form's question, as the smoke fixtures need to see it. */
@@ -163,6 +164,22 @@ export function resolveFormId(slug) {
     );
   }
   return formId;
+}
+
+/**
+ * A form's `FormEntityBinding` rows exactly as publish reads them — the `bindings` argument
+ * `buildPublishedAutomations` requires since #303, which freezes each binding's settings beside the
+ * automation that runs it and refuses a binding automation whose binding it was not given.
+ *
+ * The column list IS `AUTHORED_BINDING_FIELDS`, and `FOR JSON` keeps the types, for the reasons
+ * `readAuthoredAutomationRow` in `seed-binding-smoke.mjs` gives.
+ */
+export function readAuthoredBindingRows(formId) {
+  const json = sqlWide(
+    `SET NOCOUNT ON; SELECT ${AUTHORED_BINDING_FIELDS.join(', ')} FROM __mj_BizAppsForms.FormEntityBinding ` +
+      `WHERE FormID='${escape(formId)}' FOR JSON PATH, INCLUDE_NULL_VALUES;`,
+  ).trim();
+  return JSON.parse(json || '[]');
 }
 
 /**

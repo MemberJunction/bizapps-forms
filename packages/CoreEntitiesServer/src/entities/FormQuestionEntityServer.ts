@@ -27,8 +27,9 @@ import { BaseEntity, LogError, type EntityDeleteOptions } from '@memberjunction/
 import { RegisterClass } from '@memberjunction/global';
 import { mjBizAppsFormsFormQuestionEntity } from '@mj-biz-apps/forms-entities';
 import { refuse } from './entity-refusal.js';
+import { FORMS_ENTITY } from '../shared/entity-names.js';
 
-export const FORM_QUESTION_ENTITY_NAME = 'MJ_BizApps_Forms: Form Questions';
+export const FORM_QUESTION_ENTITY_NAME = FORMS_ENTITY.FormQuestion;
 
 @RegisterClass(BaseEntity, FORM_QUESTION_ENTITY_NAME)
 export class FormQuestionEntityServer extends mjBizAppsFormsFormQuestionEntity {

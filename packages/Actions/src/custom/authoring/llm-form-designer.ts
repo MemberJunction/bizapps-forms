@@ -18,7 +18,8 @@ import { AIEngine } from '@memberjunction/aiengine';
 import { AIPromptParams } from '@memberjunction/ai-core-plus';
 import { AIPromptRunner } from '@memberjunction/ai-prompts';
 import type { UserInfo } from '@memberjunction/core';
-import { parseFormBlueprint, type FormBlueprint } from './form-blueprint';
+import type { FormBlueprint } from '@mj-biz-apps/forms-entities';
+import { parseFormBlueprint } from './form-blueprint';
 
 /**
  * Data passed to the Form Designer AI Prompt's template. `Brief` is the user's

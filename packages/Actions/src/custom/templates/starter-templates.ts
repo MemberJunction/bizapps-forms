@@ -17,8 +17,8 @@ import {
   starterTemplateInfo,
   type StarterTemplateInfo,
   type StarterTemplateKey,
+  type FormBlueprint,
 } from '@mj-biz-apps/forms-entities';
-import type { FormBlueprint } from '../authoring/form-blueprint';
 
 /** A gallery entry: the catalogue's display metadata plus the blueprint to instantiate. */
 export interface StarterTemplate extends StarterTemplateInfo {

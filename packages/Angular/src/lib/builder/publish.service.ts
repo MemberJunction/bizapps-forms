@@ -2,8 +2,10 @@ import { Injectable } from '@angular/core';
 import { Metadata, RunView, LogError, LogStatus, type BaseEntity, type UserInfo } from '@memberjunction/core';
 import {
   AUTHORED_AUTOMATION_FIELDS,
-  buildPublishedAutomations,
+  AUTHORED_BINDING_FIELDS,
+  tryBuildPublishedAutomations,
   type AuthoredAutomationRow,
+  type AuthoredBindingRow,
   type mjBizAppsFormsFormEntity,
   type mjBizAppsFormsFormStyleEntity,
   type mjBizAppsFormsFormVersionEntity,
@@ -13,6 +15,7 @@ import {
 } from '@mj-biz-apps/forms-entities';
 import {
   brokenRuleLines,
+  brokenRuleRefusal,
   readStoredFormSettings,
   tryBuildPublishedDefinition,
 } from '@mj-biz-apps/forms-entities/contracts';
@@ -66,30 +69,6 @@ export interface PublishResult {
    * never about rules" are different answers, and `[]` reads as the first.
    */
   brokenRules?: readonly string[];
-}
-
-/**
- * How many broken rules a refusal names before it stops listing them.
- *
- * The message lands in one line of the toolbar's status text, so an uncapped list on a form with
- * thirty broken rules is a paragraph nobody reads — and the count, which is the part that says
- * how much work is waiting, would be buried in it. Three is enough to recognise the problem; the
- * canvas badges carry every one of them against the item it is about, which is where an author
- * goes to fix them anyway.
- */
-const MAX_NAMED_BROKEN_RULES = 3;
-
-/** Why the publish was refused, and which rules to go and fix. */
-function brokenRuleRefusal(broken: readonly string[]): string {
-  const named = broken.slice(0, MAX_NAMED_BROKEN_RULES);
-  const unnamed = broken.length - named.length;
-  const one = broken.length === 1;
-  const count = one ? '1 broken rule' : `${broken.length} broken rules`;
-  const rest = unnamed > 0 ? ` (and ${unnamed} more)` : '';
-  return (
-    `Publish refused — ${count} would ship with this form. ` +
-    `${one ? 'Fix it' : 'Fix them'} and publish again: ${named.join('; ')}${rest}.`
-  );
 }
 
 /**
@@ -402,21 +381,44 @@ export class PublishService {
 
   public async loadAutomations(formId: string): Promise<PublishedFormAutomation[] | null> {
     const rv = new RunView();
-    const result = await rv.RunView<AuthoredAutomationRow>(
-      {
-        EntityName: FORMS_ENTITY.FormAutomation,
-        ExtraFilter: `FormID='${formId}'`,
-        OrderBy: 'DisplayOrder ASC',
-        Fields: [...AUTHORED_AUTOMATION_FIELDS],
-        ResultType: 'simple',
-      },
+    const [automations, bindings] = await rv.RunViews(
+      [
+        {
+          EntityName: FORMS_ENTITY.FormAutomation,
+          ExtraFilter: `FormID=${quoteSqlString(formId)}`,
+          OrderBy: 'DisplayOrder ASC',
+          Fields: [...AUTHORED_AUTOMATION_FIELDS],
+          ResultType: 'simple',
+        },
+        // The bindings ride in the snapshot beside the automations that run them (#303), so the
+        // draft has to carry them too or every form with a binding step would read as changed.
+        {
+          EntityName: FORMS_ENTITY.FormEntityBinding,
+          ExtraFilter: `FormID=${quoteSqlString(formId)}`,
+          Fields: [...AUTHORED_BINDING_FIELDS],
+          ResultType: 'simple',
+        },
+      ],
       this.user,
     );
-    if (!result.Success) {
-      LogError(`Forms publish: could not load automations for form ${formId}: ${result.ErrorMessage}`);
+    if (!automations?.Success || !bindings?.Success) {
+      LogError(
+        `Forms publish: could not load automations for form ${formId}: ` +
+          `${automations?.ErrorMessage || bindings?.ErrorMessage || 'no result'}`,
+      );
       return null;
     }
-    return buildPublishedAutomations(result.Results ?? []);
+    const built = tryBuildPublishedAutomations(
+      (automations.Results ?? []) as AuthoredAutomationRow[],
+      (bindings.Results ?? []) as AuthoredBindingRow[],
+    );
+    if (!built.ok) {
+      // "We cannot read them" rather than "there are none", exactly as for a failed read: the
+      // builder shows the automations as unknown and publish refuses with the column named.
+      LogError(`Forms publish: form ${formId}: ${built.error.message}`);
+      return null;
+    }
+    return built.automations;
   }
 
   /**

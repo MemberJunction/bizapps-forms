@@ -219,20 +219,6 @@ export function draftDiffers(publishedFingerprint: string | null, draft: DraftCo
   return draft.kind === 'unreadable' || draft.fingerprint !== publishedFingerprint;
 }
 
-/**
- * What the author is told about an unreadable draft column, for the action they tried (or, for
- * `publish`, the one the toolbar is holding back).
- *
- * Composed from the column and the reason rather than by rewriting another message's text, so a
- * change of wording in one place cannot silently break the other.
- */
-export function unreadableDraftMessage(
-  action: 'publish' | 'preview',
-  problem: { readonly column: string; readonly reason: string },
-): string {
-  return `Cannot ${action}: the ${problem.column} cannot be read — ${problem.reason}.`;
-}
-
 /** What the publish control should offer the author. */
 export type PublishControlState = 'publish' | 'update' | 'current';
 

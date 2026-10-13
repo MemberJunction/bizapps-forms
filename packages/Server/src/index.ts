@@ -13,8 +13,14 @@
 import '@mj-biz-apps/forms-entities';
 import '@mj-biz-apps/forms-actions';
 
-// Server-side entity subclasses (invariants for every writer) — importing registers them.
-import { LoadFormsEntityServerSubclasses, MagicLinkMinterRegistry } from '@mj-biz-apps/forms-core-entities-server';
+// Server-side entity subclasses (invariants for every writer) and Remote Operation server subclasses
+// (`Forms.<Name>`) — importing registers them. The operations register over the CodeGen-emitted
+// bases in forms-entities, which is one more reason that package must load first.
+import {
+  LoadFormsEntityServerSubclasses,
+  LoadPublishFormOperation,
+  MagicLinkMinterRegistry,
+} from '@mj-biz-apps/forms-core-entities-server';
 
 // Concrete magic-link invite minter, registered into the entity-hook seam so the
 // FormDistribution lifecycle hook can provision anonymous links via MJ core's
@@ -117,9 +123,10 @@ RESOLVER_PATHS.push(resolve(__dirname, 'distribution-claims/*Resolver.{js,ts}'))
  * the module is fully evaluated.
  */
 export function LoadBizAppsFormsServer(): void {
-    // Static imports above ensure all classes are registered; this reference keeps a bundler from
-    // dropping the entity server subclasses as unused.
+    // Static imports above ensure all classes are registered; these references keep a bundler from
+    // dropping the entity server subclasses and the operation server subclasses as unused.
     LoadFormsEntityServerSubclasses();
+    LoadPublishFormOperation();
     // Register the concrete magic-link minter so the FormDistribution hook can provision anonymous
     // links. Idempotent: re-registering simply replaces the instance.
     MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());

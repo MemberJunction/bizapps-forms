@@ -2,8 +2,8 @@
  * No-AI authoring action: **Forms: Create Form From Template**.
  *
  * Instantiates one of the {@link STARTER_TEMPLATES} into a live Draft form via the
- * same deterministic Builder the AI path uses. This is the "easy setup" path for
- * users who don't want to write a brief.
+ * same deterministic Builder the AI path uses (`FormAuthoringEngine.BuildFromBlueprint`, one
+ * transaction). This is the "easy setup" path for users who don't want to write a brief.
  *
  * Input params:
  *   - `TemplateKey` (string, required) — one of the starter gallery keys
@@ -17,20 +17,22 @@
  *      inference, so an existing caller's forms are unaffected.
  *   - `Automations` (JSON array, optional) — the on-submit steps this form runs, in order, each
  *      naming an MJ Action. Supplying it implies `Configured`.
- * Output params: `FormID`, `FormVersionID`, `PageCount`, `QuestionCount`, `OptionCount`,
- * `AutomationCount`.
+ *   - `PublishImmediately` (boolean, optional, default false) — publish the form in the same
+ *      transaction, so the caller gets a published form or nothing (#303).
+ * Output params: `FormID`, `PageCount`, `QuestionCount`, `OptionCount`, `AutomationCount`.
  */
 import { BaseAction } from '@memberjunction/actions';
 import type { ActionResultSimple, RunActionParams } from '@memberjunction/actions-base';
 import { RegisterClass } from '@memberjunction/global';
-import { buildFormFromBlueprint, FormPersistError } from '../authoring/form-blueprint-builder';
-import type { FormBlueprint } from '../authoring/form-blueprint';
-import { getStringParam, setOutputParam } from '../shared/action-params';
+import type { FormBlueprint } from '@mj-biz-apps/forms-entities';
+import { buildForm, describeBuilt, onActionProvider, prepareAuthoring } from '../authoring/persist-blueprint';
+import { getStringParam } from '../shared/action-params';
 import { STARTER_TEMPLATES, getStarterTemplate } from './starter-templates';
-import { applyOnSubmitConfig, OnSubmitConfigError } from '../authoring/on-submit-config';
-import { findParam } from '../shared/action-params';
+import { OnSubmitConfigError, withOnSubmitConfig } from '../authoring/on-submit-config';
 
-@RegisterClass(BaseAction, 'Forms: Create Form From Template')
+const ACTION_NAME = 'Forms: Create Form From Template';
+
+@RegisterClass(BaseAction, ACTION_NAME)
 export class CreateFormFromTemplateAction extends BaseAction {
   protected async InternalRunAction(params: RunActionParams): Promise<ActionResultSimple> {
     const key = getStringParam(params, 'TemplateKey');
@@ -44,37 +46,29 @@ export class CreateFormFromTemplateAction extends BaseAction {
       return fail(`Unknown TemplateKey '${key}'. Known templates: ${known}.`, 'UNKNOWN_TEMPLATE');
     }
 
-    let blueprint = withName(template.blueprint, getStringParam(params, 'Name'));
+    const prepared = prepareAuthoring(params, ACTION_NAME);
+    if (!prepared.ok) {
+      return prepared.result;
+    }
+    let blueprint: FormBlueprint;
     try {
-      blueprint = applyOnSubmitConfig(
-        blueprint,
-        getStringParam(params, 'OnSubmitMode'),
-        findParam(params, 'Automations')?.Value,
-      );
+      blueprint = withOnSubmitConfig(withName(template.blueprint, getStringParam(params, 'Name')), prepared.value.onSubmit);
     } catch (error) {
-      // Before anything is written. A caller that mis-specified its on-submit steps must get an
-      // error, not a form that silently runs the four built-ins it was trying to replace.
       const code = error instanceof OnSubmitConfigError ? 'INVALID_ON_SUBMIT_CONFIG' : 'FAILED';
       return fail(asText(error), code);
     }
 
-    try {
-      const built = await buildFormFromBlueprint(blueprint, params.ContextUser, getStringParam(params, 'OwnerUserID'));
-      setOutputParam(params, 'FormID', built.formId);
-      setOutputParam(params, 'FormVersionID', built.formVersionId);
-      setOutputParam(params, 'PageCount', built.pageCount);
-      setOutputParam(params, 'QuestionCount', built.questionCount);
-      setOutputParam(params, 'OptionCount', built.optionCount);
-      setOutputParam(params, 'AutomationCount', built.automationCount);
+    return onActionProvider(params, ACTION_NAME, async (provider) => {
+      const built = await buildForm(params, provider, blueprint, prepared.value, ACTION_NAME);
+      if (!built.ok) {
+        return built.result;
+      }
       return {
         Success: true,
         ResultCode: 'SUCCESS',
-        Message: `Created draft form "${blueprint.name}" from template "${template.key}".`,
+        Message: `Created form "${blueprint.name}" from template "${template.key}", ${describeBuilt(built.value)}.`,
       };
-    } catch (error) {
-      const code = error instanceof FormPersistError ? 'PERSIST_FAILED' : 'FAILED';
-      return fail(`Failed to create form from template: ${asText(error)}`, code);
-    }
+    });
   }
 }
 

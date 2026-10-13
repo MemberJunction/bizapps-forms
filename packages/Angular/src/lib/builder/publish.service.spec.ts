@@ -35,6 +35,32 @@ interface AutomationRow {
 }
 
 const automationRows: AutomationRow[] = [];
+
+/** Rows the fake RunView hands back for the `Form Entity Bindings` query. */
+interface BindingRow {
+  ID: string;
+  Name: string;
+  TargetEntityName: string;
+  FieldMappings: string;
+  IdentityRule: string;
+  MergePolicy: string | null;
+  Status: 'Active' | 'Disabled';
+}
+
+const bindingRows: BindingRow[] = [];
+
+/** The binding the default automation row runs. */
+function bindingRow(): BindingRow {
+  return {
+    ID: 'binding-1',
+    Name: 'Person',
+    TargetEntityName: 'MJ_BizApps_Common: People',
+    FieldMappings: JSON.stringify({ version: 1, fields: [{ targetField: 'Email', source: { kind: 'question', questionId: 'q-email' } }] }),
+    IdentityRule: JSON.stringify({ mode: 'AlwaysCreate' }),
+    MergePolicy: null,
+    Status: 'Active',
+  };
+}
 /** What `Form.Settings` holds IN THE DATABASE — deliberately not what the in-memory tree carries. */
 let storedSettings: string | null = null;
 let formsReadSucceeds = true;
@@ -159,6 +185,9 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
       if (params.EntityName === 'MJ_BizApps_Forms: Form Automations') {
         return { Success: true, Results: automationRows };
       }
+      if (params.EntityName === 'MJ_BizApps_Forms: Form Entity Bindings') {
+        return { Success: true, Results: bindingRows };
+      }
       if (params.EntityName === 'MJ_BizApps_Forms: Forms') {
         if (!formsReadSucceeds) {
           return { Success: false, Results: [] };
@@ -175,6 +204,11 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
       }
       const highest = versionRows.map((r) => r.VersionNumber).sort((a, b) => b - a)[0];
       return { Success: true, Results: highest === undefined ? [] : [{ VersionNumber: highest }] };
+    }
+    public async RunViews(
+      params: { EntityName: string; ResultType?: string }[],
+    ): Promise<{ Success: boolean; Results: unknown[] }[]> {
+      return Promise.all(params.map((p) => this.RunView(p)));
     }
   }
   return { ...actual, Metadata, RunView, LogError: () => {}, LogStatus: () => {} };
@@ -205,6 +239,8 @@ function publishedSnapshot(): PublishedFormDefinition {
 /** Everything the fakes carry between tests. */
 function resetWorld(): void {
   automationRows.length = 0;
+  bindingRows.length = 0;
+  bindingRows.push(bindingRow());
   queriedEntities.length = 0;
   versionRows.length = 0;
   createdVersions.length = 0;
@@ -258,8 +294,29 @@ describe('PublishService — automations in the snapshot', () => {
         displayOrder: 1,
         continueOnError: true,
         isActive: true,
+        // Frozen beside the automation since #303, so the response runs this version's mappings.
+        binding: {
+          targetEntityName: 'MJ_BizApps_Common: People',
+          fieldMappings: {
+            version: 1,
+            fields: [{ targetField: 'Email', source: { kind: 'question', questionId: 'q-email' }, required: false }],
+          },
+          identityRule: { mode: 'AlwaysCreate', match: [], scope: [], onMultipleMatch: 'Oldest', onMissingIdentityValue: 'Skip' },
+          mergePolicy: { default: 'neverBlank', fields: {} },
+          status: 'Active',
+        },
       },
     ]);
+  });
+
+  it('refuses to publish a binding step whose binding cannot be read, naming it (#303)', async () => {
+    reset([row({})]);
+    bindingRows.length = 0;
+
+    const result = await new PublishService().publish(tree());
+
+    expect(result.success).toBe(false);
+    expect(createdVersions).toHaveLength(0);
   });
 
   it('publishes an empty array for a form with no automations, so the legacy path still applies', async () => {

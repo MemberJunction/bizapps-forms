@@ -71,6 +71,7 @@ import {
   type RuleBadge,
   type RuleEntry,
   type RuleInventoryForm,
+  unreadableDraftMessage,
 } from '@mj-biz-apps/forms-entities/contracts';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
 import { defaultEndingId } from './default-ending';
@@ -94,7 +95,6 @@ import {
   draftDiffers,
   storedSnapshotFingerprint,
   publishControlState,
-  unreadableDraftMessage,
   type DraftComparand,
   type PublishControlState,
 } from './publish-fingerprint';

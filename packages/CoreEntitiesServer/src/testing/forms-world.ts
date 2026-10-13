@@ -1,0 +1,186 @@
+/**
+ * The emulated Forms database the engine, operation and authoring-Action specs run against: the shared fake provider, its tables
+ * seeded with one draft form, and the REAL `FormEntityServer` / `FormVersionEntityServer` over every
+ * Form and Form Version row (see `testing/write-through-entity.ts`) — so each save the engine makes
+ * passes through the same invariants a production save does.
+ *
+ * A spec that imports this must first mock `@mj-biz-apps/forms-entities` so the two generated bases
+ * are `WriteThroughEntityBase` (the mock has to live in the spec file; Vitest hoists it there). The
+ * subclass constructors are passed in rather than imported here for the same reason: they must be
+ * the classes evaluated AFTER that mock.
+ */
+import type { UserInfo } from '@memberjunction/core';
+import { makeFakeProvider, type FakeProvider, type FakeProviderConfig, type FakeRow } from './fake-provider.js';
+import { writeThroughEntities, type WriteThroughEntityBase } from './write-through-entity.js';
+
+export const FORMS = 'MJ_BizApps_Forms: Forms';
+export const VERSIONS = 'MJ_BizApps_Forms: Form Versions';
+export const PAGES = 'MJ_BizApps_Forms: Form Pages';
+export const QUESTIONS = 'MJ_BizApps_Forms: Form Questions';
+export const OPTIONS = 'MJ_BizApps_Forms: Form Question Options';
+export const SCREENS = 'MJ_BizApps_Forms: Form Screens';
+export const STYLES = 'MJ_BizApps_Forms: Form Styles';
+export const AUTOMATIONS = 'MJ_BizApps_Forms: Form Automations';
+export const BINDINGS = 'MJ_BizApps_Forms: Form Entity Bindings';
+export const ACTIONS = 'MJ: Actions';
+
+/** The columns each real subclass loads from its row — every one the engine or the rules read. */
+export const FORM_COLUMNS = [
+  'ID', 'Name', 'Description', 'Status', 'RenderMode', 'Settings', 'IsTemplate', 'StyleID', 'OwnerUserID',
+] as const;
+export const VERSION_COLUMNS = ['ID', 'FormID', 'VersionNumber', 'Status', 'PublishedAt', 'DefinitionSnapshot'] as const;
+
+export const AUTHOR = {
+  ID: 'author-1',
+  Name: 'Author',
+  IsMagicLinkAnonymous: false,
+  MagicLinkScope: undefined,
+} as unknown as UserInfo;
+
+/** The constructors of the real subclasses, as the spec evaluated them after its mock. */
+export interface ServerSubclasses {
+  FormEntityServer: new () => WriteThroughEntityBase;
+  FormVersionEntityServer: new () => WriteThroughEntityBase;
+}
+
+export function formRow(overrides: Partial<FakeRow> = {}): FakeRow {
+  return {
+    ID: 'form-1',
+    Name: 'Intake',
+    Description: null,
+    Status: 'Draft',
+    RenderMode: 'Scroll',
+    Settings: null,
+    IsTemplate: false,
+    StyleID: null,
+    OwnerUserID: null,
+    ...overrides,
+  };
+}
+
+export function versionRow(id: string, versionNumber: number, status: string, formId = 'form-1'): FakeRow {
+  return {
+    ID: id,
+    FormID: formId,
+    VersionNumber: versionNumber,
+    Status: status,
+    PublishedAt: status === 'Draft' ? null : new Date('2026-01-01T00:00:00Z'),
+    DefinitionSnapshot: status === 'Draft' ? null : JSON.stringify({ formVersionId: id }),
+  };
+}
+
+export function pageRow(overrides: Partial<FakeRow> & { ID: string }): FakeRow {
+  return {
+    FormID: 'form-1',
+    Title: null,
+    Description: null,
+    DisplayOrder: 0,
+    IsPartialSubmitPoint: false,
+    ConditionalRule: null,
+    ...overrides,
+  };
+}
+
+export function questionRow(overrides: Partial<FakeRow> & { ID: string }): FakeRow {
+  return {
+    FormID: 'form-1',
+    PageID: 'p1',
+    QuestionType: 'ShortText',
+    Prompt: overrides.ID,
+    HelpText: null,
+    IsRequired: false,
+    DisplayOrder: 0,
+    ConditionalRule: null,
+    ValidationRule: null,
+    ScoringConfig: null,
+    Settings: null,
+    ...overrides,
+  };
+}
+
+export function optionRow(overrides: Partial<FakeRow> & { ID: string; QuestionID: string }): FakeRow {
+  return { Label: overrides.ID, Value: null, DisplayOrder: 0, IsDefault: false, ImageURL: null, MatrixAxis: null, ...overrides };
+}
+
+export function automationRow(overrides: Partial<FakeRow> & { ID: string }): FakeRow {
+  return {
+    FormID: 'form-1',
+    Name: overrides.ID,
+    TargetType: 'Action',
+    ActionID: 'action-1',
+    AgentID: null,
+    BindingID: null,
+    Trigger: 'OnComplete',
+    ExecutionMode: 'Sync',
+    DisplayOrder: 1,
+    ConditionalRule: null,
+    ContinueOnError: true,
+    IsActive: true,
+    ...overrides,
+  };
+}
+
+export function bindingRow(overrides: Partial<FakeRow> & { ID: string }): FakeRow {
+  return {
+    FormID: 'form-1',
+    Name: overrides.ID,
+    TargetEntityName: 'MJ_BizApps_Common: People',
+    FieldMappings: JSON.stringify({ version: 1, fields: [{ targetField: 'Email', source: { kind: 'question', questionId: 'q1' } }] }),
+    IdentityRule: JSON.stringify({ mode: 'AlwaysCreate' }),
+    MergePolicy: null,
+    Status: 'Active',
+    ...overrides,
+  };
+}
+
+/** A draft with one page, a text question and a choice question with two options. */
+export function draftTables(): Record<string, FakeRow[]> {
+  return {
+    [FORMS]: [formRow()],
+    [VERSIONS]: [],
+    [PAGES]: [pageRow({ ID: 'p1', Title: 'About you' })],
+    [QUESTIONS]: [
+      questionRow({ ID: 'q1', Prompt: 'Your name', IsRequired: true }),
+      questionRow({ ID: 'q2', QuestionType: 'SingleChoice', Prompt: 'Colour', DisplayOrder: 1 }),
+    ],
+    [OPTIONS]: [
+      optionRow({ ID: 'o2', QuestionID: 'q2', Label: 'Blue', DisplayOrder: 1 }),
+      optionRow({ ID: 'o1', QuestionID: 'q2', Label: 'Red', DisplayOrder: 0 }),
+    ],
+    [SCREENS]: [],
+    [STYLES]: [],
+    [AUTOMATIONS]: [],
+    [BINDINGS]: [],
+    [ACTIONS]: [],
+  };
+}
+
+/**
+ * The fake provider over `tables`, with every Form and Form Version as its real server subclass.
+ * `config` is merged last, so a spec can add failures, scripts or `noTransactions`.
+ */
+export function formsWorld(
+  subclasses: ServerSubclasses,
+  tables: Record<string, FakeRow[]> = draftTables(),
+  config: Partial<FakeProviderConfig> = {},
+): FakeProvider {
+  let world: FakeProvider | undefined;
+  world = makeFakeProvider({
+    tables,
+    wrapEntity: writeThroughEntities(
+      {
+        [FORMS]: { construct: () => new subclasses.FormEntityServer(), columns: FORM_COLUMNS },
+        [VERSIONS]: { construct: () => new subclasses.FormVersionEntityServer(), columns: VERSION_COLUMNS },
+      },
+      () => world?.provider,
+      AUTHOR,
+    ),
+    ...config,
+  });
+  return world;
+}
+
+/** The rows of one table, as the "database" holds them now. */
+export function rowsOf(world: FakeProvider, entityName: string): FakeRow[] {
+  return world.tables[entityName] ?? [];
+}

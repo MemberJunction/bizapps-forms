@@ -14,9 +14,10 @@ import { LogError, LogStatus, type UserInfo } from '@memberjunction/core';
 import type { MagicLinkProvisioningConfig } from './config.js';
 import { decideProvisioning, resolveExpiry, type DistributionProvisioningState, type ProvisioningReason } from './provisioning-decision.js';
 import type { IAnonymousMagicLinkMinter, InviteWriteHost } from './minter.js';
+import { FORMS_ENTITY } from '../shared/entity-names.js';
 
 /** Entity name of the distribution itself — the resource the invite is scoped to. */
-export const DISTRIBUTION_ENTITY_NAME = 'MJ_BizApps_Forms: Form Distributions';
+export const DISTRIBUTION_ENTITY_NAME = FORMS_ENTITY.FormDistribution;
 
 /** Inputs the runner needs from the saved distribution record. */
 export interface ProvisionContext extends DistributionProvisioningState {

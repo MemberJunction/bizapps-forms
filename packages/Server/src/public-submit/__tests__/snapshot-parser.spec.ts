@@ -62,6 +62,59 @@ describe('parsePublishedDefinition', () => {
         isActive: true,
       });
     });
+
+    /** A binding automation as a #303 publish writes it — settings frozen beside it. */
+    function bindingSnapshot(binding: unknown): string {
+      const def = JSON.parse(JSON.stringify(makeDefinition()));
+      def.automations = [
+        {
+          id: 'auto-b',
+          name: 'Write applicant',
+          targetType: 'EntityBinding',
+          bindingId: 'bind-1',
+          trigger: 'OnComplete',
+          executionMode: 'Sync',
+          displayOrder: 1,
+          continueOnError: true,
+          isActive: true,
+          ...(binding === undefined ? {} : { binding }),
+        },
+      ];
+      return JSON.stringify(def);
+    }
+
+    const frozenBinding = {
+      targetEntityName: 'MJ_BizApps_Common: People',
+      fieldMappings: { version: 1, fields: [{ targetField: 'Email', source: { kind: 'question', questionId: 'q-email' }, required: false }] },
+      identityRule: { mode: 'AlwaysCreate', match: [], scope: [], onMultipleMatch: 'Oldest', onMissingIdentityValue: 'Skip' },
+      mergePolicy: { default: 'neverBlank', fields: {} },
+      status: 'Active',
+    };
+
+    it('carries the frozen binding block through the parse (#303)', () => {
+      const parsed = parsePublishedDefinition(bindingSnapshot(frozenBinding));
+
+      expect(parsed?.automations[0].binding).toEqual(frozenBinding);
+    });
+
+    it('still reads a snapshot published before the binding block existed', () => {
+      const parsed = parsePublishedDefinition(bindingSnapshot(undefined));
+
+      expect(parsed?.automations).toHaveLength(1);
+      expect(parsed?.automations[0].bindingId).toBe('bind-1');
+      expect(parsed?.automations[0]).not.toHaveProperty('binding');
+    });
+
+    it('drops a binding block it cannot read, keeping the automation and the form', () => {
+      // The same posture as the rest of the automation parse: a side effect's config must never
+      // take the form down for respondents. Dispatch reads the live binding row today.
+      const parsed = parsePublishedDefinition(
+        bindingSnapshot({ ...frozenBinding, identityRule: { mode: 'Sometimes' } }),
+      );
+
+      expect(parsed?.automations).toHaveLength(1);
+      expect(parsed?.automations[0]).not.toHaveProperty('binding');
+    });
   });
 });
 

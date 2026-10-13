@@ -18,7 +18,13 @@
  *   set -a && . ./.env && set +a && node smoke/automation-semantics-path.mjs
  */
 import { AUTHORED_AUTOMATION_FIELDS, buildPublishedAutomations } from '@mj-biz-apps/forms-entities';
-import { buildAnswers, publishedSnapshotAutomations, resolveFormId, resolveSeededSlug } from './lib/fixture.mjs';
+import {
+  buildAnswers,
+  publishedSnapshotAutomations,
+  readAuthoredBindingRows,
+  resolveFormId,
+  resolveSeededSlug,
+} from './lib/fixture.mjs';
 import { sql, sqlWide } from './lib/sqlcmd.mjs';
 import { sessionIdFor } from './lib/session.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
@@ -49,7 +55,7 @@ function republish() {
   const json = sqlWide(`SET NOCOUNT ON; SELECT ${columns} FROM __mj_BizAppsForms.FormAutomation
     WHERE FormID='${formId}' FOR JSON PATH, INCLUDE_NULL_VALUES;`);
   const rows = JSON.parse(json || '[]');
-  const published = JSON.stringify(buildPublishedAutomations(rows)).replace(/'/g, "''");
+  const published = JSON.stringify(buildPublishedAutomations(rows, readAuthoredBindingRows(formId))).replace(/'/g, "''");
   sql(`
 DECLARE @VerID UNIQUEIDENTIFIER = (
   SELECT TOP 1 v.ID FROM __mj_BizAppsForms.FormVersion v

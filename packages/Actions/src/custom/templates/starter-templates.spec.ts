@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { STARTER_TEMPLATES, getStarterTemplate } from './starter-templates';
-import { formBlueprintSchema, CHOICE_QUESTION_TYPES } from '../authoring/form-blueprint';
+import { formBlueprintSchema, CHOICE_QUESTION_TYPES } from '@mj-biz-apps/forms-entities';
 
 describe('starter templates', () => {
   it('exposes the expected gallery keys', () => {
