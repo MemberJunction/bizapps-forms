@@ -32,7 +32,8 @@
  * Pure and dependency-free on purpose: the respondent widget uses it, and the widget must not reach
  * the Explorer shell.
  */
-import type { FormStyleTokens, PublishedFormDefinition, PublishedFormScreen } from './form-definition';
+import type { FormStyleTokens, PublishedFormDefinition, PublishedFormPage, PublishedFormScreen } from './form-definition';
+import type { RespondentFormDefinition } from './respondent-definition';
 
 /**
  * The base path both asset routes hang off. ONE definition: forms-server mounts the routes on it
@@ -149,8 +150,24 @@ export function mapStyleTokenAssets(tokens: FormStyleTokens, map: (url: string) 
 }
 
 /** Map a welcome/ending screen's `mediaURL`, if present, leaving it absent when it was absent. */
-function mapScreen(screen: PublishedFormScreen, map: (url: string) => string): PublishedFormScreen {
+function mapScreen<S extends { readonly mediaURL?: string }>(screen: S, map: (url: string) => string): S {
   return screen.mediaURL ? { ...screen, mediaURL: map(screen.mediaURL) } : screen;
+}
+
+/** The part of a page an asset lives on: a question option's image. */
+interface AssetBearingPage {
+  readonly questions: readonly { readonly options: readonly { readonly imageURL?: string }[] }[];
+}
+
+/** Map every option `imageURL` on these pages; options without one are returned as they were. */
+function mapPageAssets<P extends AssetBearingPage>(pages: readonly P[], map: (url: string) => string): P[] {
+  return pages.map((page) => ({
+    ...page,
+    questions: page.questions.map((question) => ({
+      ...question,
+      options: question.options.map((option) => (option.imageURL ? { ...option, imageURL: map(option.imageURL) } : option)),
+    })),
+  }));
 }
 
 /**
@@ -170,15 +187,24 @@ export function mapDefinitionAssets(
     ...(def.welcomeScreen ? { welcomeScreen: mapScreen(def.welcomeScreen, map) } : {}),
     endScreens: def.endScreens.map((screen) => mapScreen(screen, map)),
     styleTokens: mapStyleTokenAssets(def.styleTokens, map),
-    pages: def.pages.map((page) => ({
-      ...page,
-      questions: page.questions.map((question) => ({
-        ...question,
-        options: question.options.map((option) =>
-          option.imageURL ? { ...option, imageURL: map(option.imageURL) } : option,
-        ),
-      })),
-    })),
+    pages: mapPageAssets(def.pages, map),
+  };
+}
+
+/**
+ * {@link mapDefinitionAssets} for the respondent projection (#302) the live widget is served: its
+ * welcome screen, option images and style tokens. It has no ending screens — the ending a respondent
+ * lands on arrives from `Forms.SaveResponse`, and is resolved separately ({@link resolveAssetUrl}).
+ */
+export function mapRespondentDefinitionAssets(
+  def: RespondentFormDefinition,
+  map: (url: string) => string,
+): RespondentFormDefinition {
+  return {
+    ...def,
+    ...(def.welcomeScreen ? { welcomeScreen: mapScreen(def.welcomeScreen, map) } : {}),
+    styleTokens: mapStyleTokenAssets(def.styleTokens, map),
+    pages: mapPageAssets(def.pages, map),
   };
 }
 
@@ -197,6 +223,15 @@ export function resolveDefinitionForRender(
   // repeated, pointless work for a value that never changes across the walk.
   const apiBase = apiBaseOf(graphqlUrl);
   return mapDefinitionAssets(def, (url) => resolveAssetUrl(url, apiBase));
+}
+
+/** Same resolution as {@link resolveDefinitionForRender}, for the respondent projection the live widget is served. */
+export function resolveRespondentDefinitionForRender(
+  def: RespondentFormDefinition,
+  graphqlUrl: string,
+): RespondentFormDefinition {
+  const apiBase = apiBaseOf(graphqlUrl);
+  return mapRespondentDefinitionAssets(def, (url) => resolveAssetUrl(url, apiBase));
 }
 
 /** Same resolution as {@link resolveDefinitionForRender}, for a bare `FormStyleTokens` (preview styling). */
@@ -226,7 +261,10 @@ function byDisplayOrder<T extends { displayOrder: number }>(items: readonly T[])
  * API this widget is talking to — the same URLs its `<img>` tags will ask for, which is what lets
  * the browser cache serve them.
  */
-export function collectLaterImageUrls(def: PublishedFormDefinition): string[] {
+export function collectLaterImageUrls(def: {
+  readonly pages: readonly PublishedFormPage[];
+  readonly endScreens: readonly PublishedFormScreen[];
+}): string[] {
   const urls: string[] = [];
   for (const page of byDisplayOrder(def.pages)) {
     for (const question of byDisplayOrder(page.questions)) {

@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { PublishedFormDefinition } from './form-definition';
+import { toRespondentDefinition } from './respondent-projection';
 
 import {
   apiBaseOf,
   collectLaterImageUrls,
   mapCssUrls,
   mapDefinitionAssets,
+  mapRespondentDefinitionAssets,
   mapStyleTokenAssets,
   resolveAssetUrl,
   resolveDefinitionForRender,
+  resolveRespondentDefinitionForRender,
   resolveStyleTokensForRender,
   toAssetRef,
 } from './asset-ref';
@@ -334,6 +337,38 @@ describe('resolveDefinitionForRender', () => {
     const def = definition();
     const resolved = resolveDefinitionForRender(def, '');
     expect(resolved.welcomeScreen?.mediaURL).toBe(`http://old/forms/asset/${ID}`);
+  });
+});
+
+/**
+ * The respondent projection the live widget renders (#303 Task 10c): the same resolution as the full
+ * snapshot for everything it carries — and it carries no ending screens to resolve.
+ */
+describe('mapRespondentDefinitionAssets / resolveRespondentDefinitionForRender', () => {
+  it('maps the welcome screen, option images and style tokens of the projection', () => {
+    const projection = toRespondentDefinition(definition());
+    const before = structuredClone(projection);
+    const mapped = mapRespondentDefinitionAssets(projection, toAssetRef);
+
+    expect(mapped.welcomeScreen?.mediaURL).toBe(`/forms/asset/${ID}`);
+    expect(mapped.pages[0]?.questions[0]?.options[0]?.imageURL).toBe(`/forms/asset/${ID}`);
+    expect('imageURL' in (mapped.pages[0]?.questions[0]?.options[1] ?? {})).toBe(false);
+    expect(mapped.styleTokens.logoURL).toBe(`/forms/asset/${ID}`);
+    expect('endScreens' in mapped).toBe(false);
+    expect(projection).toEqual(before);
+  });
+
+  it('resolves against the API base of the widget\'s own endpoint, prefix included', () => {
+    const resolved = resolveRespondentDefinitionForRender(toRespondentDefinition(definition()), 'https://h/api/graphql');
+    expect(resolved.welcomeScreen?.mediaURL).toBe(`https://h/api/forms/asset/${ID}`);
+    expect(resolved.pages[0]?.questions[0]?.options[0]?.imageURL).toBe(`https://h/api/forms/asset/${ID}`);
+    expect(resolved.styleTokens.logoURL).toBe(`https://h/api/forms/asset/${ID}`);
+  });
+
+  it('leaves welcomeScreen absent when the projection has none', () => {
+    const def = definition();
+    delete def.welcomeScreen;
+    expect('welcomeScreen' in mapRespondentDefinitionAssets(toRespondentDefinition(def), toAssetRef)).toBe(false);
   });
 });
 

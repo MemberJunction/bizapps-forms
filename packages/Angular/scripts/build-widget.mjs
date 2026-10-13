@@ -32,7 +32,7 @@ import linkerPlugin from '@angular/compiler-cli/linker/babel';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
-import { createPackageNameResolver, findServerOnlyInputs } from './widget-bundle-guard.mjs';
+import { createPackageNameResolver, findDevOnlyCode, findServerOnlyInputs } from './widget-bundle-guard.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(here, '..');
@@ -115,5 +115,25 @@ function assertNoServerOnlyInputs(metafile) {
 assertNoServerOnlyInputs(result.metafile);
 
 const out = result.metafile.outputs['dist/widget/mj-form.js'];
+assertNoDevOnlyCode(out);
+
+/** Fails the build when development-only code reached the bundle (see `findDevOnlyCode`). */
+function assertNoDevOnlyCode(output) {
+  if (!output) {
+    console.error('[build:widget] esbuild reported no dist/widget/mj-form.js output; nothing to check.');
+    process.exit(1);
+  }
+  const offenders = findDevOnlyCode(output.inputs, createPackageNameResolver(process.cwd()));
+  if (offenders.size === 0) return;
+  console.error(
+    '[build:widget] The <mj-form> bundle contains development-only code (#303 Task 10c). The server ' +
+      'builds the respondent projection; the widget only parses it. Offending inputs by package:',
+  );
+  for (const [pkg, paths] of offenders) {
+    console.error(`  ${pkg}: ${paths.length} file(s)`);
+    for (const path of paths) console.error(`    ${path}`);
+  }
+  process.exit(1);
+}
 const bytes = out ? out.bytes : 0;
 console.log(`[build:widget] Bundled <mj-form> → ${outFile} (${(bytes / 1024).toFixed(1)} kB)`);

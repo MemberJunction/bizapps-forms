@@ -1,12 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ConditionalRule } from './conditional-rule';
 import type { PublishedFormDefinition } from './form-definition';
-import {
-  PUBLISHED_DEFINITION_KEY_DECISIONS,
-  RESPONDENT_SETTING_KEYS,
-  respondentFormDefinitionSchema,
-  toRespondentDefinition,
-} from './respondent-definition';
+import { respondentFormDefinitionSchema } from './respondent-definition';
+import { PUBLISHED_DEFINITION_KEY_DECISIONS, RESPONDENT_SETTING_KEYS, toRespondentDefinition } from './respondent-projection';
 import { FORM_QUESTION_TYPES } from './question-types';
 import type { PublishedFormPage, PublishedFormQuestion } from './form-definition';
 import { settleVisibility } from './visibility';

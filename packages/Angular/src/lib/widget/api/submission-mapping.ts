@@ -1,134 +1,112 @@
 /**
- * Pure mapping from the frozen `@mj-biz-apps/forms-entities` submission contract to the S1
- * GraphQL `FormSubmissionInputType` wire shape. Extracted from the transport service so it is
- * unit-testable and so the wire-shape field set is locked by a test (see submission-mapping.spec).
+ * Pure mapping from the widget's answers (the contracts' `FormAnswerInput`, camelCase, structured
+ * `jsonValue`) to the `Forms.SaveResponse` wire input — the CodeGen-emitted `FormsSaveResponseInput`
+ * (#303 Task 10c). Extracted from the component so it is unit-testable and so the field set is locked
+ * by the compiler as well as by a spec (see submission-mapping.spec).
  *
- * The ONLY intentional divergence from the contract is `jsonValue`: the contract carries a
- * structured `JSONValue`, the SDL expects a JSON STRING, so it is stringified here. The
- * transport-only `responseId` (autosave upsert target) is folded in here too, keeping it out of
- * the frozen contract.
+ * The ONLY intentional value divergence is `jsonValue`: the contract carries a structured `JSONValue`,
+ * the operation expects JSON TEXT, so it is stringified here.
  */
-import type { ClientMeta, FormAnswerInput, FormSubmissionInput } from '@mj-biz-apps/forms-entities/contracts';
+import type { FormsAnswerInput, FormsSaveResponseInput } from '@mj-biz-apps/forms-entities';
+import type { ClientMeta, FormAnswerInput } from '@mj-biz-apps/forms-entities/contracts';
 
-/**
- * `FormAnswerInputType` per WP-B's SDL: `jsonValue` is a JSON STRING, `dateValue` a String.
- *
- * Every typed field is `| null` to match the contract: a `nullable: true` GraphQL field may carry
- * an explicit `null`, and typing it as merely optional is what let a `null.trim()` reach the
- * public write path twice. This widget never SENDS a null — `answer-value.ts` only sets the one
- * column an answer uses — but the type is the wire's, not this client's, and the lock below pins
- * the two together.
- */
-export interface FormAnswerInputType {
-  questionId: string;
-  textValue?: string | null;
-  numericValue?: number | null;
-  dateValue?: string | null;
-  booleanValue?: boolean | null;
-  jsonValue?: string | null;
-  fileId?: string | null;
-}
-
-/** `FormSubmissionInputType` per WP-B's SDL (answers use {@link FormAnswerInputType}). */
-export interface FormSubmissionInputType {
+/** One save, as the widget assembles it — every field `Forms.SaveResponse` takes, in the widget's terms. */
+export interface RespondentSave {
   distributionSlug: string;
   formVersionId: string;
-  partial?: boolean;
-  /** Prior partial's id, so the server UPSERTs the same response on autosave. */
-  responseId?: string;
+  mode: FormsSaveResponseInput['Mode'];
+  /** The stable client-minted id of this sitting's response — the upsert target and idempotency key. */
+  clientResponseId: string;
   startedAt?: string;
   turnstileToken?: string;
   clientMeta?: ClientMeta;
-  answers: FormAnswerInputType[];
+  answers: FormAnswerInput[];
 }
 
-/** The exact, ordered set of top-level fields the server input type accepts. */
-export const SUBMISSION_INPUT_FIELDS: readonly (keyof FormSubmissionInputType)[] = [
-  'distributionSlug',
-  'formVersionId',
-  'partial',
-  'responseId',
-  'startedAt',
-  'turnstileToken',
-  'clientMeta',
-  'answers',
-] as const;
+/** The wire key each contract answer field travels under. Typed so a field on either side cannot go unmapped. */
+export const ANSWER_FIELD_ON_THE_WIRE = {
+  questionId: 'QuestionID',
+  textValue: 'TextValue',
+  numericValue: 'NumericValue',
+  dateValue: 'DateValue',
+  booleanValue: 'BooleanValue',
+  jsonValue: 'JSONValue',
+  fileId: 'FileID',
+} as const satisfies Record<keyof FormAnswerInput, keyof FormsAnswerInput>;
 
-/** The exact set of fields a single answer accepts. */
-export const ANSWER_INPUT_FIELDS: readonly (keyof FormAnswerInputType)[] = [
-  'questionId',
-  'textValue',
-  'numericValue',
-  'dateValue',
-  'booleanValue',
-  'jsonValue',
-  'fileId',
-] as const;
-
-/** Map the contract submission onto the wire shape, folding in the transport upsert target. */
-export function toInputType(
-  input: FormSubmissionInput,
-  existingResponseId?: string,
-): FormSubmissionInputType {
-  return {
-    distributionSlug: input.distributionSlug,
-    formVersionId: input.formVersionId,
-    partial: input.partial,
-    responseId: existingResponseId,
-    startedAt: input.startedAt,
-    turnstileToken: input.turnstileToken,
-    clientMeta: input.clientMeta,
-    answers: input.answers.map(toAnswerInputType),
+/** Map one save onto the operation's input. */
+export function toSaveResponseInput(save: RespondentSave): FormsSaveResponseInput {
+  const input: FormsSaveResponseInput = {
+    Slug: save.distributionSlug,
+    FormVersionID: save.formVersionId,
+    Mode: save.mode,
+    ClientResponseID: save.clientResponseId,
+    Answers: save.answers.map(toWireAnswer),
   };
+  if (save.startedAt !== undefined) {
+    input.StartedAt = save.startedAt;
+  }
+  if (save.turnstileToken !== undefined) {
+    input.TurnstileToken = save.turnstileToken;
+  }
+  if (save.clientMeta) {
+    input.ClientMeta = { Referrer: save.clientMeta.referrer, UserAgent: save.clientMeta.userAgent };
+  }
+  return input;
 }
 
-/** Map one contract answer onto the wire shape, stringifying `jsonValue`. */
-export function toAnswerInputType(answer: FormAnswerInput): FormAnswerInputType {
-  return {
-    questionId: answer.questionId,
-    textValue: answer.textValue,
-    numericValue: answer.numericValue,
-    dateValue: answer.dateValue,
-    booleanValue: answer.booleanValue,
-    jsonValue: answer.jsonValue === undefined ? undefined : JSON.stringify(answer.jsonValue),
-    fileId: answer.fileId,
-  };
+/**
+ * Map one contract answer onto the wire shape, stringifying `jsonValue`. Only the columns the answer
+ * USES are written: the operation refuses an answer that fills a column its question type does not
+ * store (`answerShapeProblem`), and an absent key is the plainest way to say "not this column".
+ */
+export function toWireAnswer(answer: FormAnswerInput): FormsAnswerInput {
+  const wire: FormsAnswerInput = { QuestionID: answer.questionId };
+  if (answer.textValue !== undefined) {
+    wire.TextValue = answer.textValue;
+  }
+  if (answer.numericValue !== undefined) {
+    wire.NumericValue = answer.numericValue;
+  }
+  if (answer.dateValue !== undefined) {
+    wire.DateValue = answer.dateValue;
+  }
+  if (answer.booleanValue !== undefined) {
+    wire.BooleanValue = answer.booleanValue;
+  }
+  if (answer.jsonValue !== undefined) {
+    wire.JSONValue = answer.jsonValue === null ? null : JSON.stringify(answer.jsonValue);
+  }
+  if (answer.fileId !== undefined) {
+    wire.FileID = answer.fileId;
+  }
+  return wire;
 }
 
-// --- Compile-time contract lock (widget <-> S1 wire shape) -----------------
+// --- Compile-time contract lock (widget <-> Forms.SaveResponse wire shape) -------------------------
 //
-// Fails `ngc` if the wire shape drifts from the frozen `@mj-biz-apps/forms-entities` contract.
-// Its server-side twin (forms-server's `public-submit/graphql-types.ts`) was retired with the
-// `SubmitFormResponse` mutation (#303 Task 8); the server's wire shape is now the generated
-// `FormsSaveResponseInput`, which the widget adopts in #303 Task 10. Two divergences are DELIBERATE: answer `jsonValue` is a JSON STRING here
-// (contract: structured JSONValue), and `responseId` is transport-only (not in the contract).
+// `ANSWER_FIELD_ON_THE_WIRE`'s `satisfies` already fails `ngc` when a CONTRACT answer field has no
+// wire key. These fail it the other way: when the generated wire input gains a field the widget does
+// not fill, and when a mapped column's value type drifts from the contract's.
 
-/** Flatten intersections / Omit / mapped types to a plain object literal so `Exact` compares cleanly. */
-type Id<T> = { [K in keyof T]: T[K] };
+/** Invariant equality on a tuple of types (the bare conditional distributes over unions). */
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type AssertTrue<T extends true> = T;
 
-/** Invariant equality — catches renamed/added OPTIONAL fields (bidirectional `extends` won't). */
-type Exact<A, B> = (<T>() => T extends Id<A> ? 1 : 2) extends <T>() => T extends Id<B> ? 1 : 2
-  ? true
-  : false;
-type AssertExact<T extends true> = T;
-
-type _LockAnswer = AssertExact<Exact<Omit<FormAnswerInput, 'jsonValue'>, Omit<FormAnswerInputType, 'jsonValue'>>>;
-// jsonValue is a scalar union, not an object — assert it directly (Id<> is for object shapes).
-type _LockAnswerJson = AssertExact<
-  [FormAnswerInputType['jsonValue']] extends [string | null | undefined]
-    ? ([string | null | undefined] extends [FormAnswerInputType['jsonValue']] ? true : false)
-    : false
+type _EveryWireAnswerFieldMapped = AssertTrue<
+  Same<keyof FormsAnswerInput, (typeof ANSWER_FIELD_ON_THE_WIRE)[keyof typeof ANSWER_FIELD_ON_THE_WIRE]>
 >;
-
-// The submission lock excludes `answers` (locked separately by _LockAnswer — its element type
-// intentionally diverges on jsonValue) and pins every OTHER field plus the transport `responseId`.
-type _LockSubmission = AssertExact<
-  Exact<
-    Omit<FormSubmissionInput, 'answers'> & { responseId?: string },
-    Omit<FormSubmissionInputType, 'answers'>
+/** The answer columns that keep their value type on the wire (everything but the id and the JSON column). */
+type ScalarAnswerField = Exclude<keyof FormAnswerInput, 'jsonValue' | 'questionId'>;
+type _ScalarColumnsAgree = AssertTrue<
+  Same<
+    { [K in ScalarAnswerField]: FormAnswerInput[K] },
+    { [K in ScalarAnswerField]: FormsAnswerInput[(typeof ANSWER_FIELD_ON_THE_WIRE)[K]] }
   >
 >;
-type _LockClientMeta = AssertExact<Exact<ClientMeta, NonNullable<FormSubmissionInputType['clientMeta']>>>;
+type _SaveFieldsCovered = AssertTrue<
+  Same<keyof FormsSaveResponseInput, 'Slug' | 'FormVersionID' | 'Mode' | 'ClientResponseID' | 'StartedAt' | 'TurnstileToken' | 'ClientMeta' | 'Answers'>
+>;
 
 /** Referenced so `noUnusedLocals` retains the locks above (they exist purely for the check). */
-export type WidgetContractLocks = [_LockAnswer, _LockAnswerJson, _LockSubmission, _LockClientMeta];
+export type WidgetContractLocks = [_EveryWireAnswerFieldMapped, _ScalarColumnsAgree, _SaveFieldsCovered];

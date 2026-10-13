@@ -17,13 +17,13 @@ import {
   type AnswerProblem,
   type AnswerValue,
   type FormAnswerInput,
-  type PublishedFormDefinition,
   type PublishedFormPage,
   type PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities/contracts';
 
 import { toAnswerInputs, transmittedValue } from './answer-value';
 import { computeProgress } from './progress';
+import type { WidgetForm } from './widget-form';
 
 /**
  * What an autosave would send: the storable answers, or — when a field it would have to leave out
@@ -36,8 +36,22 @@ export type DraftInputs =
 export class FormRuntime {
   private readonly answers = signal<Map<string, AnswerValue>>(new Map());
   private readonly touched = signal<Set<string>>(new Set());
+  /**
+   * What the server last refused, per question, from a submit's `Errors` (`QuestionID` → message).
+   *
+   * Kept apart from the client's own verdict because the server's refusal no longer names the
+   * question in its text ("This question is required."): shown in a banner it says nothing about
+   * which answer to fix. Shown under the field instead, and cleared the moment that answer changes —
+   * the respondent's edit is what the refusal asked for.
+   */
+  private readonly serverErrors = signal<ReadonlyMap<string, string>>(new Map());
 
-  constructor(private readonly definition: PublishedFormDefinition) {}
+  /**
+   * @param form what the widget holds — the live projection or the author's full draft. The runtime
+   * renders, settles and validates from `form.render`, and asks `rulesMayRead` with `form` itself, so
+   * whether an autosave may leave a field out is decided by the kind the load path declared.
+   */
+  constructor(private readonly form: WidgetForm) {}
 
   // --- Answer access -------------------------------------------------------
 
@@ -84,6 +98,11 @@ export class FormRuntime {
   }
 
   public setValue(questionId: string, value: AnswerValue): void {
+    if (this.serverErrors().has(questionId)) {
+      const remaining = new Map(this.serverErrors());
+      remaining.delete(questionId);
+      this.serverErrors.set(remaining);
+    }
     const next = new Map(this.answers());
     if (value === null || value === undefined) {
       next.delete(questionId);
@@ -137,7 +156,7 @@ export class FormRuntime {
    * re-derives from it are readings of one answer set. Why it is a fixed point, and why that is
    * what makes the two sides agree, is written down there.
    */
-  private readonly visibility = computed(() => settleVisibility(this.definition, this.answers()));
+  private readonly visibility = computed(() => settleVisibility(this.form.render, this.answers()));
 
   /**
    * Whether this form's show rules settle for the current answers.
@@ -176,9 +195,24 @@ export class FormRuntime {
 
   // --- Validation ----------------------------------------------------------
 
-  /** Validation message for a question, or `null` when valid. */
+  /**
+   * Validation message for a question, or `null` when valid: the widget's own verdict first, else
+   * what the server last refused about it ({@link showServerErrors}).
+   */
   public errorFor(question: PublishedFormQuestion): string | null {
-    return this.problemFor(question)?.message ?? null;
+    return this.problemFor(question)?.message ?? this.serverErrors().get(question.id) ?? null;
+  }
+
+  /**
+   * Put the server's per-question refusals under their fields, and mark those fields touched so the
+   * message shows. Replaces the previous set: a new submit's refusals are the current ones.
+   *
+   * Display only — {@link areValid} and {@link isFormValid} stay the client's verdict, so a refusal the
+   * respondent cannot act on (a file the server no longer vouches for) never locks the form.
+   */
+  public showServerErrors(errors: readonly { readonly questionId: string; readonly message: string }[]): void {
+    this.serverErrors.set(new Map(errors.map((error) => [error.questionId, error.message])));
+    this.touchAll(this.visibleAnswerableQuestions().filter((question) => this.serverErrors().has(question.id)));
   }
 
   /** Error shown in the UI only after the field has been touched. */
@@ -224,7 +258,7 @@ export class FormRuntime {
    * accepts it" the same sentence.
    */
   private readonly submitVerdict = computed(() =>
-    validateAnswers(this.definition, this.buildAnswerInputs(), 'complete'),
+    validateAnswers(this.form.render, this.buildAnswerInputs(), 'complete'),
   );
 
   /**
@@ -293,15 +327,16 @@ export class FormRuntime {
    * field left out is a field nobody answered, so leaving it out changes what the server decides for
    * everything else — a question shown because of it is hidden and its saved row deleted, and an
    * `isNotAnswered` knockout on it ends the form. Nothing is sent then; the answers stay here until
-   * the field is fixed. On the respondent projection every field counts as read (`rulesMayRead`),
-   * because the projection has had the server's knockout, score and automation rules removed.
+   * the field is fixed. On the live form — a `projection` — every field counts as read
+   * (`rulesMayRead`), because the projection has had the server's knockout, score and automation
+   * rules removed; only the author's `full` draft can show that nothing reads a field.
    */
   public buildDraftInputs(): DraftInputs {
     const visible = this.visibleAnswerableQuestions();
     const unstorable = visible
       .filter((question) => validateAnswer(question, transmittedValue(question, this.valueFor(question.id)), 'draft') !== undefined)
       .map((question) => question.id);
-    if (rulesMayRead(this.definition, unstorable)) {
+    if (rulesMayRead(this.form, unstorable)) {
       return { held: true, unstorable };
     }
     const storable = visible.filter((question) => !unstorable.includes(question.id));
@@ -334,7 +369,7 @@ export class FormRuntime {
   }
 
   private orderedPages(): PublishedFormPage[] {
-    return [...this.definition.pages].sort((a, b) => a.displayOrder - b.displayOrder);
+    return [...this.form.render.pages].sort((a, b) => a.displayOrder - b.displayOrder);
   }
 }
 

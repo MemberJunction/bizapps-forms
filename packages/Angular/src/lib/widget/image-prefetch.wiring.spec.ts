@@ -40,7 +40,7 @@ describe('prefetch lifecycle — source smoke', () => {
   it('load() cancels the previous queue before anything else can start one', () => {
     const load = body(form, 'private async load(): Promise<void>');
     expect(load).toContain('this.cancelPrefetch()');
-    expect(load.indexOf('this.cancelPrefetch()')).toBeLessThan(load.indexOf('this.planPrefetch(def, opening, gated)'));
+    expect(load.indexOf('this.cancelPrefetch()')).toBeLessThan(load.indexOf('this.planPrefetch(form, opening, gated)'));
   });
 
   it('ngOnDestroy cancels the queue', () => {
@@ -55,7 +55,7 @@ describe('prefetch lifecycle — source smoke', () => {
   });
 
   it('plans nothing unless intake is still ahead (welcome or ready)', () => {
-    const plan = body(form, 'private planPrefetch(def: PublishedFormDefinition, opening: WidgetPhase, gated: boolean): void');
+    const plan = body(form, 'private planPrefetch(form: WidgetForm, opening: WidgetPhase, gated: boolean): void');
     expect(plan).toContain(`opening !== 'welcome' && opening !== 'ready'`);
     expect(plan.indexOf(`opening !== 'welcome' && opening !== 'ready'`)).toBeLessThan(
       plan.indexOf('this.schedulePrefetchWhenIdle()'),

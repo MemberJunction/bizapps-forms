@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { PublishedFormDefinition, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
+import { resolveResponseOutcome, type PublishedFormDefinition, type PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 import { saveThroughEngine, recordingQueue, type EngineSaveContext, type EngineSaveSubmission } from './harness.js';
 import { FormsRateLimiter } from '../../../submission/rate-limit.js';
 import { resetPublicSubmitConfigForTests } from '../../../submission/config.js';
@@ -121,5 +121,25 @@ describe('the score the server bands on', () => {
       expect(result.success).toBe(true);
       expect(result.confirmationMessage).toBe('Not qualified');
     });
+  });
+});
+
+/**
+ * DW13, the server half: the ending a live submit returns is the screen `resolveResponseOutcome`
+ * picks for the same answers — the one function the author's Preview resolves through in the widget
+ * (forms-ng `widget/preview.spec.ts` pins that half). So a score-gated ending cannot differ between
+ * what an author previews and what a respondent gets (#75).
+ */
+describe('the ending a submit returns is the one Preview resolves (DW13)', () => {
+  it.each([
+    [[{ questionId: 'gate', textValue: 'Yes' }, { questionId: 'bonus', textValue: 'Gold' }]],
+    [[{ questionId: 'gate', textValue: 'No' }]],
+    [[{ questionId: 'gate', textValue: 'No' }, { questionId: 'bonus', textValue: 'Gold' }]],
+  ])('answers %j', async (answers) => {
+    const definition = scoredDefinition();
+    const result = await submit(definition, answers);
+    const preview = resolveResponseOutcome(definition, new Map(answers.map((a) => [a.questionId, a.textValue])));
+    expect(result.success).toBe(true);
+    expect(result.ending?.id).toBe(preview.outcome.screen?.id);
   });
 });

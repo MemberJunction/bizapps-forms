@@ -1,26 +1,34 @@
 /**
- * Real S1 transport — issues the `PublishedForm` / `SubmitFormResponse` GraphQL
- * operations against the MJAPI endpoint over `fetch`.
+ * Real S1 transport — posts the `Forms.GetRespondentForm` and `Forms.SaveResponse` Remote Operations
+ * (#303) to the MJAPI endpoint over `fetch`, through MJ's one generic `ExecuteRemoteOperation`
+ * mutation.
  *
  * Deliberately uses plain `fetch` rather than `@memberjunction/graphql-dataprovider`:
  * the widget is a tiny, anonymous, embeddable custom element with no Explorer shell
  * and no global MJ provider to lean on — it only needs an endpoint URL and an
- * anonymous bearer token (both supplied as element attributes). This also keeps the
- * transport strongly typed end-to-end instead of routing through `ExecuteGQL`'s
- * untyped result.
+ * anonymous bearer token (both supplied as element attributes). The operation I/O is
+ * typed end-to-end by the CodeGen-emitted types, imported type-only so none of their
+ * module's runtime reaches the respondent bundle (see `forms-api.interface.ts`).
  */
 import { Injectable, inject } from '@angular/core';
 import type {
-  PublishedFormDefinition,
-  FormSubmissionInput,
-  FormSubmissionResult,
-  ResumeSnapshot,
-} from '@mj-biz-apps/forms-entities/contracts';
+  FormsGetRespondentFormInput,
+  FormsGetRespondentFormOutput,
+  FormsRespondentEnding,
+  FormsSaveResponseInput,
+  FormsSaveResponseOutput,
+} from '@mj-biz-apps/forms-entities';
+import { respondentFormDefinitionSchema, type ResumeSnapshot } from '@mj-biz-apps/forms-entities/contracts';
 
-import { SessionExpiredError, type IFormsApiService, type PublishedFormLoad } from './forms-api.interface';
+import {
+  FormUnavailableError,
+  ResponseNotSavedError,
+  SessionExpiredError,
+  type IFormsApiService,
+  type RespondentFormLoad,
+} from './forms-api.interface';
 import { FORMS_API_CONFIG } from './forms-api.config';
 import { generateClientResponseId } from '../core/client-id';
-import { toInputType } from './submission-mapping';
 
 /**
  * Shape of a GraphQL HTTP response envelope.
@@ -50,47 +58,45 @@ export function isSessionExpired(body: GraphQLEnvelope<unknown> | undefined): bo
 }
 
 /**
- * Raw `PublishedFormType` row from WP-B's SDL. The deep pages/questions/options tree
- * lives ONLY inside `definitionJSON` (a JSON string); the top-level scalars are
- * redundant once it is parsed, so we select + parse `definitionJSON`.
+ * MJ's generic Remote Operation mutation, spelled as MJ's own client spells it
+ * (`GraphQLDataProvider.InternalRouteOperation`). `attached`: the respondent waits for the result.
  */
-interface PublishedFormType {
-  definitionJSON: string;
-  /** Present only for a session whose scope names a Form Response — see `PublishedFormLoad`. */
-  resumeJSON?: string | null;
-}
-
-/** Result wrapper for the `PublishedForm` query. */
-interface PublishedFormQueryData {
-  PublishedForm: PublishedFormType | null;
-}
-
-/** Result wrapper for the `SubmitFormResponse` mutation. */
-interface SubmitFormResponseData {
-  SubmitFormResponse: FormSubmissionResult;
-}
-
-const PUBLISHED_FORM_QUERY = `
-  query PublishedForm($distributionSlug: String!) {
-    PublishedForm(distributionSlug: $distributionSlug) {
-      definitionJSON
-      resumeJSON
-    }
-  }
-`;
-
-const SUBMIT_RESPONSE_MUTATION = `
-  mutation SubmitFormResponse($input: FormSubmissionInputType!) {
-    SubmitFormResponse(input: $input) {
+export const EXECUTE_REMOTE_OPERATION_MUTATION = `
+  mutation ExecuteRemoteOperation($operationKey: String!, $inputJSON: String!, $invokeMode: String!) {
+    ExecuteRemoteOperation(input: { operationKey: $operationKey, inputJSON: $inputJSON, invokeMode: $invokeMode }) {
       success
-      responseId
-      status
-      confirmationMessage
-      redirectUrl
-      errors { questionId message }
+      resultCode
+      outputJSON
+      errorMessage
     }
   }
 `;
+
+/** The `ExecuteRemoteOperationResultType` fields selected above (MJServer's `ExecuteRemoteOperationResolver`). */
+interface ExecuteRemoteOperationResult {
+  success: boolean;
+  resultCode?: string | null;
+  outputJSON?: string | null;
+  errorMessage?: string | null;
+}
+
+interface ExecuteRemoteOperationData {
+  ExecuteRemoteOperation: ExecuteRemoteOperationResult | null;
+}
+
+/** The two operations a respondent can reach, keyed by operation key, with their generated I/O types. */
+export interface RespondentOperations {
+  'Forms.GetRespondentForm': { input: FormsGetRespondentFormInput; output: FormsGetRespondentFormOutput };
+  'Forms.SaveResponse': { input: FormsSaveResponseInput; output: FormsSaveResponseOutput };
+}
+
+/**
+ * One operation's outcome as the wire reports it, before anyone interprets it: the op ran and
+ * answered (its `outputJSON`, still to be checked), or the call itself was refused.
+ */
+export type RemoteOperationOutcome =
+  | { readonly ran: true; readonly output: unknown }
+  | { readonly ran: false; readonly resultCode: string; readonly errorMessage: string };
 
 @Injectable()
 export class FormsGraphQLApiService implements IFormsApiService {
@@ -119,29 +125,50 @@ export class FormsGraphQLApiService implements IFormsApiService {
     return this.sessionId;
   }
 
-  public async loadPublishedForm(distributionSlug: string): Promise<PublishedFormLoad | null> {
-    const data = await this.execute<PublishedFormQueryData>(PUBLISHED_FORM_QUERY, {
-      distributionSlug,
-    });
-    if (!data.PublishedForm) {
-      return null;
+  public async loadRespondentForm(distributionSlug: string): Promise<RespondentFormLoad> {
+    const outcome = await this.executeRemoteOperation('Forms.GetRespondentForm', { Slug: distributionSlug });
+    if (!outcome.ran) {
+      throw new FormUnavailableError(`Forms.GetRespondentForm for '${distributionSlug}' was refused (${outcome.resultCode}): ${outcome.errorMessage}`);
     }
-    // The full nested pages/questions/options graph is delivered as a JSON string in
-    // `definitionJSON`; parse it into the contract's PublishedFormDefinition.
-    return {
-      definition: JSON.parse(data.PublishedForm.definitionJSON) as PublishedFormDefinition,
-      resume: parseResume(data.PublishedForm.resumeJSON),
-    };
+    return respondentFormLoadFrom(outcome.output, distributionSlug);
   }
 
-  public async submitResponse(
-    input: FormSubmissionInput,
-    existingResponseId?: string,
-  ): Promise<FormSubmissionResult> {
-    const data = await this.execute<SubmitFormResponseData>(SUBMIT_RESPONSE_MUTATION, {
-      input: toInputType(input, existingResponseId),
+  public async saveResponse(input: FormsSaveResponseInput): Promise<FormsSaveResponseOutput> {
+    const outcome = await this.executeRemoteOperation('Forms.SaveResponse', input);
+    if (!outcome.ran) {
+      throw new ResponseNotSavedError(
+        `Forms.SaveResponse (${input.Mode}) for response ${input.ClientResponseID} was refused (${outcome.resultCode}): ${outcome.errorMessage}`,
+      );
+    }
+    return saveResponseOutputFrom(outcome.output, input);
+  }
+
+  /**
+   * Run one respondent Remote Operation, attached, through MJ's generic `ExecuteRemoteOperation`
+   * mutation — the ONE way this transport reaches the server.
+   *
+   * Reports the call's outcome without interpreting the operation's output: an operation that RAN
+   * returns its `outputJSON` parsed (still unchecked — each caller knows its own shape); one the
+   * server refused before or while running it (`FORBIDDEN`, `EXECUTION_ERROR`, an unknown key) returns
+   * its result code and message. Transport failures and an expired session throw, as before.
+   */
+  public async executeRemoteOperation<K extends keyof RespondentOperations>(
+    operationKey: K,
+    input: RespondentOperations[K]['input'],
+  ): Promise<RemoteOperationOutcome> {
+    const data = await this.execute<ExecuteRemoteOperationData>(EXECUTE_REMOTE_OPERATION_MUTATION, {
+      operationKey,
+      inputJSON: JSON.stringify(input),
+      invokeMode: 'attached',
     });
-    return data.SubmitFormResponse;
+    const result = data.ExecuteRemoteOperation;
+    if (!result) {
+      throw new Error(`${operationKey}: the server returned no ExecuteRemoteOperation result.`);
+    }
+    if (!result.success) {
+      return { ran: false, resultCode: result.resultCode ?? 'UNKNOWN', errorMessage: result.errorMessage ?? 'no reason given' };
+    }
+    return { ran: true, output: parseOutputJSON(operationKey, result.outputJSON) };
   }
 
   /** POST a GraphQL operation and unwrap its `data`, throwing on transport/GraphQL errors. */
@@ -186,23 +213,133 @@ export class FormsGraphQLApiService implements IFormsApiService {
   }
 }
 
+/** The operation's `outputJSON`, parsed — or a throw naming the operation when it is absent or not JSON. */
+function parseOutputJSON(operationKey: string, outputJSON: string | null | undefined): unknown {
+  if (!outputJSON) {
+    throw new Error(`${operationKey}: the operation ran but returned no output.`);
+  }
+  try {
+    return JSON.parse(outputJSON) as unknown;
+  } catch (err) {
+    throw new Error(`${operationKey}: the operation's output is not JSON (${err instanceof Error ? err.message : String(err)}).`);
+  }
+}
+
+/**
+ * The checked load: a `FormsGetRespondentFormOutput` whose `DefinitionJSON` parses with the contracts'
+ * `respondentFormDefinitionSchema` and names the version it was served as. Anything else is refused
+ * with the one fixed sentence — a half-understood form rendered anyway would ask questions the server
+ * does not, or validate answers against rules it does not apply.
+ */
+export function respondentFormLoadFrom(output: unknown, distributionSlug: string): RespondentFormLoad {
+  const refuse = (why: string): never => {
+    throw new FormUnavailableError(`Forms.GetRespondentForm for '${distributionSlug}': ${why}`);
+  };
+  if (!isRecord(output) || typeof output['DefinitionJSON'] !== 'string' || typeof output['FormVersionID'] !== 'string') {
+    return refuse('the output has no DefinitionJSON or FormVersionID.');
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(output['DefinitionJSON']) as unknown;
+  } catch (err) {
+    return refuse(`DefinitionJSON is not JSON (${err instanceof Error ? err.message : String(err)}).`);
+  }
+  const parsed = respondentFormDefinitionSchema.safeParse(raw);
+  if (!parsed.success) {
+    const where = parsed.error.issues.slice(0, 3).map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`);
+    return refuse(`DefinitionJSON does not match the respondent schema (${where.join('; ')}).`);
+  }
+  const definition = parsed.data;
+  if (definition.formVersionId !== output['FormVersionID']) {
+    return refuse(`DefinitionJSON is version ${definition.formVersionId} but was served as ${output['FormVersionID']}.`);
+  }
+  // The link's own captcha toggle is already folded into the projection server-side; the top-level
+  // flag is honoured too, so a server that says "captcha" is never answered by a form that has none.
+  if (output['CaptchaRequired'] === true) {
+    definition.captchaRequired = true;
+  }
+  const resumeJSON = output['ResumeJSON'];
+  const resume = typeof resumeJSON === 'string' ? parseResume(resumeJSON, distributionSlug) : undefined;
+  return resume ? { formVersionId: definition.formVersionId, definition, resume } : { formVersionId: definition.formVersionId, definition };
+}
+
+/**
+ * The checked save result. The fields the widget acts on (`Success`, `Outcome`, `Errors`) must be
+ * there and well-typed; a body without them is not a save result, and acting on a guess — say,
+ * "no Outcome, so continue" past a knockout — is worse than reporting the save as failed. An `Ending`
+ * the widget cannot render is dropped (and logged) instead: the save itself landed.
+ */
+export function saveResponseOutputFrom(output: unknown, input: Pick<FormsSaveResponseInput, 'Mode' | 'ClientResponseID'>): FormsSaveResponseOutput {
+  const ok =
+    isRecord(output) &&
+    typeof output['Success'] === 'boolean' &&
+    (output['Outcome'] === 'continue' || output['Outcome'] === 'ended') &&
+    Array.isArray(output['Errors']);
+  if (!ok) {
+    throw new ResponseNotSavedError(
+      `Forms.SaveResponse (${input.Mode}) for response ${input.ClientResponseID} returned something that is not a save result.`,
+    );
+  }
+  const result = output as unknown as FormsSaveResponseOutput;
+  if (result.Ending !== undefined && !isRespondentEnding(result.Ending)) {
+    // The save DID land; only the screen to show is unreadable. Dropping it shows the built-in
+    // confirmation (or the server's ConfirmationMessage) rather than failing a save the server
+    // accepted — which would retry it, and for a knockout would never show the screen at all.
+    console.warn(
+      `[mj-form] Forms.SaveResponse (${input.Mode}) for response ${input.ClientResponseID} returned a malformed Ending; ` +
+        'showing the default ending instead.',
+    );
+    const { Ending: _dropped, ...withoutEnding } = result;
+    void _dropped;
+    return withoutEnding;
+  }
+  return result;
+}
+
+/** Whether `value` has every field `endingScreenFrom` reads, with the types it reads them as. */
+function isRespondentEnding(value: unknown): value is FormsRespondentEnding {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const nullableText = (key: string): boolean => value[key] === null || typeof value[key] === 'string';
+  const links = value['SocialLinks'];
+  return (
+    typeof value['ID'] === 'string' &&
+    typeof value['Title'] === 'string' &&
+    nullableText('Body') &&
+    nullableText('ButtonLabel') &&
+    nullableText('MediaURL') &&
+    nullableText('RedirectURL') &&
+    typeof value['IsDisqualification'] === 'boolean' &&
+    Array.isArray(links) &&
+    links.every((link: unknown) => isRecord(link) && typeof link['Platform'] === 'string' && typeof link['URL'] === 'string')
+  );
+}
+
 /**
  * Read the resume snapshot back, or nothing.
  *
  * Guarded rather than trusted: this is the one field on the read path whose absence is ORDINARY
- * (every first sitting), so a parse failure must be indistinguishable from absence — a respondent
- * whose draft cannot be understood gets a blank form, not an error page. The alternative, letting
- * the throw escape, would take down `load()` for the commonest case in the product.
+ * (every first sitting), so a parse failure is treated as absence — a respondent whose draft cannot
+ * be understood gets a blank form, not an error page. The alternative, letting the throw escape,
+ * would take down `load()` for the commonest case in the product. Never silently: it is logged.
  */
-function parseResume(json: string | null | undefined): ResumeSnapshot | undefined {
-  if (!json) {
-    return undefined;
-  }
+function parseResume(json: string, distributionSlug: string): ResumeSnapshot | undefined {
   try {
-    return JSON.parse(json) as ResumeSnapshot;
-  } catch {
+    const value = JSON.parse(json) as unknown;
+    if (isRecord(value) && typeof value['responseId'] === 'string' && typeof value['status'] === 'string' && Array.isArray(value['answers'])) {
+      return value as unknown as ResumeSnapshot;
+    }
+    console.warn(`[mj-form] the draft served for '${distributionSlug}' is not a resume snapshot; starting a fresh response.`);
+    return undefined;
+  } catch (err) {
+    console.warn(`[mj-form] the draft served for '${distributionSlug}' did not parse; starting a fresh response.`, err);
     return undefined;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**

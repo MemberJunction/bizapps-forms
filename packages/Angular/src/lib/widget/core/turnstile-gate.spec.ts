@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CAPTCHA_NOT_CONFIGURED_MESSAGE, type PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
+import { CAPTCHA_NOT_CONFIGURED_MESSAGE } from '@mj-biz-apps/forms-entities/contracts';
 
 import {
   canRenderChallenge,
@@ -10,19 +10,9 @@ import {
   isTurnstileError,
 } from './turnstile-gate';
 
-/** Minimal published-form factory toggling only the captcha flag. */
-function def(captcha: boolean): PublishedFormDefinition {
-  return {
-    formId: 'f1',
-    formVersionId: 'v1',
-    name: 'Test',
-    renderMode: 'Scroll',
-    settings: { anonymousAllowed: true, captchaRequired: captcha },
-    styleTokens: { cssVariables: {} },
-    automations: [],
-    endScreens: [],
-    pages: [],
-  };
+/** The one field the gate reads, toggled. */
+function def(captcha: boolean): { captchaRequired: boolean } {
+  return { captchaRequired: captcha };
 }
 
 const KEY = '0x4AAAAAAA_test';
