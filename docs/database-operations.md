@@ -307,8 +307,12 @@ and re-run `check:host-truth --core-tag <tag>`. The changeset carries the same g
 **Building a #303 sandbox: from scratch, never upward.** MJ `6.2.0-edge` carries 28 core migrations
 versioned *below* 6.1.5's top file, and `mj migrate` runs with `outOfOrder: false`, so a 6.1.5
 database migrated upward skips all 28 and reports success. Build it with the clean-room chain above
-at `-t v6.2.0-edge.3` (`MJ_Forms303_Edge` was built that way). Run the host-truth check with
-`--core-tag v6.2.0-edge.3` for the same reason: its default is the `mjVersionRange` floor.
+at `-t v6.2.0-edge.3`. `MJ_Forms303_Edge` was built that way and then advanced to two later core
+migrations from MJ `next` (`V202610111907`, `V202610121900`, first shipped in 6.2.0-edge.4), and the
+dev host links MJ `next` source — so evidence measured there is `next`-shaped, not edge.3. A sandbox
+that must match the pinned MJ exactly is built at the pin's tag and never migrated further.
+`check:host-truth` derives its core tag from the `mjVersionRange` floor, prerelease included
+(`v6.2.0-edge.3` today); pass `--core-tag` only to build against a different tag.
 
 ### Release checklist: guarantees only an opt-in spec proves
 
