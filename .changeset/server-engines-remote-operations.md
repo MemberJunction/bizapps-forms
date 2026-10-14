@@ -41,6 +41,13 @@ version-tagged on a database built from scratch (MJ 6.2 carries core migrations 
   be queued. Every means every: a form with no configured automations runs the legacy hooks, so its
   completion still owes an `OnComplete` message. The API says why at startup, and then at most once a
   minute.
+- **Authoring from a starter template and "Author with AI" work for non-Owners on MJ 6.2+.** MJ's
+  `RunAction` now refuses a non-Owner any action that has no `MJ: Action Authorizations` link and
+  does not authorize its caller itself. `Forms: Create Form From Template` and `Forms: Generate Form
+  From Brief` now declare `AuthorizesCaller` (MJ core's convention for client-called actions): each
+  already refuses a caller who may not author forms, and that check stays the one authoring
+  decision. Nothing to grant. Do not add an Action Authorization for either: any such row replaces
+  the marker. The on-submit actions do not declare it; only the automation runner runs them.
 - Runbook for dead-lettered deliveries, including the rare one the runtime dead-letters itself when
   a step hangs past its lease: `docs/local-host.md`.
 
@@ -104,6 +111,20 @@ version-tagged on a database built from scratch (MJ 6.2 carries core migrations 
   before responses arrived can no longer roll the count back and reopen slots `MaxResponses` closed.
 - A builder edit whose save throws (rather than being refused) is shown in the builder's error banner
   and no longer blocks later saves of the same row.
+- **A new form is created when the author asks for it.** A never-saved Form record (New form, or a
+  "New Forms Record" tab Explorer restores on its own) opens on a start step with a name box and
+  **Create form**; nothing is written until then. The builder used to save an "Untitled form" row as
+  soon as it loaded one, so a restored tab left a stray Draft behind.
+- The builder offers **Add content above** on the selected first question of a section, the one
+  insert position no "after this question" bar reached. A question can be dragged into an empty
+  section: the hidden add bar no longer shifts the layout CDK measured when the drag started.
+- The dashboard's Refresh keeps the Responses view open, and opening the dashboard reads the summary
+  once (MJ's host refreshes the instance while its own init is still loading).
+- "What this submission did" and the Automate tab's recent activity show a step's summary as text,
+  without the stored JSON envelope or record ids.
+- `MJ_BizApps_Forms: Form Responses` now has a record name, the form's name (metadata, shipped in
+  this release's `Metadata_Sync`). Explorer's record-name lookup failed for every response before. The
+  three foreign keys to it keep `IncludeRelatedEntityNameFieldInBaseView` off, so no view changes.
 - `FormAutomationRun.AttemptCount`'s description still mentions the removed recovery sweep; it is
   corrected by a later migration.
 

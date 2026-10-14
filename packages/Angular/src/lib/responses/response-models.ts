@@ -95,6 +95,7 @@ export interface ResponseAutomationAttempt {
   /** Wall-clock seconds; null while the run is still in flight or never started. */
   durationSeconds: number | null;
   errorMessage: string | null;
+  /** What the step said, in words: decoded from the stored JSON, record ids removed (`runOutputText`). */
   outputSummary: string | null;
   /** `MJ: Action Execution Logs` id, when an Action ran. */
   actionExecutionLogId: string | null;

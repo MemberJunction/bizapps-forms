@@ -10,7 +10,7 @@
 import '@angular/compiler';
 import { ChangeDetectorRef, Injector, runInInjectionContext } from '@angular/core';
 import { NavigationService } from '@memberjunction/ng-shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { FormsHomeDashboardComponent } from './forms-home-dashboard.component';
 import { FormsHomeService } from './forms-home.service';
 import type { FormStatus, FormSummaryRow } from './home-models';
@@ -174,3 +174,63 @@ describe('FormsHomeDashboardComponent lifecycle and templates', () => {
     expect(component.errorMessage).toBe('Could not create a form from "Intake": Form t1 is not a template.');
   });
 });
+
+describe('FormsHomeDashboardComponent — opening reads the list once', () => {
+  // MJ's dashboard host calls `Refresh()` on the instance it creates, and the instance's own
+  // `ngOnInit` loads too; both reach `loadData` while the first load is in flight. Same shape as
+  // the reporting dashboard's double `Forms.GetResponseSummary` (click-through observation 3).
+  const loadData = (c: FormsHomeDashboardComponent): void => (c as unknown as { loadData(): void }).loadData();
+
+  function deferredLoads() {
+    const pending: Array<(rows: FormSummaryRow[]) => void> = [];
+    const service = homeService({
+      loadForms: () => new Promise<FormSummaryRow[]>((resolve) => pending.push(resolve)),
+    });
+    return { service, pending };
+  }
+
+  it('joins a load already in flight instead of starting a second', async () => {
+    const { service, pending } = deferredLoads();
+    const component = makeComponent(service);
+    loadData(component);
+    loadData(component);
+
+    expect(pending).toHaveLength(1);
+    pending[0]([draftRow]);
+    component.ngOnDestroy();
+  });
+
+  it('still re-reads on a Refresh that comes after the first load settled', async () => {
+    const { service, pending } = deferredLoads();
+    const component = makeComponent(service);
+    loadData(component);
+    pending[0]([draftRow]);
+    await new Promise((settled) => setTimeout(settled, 0));
+
+    loadData(component);
+
+    expect(pending).toHaveLength(2);
+    pending[1]([draftRow]);
+    component.ngOnDestroy();
+  });
+
+  it('signals load-complete only once the list is in, for both joined callers', async () => {
+    const { service, pending } = deferredLoads();
+    const component = makeComponent(service);
+    const notified = vi.fn();
+    (component as unknown as { NotifyLoadComplete(): void }).NotifyLoadComplete = notified;
+
+    const first = component.Refresh();
+    const second = component.Refresh();
+    await new Promise((settled) => setTimeout(settled, 0));
+    expect(notified).not.toHaveBeenCalled();
+
+    pending[0]([draftRow]);
+    await Promise.all([first, second]);
+
+    expect(notified).toHaveBeenCalledTimes(2);
+    expect(component.forms).toEqual([draftRow]);
+    component.ngOnDestroy();
+  });
+});
+

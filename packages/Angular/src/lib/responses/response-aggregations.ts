@@ -31,6 +31,7 @@ import type {
   ResponseFileView,
   ResponseListRow,
 } from './response-models';
+import { runOutputText } from '../shared/run-output-text';
 
 /** Shown when a `FormUpload` row exists but carries no `FileName`. */
 const UNNAMED_FILE = 'Unnamed file';
@@ -182,7 +183,7 @@ function toAutomationAttempt(run: FormsResponseAutomationRun): ResponseAutomatio
     completedAt,
     durationSeconds: startedAt && completedAt ? (completedAt.getTime() - startedAt.getTime()) / 1000 : null,
     errorMessage: run.ErrorMessage,
-    outputSummary: run.OutputSummary,
+    outputSummary: runOutputText(run.OutputSummary),
     actionExecutionLogId: run.ActionExecutionLogID,
     aiAgentRunId: run.AIAgentRunID,
   };

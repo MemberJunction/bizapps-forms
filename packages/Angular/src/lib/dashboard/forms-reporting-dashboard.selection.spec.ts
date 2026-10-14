@@ -394,6 +394,23 @@ describe('FormsReportingDashboardComponent — a summary refused to this reader,
     expect(c.showResponsesView).toBe(false);
   });
 
+  it('keeps the Responses view when the header Refresh re-reads the same form (click-through step 32)', async () => {
+    const { c, reportCalls } = construct();
+    const a = c.selectForm(FORM_A);
+    reportCalls[0].load.resolve(reportWithTotal(11));
+    await a;
+    c.setMode('responses');
+
+    const refreshing = c.refresh();
+    expect(c.mode).toBe('responses');
+    reportCalls[1].load.resolve(reportWithTotal(12));
+    await refreshing;
+
+    expect(c.mode).toBe('responses');
+    expect(c.showResponsesView).toBe(true);
+    expect(c.report?.summary.totalResponses).toBe(12);
+  });
+
   it('holds its own refresh and export while the Responses view opens a response, and drops the hold on a new form', async () => {
     const { c, reportCalls } = construct();
     const a = c.selectForm(FORM_A);
@@ -412,3 +429,61 @@ describe('FormsReportingDashboardComponent — a summary refused to this reader,
     await b;
   });
 });
+
+describe('FormsReportingDashboardComponent — opening reads each thing once', () => {
+  // MJ's dashboard host calls `Refresh()` on the instance it creates, and the instance's own
+  // `ngOnInit` loads too. Both reached `loadData` while the first load was in flight, so opening
+  // the dashboard sent `Forms.GetResponseSummary` twice (click-through observation 3).
+  const loadData = (c: FormsReportingDashboardComponent): void =>
+    (c as unknown as { loadData(): void }).loadData();
+
+  it('joins a load already in flight instead of starting a second', async () => {
+    const { c, formLists, reportCalls } = construct();
+    loadData(c);
+    loadData(c);
+    expect(formLists).toHaveLength(1);
+
+    formLists[0].resolve([FORM_A]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(1));
+    reportCalls[0].load.resolve(reportWithTotal(11));
+    await vi.waitFor(() => expect(c.loadingReport).toBe(false));
+    expect(reportCalls).toHaveLength(1);
+  });
+
+  it('still re-reads on a Refresh that comes after the first load settled', async () => {
+    const { c, formLists, reportCalls } = construct();
+    loadData(c);
+    formLists[0].resolve([FORM_A]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(1));
+    reportCalls[0].load.resolve(reportWithTotal(11));
+    await vi.waitFor(() => expect(c.loadingReport).toBe(false));
+    // The whole first load, including its own bookkeeping after the report, has returned.
+    await new Promise((settled) => setTimeout(settled, 0));
+
+    loadData(c);
+    expect(formLists).toHaveLength(2);
+  });
+
+  it('signals load-complete only once the forms and the first report are in, for both joined callers', async () => {
+    // `BaseDashboard` awaits `loadData()` and calls `NotifyLoadComplete` after it. A `loadData` that
+    // returned nothing let the Explorer shell drop its loading state before any data arrived.
+    const { c, formLists, reportCalls } = construct();
+    const notified = vi.fn();
+    (c as unknown as { NotifyLoadComplete(): void }).NotifyLoadComplete = notified;
+
+    const first = c.Refresh();
+    const second = c.Refresh();
+    await new Promise((settled) => setTimeout(settled, 0));
+    expect(notified).not.toHaveBeenCalled();
+
+    formLists[0].resolve([FORM_A]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(1));
+    expect(notified).not.toHaveBeenCalled();
+    reportCalls[0].load.resolve(reportWithTotal(11));
+    await Promise.all([first, second]);
+
+    expect(notified).toHaveBeenCalledTimes(2);
+    expect(c.report?.summary.totalResponses).toBe(11);
+  });
+});
+

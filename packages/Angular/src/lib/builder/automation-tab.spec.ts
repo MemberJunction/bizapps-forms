@@ -112,12 +112,19 @@ describe('failures are surfaced, never swallowed', () => {
 
 /** Automation rows the mocked RunView answers with (the tab reads them as plain rows). */
 let automationRows: Record<string, unknown>[] = [];
+/** Run rows the mocked RunView answers with. */
+let runRows: Record<string, unknown>[] = [];
 
 vi.mock('@memberjunction/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class RunView {
     public async RunView(params: RunViewParams) {
-      const rows = params.EntityName === 'MJ_BizApps_Forms: Form Automations' ? automationRows : [];
+      const rows =
+        params.EntityName === 'MJ_BizApps_Forms: Form Automations'
+          ? automationRows
+          : params.EntityName === 'MJ_BizApps_Forms: Form Automation Runs'
+            ? runRows
+            : [];
       return { Success: true, Results: rows, ErrorMessage: '' };
     }
     public async RunViews(params: RunViewParams[]) {
@@ -181,6 +188,7 @@ async function tabWith(rows: Record<string, unknown>[]): Promise<TabInternals> {
 
 beforeEach(() => {
   automationRows = [];
+  runRows = [];
 });
 
 afterEach(() => {
@@ -190,6 +198,17 @@ afterEach(() => {
 
 const saved = (id: string, seeded: string[] = []) =>
   succeeded({ FormAutomationID: id, FormEntityBindingID: null, DisplayOrder: 5, SeededAutomationIDs: seeded });
+
+describe('recent activity', () => {
+  it('shows what a run said in words — no JSON envelope, no record id (click-through observation 2)', async () => {
+    runRows = [
+      { ID: 'run-1', FormAutomationID: 'a1', Status: 'Succeeded', StartedAt: null, ErrorMessage: null, OutputSummary: '{"summary":"Created 7F367F15-B60D-49FF-A85F-3F62B5F2AE42"}' },
+    ];
+    const tab = await tabWith([step('a1', 1)]);
+
+    expect((tab as unknown as { runs(): { message: string }[] }).runs().map((r) => r.message)).toEqual(['Created']);
+  });
+});
 
 describe('adding a step', () => {
   it('creates an Action step through Forms.SaveAutomation, leaving order and defaults to the server', async () => {

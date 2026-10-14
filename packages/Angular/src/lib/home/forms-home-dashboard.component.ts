@@ -127,9 +127,27 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     // Nothing to set up beyond the injected service.
   }
 
-  protected loadData(): void {
-    void this.loadForms();
+  /** The open/Refresh load in flight, if any; see {@link loadData}. */
+  private openLoad: Promise<void> | null = null;
+
+  /**
+   * Loads the list — joining a load already in flight rather than starting a second. MJ's
+   * dashboard host calls `Refresh()` on the instance it creates, and the instance's own `ngOnInit`
+   * loads too, so opening the dashboard read the list twice. A Refresh after the load has settled
+   * still re-reads; the reloads after this page's own writes call `loadForms` directly.
+   *
+   * Returns the load, so `BaseDashboard` (which awaits `loadData` and then calls
+   * `NotifyLoadComplete`) signals load-complete when the list is in; a joined caller gets the same
+   * promise. The base declares `void`; a promise-returning override is what it awaits.
+   */
+  protected loadData(): Promise<void> {
     this.watchForFormChanges();
+    if (!this.openLoad) {
+      this.openLoad = this.loadForms().finally(() => {
+        this.openLoad = null;
+      });
+    }
+    return this.openLoad;
   }
 
   public ngOnDestroy(): void {

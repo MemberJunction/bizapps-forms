@@ -37,6 +37,15 @@ const ACTION_NAME = 'Forms: Create Form From Template';
 
 @RegisterClass(BaseAction, ACTION_NAME)
 export class CreateFormFromTemplateAction extends BaseAction {
+  /**
+   * Runs from the browser (Forms home) through MJ's `RunAction`, which refuses a non-Owner any
+   * action that neither has an `MJ: Action Authorizations` link nor declares this. It is safe here:
+   * `prepareAuthoring` refuses a caller who may not author forms (`refuseFormAuthoring`) before any
+   * work, and the form is written with the caller's own permissions — that check is the one
+   * authoring decision.
+   */
+  public static readonly AuthorizesCaller = true;
+
   protected async InternalRunAction(params: RunActionParams): Promise<ActionResultSimple> {
     const key = getStringParam(params, 'TemplateKey');
     if (!key) {

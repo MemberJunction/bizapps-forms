@@ -43,6 +43,7 @@ import {
   type EntityChoice,
   type NamedTarget,
 } from './entity-suggestions';
+import { runOutputText } from '../shared/run-output-text';
 
 /**
  * What the step verbs write: the steps, the binding a step runs, and the form's settings (marked as
@@ -964,7 +965,7 @@ function toRunRows(rows: readonly RawRunRow[]): RunRow[] {
     status: r.Status,
     when: r.StartedAt ? new Date(r.StartedAt) : null,
     // The error wins over the summary: a run that failed has one thing worth reading.
-    message: r.ErrorMessage || r.OutputSummary || '',
+    message: r.ErrorMessage || runOutputText(r.OutputSummary) || '',
   }));
 }
 

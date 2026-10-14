@@ -245,6 +245,14 @@ describe('buildResponseDetail — what the submission did', () => {
     ]);
   });
 
+  it('shows what a step said in words — no JSON envelope, no record id (click-through observation 2)', () => {
+    const detail = buildResponseDetail(
+      output({ AutomationRuns: [run({ OutputSummary: '{"summary":"Skipped 44C5700D-7BA4-4838-B00F-3B6F11D6E8C6"}' })] }),
+    );
+
+    expect(detail.automationRuns[0].outputSummary).toBe('Skipped');
+  });
+
   it('leaves the duration null while a step is still in flight, and keeps a failure message', () => {
     const detail = buildResponseDetail(output({ AutomationRuns: [run({ Status: 'Running', CompletedAt: null, ErrorMessage: 'boom' })] }));
 

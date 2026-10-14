@@ -161,8 +161,27 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     // Nothing to set up beyond the injected services.
   }
 
-  protected loadData(): void {
-    void this.loadForms();
+  /** The forms-list load in flight, if any; see {@link loadData}. */
+  private formsLoad: Promise<void> | null = null;
+
+  /**
+   * Loads the rail and the first form's report — joining a load already in flight rather than
+   * starting a second. MJ's dashboard host calls `Refresh()` on the instance it creates, and the
+   * instance's own `ngOnInit` loads too, so opening the dashboard reached here twice before the
+   * first load returned and sent `Forms.GetResponseSummary` twice. A Refresh after the load has
+   * settled still re-reads.
+   *
+   * Returns the load, so `BaseDashboard` (which awaits `loadData` and then calls
+   * `NotifyLoadComplete`) signals load-complete when the data is in; a joined caller gets the same
+   * promise. The base declares `void`; a promise-returning override is what it awaits.
+   */
+  protected loadData(): Promise<void> {
+    if (!this.formsLoad) {
+      this.formsLoad = this.loadForms().finally(() => {
+        this.formsLoad = null;
+      });
+    }
+    return this.formsLoad;
   }
 
   private async loadForms(): Promise<void> {
@@ -224,15 +243,29 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     return this.selectedForm?.formId === form.formId;
   }
 
+  /** Shows another form: back to its Insights, with the previous form's Responses view dropped. */
   public async selectForm(form: ReportableForm): Promise<void> {
+    this.mode = 'insights';
+    this.responsesMounted = false;
+    this.responsesBusy = false;
+    await this.loadReportFor(form);
+  }
+
+  /**
+   * Re-reads the selected form's report; a form owner may be watching submissions arrive. The
+   * reader stays in the view they are on: a Refresh from Responses re-reads and stays there.
+   */
+  public async refresh(): Promise<void> {
+    if (!this.selectedForm) return;
+    await this.loadReportFor(this.selectedForm);
+  }
+
+  private async loadReportFor(form: ReportableForm): Promise<void> {
     // The rail stays clickable during a load, so two loads can be in flight and they settle
     // in network order, not click order. Only the load holding the latest stamp may touch
     // the report, the error or the loading flag (#252).
     const stamp = ++this.selectionStamp;
     this.selectedForm = form;
-    this.mode = 'insights';
-    this.responsesMounted = false;
-    this.responsesBusy = false;
     this.loadingReport = true;
     this.errorMessage = null;
     this.exportNotice = null;
@@ -270,12 +303,6 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
         this.cdr.markForCheck();
       }
     }
-  }
-
-  /** Re-reads the selected form's report; a form owner may be watching submissions arrive. */
-  public async refresh(): Promise<void> {
-    if (!this.selectedForm) return;
-    await this.selectForm(this.selectedForm);
   }
 
   // --- The report ------------------------------------------------------------

@@ -138,17 +138,28 @@ class FakeState {
   public readonly calls: string[] = [];
   public persistOk = true;
   public saveDebounced = vi.fn();
-  public lastFailure = () => null;
+  public lastFailure = () => this.failure;
+  public dismissFailure = vi.fn(() => {
+    this.failure = null;
+  });
   public async loadTree(): Promise<FormTree> {
+    this.calls.push('loadTree');
     if (!this.tree) throw new Error('no tree');
     return this.tree;
   }
   public async flushPendingSaves(): Promise<void> {
     this.calls.push('flush');
   }
-  public async save(): Promise<boolean> {
-    return true;
-  }
+  public saveOk = true;
+  public failure: string | null = null;
+  /** Like the real service: a successful save of a new record leaves it saved. */
+  public save = vi.fn(async (entity: { IsSaved: boolean }): Promise<boolean> => {
+    this.calls.push('save');
+    if (this.saveOk) {
+      entity.IsSaved = true;
+    }
+    return this.saveOk;
+  });
   /** Like the real service, minus the queue: read, then adopt what is stored. */
   public async adoptStored(entity: mjBizAppsFormsFormEntity, read: () => Promise<Record<string, unknown> | null>): Promise<boolean> {
     const row = await read();
@@ -194,11 +205,17 @@ interface BuilderInternals {
   templateDialogError: string | null;
   pickerSeam: { pageId: string; index: number } | null;
   loadBuilder(): Promise<void>;
+  awaitingCreate: boolean;
+  createError: string | null;
+  createForm(name: string): Promise<void>;
   publish(): Promise<void>;
   saveAsTemplate(request: { name: string; description: string | null }): Promise<void>;
   onOptionChanged(option: mjBizAppsFormsFormQuestionOptionEntity): void;
   onQuestionChanged(node: QuestionNode): void;
   insertQuestionAt(type: FormQuestionType): Promise<void>;
+  selectQuestion(node: QuestionNode): void;
+  offersInsertAbove(page: PageNode, node: QuestionNode): boolean;
+  openTypePicker(page: PageNode, index: number): void;
   dropQuestion(page: PageNode, event: CdkDragDrop<PageNode>): Promise<void>;
   ngOnDestroy(): void;
   publishReach: { kind: string };
@@ -457,6 +474,125 @@ describe('inserting a question at a seam', () => {
   });
 });
 
+describe('inserting above the first question of a section', () => {
+  // Click-through step 5: the only seams a non-empty section offered were "after the selected
+  // question", so nothing could land above question 1 without an insert and a Move up.
+  it('offers the seam above only on the selected FIRST question', async () => {
+    const { builder } = await loaded();
+    const [p1] = (builder.tree as FormTree).pages;
+    const [q1, q2] = p1.questions;
+
+    expect(builder.offersInsertAbove(p1, q1)).toBe(false);
+    builder.selectQuestion(q1);
+    expect(builder.offersInsertAbove(p1, q1)).toBe(true);
+    builder.selectQuestion(q2);
+    // Above q2 is the seam "after q1" already offers; a second opener for one seam would render
+    // the picker twice.
+    expect(builder.offersInsertAbove(p1, q2)).toBe(false);
+  });
+
+  it('puts the new question first, in one save', async () => {
+    const { builder, state } = await loaded();
+    const [p1] = (builder.tree as FormTree).pages;
+    builder.selectQuestion(p1.questions[0]);
+
+    builder.openTypePicker(p1, 0);
+    await builder.insertQuestionAt('LongText');
+
+    expect(state.addQuestion).toHaveBeenCalledTimes(1);
+    expect(state.addQuestion.mock.calls[0][4]).toBe(0);
+    expect(p1.questions.map((q) => q.entity.ID)).toEqual(['new', 'q1', 'q2', 'q3']);
+  });
+});
+
+describe('a new, unsaved form record', () => {
+  // Click-through observation 9: Explorer restored a pinned "New Forms Record" tab, and the
+  // builder it mounted saved an "Untitled form" row before the author touched anything. A new
+  // record now writes nothing until the author asks for the form.
+  async function opened() {
+    const made = makeBuilder();
+    Object.assign(made.record, { IsSaved: false, Name: '' });
+    await made.builder.loadBuilder();
+    return made;
+  }
+
+  it('writes nothing when the builder opens it', async () => {
+    const { builder, state } = await opened();
+
+    expect(state.save).not.toHaveBeenCalled();
+    expect(state.calls).not.toContain('loadTree');
+    expect(builder.awaitingCreate).toBe(true);
+    expect(builder.tree).toBeNull();
+  });
+
+  it('creates the form with the name the author typed, then loads the builder', async () => {
+    const { builder, state, record } = await opened();
+
+    await builder.createForm('  Volunteer intake ');
+
+    expect(state.save).toHaveBeenCalledTimes(1);
+    expect(record.Name).toBe('Volunteer intake');
+    expect(state.calls.indexOf('save')).toBeLessThan(state.calls.indexOf('loadTree'));
+    expect(builder.awaitingCreate).toBe(false);
+    expect(builder.tree).not.toBeNull();
+  });
+
+  it('names a form created with a blank name "Untitled form"', async () => {
+    const { builder, record } = await opened();
+
+    await builder.createForm('   ');
+
+    expect(record.Name).toBe('Untitled form');
+  });
+
+  it('stays on the start step with the reason when the create is refused', async () => {
+    const { builder, state } = await opened();
+    state.saveOk = false;
+    state.failure = 'Could not save. You do not have permission to create this record.';
+
+    await builder.createForm('Volunteer intake');
+
+    expect(builder.awaitingCreate).toBe(true);
+    expect(builder.createError).toBe('This form could not be created: You do not have permission to create this record.');
+    expect(state.calls).not.toContain('loadTree');
+  });
+
+  it("says MJ's refusal once, on one line, without its trailing brace (click-through observation 4)", async () => {
+    const { builder, state } = await opened();
+    state.saveOk = false;
+    state.failure =
+      'Could not save. User: Ada (ID: 1, Email: ada@example.org)\n                         Does NOT have permission to Create MJ_BizApps_Forms: Forms records.\n                         If you believe this is an error, please contact your system administrator.}';
+
+    await builder.createForm('Volunteer intake');
+
+    expect(builder.createError).toBe(
+      'This form could not be created: User: Ada (ID: 1, Email: ada@example.org) Does NOT have permission to Create MJ_BizApps_Forms: Forms records. If you believe this is an error, please contact your system administrator.',
+    );
+  });
+
+  it('leaves no stale failure for the builder banner once a retried create succeeds', async () => {
+    const { builder, state } = await opened();
+    state.saveOk = false;
+    state.failure = 'Could not save. The database was unreachable.';
+    await builder.createForm('Volunteer intake');
+
+    state.saveOk = true;
+    await builder.createForm('Volunteer intake');
+
+    expect(builder.awaitingCreate).toBe(false);
+    expect(builder.createError).toBeNull();
+    expect(state.lastFailure()).toBeNull();
+  });
+
+  it('opens a saved form straight into the builder, as before', async () => {
+    const { builder, state } = await loaded();
+
+    expect(state.save).not.toHaveBeenCalled();
+    expect(builder.awaitingCreate).toBe(false);
+    expect(builder.tree).not.toBeNull();
+  });
+});
+
 describe('a refused reorder', () => {
   const drop = (from: PageNode, previousIndex: number, currentIndex: number, to = from) =>
     ({ previousContainer: { data: from }, container: { data: to }, previousIndex, currentIndex }) as unknown as CdkDragDrop<PageNode>;
@@ -487,6 +623,19 @@ describe('a refused reorder', () => {
     expect(state.calls).toContain('persistCrossPageMove');
     expect(p1.questions.map((q) => q.entity.ID)).toEqual(['q1', 'q2', 'q3']);
     expect(p2.questions.map((q) => q.entity.ID)).toEqual(['q4']);
+  });
+
+  it('moves a question into an EMPTY section (click-through observation 10)', async () => {
+    const { builder, state } = await loaded();
+    const tree = builder.tree as FormTree;
+    const [p1, p2] = tree.pages;
+    p2.questions.splice(0);
+
+    await builder.dropQuestion(p2, drop(p1, 0, 0, p2));
+
+    expect(state.calls).toContain('persistCrossPageMove');
+    expect(p1.questions.map((q) => q.entity.ID)).toEqual(['q2', 'q3']);
+    expect(p2.questions.map((q) => q.entity.ID)).toEqual(['q1']);
   });
 
   it('keeps a successful move', async () => {

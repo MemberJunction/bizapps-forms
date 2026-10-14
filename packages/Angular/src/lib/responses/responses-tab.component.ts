@@ -74,8 +74,8 @@ export const LIST_CHANGED_NOTICE = 'The list changed — refresh to see it.';
       }
 
       @if (Embedded) {
-        <!-- Under the dashboard's header, whose own refresh re-reads the summary and returns to
-             Insights: this one re-reads the list and stays on it. -->
+        <!-- Under the dashboard's header, whose own refresh re-reads the summary and this list
+             and keeps the reader on Responses: this one re-reads only the list. -->
         <div class="rt-bar">
           <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" [disabled]="Loading() || OpeningResponse()" (click)="Refresh()">
             <i class="fa-solid fa-rotate-right" [class.fa-spin]="Loading()" aria-hidden="true"></i> Refresh

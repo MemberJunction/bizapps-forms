@@ -412,6 +412,16 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected builderReady = false;
 
   /**
+   * True while the builder holds a new, never-saved Form record and is waiting for the author to
+   * create it (the start step in the template). Nothing is written before that: Explorer restores
+   * a pinned "New Forms Record" tab on its own, and a builder that saved on load created an
+   * "Untitled form" row nobody asked for.
+   */
+  protected awaitingCreate = false;
+  /** Why the start step's create was refused, in the author's words; null when it was not. */
+  protected createError: string | null = null;
+
+  /**
    * This form's share links, or `null` while unread or unreadable.
    *
    * Null is the honest starting value AND the honest failure value, and it has to be both:
@@ -497,15 +507,15 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   private async loadBuilder(): Promise<void> {
-    this.busy = true;
-    // A Form opened via the "new record" flow isn't persisted yet, so its child
-    // Pages/Questions would violate FK_FormPage_Form / FK_FormQuestion_Form. Persist
-    // the Form shell first (the builder is immediate-persist by design).
-    if (!(await this.ensureFormSaved())) {
-      this.busy = false;
+    // A Form opened via the "new record" flow is not persisted yet, and the builder is
+    // immediate-persist: every page and question it writes needs the Form row (FK_FormPage_Form).
+    // So a new record waits on the start step until the author creates it — see `createForm`.
+    if (!this.record.IsSaved) {
+      this.awaitingCreate = true;
       this.cdr.markForCheck();
       return;
     }
+    this.busy = true;
     try {
       this.tree = await this.state.loadTree(this.record);
     } catch (err) {
@@ -555,18 +565,31 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   /**
-   * Guarantee the Form record exists in the DB before any child insert. New records
-   * (Explorer "create") arrive unsaved with a client-generated ID; `Name` is the only
-   * required column without a DB default, so we seed a placeholder the author renames.
+   * The start step's one action: write the new Form row with the name the author typed, then load
+   * the builder over it. A blank name becomes "Untitled form" (`Name` is the only required column
+   * without a database default). A refused save keeps the author on the start step with the reason.
    */
-  private async ensureFormSaved(): Promise<boolean> {
-    if (this.record.IsSaved) {
-      return true;
+  protected async createForm(name: string): Promise<void> {
+    if (!this.awaitingCreate || this.busy) {
+      return;
     }
-    if (!this.record.Name) {
-      this.record.Name = 'Untitled form';
+    this.busy = true;
+    this.createError = null;
+    this.record.Name = name.trim() || 'Untitled form';
+    const saved = await this.state.save(this.record);
+    this.busy = false;
+    const failure = this.state.lastFailure();
+    // The start step says why itself; left in the service, the reason would reappear as the
+    // builder's banner once a retried create succeeds.
+    this.state.dismissFailure();
+    if (!saved) {
+      LogError(`Forms builder could not create the new form "${this.record.Name}": ${failure ?? 'no reason given'}`);
+      this.createError = `This form could not be created: ${createRefusalReason(failure)}`;
+      this.cdr.markForCheck();
+      return;
     }
-    return this.state.save(this.record);
+    this.awaitingCreate = false;
+    await this.loadBuilder();
   }
 
   // -- palette --------------------------------------------------------------
@@ -624,6 +647,16 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   protected isPickerOpen(page: PageNode, index: number): boolean {
     return this.pickerSeam?.pageId === page.entity.ID && this.pickerSeam.index === index;
+  }
+
+  /**
+   * True when the canvas should offer "add content above" on this question: it is selected and it
+   * is the first in its section. Seam 0 of a non-empty section is the one seam no "after this
+   * question" bar can reach. Above any other question is the seam the bar under its predecessor
+   * already opens, and offering it twice would render one seam's picker in two places.
+   */
+  protected offersInsertAbove(page: PageNode, node: QuestionNode): boolean {
+    return node.entity.ID === this.selectedQuestionId && page.questions[0] === node;
   }
 
   protected openTypePicker(page: PageNode, index: number): void {
@@ -2171,4 +2204,22 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.previewDef = null;
     this.cdr.markForCheck();
   }
+}
+
+/**
+ * The reason a new form's save was refused, as one readable sentence: without the save queue's own
+ * "Could not save." prefix (the start step supplies its own), on one line, and without the
+ * unmatched closing brace MJ's permission message ends with.
+ */
+function createRefusalReason(failure: string | null): string {
+  if (!failure) {
+    return 'The server did not say why.';
+  }
+  const text = failure
+    .replace(/^Could not save\.\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const opens = (text.match(/\{/g) ?? []).length;
+  const closes = (text.match(/\}/g) ?? []).length;
+  return closes > opens && text.endsWith('}') ? text.slice(0, -1).trimEnd() : text;
 }
