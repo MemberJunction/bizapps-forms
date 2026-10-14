@@ -21,7 +21,14 @@ import { FormsReportingService, type ReportLoad } from './services/forms-reporti
 import { FormsReportingExportService, type ExportOutcome } from './services/forms-reporting-export.service';
 import { toFormReport } from './services/report-view';
 import { summaryOutput } from './testing/summary-fixture';
+import { LOAD_TIMEOUT_MS } from '../shared/coalesced-load';
 import type { FormReportData, ReportableForm } from './models/reporting.model';
+
+const settle = (): Promise<void> => new Promise((done) => setTimeout(done, 0));
+
+/** The mount-time load (`ngOnInit` calls it); `loadData` is protected. */
+const loadData = (c: FormsReportingDashboardComponent): void =>
+  void (c as unknown as { loadData(): Promise<void> }).loadData();
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -434,9 +441,6 @@ describe('FormsReportingDashboardComponent — opening reads each thing once', (
   // MJ's dashboard host calls `Refresh()` on the instance it creates, and the instance's own
   // `ngOnInit` loads too. Both reached `loadData` while the first load was in flight, so opening
   // the dashboard sent `Forms.GetResponseSummary` twice (click-through observation 3).
-  const loadData = (c: FormsReportingDashboardComponent): void =>
-    (c as unknown as { loadData(): void }).loadData();
-
   it('joins a load already in flight instead of starting a second', async () => {
     const { c, formLists, reportCalls } = construct();
     loadData(c);
@@ -464,26 +468,207 @@ describe('FormsReportingDashboardComponent — opening reads each thing once', (
     expect(formLists).toHaveLength(2);
   });
 
-  it('signals load-complete only once the forms and the first report are in, for both joined callers', async () => {
+  it('signals load-complete only once the forms and the first report are in', async () => {
     // `BaseDashboard` awaits `loadData()` and calls `NotifyLoadComplete` after it. A `loadData` that
     // returned nothing let the Explorer shell drop its loading state before any data arrived.
     const { c, formLists, reportCalls } = construct();
     const notified = vi.fn();
     (c as unknown as { NotifyLoadComplete(): void }).NotifyLoadComplete = notified;
 
-    const first = c.Refresh();
-    const second = c.Refresh();
-    await new Promise((settled) => setTimeout(settled, 0));
+    const opening = c.Refresh();
+    loadData(c);
+    await settle();
     expect(notified).not.toHaveBeenCalled();
 
     formLists[0].resolve([FORM_A]);
     await vi.waitFor(() => expect(reportCalls).toHaveLength(1));
     expect(notified).not.toHaveBeenCalled();
     reportCalls[0].load.resolve(reportWithTotal(11));
-    await Promise.all([first, second]);
+    await opening;
 
-    expect(notified).toHaveBeenCalledTimes(2);
+    expect(notified).toHaveBeenCalledTimes(1);
+    expect(formLists).toHaveLength(1);
     expect(c.report?.summary.totalResponses).toBe(11);
   });
 });
 
+describe('FormsReportingDashboardComponent — a host Refresh', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // The rail sorts by response count, so FORM_B (22) is first and is what the open selects; the
+  // tests that need "a form other than the first" use FORM_A.
+
+  /** Settles the open: the list, then the first form's (FORM_B's) report. */
+  async function open(h: Harness, forms: ReportableForm[]): Promise<void> {
+    loadData(h.c);
+    h.formLists[0].resolve(forms);
+    await vi.waitFor(() => expect(h.reportCalls).toHaveLength(1));
+    h.reportCalls[0].load.resolve(reportWithTotal(22, FORM_B));
+    await vi.waitFor(() => expect(h.c.loadingReport).toBe(false));
+    await settle();
+  }
+
+  it('that arrives during the first load runs once that load settles, not alongside it', async () => {
+    const h = construct();
+    const { c, formLists, reportCalls } = h;
+    const notified = vi.fn();
+    (c as unknown as { NotifyLoadComplete(): void }).NotifyLoadComplete = notified;
+    loadData(c);
+    const refreshing = c.Refresh();
+    const again = c.Refresh();
+    await settle();
+    // No overlap: the second read waits for the first.
+    expect(formLists).toHaveLength(1);
+
+    formLists[0].resolve([FORM_A]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(1));
+    reportCalls[0].load.resolve(reportWithTotal(11));
+    // Two Refreshes during one load ask for one more read, not two.
+    await vi.waitFor(() => expect(formLists).toHaveLength(2));
+    expect(notified).not.toHaveBeenCalled();
+
+    formLists[1].resolve([FORM_A]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(2));
+    reportCalls[1].load.resolve(reportWithTotal(12));
+    await Promise.all([refreshing, again]);
+
+    expect(formLists).toHaveLength(2);
+    expect(reportCalls).toHaveLength(2);
+    expect(c.report?.summary.totalResponses).toBe(12);
+    expect(notified).toHaveBeenCalledTimes(2);
+  });
+
+  it('after the load keeps the selected form and the Responses view', async () => {
+    const h = construct();
+    const { c, formLists, reportCalls } = h;
+    await open(h, [FORM_A, FORM_B]);
+    const a = c.selectForm(FORM_A);
+    reportCalls[1].load.resolve(reportWithTotal(11));
+    await a;
+    c.setMode('responses');
+
+    const refreshing = c.Refresh();
+    formLists[1].resolve([FORM_A, FORM_B]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(3));
+    expect(reportCalls[2].form.formId).toBe(FORM_A.formId);
+    reportCalls[2].load.resolve(reportWithTotal(12));
+    await refreshing;
+
+    expect(c.selectedForm?.formId).toBe(FORM_A.formId);
+    expect(c.mode).toBe('responses');
+    expect(c.showResponsesView).toBe(true);
+    expect(c.report?.summary.totalResponses).toBe(12);
+  });
+
+  it('after the load falls back to the first form, on Insights, when the selected one is gone', async () => {
+    const h = construct();
+    const { c, formLists, reportCalls } = h;
+    await open(h, [FORM_A, FORM_B]);
+    const a = c.selectForm(FORM_A);
+    reportCalls[1].load.resolve(reportWithTotal(11));
+    await a;
+    c.setMode('responses');
+
+    const refreshing = c.Refresh();
+    formLists[1].resolve([FORM_B]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(3));
+    reportCalls[2].load.resolve(reportWithTotal(23, FORM_B));
+    await refreshing;
+
+    expect(reportCalls[2].form.formId).toBe(FORM_B.formId);
+    expect(c.selectedForm?.formId).toBe(FORM_B.formId);
+    expect(c.mode).toBe('insights');
+    expect(c.responsesMounted).toBe(false);
+  });
+
+  it('does not put its report over a form the reader switched to while it was loading', async () => {
+    const h = construct();
+    const { c, formLists, reportCalls } = h;
+    await open(h, [FORM_A, FORM_B]);
+
+    const refreshing = c.Refresh();
+    formLists[1].resolve([FORM_A, FORM_B]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(2));
+    // The reload is reading FORM_B (the selection); the reader moves to FORM_A meanwhile.
+    expect(reportCalls[1].form.formId).toBe(FORM_B.formId);
+    const a = c.selectForm(FORM_A);
+    const reportA = reportWithTotal(11);
+    reportCalls[2].load.resolve(reportA);
+    await a;
+    reportCalls[1].load.resolve(reportWithTotal(99, FORM_B));
+    await refreshing;
+
+    expect(c.selectedForm?.formId).toBe(FORM_A.formId);
+    expect(c.report).toBe(reportOf(reportA));
+    expect(c.loadingReport).toBe(false);
+  });
+});
+
+describe('FormsReportingDashboardComponent — the failed-state retry, and a hung load', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('runs a retry pressed during a host Refresh after it, not alongside it', async () => {
+    const { c, formLists, reportCalls } = construct();
+    const refreshing = c.Refresh();
+    c.retryLoadForms();
+    await settle();
+    expect(formLists).toHaveLength(1);
+
+    formLists[0].resolve([FORM_A]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(1));
+    reportCalls[0].load.resolve(reportWithTotal(11));
+    await vi.waitFor(() => expect(formLists).toHaveLength(2));
+    formLists[1].resolve([FORM_A]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(2));
+    reportCalls[1].load.resolve(reportWithTotal(12));
+    await refreshing;
+    await vi.waitFor(() => expect(c.report?.summary.totalResponses).toBe(12));
+  });
+
+  it('abandons a list read that hangs past the load timeout: says so, ends the loading state, ignores its late list', async () => {
+    vi.useFakeTimers();
+    const { c, formLists, reportCalls, errors } = construct();
+    loadData(c);
+    expect(c.loadingForms).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS);
+    expect(c.loadingForms).toBe(false);
+    expect(c.formsLoadError).toContain(`did not settle within ${LOAD_TIMEOUT_MS} ms`);
+    expect(c.railState).toBe('failed');
+    expect(errors).toHaveLength(1);
+
+    formLists[0].resolve([FORM_A]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(c.forms).toEqual([]);
+    expect(reportCalls).toHaveLength(0);
+  });
+
+  it('abandons a first report that hangs past the load timeout: ends the report spinner and ignores the late report', async () => {
+    vi.useFakeTimers();
+    const { c, formLists, reportCalls } = construct();
+    loadData(c);
+    formLists[0].resolve([FORM_A]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reportCalls).toHaveLength(1);
+    expect(c.loadingReport).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS);
+    expect(c.loadingReport).toBe(false);
+    expect(c.errorMessage).toContain(`did not settle within ${LOAD_TIMEOUT_MS} ms`);
+
+    reportCalls[0].load.resolve(reportWithTotal(11));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(c.report).toBeNull();
+  });
+});

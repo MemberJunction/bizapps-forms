@@ -14,6 +14,7 @@ import type { ActionParam } from '@memberjunction/actions-base';
 
 import { FORMS_UI_CSS, failureMessage } from '../shared';
 import { onFormsWrite, type FormsWriteSubscription } from '../shared/forms-writes';
+import { CoalescedLoad } from '../shared/coalesced-load';
 import { FormsHomeService } from './forms-home.service';
 import { FORMS_HOME_CSS } from './forms-home-dashboard.styles';
 import { totalResponses } from './home-aggregations';
@@ -127,27 +128,36 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     // Nothing to set up beyond the injected service.
   }
 
-  /** The open/Refresh load in flight, if any; see {@link loadData}. */
-  private openLoad: Promise<void> | null = null;
+  /**
+   * The one list read: the mount-time load joins it; a host Refresh, the reload after this page's
+   * own writes and a write heard elsewhere all re-request it through {@link loadForms}, so no two
+   * reads ever overlap and settle out of order.
+   */
+  private readonly openLoad = new CoalescedLoad((signal) => this.readForms(signal), { label: 'Forms home list' });
 
   /**
-   * Loads the list — joining a load already in flight rather than starting a second. MJ's
-   * dashboard host calls `Refresh()` on the instance it creates, and the instance's own `ngOnInit`
-   * loads too, so opening the dashboard read the list twice. A Refresh after the load has settled
-   * still re-reads; the reloads after this page's own writes call `loadForms` directly.
+   * The mount-time load (`BaseDashboard.ngOnInit`), joining one already in flight: MJ's dashboard
+   * host calls `Refresh()` on the instance it creates, so without the join opening the dashboard
+   * read the list twice.
    *
    * Returns the load, so `BaseDashboard` (which awaits `loadData` and then calls
-   * `NotifyLoadComplete`) signals load-complete when the list is in; a joined caller gets the same
-   * promise. The base declares `void`; a promise-returning override is what it awaits.
+   * `NotifyLoadComplete`) signals load-complete when the list is in. The base declares `void`; a
+   * promise-returning override is what it awaits.
    */
   protected loadData(): Promise<void> {
     this.watchForFormChanges();
-    if (!this.openLoad) {
-      this.openLoad = this.loadForms().finally(() => {
-        this.openLoad = null;
-      });
-    }
-    return this.openLoad;
+    return this.openLoad.join();
+  }
+
+  /**
+   * A host Refresh reads again. One that arrives during a load is not dropped into it (it asked for
+   * data read after it asked): it queues one follow-up that starts when that load settles. The base
+   * then reaches {@link loadData}, whose join returns that follow-up, so load-complete waits for it.
+   */
+  public override Refresh(): Promise<void> {
+    // Not floating: the coalescer never rejects, and the base's `loadData` below joins this same load.
+    void this.loadForms();
+    return super.Refresh();
   }
 
   public ngOnDestroy(): void {
@@ -165,29 +175,58 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
    *
    * Deliberately narrow. It reacts to the Forms entity only — a save anywhere else in the
    * Explorer must not trigger a reload here — and it skips reloads while this surface is itself
-   * mid-write, because `loadForms` already runs at the end of those.
+   * mid-write, because `loadForms` already runs at the end of those. A write heard while a read
+   * is in flight is not skipped: that read may have started before the write, so `loadForms`
+   * queues one more behind it.
    */
   private watchForFormChanges(): void {
     if (this.formChanges) {
       return;
     }
     this.formChanges = onFormsWrite(HOME_ENTITY.forms, ['save', 'delete'], () => {
-      if (this.busy || this.loading) {
+      if (this.busy) {
         return;
       }
+      // Not floating: the coalescer never rejects, and `readForms` shows its own failure.
       void this.loadForms();
     }, { debounceMs: FORM_WRITE_DEBOUNCE_MS });
   }
 
-  public async loadForms(): Promise<void> {
+  /**
+   * Re-reads the list after the current read, if one is in flight: one follow-up shared by every
+   * caller who asks meanwhile, never a second read alongside it. Resolves once the list on screen
+   * reflects a read that started after this call.
+   */
+  public loadForms(): Promise<void> {
+    return this.openLoad.again();
+  }
+
+  /**
+   * The read itself; only {@link openLoad} runs it. `signal` aborts when the coalescer abandons the
+   * read at its timeout: the page then says so and ends the loading state at once, and the late
+   * rows, if they come, are not applied (a newer read owns the list by then).
+   */
+  private async readForms(signal: AbortSignal): Promise<void> {
+    signal.addEventListener(
+      'abort',
+      () => {
+        this.fail(signal.reason, 'Failed to load forms.');
+        this.endLoad();
+      },
+      { once: true },
+    );
     this.beginLoad();
     try {
-      this.forms = await this.data.loadForms();
+      const rows = await this.data.loadForms();
+      if (signal.aborted) return;
+      this.forms = rows;
       this.applyFilter();
     } catch (err) {
+      // Abandoned: the coalescer logs this late failure; the page already says the read failed.
+      if (signal.aborted) throw err;
       this.fail(err, 'Failed to load forms.');
     } finally {
-      this.endLoad();
+      if (!signal.aborted) this.endLoad();
     }
   }
 

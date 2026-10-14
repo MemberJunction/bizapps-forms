@@ -22,6 +22,7 @@ import {
   type RailState,
   sortFormsForRail,
 } from './reporting-view-model';
+import { CoalescedLoad } from '../shared/coalesced-load';
 
 import { FormsSummaryStatsComponent } from './components/summary-stats.component';
 import { FormsRespondentProfileComponent } from './components/respondent-profile.component';
@@ -161,36 +162,52 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     // Nothing to set up beyond the injected services.
   }
 
-  /** The forms-list load in flight, if any; see {@link loadData}. */
-  private formsLoad: Promise<void> | null = null;
+  /**
+   * The rail-and-report load: the mount-time load joins it; a host Refresh and the failed state's
+   * retry re-request it, so no two of them overlap.
+   */
+  private readonly formsLoad = new CoalescedLoad((signal) => this.loadForms(signal), { label: 'Forms reporting rail and report' });
 
   /**
-   * Loads the rail and the first form's report — joining a load already in flight rather than
-   * starting a second. MJ's dashboard host calls `Refresh()` on the instance it creates, and the
-   * instance's own `ngOnInit` loads too, so opening the dashboard reached here twice before the
-   * first load returned and sent `Forms.GetResponseSummary` twice. A Refresh after the load has
-   * settled still re-reads.
+   * The mount-time load (`BaseDashboard.ngOnInit`), joining one already in flight: MJ's dashboard
+   * host calls `Refresh()` on the instance it creates, so without the join opening the dashboard
+   * sent `Forms.GetResponseSummary` twice.
    *
    * Returns the load, so `BaseDashboard` (which awaits `loadData` and then calls
-   * `NotifyLoadComplete`) signals load-complete when the data is in; a joined caller gets the same
-   * promise. The base declares `void`; a promise-returning override is what it awaits.
+   * `NotifyLoadComplete`) signals load-complete when the data is in. The base declares `void`; a
+   * promise-returning override is what it awaits.
    */
   protected loadData(): Promise<void> {
-    if (!this.formsLoad) {
-      this.formsLoad = this.loadForms().finally(() => {
-        this.formsLoad = null;
-      });
-    }
-    return this.formsLoad;
+    return this.formsLoad.join();
   }
 
-  private async loadForms(): Promise<void> {
+  /**
+   * A host Refresh reads again. One that arrives during a load is not dropped into it (it asked for
+   * data read after it asked): it queues one follow-up that starts when that load settles. The base
+   * then reaches {@link loadData}, whose join returns that follow-up, so load-complete waits for it.
+   */
+  public override Refresh(): Promise<void> {
+    // Not floating: the coalescer never rejects, and the base's `loadData` below joins this same load.
+    void this.formsLoad.again();
+    return super.Refresh();
+  }
+
+  /**
+   * One rail-and-report load; only {@link formsLoad} runs it. `signal` aborts when the coalescer
+   * abandons the load at its timeout ({@link abandonLoad} then owns the page state), so after each
+   * await an aborted load applies nothing — a newer load, or the reader, owns the page by then.
+   */
+  private async loadForms(signal: AbortSignal): Promise<void> {
+    /** The stamp of this load's own report, once it starts one; see {@link abandonLoad}. */
+    const own: { reportStamp: number | null } = { reportStamp: null };
+    signal.addEventListener('abort', () => this.abandonLoad(signal.reason, own.reportStamp), { once: true });
     this.loadingForms = true;
     this.errorMessage = null;
     this.formsLoadError = null;
     this.cdr.markForCheck();
     try {
       const loaded = await this.data.loadReportableForms();
+      if (signal.aborted) return;
       this.forms = sortFormsForRail(loaded);
       this.applyRailFilter();
       // The rail exists now, so the page-wide state ends here rather than when the first report
@@ -199,14 +216,54 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
       // pane's own `loadingReport` covers this first load like any other.
       this.loadingForms = false;
       if (this.forms.length > 0) {
-        await this.selectForm(this.forms[0]);
+        // `loadReportFor` takes its stamp synchronously, before its first await.
+        const showing = this.showSelectionAfterLoad();
+        own.reportStamp = this.selectionStamp;
+        await showing;
       }
     } catch (err) {
+      // Abandoned: the coalescer logs this late failure; the page already says the load failed.
+      if (signal.aborted) throw err;
       this.fail(err, 'Failed to load forms.');
       this.formsLoadError = this.errorMessage;
     } finally {
-      this.loadingForms = false;
-      this.cdr.markForCheck();
+      if (!signal.aborted) {
+        this.loadingForms = false;
+        this.cdr.markForCheck();
+      }
+    }
+  }
+
+  /**
+   * The load was abandoned at the coalescer's timeout. Still on the list: the rail failed. On its
+   * own report (nobody picked another form since): end that spinner, and move the stamp so the
+   * late report applies nothing. A report the reader picked meanwhile is theirs and is left alone.
+   */
+  private abandonLoad(reason: unknown, ownReportStamp: number | null): void {
+    this.loadingForms = false;
+    if (ownReportStamp === null) {
+      this.fail(reason, 'Failed to load forms.');
+      this.formsLoadError = this.errorMessage;
+    } else if (ownReportStamp === this.selectionStamp) {
+      this.selectionStamp++;
+      this.loadingReport = false;
+      this.fail(reason, 'Failed to load the report.');
+    }
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * After the list (re)loads: the form the reader is on, in the view they are on, re-read; the
+   * first form, on Insights, when there is no selection yet or theirs is no longer listed. A host
+   * Refresh used to jump back to the first form's Insights.
+   */
+  private async showSelectionAfterLoad(): Promise<void> {
+    const selectedId = this.selectedForm?.formId;
+    const kept = selectedId ? this.forms.find((f) => f.formId === selectedId) : undefined;
+    if (kept) {
+      await this.loadReportFor(kept);
+    } else {
+      await this.selectForm(this.forms[0]);
     }
   }
 
@@ -227,9 +284,10 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     return railState(this.loadingForms, this.formsLoadError, this.forms.length);
   }
 
-  /** The failed state's retry. */
+  /** The failed state's retry: queued behind a load in flight (a host Refresh), never alongside it. */
   public retryLoadForms(): void {
-    void this.loadForms();
+    // Not floating: the coalescer never rejects, and `loadForms` shows its own failure.
+    void this.formsLoad.again();
   }
 
   /** Shown beside the rail's search; only interesting while a search is narrowing it. */

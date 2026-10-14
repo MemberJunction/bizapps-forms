@@ -10,10 +10,12 @@
 import '@angular/compiler';
 import { ChangeDetectorRef, Injector, runInInjectionContext } from '@angular/core';
 import { NavigationService } from '@memberjunction/ng-shared';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FormsHomeDashboardComponent } from './forms-home-dashboard.component';
 import { FormsHomeService } from './forms-home.service';
-import type { FormStatus, FormSummaryRow } from './home-models';
+import { HOME_ENTITY, type FormStatus, type FormSummaryRow } from './home-models';
+import { announceWrites } from '../shared/forms-writes';
+import { LOAD_TIMEOUT_MS } from '../shared/coalesced-load';
 
 type HomeServiceSurface = Pick<FormsHomeService, 'loadForms' | 'archive' | 'restore' | 'createFromTemplate' | 'runAuthoringAction'>;
 
@@ -214,23 +216,149 @@ describe('FormsHomeDashboardComponent — opening reads the list once', () => {
     component.ngOnDestroy();
   });
 
-  it('signals load-complete only once the list is in, for both joined callers', async () => {
+  it('signals load-complete only once the list is in', async () => {
     const { service, pending } = deferredLoads();
     const component = makeComponent(service);
     const notified = vi.fn();
     (component as unknown as { NotifyLoadComplete(): void }).NotifyLoadComplete = notified;
 
-    const first = component.Refresh();
-    const second = component.Refresh();
+    const opening = component.Refresh();
+    loadData(component);
     await new Promise((settled) => setTimeout(settled, 0));
     expect(notified).not.toHaveBeenCalled();
 
     pending[0]([draftRow]);
-    await Promise.all([first, second]);
+    await opening;
 
-    expect(notified).toHaveBeenCalledTimes(2);
+    expect(notified).toHaveBeenCalledTimes(1);
+    expect(pending).toHaveLength(1);
     expect(component.forms).toEqual([draftRow]);
+    component.ngOnDestroy();
+  });
+
+  it("queues a write's reload behind a Refresh in flight: one follow-up, no overlap, and the list shows the write", async () => {
+    const pending: Array<(rows: FormSummaryRow[]) => void> = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const archived: FormSummaryRow = { ...draftRow, status: 'Closed' };
+    const service = homeService({
+      loadForms: () => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        return new Promise<FormSummaryRow[]>((resolve) =>
+          pending.push((rows) => {
+            inFlight -= 1;
+            resolve(rows);
+          }),
+        );
+      },
+    });
+    const component = makeComponent(service);
+
+    const refreshing = component.Refresh();
+    const archiving = component.toggleArchive(draftRow);
+    const restoring = component.toggleArchive(archived);
+    await new Promise((settled) => setTimeout(settled, 0));
+    // Both writes landed; their reloads wait for the Refresh's read instead of racing it.
+    expect(pending).toHaveLength(1);
+
+    pending[0]([draftRow]);
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    pending[1]([archived]);
+    await Promise.all([refreshing, archiving, restoring]);
+
+    expect(pending).toHaveLength(2);
+    expect(maxInFlight).toBe(1);
+    expect(component.forms).toEqual([archived]);
+    component.ngOnDestroy();
+  });
+
+  it('runs a Refresh that arrives during the first load once that load settles, not alongside it', async () => {
+    const { service, pending } = deferredLoads();
+    const component = makeComponent(service);
+    const notified = vi.fn();
+    (component as unknown as { NotifyLoadComplete(): void }).NotifyLoadComplete = notified;
+    const renamed: FormSummaryRow = { ...draftRow, name: 'Intake (renamed)' };
+
+    loadData(component);
+    const refreshing = component.Refresh();
+    const again = component.Refresh();
+    await new Promise((settled) => setTimeout(settled, 0));
+    expect(pending).toHaveLength(1);
+
+    pending[0]([draftRow]);
+    // Two Refreshes during one load ask for one more read, not two.
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    expect(notified).not.toHaveBeenCalled();
+    pending[1]([renamed]);
+    await Promise.all([refreshing, again]);
+
+    expect(pending).toHaveLength(2);
+    expect(component.forms).toEqual([renamed]);
+    expect(notified).toHaveBeenCalledTimes(2);
     component.ngOnDestroy();
   });
 });
 
+
+describe('FormsHomeDashboardComponent — reloads heard from elsewhere, and a hung read', () => {
+  const loadData = (c: FormsHomeDashboardComponent): void => void (c as unknown as { loadData(): Promise<void> }).loadData();
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function deferredLoads() {
+    const pending: Array<(rows: FormSummaryRow[]) => void> = [];
+    const service = homeService({
+      loadForms: () => new Promise<FormSummaryRow[]>((resolve) => pending.push(resolve)),
+    });
+    return { service, pending };
+  }
+
+  it('queues a re-read behind the read in flight when a Forms write is heard elsewhere, instead of skipping it', async () => {
+    // The read in flight may have started before that write, so skipping it (the old `loading`
+    // guard) left the list showing the pre-write state.
+    vi.useFakeTimers();
+    const { service, pending } = deferredLoads();
+    const component = makeComponent(service);
+    const renamed: FormSummaryRow = { ...draftRow, name: 'Intake (renamed)' };
+    loadData(component);
+    expect(component.loading).toBe(true);
+
+    announceWrites([HOME_ENTITY.forms]);
+    await vi.advanceTimersByTimeAsync(1_000); // past the listener's debounce
+    expect(pending).toHaveLength(1); // queued, not alongside
+
+    pending[0]([draftRow]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pending).toHaveLength(2);
+    pending[1]([renamed]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(component.forms).toEqual([renamed]);
+    component.ngOnDestroy();
+  });
+
+  it('abandons a read that hangs past the load timeout: says so, ends the loading state, and ignores its late rows', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { service, pending } = deferredLoads();
+    const component = makeComponent(service);
+    const errors = emitted(component);
+    loadData(component);
+
+    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS);
+    expect(component.loading).toBe(false);
+    expect(component.errorMessage).toContain('Failed to load forms');
+    expect(component.errorMessage).toContain(`did not settle within ${LOAD_TIMEOUT_MS} ms`);
+    expect(errors).toHaveLength(1);
+
+    pending[0]([draftRow]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(component.forms).toEqual([]);
+    expect(component.loading).toBe(false);
+    component.ngOnDestroy();
+  });
+});
