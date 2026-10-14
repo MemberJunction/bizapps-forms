@@ -20,10 +20,11 @@ import type { WidgetRenderDefinition } from './widget-form';
 type CaptchaBearing = Pick<WidgetRenderDefinition, 'captchaRequired'>;
 
 /**
- * Server-side Turnstile error codes that reach the client inside a message
- * (see Server/turnstile.service.ts, and `Captcha verification failed (<code>).` in submit-pipeline).
+ * Server-side Turnstile error codes that reach the client inside a message (see forms-core-entities-
+ * server's `submission/turnstile.ts`, and `Captcha verification failed (<code>).` in
+ * `FormSubmissionEngine.SaveResponse`).
  *
- * `turnstile-not-configured` is listed but is NO LONGER one of them: the pipeline intercepts that
+ * `turnstile-not-configured` is listed but is NO LONGER one of them: the engine intercepts that
  * code and answers with {@link CAPTCHA_NOT_CONFIGURED_MESSAGE} instead, so it can only arrive here
  * from an older server. It stays in the list for exactly that reason — a widget bundle outlives the
  * server it was built against — not because the current server can still send it.

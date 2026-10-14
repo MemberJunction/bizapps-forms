@@ -11,7 +11,10 @@
  *  - promotion of ONE draft by two concurrent finals (review finding 2) takes ONE slot and queues ONE
  *    message: the second waits on the draft row's update lock and finds it sealed;
  *  - DW10: a final save writes the response and its `forms.response-submitted` message in ONE
- *    transaction — a forced failure AFTER the publish leaves neither the response nor the message.
+ *    transaction — a forced failure AFTER the publish leaves neither the response nor the message;
+ *  - final review I2: a distribution copy loaded BEFORE a submission (the builder's), saved after it,
+ *    leaves `ResponseCount` where the atomic UPDATE put it — whether the copy's count is merely stale
+ *    or the client set it, as the GraphQL update path's `SetMany` does.
  *
  * OPT-IN. Skipped unless `FORMS_INTEGRATION_DB` is set, because it needs the sandbox database
  * (`MJ_Forms303_Edge`; connection from the repo `.env`) with the Forms metadata and MJ 6.2's work
@@ -342,6 +345,37 @@ describe.skipIf(!ENABLED)('FormSubmissionEngine on SQL Server (DW9, DW10)', () =
       release();
       await Promise.all([first.ReleaseIndependentInstance(), second.ReleaseIndependentInstance()]);
     }
+  }, 60_000);
+
+  it('I2: a stale builder save after an atomic increment leaves ResponseCount where the UPDATE put it', async () => {
+    const w = world!;
+    FormsRateLimiter.Instance.resetForTests();
+    const link = await issueLink(w, 5);
+    // The builder's copy, loaded before anyone answered.
+    const builderCopy = await w.provider.GetEntityObject<mjBizAppsFormsFormDistributionEntity>(FORMS_ENTITY.FormDistribution, w.system);
+    expect(await builderCopy.Load(link.id)).toBe(true);
+    expect(builderCopy.ResponseCount).toBe(0);
+
+    const instance = await w.provider.CreateIndependentInstance();
+    try {
+      const result = await FormSubmissionEngine.Instance.SaveResponse(finalSave(w, link.slug, 'counted'), instance, respondentFor(w, link.id));
+      expect(result).toMatchObject({ success: true, status: 'Complete' });
+    } finally {
+      await instance.ReleaseIndependentInstance();
+    }
+    expect(await responseCount(w, link.id)).toBe(1);
+
+    // An ordinary settings save from the stale copy: its count is clean but behind the store.
+    builderCopy.Name = `${link.slug} renamed`;
+    expect(await builderCopy.Save()).toBe(true);
+    expect(await responseCount(w, link.id)).toBe(1);
+
+    // The GraphQL update path SetMany()s every field the client sent, so the stale 0 arrives DIRTY.
+    const wireCopy = await w.provider.GetEntityObject<mjBizAppsFormsFormDistributionEntity>(FORMS_ENTITY.FormDistribution, w.system);
+    expect(await wireCopy.Load(link.id)).toBe(true);
+    wireCopy.SetMany({ ResponseCount: 0, Name: `${link.slug} again` });
+    expect(await wireCopy.Save()).toBe(true);
+    expect(await responseCount(w, link.id)).toBe(1);
   }, 60_000);
 
   it('DW10 (control): a final save commits the response AND its message', async () => {

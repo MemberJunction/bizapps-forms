@@ -593,6 +593,8 @@ export class BuilderStateService {
       entity,
       setTimeout(() => {
         this.saveTimers.delete(entity);
+        // Not awaited, and safe to drop: `saveChecked` reports a refused OR thrown save to the
+        // author (`lastFailure`) and the log itself, so this promise never rejects.
         void this.chainSave(entity);
       }, SAVE_DEBOUNCE_MS),
     );
@@ -609,6 +611,7 @@ export class BuilderStateService {
     for (const [entity, timer] of [...this.saveTimers]) {
       clearTimeout(timer);
       this.saveTimers.delete(entity);
+      // Awaited through `saveChains` below; its failure is reported by `saveChecked` (see above).
       void this.chainSave(entity);
     }
     // Loop rather than one `Promise.all`: awaiting a chain can let a queued save start, and the
@@ -661,14 +664,26 @@ export class BuilderStateService {
     });
   }
 
-  /** Run `work` for `entity` behind its earlier queued work and any structural save in flight. */
+  /**
+   * Run `work` for `entity` behind its earlier queued work and any structural save in flight.
+   *
+   * The slot waits for the earlier step to SETTLE, never for it to succeed: that step's outcome —
+   * a thrown re-read included — already went to its own caller through `result`. Chaining on its
+   * success instead made one failure reject every save queued behind it on that row, dropping the
+   * author's edits with an unhandled rejection and no `lastFailure` (final review I3).
+   */
   private inQueue<T>(entity: SaveableEntity, work: () => Promise<T>): Promise<T> {
     const previous = this.saveChains.get(entity) ?? Promise.resolve();
     const result = previous
       .then(() => this.structuralInFlight ?? undefined)
       .then(work);
+    // Settles on BOTH outcomes, which is what makes `previous` above never reject: every slot in the
+    // map is one of these. It is also why a rejected step raises no unhandled rejection here.
     const next = result
-      .then(() => undefined)
+      .then(
+        () => undefined,
+        () => undefined,
+      )
       .finally(() => {
         // Only clear the slot if no later edit has chained onto it meanwhile.
         if (this.saveChains.get(entity) === next) {
@@ -710,7 +725,18 @@ export class BuilderStateService {
   private async saveChecked(entity: SaveableEntity, action: string): Promise<boolean> {
     const options = new EntitySaveOptions();
     options.SkipRelatedCollections = true;
-    const ok = await entity.Save(options);
+    let ok: boolean;
+    try {
+      ok = await entity.Save(options);
+    } catch (err) {
+      // A THROWN save (a dropped connection, a provider bug) is the same news to the author as a
+      // refused one, and most callers never await this: the debounce timer and the flush drop the
+      // promise. Reported here, so it reaches the log and the builder's error banner either way.
+      const reason = err instanceof Error ? err.message : String(err);
+      LogError(`Forms builder failed to ${action}: ${reason}`);
+      this._lastFailure.set(`Could not ${action}. ${reason}`);
+      return false;
+    }
     if (!ok) {
       this.reportFailure(action, entity);
     }

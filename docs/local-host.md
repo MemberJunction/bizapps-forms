@@ -155,10 +155,21 @@ cleanly (nothing half-written — the caller sees a failed save and retries). Wi
 form read is a snapshot read and does not wait, so the cycle cannot form. Treat RCSI as required,
 not as a tuning option.
 
-The `Form Respondent` role is **unchanged** by #303: its grants on Form Responses, Form Response
-Answers, Form Versions and Form Distributions are as before (narrowing them is a follow-up). The
-respondent operations do not rely on them — they authorize the session against the link and then
-read and write as the system user.
+The `Form Respondent` role loses one grant in #303: its Read on **Form Versions** is retired by
+`V202610132000` (with its row filter), because any holder of a public link could read the raw
+snapshot — answer key, ending redirects, knockout conditions — through the generated
+`mjBizAppsFormsFormVersion` resolver (#302). Its grants on Form Responses, Form Response Answers and
+Form Distributions are as before (narrowing them is a follow-up). The respondent operations
+authorize the session against the link — the Form Distributions read is still made as the
+respondent, so its row filter binds the session to its own link — and then read the version and
+write as the system user.
+
+**This branch targets MJ 6.2 and has an LTS merge gate.** The Work Queue and the isolated-provider
+API above exist only in MJ `6.2.0-edge.*`, so the branch does not merge to `next` until MJ's 6.2 LTS
+tag ships and bizapps-common and bizapps-tasks publish releases whose MJ peers admit it. Until then,
+develop against an MJ **edge** workspace (the harness section below); the LTS `mj-dev` workspace
+cannot run it. The full gate — pins, sandbox rebuild, CodeGen, host-truth — is in
+[`docs/database-operations.md` §4a](database-operations.md#4a-what-303-changed-in-the-database).
 
 ## Running the API harness (`apps/MJAPI`) against an edge workspace
 

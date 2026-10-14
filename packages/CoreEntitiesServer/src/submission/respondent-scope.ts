@@ -55,7 +55,7 @@ function userCanCreate(provider: ScopeMetadataProvider, entityName: string, user
 
 /**
  * Verify the anonymous session may create responses and nothing more. Returns a
- * denial (never throws) so the resolver can map it to a clean `FormSubmissionResult`.
+ * denial (never throws) so `FormSubmissionEngine.SaveResponse` can answer it as an ordinary refusal.
  */
 export function checkRespondentScope(provider: ScopeMetadataProvider, user: UserInfo): ScopeCheckResult {
   if (!userCanCreate(provider, FORMS_ENTITY.FormResponse, user)) {

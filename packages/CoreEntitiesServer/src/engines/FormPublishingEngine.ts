@@ -12,7 +12,8 @@
  *  1. read the draft (two batched `RunViews`; see {@link readDraft});
  *  2. refuse a template, then any broken rule (`brokenRuleLines`), then anything the strict parsers
  *     cannot read (`buildPublishedAutomations` / `buildPublishedDefinition` throw
- *     `UnreadableColumnError`) — all BEFORE the first write;
+ *     `UnreadableColumnError`), then a binding step whose binding row is gone
+ *     (`MissingBindingError`) — all BEFORE the first write;
  *  3. insert the new version as Draft at `max + 1`, so the database assigns its id;
  *  4. retire the live version(s) — before step 5, because `UQ_FormVersion_OnePublishedPerForm`
  *     allows one Published row per form;

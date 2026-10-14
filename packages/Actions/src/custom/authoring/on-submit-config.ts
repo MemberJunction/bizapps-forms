@@ -65,8 +65,10 @@ export function readOnSubmitConfig(mode: string | null | undefined, automations:
  * documented default — returns the blueprint unchanged, so the form keeps inferring its dispatch
  * exactly as every form authored before this did.
  *
- * The pair is checked again on the RESULT: a `Legacy` mode can come from the blueprint itself (the
- * Designer's output) while the steps come from the caller.
+ * The pair is checked again on the RESULT: a `Legacy` mode can come from the blueprint itself (a
+ * TRUSTED starter template's) while the steps come from the caller. Never from the Designer: its
+ * reply is parsed with a content-only schema that refuses `onSubmitMode` and `automations`, and
+ * {@link blueprintFromDesign} copies its content field by field (#303 security, 838b3de).
  */
 export function withOnSubmitConfig(blueprint: FormBlueprint, config: OnSubmitConfig): FormBlueprint {
   const configured: FormBlueprint = { ...blueprint };

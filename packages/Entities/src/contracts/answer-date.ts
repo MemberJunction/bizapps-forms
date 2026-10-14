@@ -70,7 +70,7 @@ export function parseClockTime(text: string): ClockTime | undefined {
  * question routed to it: a caller can post `dateValue` on any question, and persistence has to
  * parse whatever arrives. Only `Time` reads a clock; everything else reads an ISO-8601 date (or
  * date-time) that names a REAL day — an impossible one is `undefined`, never rolled over to the
- * next month ({@link isRealCalendarInstant}).
+ * next month (`parseIsoDate` checks the day against the month's own length).
  */
 export function dateAnswerInstant(type: FormQuestionType, text: string): Date | undefined {
   if (type === 'Time') {
@@ -262,8 +262,10 @@ export function calendarDateOf(instant: Date): string {
 }
 
 /**
- * A stored date-column answer read back as the text the respondent gave — the inverse of
- * {@link dateAnswerInstant}, and the one reader every consumer of a stored `DateValue` should use.
+ * A stored date-column answer read back as the text the respondent gave — what
+ * {@link dateAnswerInstant} stored, read back exactly for the canonical spellings and normalised for
+ * the rest (below), so not a strict inverse — and the one reader every consumer of a stored
+ * `DateValue` should use.
  *
  * `Time` gives back its clock, everything else its calendar day, mirroring the write side.
  *

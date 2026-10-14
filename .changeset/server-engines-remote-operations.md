@@ -7,7 +7,7 @@
 ---
 
 Forms' domain logic moves out of the browser into server engines, exposed as 19 typed Remote
-Operations (`Forms.*`), and on-submit automations run from MJ's durable Work Queue (#303). Ships two
+Operations (`Forms.*`), and on-submit automations run from MJ's durable Work Queue (#303). Ships three
 migrations and new metadata, so this is a `minor`. Closes #302, #75 and #103.
 
 **MERGE GATE — read before merging.** This targets MJ **6.2** (`6.2.0-edge.3` today): the Work Queue,
@@ -29,9 +29,18 @@ version-tagged on a database built from scratch (MJ 6.2 carries core migrations 
   form (they lock in opposite orders; with it off, one of the two is rolled back and must be retried).
 - **API keys need the new scopes**: `forms:read` for the response list, detail, summary and link
   claims; `forms:write` for everything that changes a form. A key without them is refused.
-- The `Form Respondent` role is **unchanged**.
-- Until a host has this release's metadata, a form that has automations refuses respondents
-  ("This form is not available.") rather than store responses whose automations could not be queued.
+- The `Form Respondent` role **loses its Read on Form Versions** (and that grant's row filter,
+  `MJ Forms: Respondent Own Form Versions`), removed by `V202610132000` (#302). With it, any holder of
+  a public link could read the raw snapshot — answer key, ending redirects, knockout conditions —
+  through the generated `mjBizAppsFormsFormVersion` query. The server now reads the published version
+  as the system user. Its other grants are unchanged; the role's Description still mentions the
+  retired read until the role record is corrected in a follow-up.
+- Until a host has this release's consolidated `Metadata_Sync` (the `forms.response-submitted`
+  topic and the `forms.run-automations` subscription) and a ready Work Queue, **every** form refuses
+  respondents ("This form is not available.") rather than store responses whose automations could not
+  be queued. Every means every: a form with no configured automations runs the legacy hooks, so its
+  completion still owes an `OnComplete` message. The API says why at startup, and then at most once a
+  minute.
 - Runbook for dead-lettered deliveries, including the rare one the runtime dead-letters itself when
   a step hangs past its lease: `docs/local-host.md`.
 
@@ -89,6 +98,12 @@ version-tagged on a database built from scratch (MJ 6.2 carries core migrations 
   is republished or answered mid-export; the list says "The list changed — refresh to see it." in the
   same case. List search covers the pages already loaded.
 - Share-link slugs no longer end in a hyphen, and a taken slug gets a 5-character suffix.
+- `FormDistribution.ResponseCount` is **server-owned**: only a submission's atomic slot `UPDATE`
+  advances it. Every save of a link carries the stored count (read under the save's row lock), a
+  client change to it is ignored and logged, and a new link starts at 0 — so a builder tab opened
+  before responses arrived can no longer roll the count back and reopen slots `MaxResponses` closed.
+- A builder edit whose save throws (rather than being refused) is shown in the builder's error banner
+  and no longer blocks later saves of the same row.
 - `FormAutomationRun.AttemptCount`'s description still mentions the removed recovery sweep; it is
   corrected by a later migration.
 
@@ -97,12 +112,16 @@ version-tagged on a database built from scratch (MJ 6.2 carries core migrations 
 - `V202610131349` adds nullable `FormAutomationRun.WorkQueueMessageID`, the message whose delivery
   ran the step (no foreign key: messages are purged on retention). Rows written before it are `NULL`
   and belong to no delivery.
-- `V202610131416` files five fields in their category panels on hosts built from migrations
-  (metadata only).
+- `V202610131416` files five fields (two on FormDistribution, two on FormResponse, one on
+  FormAutomationRun) in their category panels on hosts built from migrations (metadata only).
+- `V202610132000` deletes the `Form Respondent` role's Form Versions grant (matched by role and
+  entity name, every duplicate) and its row filter, unless another permission row still names the
+  filter (#302). Idempotent; it throws if the grant survives.
 
 ### Breaking API changes, by package
 
-- **`forms-entities`**: gains `generated/remote_operations.ts` (one `Forms*Operation` class and its
+- **`forms-entities`**: removed the retired mutation's `FormSubmissionInput` / `FormSubmissionResult`
+  (use the generated `FormsSaveResponseInput` / `FormsSaveResponseOutput`). Gains `generated/remote_operations.ts` (one `Forms*Operation` class and its
   I/O types per operation) and, in `contracts/`, `toRespondentDefinition` and the respondent
   projection, `validateAnswers`, `settleVisibility`, the answer-shape helpers, `rulesMayRead`,
   `RuleBearingDefinition` (`endScreens` now required), `isZonelessDateTime` /
@@ -122,7 +141,9 @@ version-tagged on a database built from scratch (MJ 6.2 carries core migrations 
   `refuseFormAuthoring`, `withActionDatabaseProvider`, `FORMS_ENTITY`, `readFormPublication` /
   `FormPublication`, `watchRunAutomationsHost` / `RUN_AUTOMATIONS_HOST_POLLS`,
   `SUMMARY_NOT_AVAILABLE_MESSAGE` / `ROW_RESTRICTED_SUMMARY_MESSAGE`. Signatures changed:
-  `configureFormsWorkQueue(user, provider?)`, `resolvePublishedDefinition(formReader)`.
+  `configureFormsWorkQueue(user, provider?)`, and `resolvePublishedDefinition` takes a fourth
+  argument, the system reader, which now reads the form's `Status` **and** its published version.
+  `DefinitionLoadFailure` gains `form-not-published` and `form-unreadable`.
   `FormAuthoringError` gains `fault`. New MJ peers: `actions`, `actions-base`, `ai-agents`,
   `ai-core-plus`, `generic-database-provider`, `work-queue-core` and `work-queue-engine`. Listed under
   `server` in `mj-app.json`.
@@ -136,10 +157,24 @@ version-tagged on a database built from scratch (MJ 6.2 carries core migrations 
   mutation (use `Forms.GetRespondentForm` / `Forms.SaveResponse`), the `FormDistributionClaims` query
   (use `Forms.GetDistributionClaims`), `PublicFormResolver`, `DistributionClaimsResolver`, the
   isolated provider and dispatcher, and the recovery sweep. The `/f/:slug`, redeem, resume, upload,
-  asset, download and widget-bundle routes keep their URLs and wire shapes.
-- **`forms-ng`**: removed `PublishService`, `FormCloneService`, `FormTemplatesService`,
-  `ResponsesDataService` and the browser aggregation, and the modules that moved to `forms-entities`
-  (above). `DistributionService.create` returns a result object. Widget: `FormRuntime` takes a
+  asset, download and widget-bundle routes keep their URLs and wire shapes. No longer declares
+  `type-graphql` as a peer: no hand-written resolver is left, and the generated ones take their
+  decorators through `@memberjunction/server`.
+- **`forms-ng`**: removed `PublishService` / `PublishResult`, `FormCloneService`,
+  `FormTemplatesService` / `SavedTemplateRow` (the row type now lives in an unexported module),
+  `ResponsesDataService`, and these exports:
+  - dashboard: the browser aggregation modules `reporting-aggregations`, `question-insight-roles`,
+    `respondent-profile`, `open-text-insights`, `temporal-buckets` and `statistics` (the summary is
+    `Forms.GetResponseSummary`; the view types are `report-view`);
+  - widget: `validateQuestion`, `hasValue`, `FieldValidationResult` (use `validateAnswers` from
+    `forms-entities`);
+  - shared: `renderAnswer`, `respondentLabel`, `extractChoiceValues`, `CHOICE_TYPES`,
+    `NUMERIC_TYPES`, `TEXT_TYPES` (now in `forms-entities`);
+  - builder: `jumpReach` / `reachNote` and `JumpReach`, `ReachItem`, `ReachPage`, `ReachSource`;
+    `collectRuleEntries`, `ruleBadgesFor`, `endingReachFor` and `EndingReach`, `RuleBadge`,
+    `RuleEntry`, `RuleInventoryForm`, `RuleInventoryItem`, `RuleInventoryPage`, `RuleItemKind`;
+    `buildPublishedDefinition`, `isOpenToResponses`, `slugify`; the template `clone-remap` module
+    (all now in `forms-entities`). `DistributionService.create` returns a result object. Widget: `FormRuntime` takes a
   `WidgetForm`; `IFormsApiService` is reshaped around the two respondent operations;
   `FormsOfflineApiService` replaces the mock in the shipped entry; `AutosaveFn` may return
   `NOTHING_TO_SAVE`; `AutosaveController` takes a fifth hooks parameter; `buildDraftInputs` returns

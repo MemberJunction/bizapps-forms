@@ -14,10 +14,10 @@
  *   1. MJ publishes a generic `Create<Entity>` mutation for every entity, and
  *      `UserExemptFromRowLevelSecurity` treats a null `CreateRLSFilterID` as exemption from
  *      create-time RLS. So the CanCreate grant that exists to satisfy forms-server's
- *      `checkRespondentScope` gate doubled as direct write access that never enters
- *      `submit-pipeline.ts` — past Turnstile, the rate limiter, the `MaxResponses` quota, field
- *      validation and the distribution's open/close window, all of which live only in that
- *      pipeline. bizapps-caliber proved this class by exploit on its own widget role: an anonymous
+ *      `checkRespondentScope` gate doubled as direct write access that never enters the submit
+ *      path (then `submit-pipeline.ts`, since #303 `FormSubmissionEngine.SaveResponse`) — past
+ *      Turnstile, the rate limiter, the `MaxResponses` quota, field validation and the
+ *      distribution's open/close window, all of which live only in that path. bizapps-caliber proved this class by exploit on its own widget role: an anonymous
  *      session JWT created a response row against an arbitrary FormID in one request.
  *
  *   2. ONE shared anonymous principal backs every respondent, so an unfiltered read is an

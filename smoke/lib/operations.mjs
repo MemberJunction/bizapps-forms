@@ -46,30 +46,43 @@ export async function executeOperation(base, auth, operationKey, input, { header
   if (!operationKey) {
     throw new Error('executeOperation: an operation key is required.');
   }
-  const res = await fetch(`${base}/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders(auth), ...headers },
-    body: JSON.stringify({
-      query: EXECUTE_REMOTE_OPERATION,
-      variables: { operationKey, inputJSON: JSON.stringify(input), invokeMode: 'attached' },
-    }),
-  });
-  const text = await res.text();
-  let body;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    throw new Error(`${operationKey}: HTTP ${res.status} returned a body that is not JSON: ${text.slice(0, 200)}`);
-  }
+  const { httpStatus, body } = await postGraphQL(
+    base,
+    auth,
+    EXECUTE_REMOTE_OPERATION,
+    { operationKey, inputJSON: JSON.stringify(input), invokeMode: 'attached' },
+    { headers, label: operationKey },
+  );
   const result = body.data?.ExecuteRemoteOperation ?? null;
   return {
-    httpStatus: res.status,
+    httpStatus,
     errors: body.errors,
     success: result?.success === true,
     resultCode: result?.resultCode ?? null,
     errorMessage: result?.errorMessage ?? null,
     output: parseOutput(operationKey, result?.outputJSON),
   };
+}
+
+/**
+ * POST one GraphQL document as `auth` and return `{ httpStatus, body }` unjudged — the one fetch
+ * every call here goes through, so the auth headers are the same for an operation and for a raw
+ * query. Exported for the probes that must hit MJ's GENERATED resolvers directly (#302: an
+ * anonymous session reading `mjBizAppsFormsFormVersion` must get nothing), which no operation
+ * reaches. A body that is not JSON throws, naming `label` and the status.
+ */
+export async function postGraphQL(base, auth, query, variables, { headers = {}, label = 'GraphQL' } = {}) {
+  const res = await fetch(`${base}/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders(auth), ...headers },
+    body: JSON.stringify({ query, variables }),
+  });
+  const text = await res.text();
+  try {
+    return { httpStatus: res.status, body: JSON.parse(text) };
+  } catch {
+    throw new Error(`${label}: HTTP ${res.status} returned a body that is not JSON: ${text.slice(0, 200)}`);
+  }
 }
 
 /**

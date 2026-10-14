@@ -80,7 +80,9 @@ INSERT INTO #FormsDoomed (SchemaName, TableName, RowID, Depth) VALUES
     -- being removed, its own filters go with it.
     ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0001-A1B2-4C3D-8E4F-000000000001', 0),  -- Respondent Gate Only, Never A Writer
     ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0002-A1B2-4C3D-8E4F-000000000002', 0),  -- Respondent Own Distribution
-    ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0003-A1B2-4C3D-8E4F-000000000003', 0),  -- Respondent Own Form Versions
+    -- Respondent Own Form Versions: retired by V202610132000 (#302), which deletes it unless another
+    -- permission row still names it. Kept here for that leftover, and for hosts below that migration.
+    ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0003-A1B2-4C3D-8E4F-000000000003', 0),
     -- Actions (ActionParam.ActionID is NOT NULL, so the 13 params follow automatically).
     ('${mjSchema}', 'Action',            '7F0A0001-A1B2-4C3D-8E4F-000000000001', 0),  -- Generate Form From Brief
     ('${mjSchema}', 'Action',            '7F0A0002-A1B2-4C3D-8E4F-000000000002', 0),  -- Create Form From Template

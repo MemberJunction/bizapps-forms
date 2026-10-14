@@ -33,14 +33,12 @@
     "@memberjunction/generic-database-provider": "^6.2.0-edge.3",
     "@memberjunction/global": "^6.2.0-edge.3",
     "@memberjunction/server": "^6.2.0-edge.3",
-    "@memberjunction/storage": "^6.2.0-edge.3",
-    "type-graphql": "2.0.0-beta.3"
+    "@memberjunction/storage": "^6.2.0-edge.3"
   },
   "devDependencies": {
     "@memberjunction/generic-database-provider": "^6.2.0-edge.3",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
-    "type-graphql": "2.0.0-beta.3",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4",
     "@aws-sdk/credential-providers": "3.1109.0",

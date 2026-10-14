@@ -47,7 +47,14 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
   LogStatus: (m: string) => logged.statuses.push(m),
 }));
 
-const { configureFormsWorkQueue, FormsWorkQueueStartup, watchRunAutomationsHost, RUN_AUTOMATIONS_HOST_POLLS } = await import('../forms-work-queue.js');
+const {
+  configureFormsWorkQueue,
+  FormsWorkQueueStartup,
+  watchRunAutomationsHost,
+  RUN_AUTOMATIONS_HOST_POLLS,
+  NOT_READY_LOG_INTERVAL_MS,
+  resetNotReadyLogForTests,
+} = await import('../forms-work-queue.js');
 
 /** A started host whose health lists `subscriptions`. */
 function hostWith(subscriptions: { Name: string; State: string; Reason?: string | null }[], started = true) {
@@ -65,6 +72,38 @@ beforeEach(() => {
   logged.errors.length = 0;
   logged.statuses.length = 0;
   wq.host = hostWith([{ Name: 'forms.run-automations', State: 'Running' }]);
+  resetNotReadyLogForTests();
+});
+
+describe('configureFormsWorkQueue on a host that stays not ready (final review M7)', () => {
+  // `GetRespondentForm` asks for readiness on EVERY load while the queue is not ready, so an
+  // unthrottled error was one log line per respondent page view on a misconfigured host.
+  it('logs the reason once per interval, however often it is asked, and again once the interval passes', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-10-13T12:00:00Z'));
+      wq.topics.clear();
+      for (let i = 0; i < 5; i++) {
+        expect(await configureFormsWorkQueue(SYSTEM)).toBe(false);
+      }
+      expect(logged.errors).toHaveLength(1);
+
+      vi.setSystemTime(new Date(Date.now() + NOT_READY_LOG_INTERVAL_MS + 1));
+      expect(await configureFormsWorkQueue(SYSTEM)).toBe(false);
+      expect(logged.errors).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('throttles each reason on its own, so a NEW reason is never hidden behind an old one', async () => {
+    wq.topics.clear();
+    await configureFormsWorkQueue(SYSTEM);
+    wq.configError = new Error('Invalid object name __mj.WorkQueueTopic');
+    await configureFormsWorkQueue(SYSTEM);
+    expect(logged.errors).toHaveLength(2);
+    expect(logged.errors[1]).toContain('Invalid object name');
+  });
 });
 
 describe('configureFormsWorkQueue', () => {

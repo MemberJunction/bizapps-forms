@@ -30,7 +30,9 @@ export interface StyleLoadResult {
  * branding-basics edits — all through generated MJ entity types (never `.Get()/.Set()`),
  * every read `.Success`-checked and every `Save()` boolean-checked (CLAUDE.md).
  *
- * Instantiated per Design panel; owns no global state.
+ * Provided by the form BUILDER, one instance per builder (the Design panel injects that instance,
+ * never its own), so its saves can run through the builder's one save queue (`UseSaveQueue`). Owns
+ * no global state.
  */
 @Injectable()
 export class DesignStateService {

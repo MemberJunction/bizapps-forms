@@ -3,7 +3,7 @@
  *
  * This file replaced a sibling that read the source. A round-four review ran mutation testing
  * against that one and found the guards it existed for could be deleted outright with the suite
- * green: `refuseClientCredentialWrites` as a total no-op, the delete/revoke order reversed, the
+ * green: `refuseClientCredentialWrites` (now `refuseClientServerColumnWrites`) as a total no-op, the delete/revoke order reversed, the
  * re-entrancy check removed. Source-text assertions test presence and position; they cannot test a
  * condition or a sequence. Once every assertion it held had a behavioural twin here — the context
  * mapping and the one-value pair write were the last two — it was deleted rather than kept as a
@@ -38,7 +38,7 @@ interface RecordedSave {
  * each `super.Save()` and read back by the hook's locked `ExecuteSQL` read. Two instances of the
  * SAME row share it, which is what lets a test stage a stale copy. Reset per test.
  */
-const store = new Map<string, RecordedSave>();
+const store = new Map<string, RecordedSave & { ResponseCount?: number }>();
 /** What the hook's read of the store answers with; `'fail'` makes the statement throw. */
 let storeRead: 'ok' | 'fail' = 'ok';
 
@@ -79,6 +79,7 @@ interface FakeBaseShape {
   IsActive: boolean;
   MagicLinkInviteID: string | null;
   PublicLinkToken: string | null;
+  ResponseCount: number;
   AllowedOrigins: string | null;
   CloseAt: Date | null;
   IsSaved: boolean;
@@ -89,6 +90,8 @@ interface FakeBaseShape {
   RegisterResultHistoryEntry(result: BaseEntityResult): void;
   fields: Map<string, FakeField>;
   saves: RecordedSave[];
+  /** `ResponseCount` as it stood at each `super.Save()` — kept apart so the pair assertions stay exact. */
+  savedCounts: number[];
   events: string[];
   /** Every statement the hook sent through `ExecuteSQL`. */
   statements: string[];
@@ -122,6 +125,7 @@ vi.mock('@mj-biz-apps/forms-entities', async () => {
     IsActive = true;
     MagicLinkInviteID: string | null = null;
     PublicLinkToken: string | null = null;
+    ResponseCount = 0;
     AllowedOrigins: string | null = null;
     CloseAt: Date | null = null;
     IsSaved = true;
@@ -160,7 +164,7 @@ vi.mock('@mj-biz-apps/forms-entities', async () => {
         }
         const id = /\[ID\] = '([^']+)'/.exec(sql)?.[1] ?? '';
         const row = store.get(id);
-        return (row ? [{ ...row }] : []) as T[];
+        return (row ? [{ ResponseCount: 0, ...row }] : []) as T[];
       },
     };
     RegisterResultHistoryEntry(result: BaseEntityResult): void {
@@ -168,6 +172,7 @@ vi.mock('@mj-biz-apps/forms-entities', async () => {
     }
     fields = new Map<string, FakeField>();
     saves: RecordedSave[] = [];
+    savedCounts: number[] = [];
     events: string[] = [];
     statements: string[] = [];
     saveResult = true;
@@ -187,8 +192,9 @@ vi.mock('@mj-biz-apps/forms-entities', async () => {
       }
       const written = { MagicLinkInviteID: this.MagicLinkInviteID, PublicLinkToken: this.PublicLinkToken };
       this.saves.push(written);
+      this.savedCounts.push(this.ResponseCount);
       if (this.saveResult) {
-        store.set(this.ID, written);
+        store.set(this.ID, { ...written, ResponseCount: this.ResponseCount });
       }
       return this.saveResult;
     }
@@ -420,7 +426,7 @@ describe('the credential pair on a save is what the STORE holds, not what this i
     await s.Save();
     expect(s.saves[0]).toEqual({ MagicLinkInviteID: 'invite-live', PublicLinkToken: null });
     expect(minter.revokes.map((r) => r.inviteId)).toEqual(['invite-live']);
-    expect(store.get('dist-1')).toEqual({ MagicLinkInviteID: 'invite-new', PublicLinkToken: 'mj_ml_new' });
+    expect(store.get('dist-1')).toEqual({ MagicLinkInviteID: 'invite-new', PublicLinkToken: 'mj_ml_new', ResponseCount: 0 });
   });
 
   it('when the store cannot be read, saves on the loaded values and says so rather than refusing the save', async () => {
@@ -432,6 +438,77 @@ describe('the credential pair on a save is what the STORE holds, not what this i
     expect(s.saves[0]).toEqual({ MagicLinkInviteID: 'invite-live', PublicLinkToken: 'mj_ml_live' });
     const { LogError } = await import('@memberjunction/core');
     expect(vi.mocked(LogError).mock.calls.flat().join('\n')).toMatch(/read refused[\s\S]*without a row lock/);
+  });
+});
+
+describe('ResponseCount is server-owned: a save carries what the STORE holds (final review I2)', () => {
+  // Submit takes a slot with one conditional raw UPDATE (`submission/quota.ts`), never through this
+  // entity. But MJ writes every column on an update, and the GraphQL update path `SetMany`s every
+  // field the client sent — so the builder's settings save, on a row loaded when the builder opened,
+  // wrote the count back to its old value and reopened slots `MaxResponses` had closed.
+
+  it('a stale instance saved after submissions counted carries the stored count, not the loaded one', async () => {
+    store.set('dist-1', { MagicLinkInviteID: 'invite-live', PublicLinkToken: 'mj_ml_live', ResponseCount: 7 });
+    const stale = withLiveCredential(subject());
+    stale.ResponseCount = 3; // loaded before four submissions landed
+    MagicLinkMinterRegistry.Instance.Register(minterLoggingTo(stale.events));
+
+    expect(await stale.Save()).toBe(true);
+    expect(stale.savedCounts).toEqual([7]);
+    expect(store.get('dist-1')?.ResponseCount).toBe(7);
+  });
+
+  it('a client CHANGE to the count is refused: the stored value is kept and the attempt is logged', async () => {
+    store.set('dist-1', { MagicLinkInviteID: 'invite-live', PublicLinkToken: 'mj_ml_live', ResponseCount: 7 });
+    const s = withLiveCredential(subject());
+    s.fields.set('ResponseCount', { Dirty: true, OldValue: '7', Value: '0' });
+    s.ResponseCount = 0; // "reset the counter" from a client
+    MagicLinkMinterRegistry.Instance.Register(minterLoggingTo(s.events));
+    const { LogError } = await import('@memberjunction/core');
+    vi.mocked(LogError).mockClear();
+
+    expect(await s.Save()).toBe(true);
+    expect(s.savedCounts).toEqual([7]);
+    expect(vi.mocked(LogError).mock.calls.flat().join('\n')).toMatch(/Ignoring a client write of ResponseCount on distribution dist-1/);
+  });
+
+  it('a client CHANGE is put back even when the locked re-read fails — the stored value is not the only defence', async () => {
+    storeRead = 'fail';
+    const s = withLiveCredential(subject());
+    s.fields.set('ResponseCount', { Dirty: true, OldValue: '7', Value: '0' });
+    s.ResponseCount = 0;
+    MagicLinkMinterRegistry.Instance.Register(minterLoggingTo(s.events));
+
+    expect(await s.Save()).toBe(true);
+    expect(s.savedCounts[0]).toBe(7);
+  });
+
+  it('a CREATE starts at zero whatever the client sent, and says so', async () => {
+    const s = subject();
+    s.IsSaved = false;
+    s.ResponseCount = 5;
+    MagicLinkMinterRegistry.Instance.Register(minterLoggingTo(s.events));
+    const { LogError } = await import('@memberjunction/core');
+    vi.mocked(LogError).mockClear();
+
+    await s.Save();
+    // The create, then the hook's own credential write once the mint landed: both at zero.
+    expect(s.savedCounts.length).toBeGreaterThan(0);
+    expect(s.savedCounts.every((count) => count === 0)).toBe(true);
+    expect(vi.mocked(LogError).mock.calls.flat().join('\n')).toMatch(/ResponseCount of 5/);
+  });
+
+  it('a stored row whose count is not a number is a failed read: logged, and saved on the loaded values', async () => {
+    store.set('dist-1', { MagicLinkInviteID: 'invite-live', PublicLinkToken: 'mj_ml_live', ResponseCount: Number.NaN });
+    const s = withLiveCredential(subject());
+    s.ResponseCount = 3;
+    MagicLinkMinterRegistry.Instance.Register(minterLoggingTo(s.events));
+    const { LogError } = await import('@memberjunction/core');
+    vi.mocked(LogError).mockClear();
+
+    expect(await s.Save()).toBe(true);
+    expect(s.savedCounts).toEqual([3]);
+    expect(vi.mocked(LogError).mock.calls.flat().join('\n')).toMatch(/without a row lock/);
   });
 });
 
@@ -458,7 +535,7 @@ describe('two writers of one row take turns on a DATABASE row lock (behaviour)',
     MagicLinkMinterRegistry.Instance.Register(minterLoggingTo(s.events));
     await s.Save();
     expect(s.statements).toEqual([
-      "SELECT [MagicLinkInviteID], [PublicLinkToken] FROM [__mj_BizAppsForms].[FormDistribution] " +
+      "SELECT [MagicLinkInviteID], [PublicLinkToken], [ResponseCount] FROM [__mj_BizAppsForms].[FormDistribution] " +
         "WITH (UPDLOCK, HOLDLOCK) WHERE [ID] = 'dist-o''brien'",
     ]);
   });
@@ -471,7 +548,7 @@ describe('two writers of one row take turns on a DATABASE row lock (behaviour)',
     MagicLinkMinterRegistry.Instance.Register(minterLoggingTo(s.events));
     await s.Save();
     expect(db.statements[0].sql).toBe(
-      'SELECT "MagicLinkInviteID", "PublicLinkToken" FROM "__mj_BizAppsForms"."FormDistribution" ' +
+      'SELECT "MagicLinkInviteID", "PublicLinkToken", "ResponseCount" FROM "__mj_BizAppsForms"."FormDistribution" ' +
         'WHERE "ID" = \'dist-1\' FOR UPDATE',
     );
     expect(db.statements[0].inTransaction).toBe(true);

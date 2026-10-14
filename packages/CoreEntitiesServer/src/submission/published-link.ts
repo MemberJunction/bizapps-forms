@@ -7,12 +7,17 @@
  * `form-definition.ts`), so the widget receives exactly what was published — it
  * does not drift if the underlying entity columns later change.
  *
- * The distribution and version reads go through the per-request `provider` with the anonymous
- * `contextUser`, so the magic-link read scope (the respondent role's row filters) is enforced. The
- * one exception is the form's own `Status` (#303 Task 8): the respondent role holds no grant on
- * `Forms` at all, so that single column is read as `formReader` — the system user. `RunView`
- * results are checked for `.Success`; a missing/closed link yields a typed failure rather than a
- * throw.
+ * The DISTRIBUTION read goes through the per-request `provider` with the anonymous `contextUser`,
+ * so the magic-link read scope (the respondent role's `Respondent Own Distribution` row filter) is
+ * enforced: that read is what binds the session to its own link. Everything after it is read as
+ * `systemReader` — the system user — because the respondent role holds no grant on `Forms` (#303
+ * Task 8) and, since #302, none on `Form Versions` either. The raw `DefinitionSnapshot` carries the
+ * scoring table, every ending with its redirect URL and the knockout conditions, so a respondent
+ * read grant made it one generic GraphQL query away; the respondent now gets only the allowlisted
+ * projection the respondent operations build from it. The version read is still keyed on the
+ * FormID the respondent-scoped distribution read returned, so no caller can name another form.
+ * `RunView` results are checked for `.Success`; a missing/closed link yields a typed failure rather
+ * than a throw.
  */
 import { LogError, type RunViewParams, type RunViewResult, type UserInfo } from '@memberjunction/core';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
@@ -115,7 +120,8 @@ export function publishedVersionFilter(formId: string): string {
 async function loadPublishedVersion(
   provider: DefinitionRunViewProvider,
   formId: string,
-  contextUser: UserInfo,
+  systemReader: UserInfo,
+  slug: string,
 ): Promise<mjBizAppsFormsFormVersionEntityType | undefined> {
   const result = await provider.RunView<mjBizAppsFormsFormVersionEntityType>(
     {
@@ -124,9 +130,12 @@ async function loadPublishedVersion(
       OrderBy: 'VersionNumber DESC',
       ResultType: 'simple',
     },
-    contextUser,
+    systemReader,
   );
   if (!result.Success) {
+    // Still answered as `no-published-version` (the caller refuses either way), but never silently:
+    // an outage must be told apart from an unpublished form in the log.
+    LogError(`[Forms] Could not read the published version of form ${formId} (link '${slug}'): ${result.ErrorMessage}`);
     return undefined;
   }
   return result.Results[0];
@@ -192,8 +201,9 @@ function sameGuid(a: string, b: string): boolean {
 /**
  * Resolve a slug to its published definition.
  *
- * `contextUser` is the respondent (its row filters bind the reads to the session's own link);
- * `formReader` reads the form's `Status`, which the respondent cannot. `expectedVersionId`, when
+ * `contextUser` is the respondent (its row filter binds the distribution read to the session's own
+ * link); `systemReader` reads the form's `Status` and its Published version, neither of which the
+ * respondent role can read (#302). `expectedVersionId`, when
  * supplied (submit path), pins the response to the version the widget rendered; a mismatch is
  * reported so a stale tab cannot submit against a re-published form.
  */
@@ -201,7 +211,7 @@ export async function resolvePublishedDefinition(
   provider: DefinitionRunViewProvider,
   slug: string,
   contextUser: UserInfo,
-  formReader: UserInfo,
+  systemReader: UserInfo,
   options: { expectedVersionId?: string; now?: Date } = {},
 ): Promise<DefinitionLoadResult> {
   const now = options.now ?? new Date();
@@ -219,12 +229,12 @@ export async function resolvePublishedDefinition(
     return { ok: false, failure: 'distribution-closed' };
   }
 
-  const publication = await readFormPublication(provider, distribution.FormID, formReader, `link '${slug}'`);
+  const publication = await readFormPublication(provider, distribution.FormID, systemReader, `link '${slug}'`);
   if (publication !== 'published') {
     return { ok: false, failure: publication === 'unreadable' ? 'form-unreadable' : 'form-not-published' };
   }
 
-  const version = await loadPublishedVersion(provider, distribution.FormID, contextUser);
+  const version = await loadPublishedVersion(provider, distribution.FormID, systemReader, slug);
   if (!version) {
     return { ok: false, failure: 'no-published-version' };
   }

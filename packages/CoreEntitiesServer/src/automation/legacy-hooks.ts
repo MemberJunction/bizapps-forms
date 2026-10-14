@@ -1,7 +1,7 @@
 /**
  * The four legacy on-submit Actions, fired by NAME for a form that configures none of its own
- * (`resolveOnSubmitDispatch` says `legacy`) — the one implementation, used by the work-queue handler
- * and by the submit pipeline's own legacy path in `forms-server` until that path is retired.
+ * (`resolveOnSubmitDispatch` says `legacy`) — the one implementation, called only by the
+ * `Forms.RunAutomations` Work Queue handler since #303 retired the submit pipeline's in-process path.
  *
  * Each is resolved defensively via `ActionEngineServer.GetActionByName` and SKIPPED-with-log when
  * absent: a host may not have them all, and the legacy runner never failed a submission for it.

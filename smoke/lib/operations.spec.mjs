@@ -17,7 +17,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXECUTE_REMOTE_OPERATION, executeOperation, republishForm } from './operations.mjs';
+import { EXECUTE_REMOTE_OPERATION, executeOperation, postGraphQL, republishForm } from './operations.mjs';
 import { sessionIdFor } from './session.mjs';
 
 let failures = 0;
@@ -107,6 +107,26 @@ try {
   missingKey = err.message;
 }
 check('republishing without MJ_API_KEY throws naming it', missingKey.includes('MJ_API_KEY'), missingKey);
+
+// --- a raw GraphQL probe carries the same credentials ------------------------------------------------
+
+{
+  let seen;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    seen = { url, init };
+    return new Response(JSON.stringify({ data: { mjBizAppsFormsFormVersion: null } }), { status: 200 });
+  };
+  try {
+    const probe = await postGraphQL('http://smoke.test', { token }, 'query Q($id: String!) { mjBizAppsFormsFormVersion(ID: $id) { ID } }', { id: 'v-1' });
+    check('a raw probe sends the session bearer token and its session id',
+      seen.init.headers.Authorization === `Bearer ${token}` && seen.init.headers['x-session-id'] === sessionIdFor(token));
+    check('a raw probe sends its document and variables', JSON.parse(seen.init.body).variables.id === 'v-1');
+    check('a raw probe returns the status and the parsed body unjudged', probe.httpStatus === 200 && probe.body.data.mjBizAppsFormsFormVersion === null);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
 
 console.log(failures === 0 ? '\nPASS — the smoke operation client speaks the widget\'s wire.' : `\nFAIL — ${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

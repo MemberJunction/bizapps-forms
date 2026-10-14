@@ -41,7 +41,7 @@ function snapshot(overrides: Record<string, unknown> = {}): Record<string, unkno
 
 describe('definitionFingerprint', () => {
   it('sees an automation-only edit', () => {
-    // Automations are publishable content: `fireHooksSafely` dispatches from the SNAPSHOT's
+    // Automations are publishable content: the `Forms.RunAutomations` handler plans from the SNAPSHOT's
     // `automations` array, so an automation the author added but could never publish never runs.
     // While this key was ignored, adding one left the header on a static "Published" badge with
     // no publish control at all.

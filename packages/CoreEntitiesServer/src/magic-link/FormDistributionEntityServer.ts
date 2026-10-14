@@ -18,8 +18,9 @@
  * `runProvisioning` (provision-runner.ts) so it is unit-testable without a DB.
  *
  * What this class owns itself is everything about the ROW rather than the decision: the credential
- * columns are server-owned ({@link refuseClientCredentialWrites}), a save carries the pair the store
- * holds rather than the one this instance loaded ({@link adoptStoredCredential}), two writers of one
+ * columns and `ResponseCount` are server-owned ({@link refuseClientServerColumnWrites}), a save
+ * carries the values the store holds rather than the ones this instance loaded
+ * ({@link adoptStoredServerColumns}), two writers of one
  * row take turns on a database row lock ({@link Save}), and a delete withdraws the credential in the
  * same transaction ({@link Delete}). Each exists because a concrete interleaving produced either an
  * orphaned live invite or a dead link badged Live; the docstring on each names it.
@@ -55,8 +56,14 @@ import { getMagicLinkProvisioningConfig } from './config.js';
 import { MagicLinkMinterRegistry, type IAnonymousMagicLinkMinter, type InviteWriteHost } from './minter.js';
 import { runProvisioning, DISTRIBUTION_ENTITY_NAME, type MintedLink } from './provision-runner.js';
 
-/** The credential pair as the store holds it right now. */
-type StoredCredential = Pick<mjBizAppsFormsFormDistributionEntityType, 'MagicLinkInviteID' | 'PublicLinkToken'>;
+/**
+ * The SERVER-OWNED columns as the store holds them right now: the credential pair, and the
+ * completion counter that submit advances with a raw conditional `UPDATE` (`submission/quota.ts`).
+ */
+type StoredServerColumns = Pick<
+  mjBizAppsFormsFormDistributionEntityType,
+  'MagicLinkInviteID' | 'PublicLinkToken' | 'ResponseCount'
+>;
 
 /**
  * The provider surface a save needs to lock the row it is about to write: raw SQL on the provider's
@@ -140,13 +147,14 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    *
    * Two writers of one row TAKE TURNS, on the database. A reissue persists its request — invite
    * linked, token cleared — with the first save and services it with the second, and in between
-   * that state reads as "work owed" to any other save of the same row: a public submission bumping
-   * `ResponseCount` in that window revoked the already-revoked invite, minted a second replacement,
+   * that state reads as "work owed" to any other save of the same row: a second save in that window
+   * (another tab, an engine verb) revoked the already-revoked invite, minted a second replacement,
    * and left whichever invite lost the last write Active and unreferenced — the orphan
    * bizapps-forms#104 exists to remove, produced by the act of rotating. So an update runs as one
    * transaction on the row's own provider whose FIRST statement locks the row
-   * ({@link adoptStoredCredential}); a second writer's lock waits until the first commits, then
-   * reads the pair the first one landed. The hook's own re-entrant save runs inside the transaction
+   * ({@link adoptStoredServerColumns}); a second writer's lock waits until the first commits, then
+   * reads what the first one landed. Submit's raw slot `UPDATE` takes the same row lock, so it
+   * queues behind this turn too. The hook's own re-entrant save runs inside the transaction
    * already held, so it neither opens another nor locks again.
    *
    * This replaced an in-process queue keyed by row id, which serialised writers in ONE API process
@@ -198,8 +206,8 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    * the builder, this check and the request path cannot disagree about what an entry is.
    *
    * Checked only when the column changes. A distribution already holding a bad list — written
-   * before this rule — must still take a `ResponseCount` bump from a submission; refusing that save
-   * would turn a stale column into failed submissions, and the request path already reads the bad
+   * before this rule — must still take an unrelated save (a rename, a cap edit); refusing that save
+   * would turn a stale column into a link nobody can edit, and the request path already reads the bad
    * entries as dropped. "Changes" is MJ's dirty flag, which reflects the database only while the
    * entity tracks record changes (see `tracksStoredValues`); with that off it is the client's claim,
    * so the list is checked on every save instead of the whole update being refused — a submission
@@ -240,7 +248,7 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    *
    * Checked only when this save OPENS the link (it ends Active and IsActive, and one of those or its
    * form changed): a stray live link left on a Closed form must still take a save that opens nothing,
-   * such as a submission's response count, and closing it is always allowed.
+   * such as a rename, and closing it is always allowed.
    *
    * The form is read as the writer, inside the save. A form the writer cannot see answers exactly as
    * one that does not exist, so the refusal reveals nothing about a form the writer cannot read; a
@@ -286,8 +294,8 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
   }
 
   private async saveAndProvision(options?: EntitySaveOptions, host?: InviteWriteHost): Promise<boolean> {
-    this.refuseClientCredentialWrites();
-    await this.adoptStoredCredential();
+    this.refuseClientServerColumnWrites();
+    await this.adoptStoredServerColumns();
     const saved = await super.Save(options);
     if (!saved || this.credentialWriteInFlight) {
       return saved;
@@ -352,10 +360,11 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    * restored from CURRENT state on the next save either way; the ownership check in the minter
    * is what protects the invite itself from that direction.
    */
-  private refuseClientCredentialWrites(): void {
+  private refuseClientServerColumnWrites(): void {
     if (this.credentialWriteInFlight) {
       return;
     }
+    this.refuseClientCountWrite();
     if (!this.IsSaved) {
       // A record being CREATED has no old value to restore, and a credential it arrived holding
       // was never issued by this hook — it names an invite minted for some other distribution, or
@@ -391,14 +400,48 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
   }
 
   /**
-   * Lock this row, and make this save carry the credential pair THE STORE holds, not the one this
-   * instance loaded — one statement for both.
+   * `ResponseCount` is the completion counter, and only submit's atomic slot `UPDATE` advances it
+   * (final review I2). A row being CREATED starts at zero; a change on an update is put back here
+   * and logged, and {@link adoptStoredServerColumns} then carries the stored value, so neither a
+   * deliberate write nor a stale copy can reopen slots `MaxResponses` closed. The engine's own create
+   * (`FormDistributionEngine.Issue`) already writes zero, so it passes through unchanged.
+   */
+  private refuseClientCountWrite(): void {
+    if (!this.IsSaved) {
+      if (this.ResponseCount !== 0) {
+        LogError(
+          `[FormDistributionEntityServer] Ignoring a ResponseCount of ${String(this.ResponseCount)} supplied on the ` +
+            `creation of a distribution. A new link starts at 0; only a submission counts.`,
+        );
+        this.ResponseCount = 0;
+      }
+      return;
+    }
+    const count = this.GetFieldByName('ResponseCount');
+    if (count?.Dirty) {
+      LogError(
+        `[FormDistributionEntityServer] Ignoring a client write of ResponseCount on distribution ${this.ID} ` +
+          `(${String(count.OldValue)} -> ${String(count.Value)}). Only a submission advances that counter.`,
+      );
+      this.ResponseCount = Number(count.OldValue);
+    }
+  }
+
+  /**
+   * Lock this row, and make this save carry the server-owned columns THE STORE holds, not the ones
+   * this instance loaded — one statement for all three.
+   *
+   * The count: submit advances `ResponseCount` with a raw conditional `UPDATE`, never through this
+   * entity, so every loaded copy of the row is behind it. Written back from a copy loaded when the
+   * builder opened, the counter went DOWN and `MaxResponses` could be exceeded (final review I2). The
+   * stored value is carried on every update, whoever saves.
+   *
    *
    * The pair: MJ writes every column on an update, dirty or not. So an instance loaded before a
    * rotation and saved after it — a server-side writer holding the row across other work — put the
    * OLD pair back: a revoked invite beside its dead token, which `decideProvisioning` reads as
    * `current` and never re-mints, and which the builder badges Live. A permanently dead link,
-   * produced by a rename. {@link refuseClientCredentialWrites} cannot see this: it acts on DIRTY
+   * produced by a rename. {@link refuseClientServerColumnWrites} cannot see this: it acts on DIRTY
    * fields, and a stale copy's credential columns are clean. So the pair is re-read on every update
    * and carried through, with one exception — a token this client cleared stays cleared, because
    * that is the reissue request and the whole point of the save.
@@ -411,30 +454,31 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    * through a cache.
    *
    * A read that fails leaves the loaded values in place and says so: refusing the save would turn a
-   * narrow race into a failed submission, and the loaded values are what every save wrote before
-   * the re-read existed.
+   * narrow race into a failed edit, and the loaded values are what every save wrote before the
+   * re-read existed.
    */
-  private async adoptStoredCredential(): Promise<void> {
+  private async adoptStoredServerColumns(): Promise<void> {
     if (this.credentialWriteInFlight || !this.IsSaved) {
       return;
     }
     const token = this.GetFieldByName('PublicLinkToken');
     const clearRequested = Boolean(token?.Dirty) && !this.PublicLinkToken;
 
-    const stored = await this.readStoredCredentialLocked();
+    const stored = await this.readStoredServerColumnsLocked();
     if ('failure' in stored) {
       LogError(
-        `[FormDistributionEntityServer] Could not read the stored credential of distribution ${this.ID} ` +
+        `[FormDistributionEntityServer] Could not read the stored server-owned columns of distribution ${this.ID} ` +
           `before saving it (${stored.failure}); saving the loaded values instead, without a row lock.`,
       );
       return;
     }
     this.MagicLinkInviteID = stored.MagicLinkInviteID;
     this.PublicLinkToken = clearRequested ? null : stored.PublicLinkToken;
+    this.ResponseCount = stored.ResponseCount;
   }
 
-  /** The stored credential pair, read under an update lock on this row — or why it could not be. */
-  private async readStoredCredentialLocked(): Promise<StoredCredential | { failure: string }> {
+  /** The stored server-owned columns, read under an update lock on this row — or why they could not be. */
+  private async readStoredServerColumnsLocked(): Promise<StoredServerColumns | { failure: string }> {
     const provider = this.ProviderToUse;
     if (!locksRows(provider)) {
       return { failure: 'the provider cannot run SQL, so the row cannot be locked or re-read' };
@@ -444,14 +488,23 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
       // failed read, rather than throwing out of the save.
       const q = (name: string): string => provider.QuoteIdentifier(name);
       const table = provider.QuoteSchemaAndView(this.EntityInfo.SchemaName, this.EntityInfo.BaseTable);
-      const columns = `${q('MagicLinkInviteID')}, ${q('PublicLinkToken')}`;
+      const columns = `${q('MagicLinkInviteID')}, ${q('PublicLinkToken')}, ${q('ResponseCount')}`;
       const where = `${q('ID')} = ${quoteSqlString(this.ID)}`;
       const sql =
         provider.PlatformKey === 'postgresql'
           ? `SELECT ${columns} FROM ${table} WHERE ${where} FOR UPDATE`
           : `SELECT ${columns} FROM ${table} WITH (UPDLOCK, HOLDLOCK) WHERE ${where}`;
-      const rows = await provider.ExecuteSQL<StoredCredential>(sql, undefined, undefined, this.ContextCurrentUser);
-      return rows[0] ?? { failure: 'no row' };
+      const rows = await provider.ExecuteSQL<StoredServerColumns>(sql, undefined, undefined, this.ContextCurrentUser);
+      const row = rows[0];
+      if (!row) {
+        return { failure: 'no row' };
+      }
+      // The column is NOT NULL INT; anything else is a driver or schema surprise, and adopting it
+      // would write garbage into the counter the quota decides on.
+      if (typeof row.ResponseCount !== 'number' || !Number.isFinite(row.ResponseCount)) {
+        return { failure: `the stored ResponseCount is not a number (${String(row.ResponseCount)})` };
+      }
+      return row;
     } catch (e) {
       return { failure: e instanceof Error ? e.message : String(e) };
     }

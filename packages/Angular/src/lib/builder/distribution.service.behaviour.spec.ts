@@ -151,7 +151,7 @@ describe('DistributionService — a refused save', () => {
 /**
  * The captcha switch writes the column the SUBMIT gate reads.
  *
- * `submit-pipeline` stage 4 ORs this column with the form's own `settings.captchaRequired`, and
+ * `FormSubmissionEngine.SaveResponse` ORs this column with the form's own `settings.captchaRequired`, and
  * until #151 nothing in the builder could see or set it — the only surfaces that could were a raw
  * entity form and a direct write.
  */

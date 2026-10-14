@@ -14,9 +14,11 @@
       "unfiltered. A query with NO permission rows is open to every role (QueryInfo.UserHasRunPermissions),",
       "and RunQuery bypasses row-level security, so without these the value-counts query would hand",
       "raw answer values for any FormID to every role, Form Respondent included, whose entity reads",
-      "are row-filtered to the respondent's own response. (Forms Automation Runner already reads answer",
-      "rows unfiltered; the grant set is still right for it.) The engine runs these under the System",
-      "user (which holds all three) after its own Authorize()."
+      "are row-filtered to the respondent's own response. Forms Automation Runner is left out too,",
+      "although its entity reads on Form Responses and Form Response Answers are UNFILTERED: it never",
+      "runs these queries -- nothing but FormReportingEngine does -- so a grant would only widen what a",
+      "leaked runner credential reaches. The engine runs these under the System user (which holds all",
+      "three) after its own Authorize()."
     ],
     "fields": {
       "Name": "Forms: Response Completion Stats",

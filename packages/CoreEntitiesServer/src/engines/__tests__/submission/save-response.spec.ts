@@ -6,10 +6,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import { saveThroughEngine, recordingQueue, type EngineSaveContext, type EngineSaveSubmission } from './harness.js';
+import type { RespondentSaveResult } from '../../../submission/save-request.js';
 import { FORM_UNAVAILABLE_MESSAGE, SUBMIT_FAILED_MESSAGE } from '../../FormSubmissionEngine.js';
 import { FormsRateLimiter } from '../../../submission/rate-limit.js';
 import { resetPublicSubmitConfigForTests } from '../../../submission/config.js';
-import type { FormSubmissionResult } from '@mj-biz-apps/forms-entities';
 import {
   makeContextUser,
   makeDefinition,
@@ -402,7 +402,7 @@ describe('SaveResponse', () => {
     const fireHooks = recordingQueue();
     const { ctx } = makeContext(respondentPermissions(), { queue: fireHooks, clientIpHash: 'ip-respondent' });
 
-    const autosaves: FormSubmissionResult[] = [];
+    const autosaves: RespondentSaveResult[] = [];
     for (let i = 0; i < 4; i++) {
       autosaves.push(await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] })));
     }
@@ -443,7 +443,7 @@ describe('SaveResponse', () => {
     resetPublicSubmitConfigForTests();
     const { ctx } = makeContext(respondentPermissions(), { clientIpHash: 'ip-attacker' });
 
-    const results: FormSubmissionResult[] = [];
+    const results: RespondentSaveResult[] = [];
     for (const forged of ['forged-1', 'forged-2', 'forged-3']) {
       ctx.sessionId = forged;
       results.push(await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] })));

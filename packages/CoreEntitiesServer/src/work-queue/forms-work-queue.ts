@@ -42,7 +42,7 @@ export async function configureFormsWorkQueue(contextUser: UserInfo, provider?: 
   try {
     await WorkQueueEngine.Instance.Config(false, contextUser, provider);
   } catch (err) {
-    LogError(
+    logNotReady(
       `[Forms] The work queue could not be configured, so submissions cannot queue their automations: ` +
         `${err instanceof Error ? err.message : String(err)}. Forms needs MJ 6.2's work-queue tables (run the core migration).`,
     );
@@ -53,7 +53,7 @@ export async function configureFormsWorkQueue(contextUser: UserInfo, provider?: 
     WorkQueueEngine.Instance.GetSubscriptionByName(RUN_AUTOMATIONS_SUBSCRIPTION) ? null : `subscription "${RUN_AUTOMATIONS_SUBSCRIPTION}"`,
   ].filter((what): what is string => what !== null);
   if (missing.length > 0) {
-    LogError(
+    logNotReady(
       `[Forms] The work-queue ${missing.join(' and ')} ${missing.length === 1 ? 'is' : 'are'} not on this host, so on-submit ` +
         "automations cannot be queued or run. Push Forms' metadata (metadata/work-queue-topics, metadata/work-queue-subscriptions).",
     );
@@ -64,6 +64,44 @@ export async function configureFormsWorkQueue(contextUser: UserInfo, provider?: 
       `workQueue with subscription "${RUN_AUTOMATIONS_SUBSCRIPTION}" (mj.config.cjs); until one does, they wait in the queue.`,
   );
   return true;
+}
+
+/**
+ * The least time between two logs of the SAME not-ready reason, in milliseconds.
+ *
+ * A host that is not ready is asked again on every respondent page view (`GetRespondentForm` refuses
+ * a form that owes automations while the queue cannot take them), so an unthrottled error was one
+ * line per view on a misconfigured host — the reason buried under itself (final review M7). Once a
+ * minute still reaches the operator promptly after a deploy, and the startup sink said it at boot.
+ */
+export const NOT_READY_LOG_INTERVAL_MS = 60_000;
+
+/** When each not-ready reason was last logged, keyed by its exact text. Process-local, like the check itself. */
+const notReadyLoggedAt = new Map<string, number>();
+
+/**
+ * How many distinct reasons the throttle remembers. A driver error can embed per-call detail, so the
+ * key set is not provably small; past the cap the map is cleared, which costs one repeated line each.
+ */
+const MAX_REMEMBERED_REASONS = 50;
+
+/** Log `message` unless the same message was logged less than {@link NOT_READY_LOG_INTERVAL_MS} ago. */
+function logNotReady(message: string): void {
+  const now = Date.now();
+  const last = notReadyLoggedAt.get(message);
+  if (last !== undefined && now - last < NOT_READY_LOG_INTERVAL_MS) {
+    return;
+  }
+  if (notReadyLoggedAt.size >= MAX_REMEMBERED_REASONS) {
+    notReadyLoggedAt.clear();
+  }
+  notReadyLoggedAt.set(message, now);
+  LogError(message);
+}
+
+/** Forget every throttled reason, so one spec's log cannot hide the next spec's. */
+export function resetNotReadyLogForTests(): void {
+  notReadyLoggedAt.clear();
 }
 
 /** How many times {@link watchRunAutomationsHost} looks for this process's work-queue host before saying none started. */

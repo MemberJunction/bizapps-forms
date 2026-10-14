@@ -25,7 +25,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { buildAnswers, resolveSlug } from './lib/fixture.mjs';
-import { definitionQuestions, firstSaveError, getRespondentForm, saveResponse } from './lib/operations.mjs';
+import { definitionQuestions, firstSaveError, getRespondentForm, postGraphQL, saveResponse } from './lib/operations.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
 const BASE = smokeBaseUrl();
@@ -72,6 +72,24 @@ async function main() {
   //     screens, no automations. A regression here leaks knockouts and endings to every visitor.
   const leaked = ['endScreens', 'automations', 'scoring'].filter((key) => JSON.stringify(definition).includes(`"${key}"`));
   check(leaked.length === 0, 'the respondent definition carries no scoring, endings or automations', `leaked: ${leaked.join(', ')}`);
+
+  // 4c. ...and the raw snapshot must not be one generic query away either (#302). The respondent
+  //     role holds no read on Form Versions any more (V202610132000); the server reads the version
+  //     as the system user. MJ's generated resolvers honour role + row filter only, so with the old
+  //     grant both reads below returned the whole DefinitionSnapshot — scoring, endings, knockouts.
+  const byId = await postGraphQL(BASE, { token },
+    'query V($id: String!) { mjBizAppsFormsFormVersion(ID: $id) { ID DefinitionSnapshot } }',
+    { id: formVersionId }, { label: 'mjBizAppsFormsFormVersion' });
+  check(!byId.body.data?.mjBizAppsFormsFormVersion,
+    'an anonymous session reading mjBizAppsFormsFormVersion(ID) gets nothing',
+    JSON.stringify(byId.body).slice(0, 300));
+  const byView = await postGraphQL(BASE, { token },
+    'query R($input: RunDynamicViewInput!) { RunmjBizAppsFormsFormVersionDynamicView(input: $input) { Success ErrorMessage Results { ID } } }',
+    { input: { EntityName: 'MJ_BizApps_Forms: Form Versions', ExtraFilter: '' } }, { label: 'RunmjBizAppsFormsFormVersionDynamicView' });
+  const viewRows = byView.body.data?.RunmjBizAppsFormsFormVersionDynamicView?.Results ?? [];
+  check(viewRows.length === 0,
+    'an anonymous RunView on Form Versions returns no rows',
+    JSON.stringify(byView.body).slice(0, 300));
 
   // 5. THE REGRESSION TEST. Submit with the snapshot's own formVersionId, which is the
   //    client-minted (lowercase) spelling — not the uppercase one SQL Server returns.

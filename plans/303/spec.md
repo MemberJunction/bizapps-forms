@@ -145,13 +145,13 @@ No migration (ruled 2026-10-12, Task 1): the earlier unique index on `FormAutoma
 yes
 
 ## Out of scope
-- Do not change the `Form Respondent` role record in `metadata/roles/` or its four records in `metadata/entity-permissions/` (Form Responses, Form Response Answers, Form Versions, Form Distributions); reducing those grants is a follow-up.
+- Do not change the `Form Respondent` role record or its Form Responses, Form Response Answers and Form Distributions grants. Exception approved by the user on 2026-10-13 (final review): the Form Versions Read grant is retired, and the server reads the version as the system user, so the raw snapshot is unreachable by respondents (#302).
 - Do not add per-recipient invites, a `RecipientPersonID` column, `IdentityMode = 'email'` minting, or a `FormDistributionRecipient` table (#137).
 - Do not replace `packages/Server/src/magic-link/token.ts` or `MagicLinkInviteMinter.ts` with core's `MagicLinkService`; it is not exported from `@memberjunction/server` on any branch and cannot set `IdentityMode`, `Kind` or `ResourceID`.
 - Do not make `FormsRateLimiter` or the three `InFlightLimiter`s cross-instance; keep them per-process and documented as such.
 - Do not split `mj-form.component.ts` or `form-builder.component.ts` beyond extracting the submit, ending and publish orchestration that the operations replace.
 - Do not author a `*__Metadata_Sync.sql` migration or `sync` blocks in metadata JSON.
-- Do not add migrations or columns other than the two the user approved on 2026-10-13: a nullable `FormAutomationRun.WorkQueueMessageID` (exact run-to-message identity) and a metadata migration setting `GeneratedFormSection = 'Category'` for the four FormDistribution fields that ship as 'Details'.
+- Do not add migrations or columns other than the three the user approved on 2026-10-13: a nullable `FormAutomationRun.WorkQueueMessageID` (exact run-to-message identity); a metadata migration setting `GeneratedFormSection = 'Category'` for the five fields across three entities that ship as 'Details' (two on FormDistribution, two on FormResponse, one on FormAutomationRun); and (final review, see the role exception above) a migration retiring the `Form Respondent` role's Form Versions Read grant and its row filter.
 - Do not change the `/f/:slug` host page, redeem, resume, upload, asset, download or widget-bundle HTTP routes' URLs or wire shapes.
 - Do not bump `@angular/*` pins or `pnpm.overrides`; 6.2.0-edge.3 requires the same Angular versions as 6.1.5.
 

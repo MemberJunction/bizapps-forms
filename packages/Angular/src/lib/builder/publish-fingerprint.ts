@@ -47,8 +47,8 @@ import {
  *
  * `automations` USED TO BE excluded here, on the reasoning that the Automate tab did not report
  * its changes to the builder shell so there was nothing to refresh the value. That reasoning
- * inverted the risk. Automations are real publishable content — `fireHooksSafely` dispatches
- * from the snapshot's `automations` array, never from the live `FormAutomation` rows — so
+ * inverted the risk. Automations are real publishable content — the `Forms.RunAutomations` handler
+ * plans from the snapshot's `automations` array, never from the live `FormAutomation` rows — so
  * ignoring them meant an author could add, reorder or disable an automation on a Published form
  * and get a static "Published" badge with NO publish control, leaving the change permanently
  * unable to reach a respondent. The missing refresh was the thing to fix, and the builder now

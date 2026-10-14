@@ -161,10 +161,10 @@ export async function runProvisioning(
 /**
  * Keep a credential we are not replacing bounded by the link it belongs to.
  *
- * Runs on every save of a live, credentialled distribution — which includes every public
- * submission, since submitting bumps `ResponseCount`. Each run LOADS THE INVITE ROW: one
- * core-entity read per save, on the anonymous hot path, and it is the price of the expiry
- * staying in step. It cannot be skipped on "nothing to re-bound" without reading the row,
+ * Runs on every entity save of a live, credentialled distribution. A public submission is no
+ * longer one: since #303 it advances `ResponseCount` with a raw conditional `UPDATE`
+ * (`submission/quota.ts`), so this pass runs on author and engine saves only. Each run LOADS THE
+ * INVITE ROW: one core-entity read per save, and it is the price of the expiry staying in step. It cannot be skipped on "nothing to re-bound" without reading the row,
  * because the distribution does not record the credential's expiry: when `CloseAt` was just
  * cleared the stored value is the OLD date, not the sentinel, and when a previous re-bound
  * failed this save is its retry. A review proposed skipping when `closeAt` is null and no
@@ -221,7 +221,7 @@ async function realignExpiry(
  *
  * Split from {@link withdrawCredential} so the reissue path can revoke WITHOUT the intermediate
  * unlink save. That save was a concurrency window: between "cleared" and "written with the new
- * pair", a concurrent load — a second builder tab, a public submission bumping `ResponseCount` —
+ * pair", a concurrent load — a second builder tab, an engine verb on the same link —
  * read "live link, no credential", decided `mint`, and left one of the two invites Active and
  * unreferenced: the orphan bizapps-forms#104 exists to remove, produced by the act of rotating.
  */

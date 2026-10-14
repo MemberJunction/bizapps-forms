@@ -188,7 +188,12 @@ describe('resolvePublishedDefinition — the form itself must be Published (#303
     expect(seen.some((params) => params.EntityName === 'MJ_BizApps_Forms: Form Versions')).toBe(false);
   });
 
-  it("reads the form's Status as the elevated reader and everything else as the respondent", async () => {
+  // #302: the respondent role no longer holds any read on Form Versions, so the raw snapshot (the
+  // scoring table, every ending's redirect, the knockout conditions) is unreachable through the
+  // generic GraphQL resolvers. The version is read as the elevated reader, and only AFTER the
+  // distribution read — the one still made as the respondent, so its row filter binds the session
+  // to its own link — has named the form.
+  it('reads the distribution as the respondent, and the form Status and the version as the elevated reader', async () => {
     const seen: RunViewParams[] = [];
     const readers: (UserInfo | undefined)[] = [];
     await resolvePublishedDefinition(providerFor(distribution(), seen, { readers }), 'customer-survey', ANON_USER, FORM_READER);
@@ -196,8 +201,42 @@ describe('resolvePublishedDefinition — the form itself must be Published (#303
     expect(byEntity).toEqual([
       ['MJ_BizApps_Forms: Form Distributions', ANON_USER],
       ['MJ_BizApps_Forms: Forms', FORM_READER],
-      ['MJ_BizApps_Forms: Form Versions', ANON_USER],
+      ['MJ_BizApps_Forms: Form Versions', FORM_READER],
     ]);
+  });
+
+  it('never reads a version when the respondent cannot read the distribution (the scope binding)', async () => {
+    const seen: RunViewParams[] = [];
+    const provider: DefinitionRunViewProvider = {
+      async RunView<T = unknown>(params: RunViewParams): Promise<RunViewResult<T>> {
+        seen.push(params);
+        return { Success: true, Results: [], RowCount: 0, TotalRowCount: 0, ExecutionTime: 0, ErrorMessage: '' } as RunViewResult<T>;
+      },
+    };
+    const out = await resolvePublishedDefinition(provider, 'someone-elses-link', ANON_USER, FORM_READER);
+    expect(out.failure).toBe('distribution-not-found');
+    expect(seen.map((params) => params.EntityName)).toEqual(['MJ_BizApps_Forms: Form Distributions']);
+  });
+});
+
+describe('resolvePublishedDefinition — a version read that fails', () => {
+  it('logs the failure with the form and the slug instead of reporting it silently as unpublished', async () => {
+    logError.mockClear();
+    const base = providerFor(distribution());
+    const provider: DefinitionRunViewProvider = {
+      async RunView<T = unknown>(params: RunViewParams, user?: UserInfo): Promise<RunViewResult<T>> {
+        if (params.EntityName === 'MJ_BizApps_Forms: Form Versions') {
+          return { Success: false, Results: [], RowCount: 0, TotalRowCount: 0, ExecutionTime: 0, ErrorMessage: 'deadlock victim' } as RunViewResult<T>;
+        }
+        return base.RunView<T>(params, user);
+      },
+    };
+    const out = await resolvePublishedDefinition(provider, 'customer-survey', ANON_USER, FORM_READER);
+    expect(out.ok).toBe(false);
+    const line = String(logError.mock.calls.at(-1)?.[0]);
+    expect(line).toContain('form-1');
+    expect(line).toContain('customer-survey');
+    expect(line).toContain('deadlock victim');
   });
 });
 

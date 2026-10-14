@@ -369,11 +369,7 @@ async function runLegacy(
   return { ...report, legacy };
 }
 
-/**
- * The response, its answers, the steps already succeeded for it, and its version's definition.
- * A failed read is retryable and says so — it is never "no response" or "nothing succeeded", which
- * would skip or repeat side effects. Its words go to the log only.
- */
+/** The trimmed response id, or a refusal naming it: nothing can run for an id that is not a GUID. */
 function requireResponseId(responseId: string): string {
   const id = responseId?.trim() ?? '';
   if (!isGuid(id)) {
@@ -382,6 +378,11 @@ function requireResponseId(responseId: string): string {
   return id;
 }
 
+/**
+ * The response, its answers, the steps already succeeded for it, and its version's definition.
+ * A failed read is retryable and says so — it is never "no response" or "nothing succeeded", which
+ * would skip or repeat side effects. Its words go to the log only.
+ */
 async function loadResponse(responseId: string, provider: DatabaseProviderBase, user: UserInfo): Promise<LoadedResponse> {
   const id = requireResponseId(responseId);
   const reads: RunViewParams[] = [
