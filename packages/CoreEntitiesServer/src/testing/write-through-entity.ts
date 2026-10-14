@@ -15,7 +15,8 @@
  * it — it would prove the engine writes rows, not that the rows it writes are allowed.
  *
  * What it models of `BaseEntity`, and nothing more: stored-vs-live dirty tracking for
- * `GetFieldByName` (`OldValue` / `Dirty`), `IsSaved`, `NewRecord` / `Load` / `Save` / `Delete`,
+ * `GetFieldByName` (`OldValue` / `Dirty`), `IsSaved`, `NewRecord` / `Load` / `Save` / `Delete` (with
+ * the post-delete reset to a fresh key),
  * `ValidateAsync` before every save unless the options switch it off (as MJ's `_innerSave` does),
  * and `RegisterResultHistoryEntry` so a refusal reaches `LatestResult.CompleteMessage`.
  */
@@ -128,10 +129,20 @@ export class WriteThroughEntityBase {
     return true;
   }
 
+  /**
+   * Delete, then reset the way `BaseEntity.Delete` does outside a unit of work: every column is
+   * cleared and the object takes the fresh key its record was given, so code that reads an id off
+   * the entity after deleting it gets the new key here exactly as it would against MJ.
+   */
   public async Delete(): Promise<boolean> {
-    const deleted = await this.attachedRecord().Delete();
+    const record = this.attachedRecord();
+    const deleted = await record.Delete();
     if (deleted) {
+      for (const column of Object.keys(this.columnValues())) {
+        delete (this as unknown as Record<string, unknown>)[column];
+      }
       this.stored = null;
+      (this as unknown as Record<string, unknown>).ID = record.ID;
     }
     return deleted;
   }

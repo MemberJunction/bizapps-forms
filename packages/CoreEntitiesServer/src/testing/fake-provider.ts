@@ -18,6 +18,7 @@
  *  - `ExecuteSQL`, recording every statement and answering from a script, so code that reads under
  *    a row lock or counts affected rows (`Dialect.AffectedRowCountSQL`) can be driven and asserted.
  */
+import { randomUUID } from 'node:crypto';
 import type {
   DatabaseProviderBase,
   EntityInfo,
@@ -324,6 +325,11 @@ function makeFakeEntity(
       },
       Delete: async () => {
         deleted.push({ entityName, values: { ID: record.ID } });
+        // MJ's post-delete reset (see the table-backed record's Delete): cleared fields, fresh key.
+        for (const key of Object.keys(values)) {
+          delete values[key];
+        }
+        record.ID = randomUUID();
         return true;
       },
     },
@@ -751,6 +757,11 @@ function makeTableEntity(entityName: string, table: FakeRow[], row: FakeRow | nu
           });
         }
         host.deleted.push({ entityName, values: { ID: values.ID } });
+        // As MJ's BaseEntity.Delete does outside a unit of work: the object is reset through
+        // NewRecord() and given a fresh primary key, so nothing read off it afterwards names the
+        // deleted row. A double that kept the old values hid exactly such a read.
+        record.NewRecord();
+        values.ID = randomUUID();
         return true;
       },
     },

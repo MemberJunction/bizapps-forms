@@ -112,15 +112,13 @@ export async function removeAutomation(
   const step = await loadStep(id, provider, user);
   const loaded = await loadFormSteps(step.FormID, provider, user);
   const seeded = await ensureFormRunsItsOwnSteps(loaded, provider, user);
+  // Read the identity BEFORE deleting: a successful BaseEntity.Delete() resets the object through
+  // NewRecord(), so afterwards step.ID is a fresh key and step.FormID is empty.
+  const removed = { FormAutomationID: step.ID, FormID: step.FormID, RetainedBindingID: step.BindingID ?? null };
   if (!(await step.Delete())) {
     throw new FormAutomationError(`Could not remove step ${id}.`, { fault: true, logDetail: saveFailure(step) });
   }
-  return {
-    FormAutomationID: step.ID,
-    FormID: step.FormID,
-    RetainedBindingID: step.BindingID ?? null,
-    SeededAutomationIDs: seeded.map((s) => s.ID),
-  };
+  return { ...removed, SeededAutomationIDs: seeded.map((s) => s.ID) };
 }
 
 async function createStep(

@@ -304,11 +304,13 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
       for (const rows of [options, questions, automations, bindings, screens, pages]) {
         await deleteEach(rows, form.ID);
       }
+      // Captured before the delete: a successful BaseEntity.Delete() resets the object to a fresh key.
+      const templateFormIdDeleted = form.ID;
       if (!(await form.Delete())) {
         throw new FormAuthoringError(`Could not delete template ${form.ID}: ${saveFailure(form)}. Nothing was deleted.`, { fault: true });
       }
       return {
-        templateFormId: form.ID,
+        templateFormId: templateFormIdDeleted,
         pageCount: pages.length,
         questionCount: questions.length,
         optionCount: options.length,
