@@ -157,6 +157,25 @@ describe('remapConditionalRule — the jump verb (C2)', () => {
     expect(remapConditionalRule(rule, MAP, new Map())).toEqual({ json: null, dropped: 1 });
   });
 
+  it('happy: an ENDING target is remapped through the screen map — a copied knockout keeps its branch', () => {
+    const rule = JSON.stringify({
+      jump: [{ when: { any: [{ questionId: 'q-old-1', op: 'equals', value: 'c' }] }, target: { kind: 'ending', id: 's-old-1' } }],
+    });
+    const result = remapConditionalRule(rule, MAP, PAGE_MAP, new Map([['s-old-1', 's-new-1']]));
+    expect(result.dropped).toBe(0);
+    expect(JSON.parse(result.json as string)).toEqual({
+      jump: [{ when: { any: [{ questionId: 'q-new-1', op: 'equals', value: 'c' }] }, target: { kind: 'ending', id: 's-new-1' } }],
+    });
+  });
+
+  it('worst: an ending target with no counterpart in the screen map is dropped and counted, never dangling', () => {
+    const rule = JSON.stringify({
+      jump: [{ when: { all: [{ questionId: 'q-old-1', op: 'isAnswered' }] }, target: { kind: 'ending', id: 's-other-form' } }],
+    });
+    expect(remapConditionalRule(rule, MAP, PAGE_MAP)).toEqual({ json: null, dropped: 1 });
+    expect(remapConditionalRule(rule, MAP, PAGE_MAP, new Map([['s-old-1', 's-new-1']]))).toEqual({ json: null, dropped: 1 });
+  });
+
   it('worst: a question condition with no questionId is dropped, not resurrected', () => {
     const rule = JSON.stringify({ show: { all: [{ op: 'isAnswered' }] } });
     expect(remapConditionalRule(rule, MAP, PAGE_MAP)).toEqual({ json: null, dropped: 1 });

@@ -160,7 +160,14 @@ function rowsOrThrow<T>(result: RunViewResult<unknown> | undefined, what: string
   return (result.Results ?? []) as T[];
 }
 
-/** The subset of copied rows whose `ConditionalRule` may name questions and pages. */
+/** Old-id → new-id maps for everything a `ConditionalRule` can name: conditions, and jump targets. */
+interface CloneIdMaps {
+  questions: ReadonlyMap<string, string>;
+  pages: ReadonlyMap<string, string>;
+  screens: ReadonlyMap<string, string>;
+}
+
+/** The subset of copied rows whose `ConditionalRule` may name questions, pages and endings. */
 type ConditionalRuleRow =
   | mjBizAppsFormsFormPageEntity
   | mjBizAppsFormsFormQuestionEntity
@@ -170,7 +177,7 @@ type ConditionalRuleRow =
 /**
  * One copy in progress: the source, the provider it writes through, and the copies and old-id →
  * new-id maps it builds. Two passes, and the second one is the point: pass one writes the rows and
- * builds the maps; pass two rewrites every JSON payload that referenced a question or page by id.
+ * builds the maps; pass two rewrites every JSON payload that referenced a question, page or ending by id.
  * They cannot be one pass, because a rule on the first page may reference the last question.
  */
 class FormTreeCopier {
@@ -192,10 +199,11 @@ class FormTreeCopier {
     const automations = await this.copyAutomations(copy.ID, bindings.idMap);
 
     // Pass two — every id-bearing payload, now that the maps are complete.
-    await this.rewriteConditionalRules(pages.copies, questions.idMap, pages.idMap, 'page');
-    await this.rewriteConditionalRules(questions.copies, questions.idMap, pages.idMap, 'question');
-    await this.rewriteConditionalRules(screens, questions.idMap, pages.idMap, 'screen');
-    await this.rewriteConditionalRules(automations, questions.idMap, pages.idMap, 'automation');
+    const maps: CloneIdMaps = { questions: questions.idMap, pages: pages.idMap, screens: screens.idMap };
+    await this.rewriteConditionalRules(pages.copies, maps, 'page');
+    await this.rewriteConditionalRules(questions.copies, maps, 'question');
+    await this.rewriteConditionalRules(screens.copies, maps, 'screen');
+    await this.rewriteConditionalRules(automations, maps, 'automation');
     await this.rewriteFieldMappings(bindings.copies, questions.idMap);
 
     return {
@@ -204,7 +212,7 @@ class FormTreeCopier {
       pageCount: pages.copies.length,
       questionCount: questions.copies.length,
       optionCount,
-      screenCount: screens.length,
+      screenCount: screens.copies.length,
       automationCount: automations.length,
       bindingCount: bindings.copies.length,
       warnings: this.warnings,
@@ -310,8 +318,10 @@ class FormTreeCopier {
     return this.source.options.length;
   }
 
-  private async copyScreens(newFormId: string): Promise<mjBizAppsFormsFormScreenEntity[]> {
+  private async copyScreens(newFormId: string): Promise<{ copies: mjBizAppsFormsFormScreenEntity[]; idMap: Map<string, string> }> {
     const copies: mjBizAppsFormsFormScreenEntity[] = [];
+    // A jump can target one of these endings; without the map its rule could only be dropped.
+    const idMap = new Map<string, string>();
     for (const source of this.source.screens) {
       const copy = await this.newRow<mjBizAppsFormsFormScreenEntity>(ENTITY.FormScreen);
       copy.FormID = newFormId;
@@ -332,9 +342,10 @@ class FormTreeCopier {
       // fired every on-submit automation.
       copy.IsDisqualification = source.IsDisqualification;
       await saveOrThrow(copy, `${source.ScreenType.toLowerCase()} screen "${source.Title}"`);
+      idMap.set(source.ID, copy.ID);
       copies.push(copy);
     }
-    return copies;
+    return { copies, idMap };
   }
 
   private async copyBindings(newFormId: string): Promise<{ copies: mjBizAppsFormsFormEntityBindingEntity[]; idMap: Map<string, string> }> {
@@ -389,8 +400,7 @@ class FormTreeCopier {
 
   private async rewriteConditionalRules(
     copies: readonly ConditionalRuleRow[],
-    questionIdMap: ReadonlyMap<string, string>,
-    pageIdMap: ReadonlyMap<string, string>,
+    maps: CloneIdMaps,
     label: string,
   ): Promise<void> {
     for (const copy of copies) {
@@ -398,8 +408,8 @@ class FormTreeCopier {
       if (original === null || original.trim() === '') {
         continue;
       }
-      const result = remapConditionalRule(original, questionIdMap, pageIdMap);
-      this.note(result, `${label} visibility rule`);
+      const result = remapConditionalRule(original, maps.questions, maps.pages, maps.screens);
+      this.note(result, `${label} visibility rule`, 'a question, page or ending');
       if (result.json === original) {
         continue;
       }
@@ -411,7 +421,7 @@ class FormTreeCopier {
   private async rewriteFieldMappings(copies: readonly mjBizAppsFormsFormEntityBindingEntity[], questionIdMap: ReadonlyMap<string, string>): Promise<void> {
     for (const copy of copies) {
       const result = remapFieldMappings(copy.FieldMappings, questionIdMap);
-      this.note(result, `entity binding "${copy.Name}"`);
+      this.note(result, `entity binding "${copy.Name}"`, 'a question');
       if (result.json === null) {
         // FieldMappings is NOT NULL. A binding whose mappings cannot be rewritten is disabled rather
         // than left pointing at another form's questions, where it would write blanks into real
@@ -427,14 +437,18 @@ class FormTreeCopier {
     }
   }
 
-  /** Record what a remap had to discard, in words the author can act on. */
-  private note(result: RemapResult, what: string): void {
+  /**
+   * Record what a remap had to discard, in words the author can act on. `refersTo` names only the
+   * kinds that payload can reference — a binding's mappings name questions, a rule also pages and
+   * endings — so the warning never blames a kind of reference that was not there.
+   */
+  private note(result: RemapResult, what: string, refersTo: string): void {
     if (result.error) {
       this.warnings.push(`${what}: ${result.error}`);
     } else if (result.dropped > 0) {
       const one = result.dropped === 1;
       this.warnings.push(
-        `${what}: ${result.dropped} reference${one ? '' : 's'} to a question that was not copied ${one ? 'was' : 'were'} removed.`,
+        `${what}: ${result.dropped} reference${one ? '' : 's'} to ${refersTo} that was not copied ${one ? 'was' : 'were'} removed.`,
       );
     }
   }

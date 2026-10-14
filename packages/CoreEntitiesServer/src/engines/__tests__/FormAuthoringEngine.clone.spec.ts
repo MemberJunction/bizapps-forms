@@ -257,6 +257,21 @@ describe('Clone — the two-pass id remap', () => {
     expect(JSON.parse(String(binding.FieldMappings)).fields[0].source).toEqual({ kind: 'question', questionId: newQ1 });
   });
 
+  it('keeps a jump to the form\'s own ending, pointed at the COPY\'s ending — a cloned quiz keeps its knockout', async () => {
+    const tables = sourceTables();
+    tables[QUESTIONS][0].ConditionalRule = rule({ jump: [{ when: { any: [equalsCondition('q1', 'no')] }, target: { kind: 'ending', id: 's1' } }] });
+    const db = world(tables);
+
+    const result = await clone(db);
+
+    const [ending] = ofForm(db, SCREENS, result.formId);
+    const name = ofForm(db, QUESTIONS, result.formId).find((q) => q.Prompt === 'Name');
+    expect(JSON.parse(String(name?.ConditionalRule))).toEqual({
+      jump: [{ when: { any: [equalsCondition(String(name?.ID), 'no')] }, target: { kind: 'ending', id: ending.ID } }],
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
   it('points each copied option and question at the copy\'s question and page', async () => {
     const result = await clone(db);
 
@@ -284,9 +299,23 @@ describe('Clone — the two-pass id remap', () => {
     const result = await clone(db);
 
     expect(ofForm(db, SCREENS, result.formId)[0].ConditionalRule).toBeNull();
-    expect(result.warnings).toEqual(['screen visibility rule: 1 reference to a question that was not copied was removed.']);
+    expect(result.warnings).toEqual(['screen visibility rule: 1 reference to a question, page or ending that was not copied was removed.']);
     // Logged once, with the forms and the user, so an operator sees it without the author.
     expect(logged.filter((m) => m.includes('not copied'))).toEqual([expect.stringMatching(/form-1.*author-1/)]);
+  });
+
+  it('names only a QUESTION when a binding mapping is dropped — a mapping can reference nothing else', async () => {
+    const tables = sourceTables();
+    const fields = [
+      { targetField: 'Email', source: { kind: 'question', questionId: 'q1' } },
+      { targetField: 'Phone', source: { kind: 'question', questionId: 'q-not-on-this-form' } },
+    ];
+    tables[BINDINGS] = [bindingRow({ ID: 'b1', Name: 'Person', FieldMappings: rule({ version: 1, fields }) })];
+    db = world(tables);
+
+    const result = await clone(db);
+
+    expect(result.warnings).toContain('entity binding "Person": 1 reference to a question that was not copied was removed.');
   });
 
   it('copies a binding whose mappings cannot be carried over as Disabled, and says so', async () => {

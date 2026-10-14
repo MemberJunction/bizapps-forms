@@ -7,7 +7,7 @@
  *
  *   - `FormPage.ConditionalRule`, `FormQuestion.ConditionalRule`, `FormScreen.ConditionalRule`
  *     and `FormAutomation.ConditionalRule` — `{ show: { all | any: [{ questionId, op, value }] },
- *     jump: [{ when, target }] }` (question ids in the groups, page/question ids in targets)
+ *     jump: [{ when, target }] }` (question ids in the groups, page/question/ending ids in targets)
  *   - `FormEntityBinding.FieldMappings` — `{ version, fields: [{ source: { questionId } }] }`
  *
  * Copy those verbatim and the new form's branching points at the OLD form's questions. Nothing
@@ -42,7 +42,7 @@ import type { FieldMapping, FieldMappings } from './entity-binding';
 
 export interface RemapResult {
   json: string | null;
-  /** How many question references were discarded because they had no counterpart. */
+  /** How many question, page or ending references were discarded because they had no counterpart. */
   dropped: number;
   /** Set when the stored JSON could not be used at all; the payload is dropped, never kept. */
   error?: string;
@@ -58,6 +58,8 @@ export function remapConditionalRule(
   idMap: ReadonlyMap<string, string>,
   /** Page-id counterparts, for page jump targets — those are dropped (and counted) without it. */
   pageIdMap?: ReadonlyMap<string, string>,
+  /** Ending-screen counterparts, for ending jump targets — likewise dropped (and counted) without it. */
+  screenIdMap?: ReadonlyMap<string, string>,
 ): RemapResult {
   if (raw === null || raw.trim() === '') {
     return { json: null, dropped: 0 };
@@ -134,7 +136,7 @@ export function remapConditionalRule(
   const show = remapGroup(parsed.show);
   const jump: ConditionalJumpRule[] = [];
   for (const rule of parsed.jump ?? []) {
-    const target = remapTarget(rule.target, idMap, pageIdMap);
+    const target = remapTarget(rule.target, idMap, pageIdMap, screenIdMap);
     // `remapGroup` returns `undefined` for two different things, and only one of them is a
     // failure: a group whose every condition failed to remap, and a group that had no conditions
     // to begin with. The second is an UNCONDITIONAL jump — `evaluateGroup({})` is vacuously true,
@@ -169,16 +171,17 @@ export function remapConditionalRule(
 /**
  * Rewrite a jump target for the copy, or `undefined` when it cannot be rewritten.
  *
- * `submit` references nothing, so it copies verbatim. Question and page targets go through the
- * id maps the clone already builds. An ENDING target is dropped and counted: this module is not
- * handed a screen-id map, and carrying the source form's screen id into the copy would point a
- * live branch at another form's ending — the same class of silent breakage the header describes.
- * Dropping is the loud, fixable direction, and the count reaches the author.
+ * `submit` references nothing, so it copies verbatim. Question, page and ending targets go through
+ * the id maps the clone builds. A target with no counterpart is dropped and counted, never carried
+ * over: the source form's id in the copy would point a live branch at another form's page or
+ * ending — the same class of silent breakage the header describes. Dropping is the loud, fixable
+ * direction, and the count reaches the author.
  */
 function remapTarget(
   target: JumpTarget,
   idMap: ReadonlyMap<string, string>,
   pageIdMap: ReadonlyMap<string, string> | undefined,
+  screenIdMap: ReadonlyMap<string, string> | undefined,
 ): JumpTarget | undefined {
   switch (target.kind) {
     case 'submit':
@@ -191,8 +194,10 @@ function remapTarget(
       const id = pageIdMap?.get(target.id);
       return id === undefined ? undefined : { kind: 'page', id };
     }
-    case 'ending':
-      return undefined;
+    case 'ending': {
+      const id = screenIdMap?.get(target.id);
+      return id === undefined ? undefined : { kind: 'ending', id };
+    }
   }
 }
 

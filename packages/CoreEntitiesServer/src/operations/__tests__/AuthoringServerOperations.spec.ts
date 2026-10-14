@@ -250,7 +250,7 @@ describe('Forms.CreateFormFromTemplate', () => {
 
     expect(result.ResultCode).toBe('SUCCESS');
     expect((result.Output as { Warnings: string[] }).Warnings).toEqual([
-      'screen visibility rule: 1 reference to a question that was not copied was removed.',
+      'screen visibility rule: 1 reference to a question, page or ending that was not copied was removed.',
     ]);
   });
 
