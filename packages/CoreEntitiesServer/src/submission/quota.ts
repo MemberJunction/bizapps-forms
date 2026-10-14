@@ -19,6 +19,7 @@
  * Both statements run through `ExecuteSQL` on the SAME provider instance the submit's
  * `RunInEntityTransaction` opened, which is what enlists them in that transaction.
  */
+import { LogError } from '@memberjunction/core';
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { FormSettings, mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
@@ -65,7 +66,16 @@ export async function consumeDistributionSlot(
     undefined,
     contextUser,
   );
-  return affectedRows(rows) === 1;
+  const affected = affectedRows(rows);
+  if (affected === undefined) {
+    // Refuse (fail closed), but this is a fault, not a full link: say so, or it reads as one.
+    LogError(
+      `[Forms] Distribution ${distributionId}: the response-slot UPDATE returned no readable affected-row ` +
+        `count (${JSON.stringify(rows?.[0] ?? null)}); the submission is refused as if the link were full.`,
+    );
+    return false;
+  }
+  return affected === 1;
 }
 
 /**
@@ -77,7 +87,7 @@ export async function consumeDistributionSlot(
  * taken only when the form HAS a quota, so a form without one pays nothing. Lock order is form, then
  * distribution — the order archiving takes them — so the two cannot deadlock each other.
  *
- * Fail-closed: a count that cannot be read reports the quota as reached.
+ * Fail-closed: a count that cannot be read reports the quota as reached, and logs why.
  */
 export async function formQuotaReached(
   provider: DatabaseProviderBase,
@@ -105,6 +115,11 @@ export async function formQuotaReached(
     contextUser,
   );
   if (!result.Success) {
+    // Fail closed, but log the fault: the respondent can only be told "quota reached".
+    LogError(
+      `[Forms] Form ${formId}: the form-quota count failed (${result.ErrorMessage ?? 'no error message'}); ` +
+        'the submission is refused as if the quota were reached.',
+    );
     return true;
   }
   return result.TotalRowCount >= settings.quota;
@@ -121,14 +136,15 @@ function tableOf(provider: DatabaseProviderBase, entityName: string): string {
 
 /**
  * The count `AffectedRowCountSQL` reports. A driver that hands the column back under a different
- * case, or as a string, still reads; anything unreadable counts as zero — the refusing direction.
+ * case, or as a string, still reads; anything unreadable is `undefined`, which the caller refuses
+ * and logs — a missing count is a fault, not a full link.
  */
-function affectedRows(rows: Record<string, unknown>[] | undefined): number {
+function affectedRows(rows: Record<string, unknown>[] | undefined): number | undefined {
   const row = rows?.[0];
   if (!row) {
-    return 0;
+    return undefined;
   }
   const key = Object.keys(row).find((k) => k.toLowerCase() === AFFECTED.toLowerCase());
   const value = key === undefined ? undefined : Number(row[key]);
-  return value !== undefined && Number.isFinite(value) ? value : 0;
+  return value !== undefined && Number.isFinite(value) ? value : undefined;
 }
