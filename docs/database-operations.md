@@ -254,6 +254,51 @@ our migrations left unsaid.
 
 ---
 
+## 4a. What #303 changed in the database
+
+**Two migrations**, both approved for #303 (2026-10-13) and nothing else:
+
+| Migration | What it does |
+|---|---|
+| `V202610131349__v0.16.x__FormAutomationRun_WorkQueueMessageID.sql` | Adds nullable `FormAutomationRun.WorkQueueMessageID` (UNIQUEIDENTIFIER), the Work Queue message whose delivery ran the step. It is the run's identity for at-least-once delivery: a redelivery re-runs only the steps with no terminal run carrying that id. **No foreign key** — the queue purges messages on retention and run history outlives them. `NULL` on every pre-existing row, and those rows belong to no delivery. Carries its CodeGen output (EntityField row and the regenerated view/procedures). |
+| `V202610131416__v0.16.x__Field_Form_Sections.sql` | Metadata only: sets `GeneratedFormSection = 'Category'` (and a `Category` where one was missing) on five EntityField rows earlier migrations inserted as `'Details'`, so a host's Explorer files them in their category panels instead of a stray "Details" panel. |
+
+Neither sets **`READ_COMMITTED_SNAPSHOT`**, which the Work Queue requires — that is a host step,
+in [`docs/local-host.md` §5](local-host.md#5-host-requirements-since-303-the-work-queue-and-read_committed_snapshot).
+
+**Everything else is metadata**, declared under `metadata/` and shipped at release in the one
+consolidated `Metadata_Sync` (see `migrations/README.md`): the 19 `Forms.*` Remote Operations and
+their category, the three reporting queries, the `forms.response-submitted` topic and the
+`forms.run-automations` subscription, the four builder `RelatedRecordCollection`s, and the
+`forms` / `forms:read` / `forms:write` API scopes. So until that release migration exists,
+`npm run check:release-seed` reports these records as unseeded — expected, and release work, not a
+defect of the branch. What a host built from migrations alone (the clean room above) does without
+them, so nobody mistakes it for a code defect:
+
+- The operations still run: with no `MJ: Remote Operations` row, MJ governs an operation by its
+  code registration alone (`RemoteOperationEngineBase.IsInvokable`).
+- With no topic or subscription row, the API logs which one is missing at startup, and a form that
+  **owes automations** refuses respondents ("This form is not available.") rather than store
+  responses whose automations would never run. Forms with no automations are unaffected.
+- With no reporting queries, `Forms.GetResponseSummary` cannot build the dashboard.
+- With no `RelatedRecordCollection` rows, the builder's structural edits (add, delete, reorder)
+  have no collections to save through.
+- With no `forms:*` API scopes, an API key cannot be granted access to the operations.
+
+**CodeGen gained an output.** `mj.config.cjs` `output` has `{ type: 'RemoteOperations' }`, which
+emits `packages/Entities/src/generated/remote_operations.ts` (one `Forms*Operation` class per
+`MJ: Remote Operations` row, with its I/O types read verbatim from
+`metadata/remote-operations/types/*.ts`). It reads the pushed rows, so a regeneration needs a database
+the metadata was pushed to.
+
+**Building a #303 sandbox: from scratch, never upward.** MJ `6.2.0-edge` carries 28 core migrations
+versioned *below* 6.1.5's top file, and `mj migrate` runs with `outOfOrder: false`, so a 6.1.5
+database migrated upward skips all 28 and reports success. Build it with the clean-room chain above
+at `-t v6.2.0-edge.3` (`MJ_Forms303_Edge` was built that way). Run the host-truth check with
+`--core-tag v6.2.0-edge.3` for the same reason: its default is the `mjVersionRange` floor.
+
+---
+
 ## 5. Upgrading the MJ version
 
 The runbook is [`.claude/skills/mj-upgrade/SKILL.md`](../.claude/skills/mj-upgrade/SKILL.md); it is

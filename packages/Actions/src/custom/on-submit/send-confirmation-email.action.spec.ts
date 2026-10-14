@@ -50,6 +50,11 @@ function fakeProvider(): ActionDataProvider {
       throw new Error(`Unexpected GetEntityObject('${entityName}')`);
     },
     async RunView<T>(opts: { EntityName: string }): Promise<{ Success: boolean; Results: T[] }> {
+      // The response context reads its form through a view since #303 (`Form.Load()` would also
+      // fill the form's immediate Pages/Screens collections, which the automation principal cannot read).
+      if (opts.EntityName === 'MJ_BizApps_Forms: Forms') {
+        return { Success: true, Results: [new FakeEntity()] as T[] };
+      }
       // A response with an Email answer, so the action has a recipient to deliver to.
       if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') {
         return {

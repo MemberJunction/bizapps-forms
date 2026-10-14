@@ -15,7 +15,10 @@ interface MockState {
    * binding, so the filter string is this module's real contract with the database — asserting on
    * the rows it returns cannot tell a quoted literal from an interpolated one.
    */
-  filters: { answers?: string; questions?: string };
+  filters: { answers?: string; questions?: string; form?: string };
+  /** The form rows the Forms view returns; empty means the form row does not exist. */
+  forms: Record<string, unknown>[];
+  formsReadSucceeds: boolean;
 }
 
 const state: MockState = {
@@ -26,6 +29,8 @@ const state: MockState = {
   responseLoads: true,
   responseLoadThrows: undefined,
   filters: {},
+  forms: [],
+  formsReadSucceeds: true,
 };
 
 // The global Metadata/RunView (what `new Metadata()` / `new RunView()` with no args resolve to)
@@ -92,7 +97,16 @@ function fakeProvider(): ActionDataProvider {
         } as unknown as T;
       }
       if (entityName === 'MJ_BizApps_Forms: Forms') {
-        return { ID: 'form-1', Load: async () => true } as unknown as T;
+        // What `Form.Load()` does on a real host since #303: it also fills the form's `immediate`
+        // Pages and Screens collections, so a principal with Read on Forms but not on Form Pages
+        // (the Forms Automation Runner) is refused. Found on the :4141 harness, where every
+        // Action automation failed this way. The loader must not take this path.
+        return {
+          ID: 'form-1',
+          Load: async () => {
+            throw new Error('User forms-automation@localhost.invalid does not have read permissions on MJ_BizApps_Forms: Form Pages');
+          },
+        } as unknown as T;
       }
       throw new Error(`Unexpected GetEntityObject('${entityName}')`);
     },
@@ -102,6 +116,12 @@ function fakeProvider(): ActionDataProvider {
         return state.answersReadSucceeds
           ? { Success: true, Results: state.answers as T[] }
           : { Success: false, ErrorMessage: 'connection reset', Results: [] };
+      }
+      if (opts.EntityName === 'MJ_BizApps_Forms: Forms') {
+        state.filters.form = opts.ExtraFilter;
+        return state.formsReadSucceeds
+          ? { Success: true, Results: state.forms as T[] }
+          : { Success: false, ErrorMessage: 'timeout expired', Results: [] };
       }
       if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') {
         state.filters.questions = opts.ExtraFilter;
@@ -131,6 +151,8 @@ beforeEach(() => {
   state.responseLoads = true;
   state.responseLoadThrows = undefined;
   state.filters = {};
+  state.forms = [{ ID: 'form-1', Name: 'Contact us' }];
+  state.formsReadSucceeds = true;
 });
 
 describe('loadFormResponseContext', () => {
@@ -161,6 +183,36 @@ describe('loadFormResponseContext', () => {
     const result = await loadFormResponseContext('resp-1', fakeUser, fakeProvider());
 
     expect(result.status).toBe('loaded');
+  });
+
+  describe('the owning form', () => {
+    it("reads the form row without its collections, so the runner's Read on Forms is enough (#303)", async () => {
+      // `Form.Load()` would cascade into the immediate Pages/Screens collections, which the
+      // automation principal cannot read; a view materialises the row alone.
+      const context = await loadedContext();
+
+      expect(context.form).toEqual({ ID: 'form-1', Name: 'Contact us' });
+      expect(state.filters.form).toBe("ID='form-1'");
+    });
+
+    it('fails, naming the form and the reason, when the form cannot be read', async () => {
+      state.formsReadSucceeds = false;
+
+      const result = await loadFormResponseContext('resp-1', fakeUser, fakeProvider());
+
+      expect(result.status).toBe('failed');
+      expect(result.status === 'failed' && result.error).toContain('form-1');
+      expect(result.status === 'failed' && result.error).toContain('timeout expired');
+    });
+
+    it("fails — not 'absent' — when the response's form row does not exist", async () => {
+      state.forms = [];
+
+      const result = await loadFormResponseContext('resp-1', fakeUser, fakeProvider());
+
+      expect(result.status).toBe('failed');
+      expect(result.status === 'failed' && result.error).toContain('no such record');
+    });
   });
 
   describe('typed-column projection (the columns hooks used to be blind to)', () => {

@@ -125,7 +125,10 @@ function fakeProvider(): ActionDataProvider {
     },
     async RunView<T>(opts: { EntityName: string }): Promise<{ Success: boolean; Results: T[] }> {
       let results: unknown[] = [];
-      if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') results = state.answerRows;
+      // The response context reads its form through a view since #303 (`Form.Load()` would also
+      // fill the form's immediate Pages/Screens collections, which the automation principal cannot read).
+      if (opts.EntityName === 'MJ_BizApps_Forms: Forms') results = [new FakeEntity()];
+      else if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') results = state.answerRows;
       else if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') results = state.questionRows;
       return { Success: true, Results: results as T[] };
     },

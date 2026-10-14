@@ -29,7 +29,7 @@
  * rather than reasoning about permission rows. A unit test structurally cannot reach any of this:
  * the entire mechanism is MJ's generated resolvers plus RLS evaluated in SQL Server.
  *
- * WHAT A PASS MEANS. The generic create mutations are denied while `SubmitFormResponse` still
+ * WHAT A PASS MEANS. The generic create mutations are denied while `Forms.SaveResponse` still
  * succeeds for the SAME session — which is the whole point of the deny-all create filter: it costs
  * the product nothing, because every legitimate write is performed by the elevated system user.
  * And the session can read its own distribution but not another's, and cannot read the five
@@ -37,7 +37,12 @@
  *
  * Zero dependencies: Node's built-in fetch only, so it runs in CI without a browser.
  *
- * Usage:  node smoke/respondent-scope-path.mjs [distribution-slug] [other-distribution-id]
+ * SINCE #303 the respondent reads and writes are Remote Operations, and MJ's resolver lets an
+ * anonymous magic-link session reach ANY Active operation — `Authorize()` on each operation is the
+ * only gate. So this also asserts that the session is refused an authoring operation
+ * (`Forms.PublishForm`) and refused `Forms.GetRespondentForm` for a link it is not scoped to.
+ *
+ * Usage:  node smoke/respondent-scope-path.mjs [distribution-slug] [other-distribution-id] [other-slug]
  *         FORMS_SMOKE_URL=http://host:port FORMS_SMOKE_OTHER_DISTRIBUTION_ID=<guid> \
  *           node smoke/respondent-scope-path.mjs my-slug
  *
@@ -46,13 +51,18 @@
  * distinguish "isolated" from "there was nothing else to see", and a check that passes for that
  * reason is worse than one that says it did not run.
  */
+import { randomUUID } from 'node:crypto';
 import { sessionIdFor } from './lib/session.mjs';
 import { buildAnswers, resolveSlug } from './lib/fixture.mjs';
+import { definitionQuestions, executeOperation, firstSaveError, saveResponse } from './lib/operations.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
 const BASE = smokeBaseUrl();
 const SLUG = resolveSlug('respondent-scope-path.mjs');
 const OTHER_DISTRIBUTION_ID = process.argv[3] || process.env.FORMS_SMOKE_OTHER_DISTRIBUTION_ID || '';
+// The slug of a DIFFERENT live link, for the operation-level cross-form check (#303). Optional for
+// the same reason the distribution id is: one link in the database cannot show isolation.
+const OTHER_SLUG = process.argv[4] || process.env.FORMS_SMOKE_OTHER_SLUG || '';
 
 let failures = 0;
 let skipped = 0;
@@ -167,14 +177,12 @@ async function main() {
   // The read filters are ANDed onto the definition loader's own queries, so this is the check that
   // would fail first if the Form Distributions / Form Versions scope filters were wrong — and it
   // would take the entire product with it. It is asserted BEFORE the denials for that reason.
-  const published = await gql(token,
-    'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }',
-    { slug: SLUG });
-  const definition = JSON.parse(published.data?.PublishedForm?.definitionJSON ?? '{}');
-  const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
+  const published = await executeOperation(BASE, { token }, 'Forms.GetRespondentForm', { Slug: SLUG });
+  const definition = published.output?.DefinitionJSON ? JSON.parse(published.output.DefinitionJSON) : {};
+  const questions = definitionQuestions(definition);
   check(questions.length > 0,
     `scope-filtered read still resolves the published definition (${questions.length} question(s))`,
-    errorText(published.errors) || 'PublishedForm returned no questions — the Form Versions read filter may not match this session\'s scope');
+    published.errorMessage || errorText(published.errors) || 'Forms.GetRespondentForm returned no questions');
 
   // ── 2. THE EXPLOIT, on both response entities. ──────────────────────────────────────────────
   // This is the check the whole file exists for. Before the deny-all create filter, this mutation
@@ -197,30 +205,45 @@ async function main() {
 
   // ── 3. And the pipeline still works for the same session. ───────────────────────────────────
   // Without this the file would prove only that something is broken. The deny-all create filter is
-  // supposed to cost nothing, because `PublicFormResolver` elevates to the system user for every
-  // response write; this is what makes that claim testable rather than asserted.
-  const submission = await gql(token, `
-    mutation S($input: FormSubmissionInputType!) {
-      SubmitFormResponse(input: $input) { success responseId status errors { message } }
-    }`, {
-    input: {
-      distributionSlug: SLUG,
-      formVersionId: definition.formVersionId,
-      partial: false,
-      startedAt: new Date(0).toISOString(),
-      clientMeta: { referrer: '', userAgent: 'forms-scope-smoke' },
-      // `buildAnswers`, not a local copy of it — see the note in binding-path.mjs. This check is
-      // the one that proves the deny-all create filter costs the pipeline nothing, so a fixture
-      // that cannot produce an acceptable submission reports that claim as false.
-      answers: buildAnswers(questions, { email: 'scope-smoke@example.com', name: 'Scope Smoke' }),
-    },
+  // supposed to cost nothing, because `Forms.SaveResponse` writes as the system user after its
+  // Authorize; this is what makes that claim testable rather than asserted.
+  const submission = await saveResponse(BASE, token, {
+    Slug: SLUG,
+    FormVersionID: definition.formVersionId,
+    ClientResponseID: randomUUID(),
+    StartedAt: new Date(0).toISOString(),
+    ClientMeta: { Referrer: '', UserAgent: 'forms-scope-smoke' },
+    // `buildAnswers`, not a local copy of it — see the note in binding-path.mjs. This check is
+    // the one that proves the deny-all create filter costs the pipeline nothing, so a fixture
+    // that cannot produce an acceptable submission reports that claim as false.
+    Answers: buildAnswers(questions, { email: 'scope-smoke@example.com', name: 'Scope Smoke' }),
   });
-  const result = submission.data?.SubmitFormResponse;
+  const result = submission.output ? { success: submission.output.Success, responseId: submission.output.ResponseID } : null;
   check(result?.success === true,
     'the SAME session still submits through the pipeline (the deny-all filter costs nothing)',
-    result?.errors?.[0]?.message ?? errorText(submission.errors) ?? 'no error message returned');
+    firstSaveError(submission));
 
-  // ── 3b. The second half of the exploit: writing an answer onto a REAL response row. ─────────
+  // ── 3a. An authoring operation is refused (#303). ───────────────────────────────────────────
+  // MJ's ExecuteRemoteOperation resolver lets an anonymous magic-link session reach every Active
+  // operation; `RequiredScope` is enforced only for API keys. `Authorize()` is the only gate, so
+  // this proves it is there on the live server, not only in the op specs.
+  const publish = await executeOperation(BASE, { token }, 'Forms.PublishForm', { FormID: definition.formId ?? randomUUID() });
+  check(!publish.success && publish.resultCode === 'FORBIDDEN',
+    `an anonymous session is refused an authoring operation (Forms.PublishForm → ${publish.resultCode ?? 'no result code'})`,
+    publish.success ? 'the publish RAN for an anonymous respondent' : publish.errorMessage);
+
+  // ── 3b. The respondent operation is confined to the session's own link (#303). ──────────────
+  if (OTHER_SLUG) {
+    const foreign = await executeOperation(BASE, { token }, 'Forms.GetRespondentForm', { Slug: OTHER_SLUG });
+    check(!foreign.success && foreign.resultCode === 'FORBIDDEN',
+      `Forms.GetRespondentForm for a link this session is not scoped to is refused (→ ${foreign.resultCode ?? 'no result code'})`,
+      foreign.success ? `LEAKED another form's definition (${String(foreign.output?.DefinitionJSON).slice(0, 80)})` : foreign.errorMessage);
+  } else {
+    skip('Forms.GetRespondentForm for another link is refused',
+      'pass another live slug as the THIRD argument, or set FORMS_SMOKE_OTHER_SLUG.');
+  }
+
+  // ── 3c. The second half of the exploit: writing an answer onto a REAL response row. ─────────
   // Deliberately ordered AFTER the legitimate submit, so it can cite a response id that genuinely
   // exists. With a made-up id the INSERT is rejected by `FK_FormResponseAnswer_FormResponse` — an
   // error, and therefore a "denial" to a naive check, on a database where the grant is wide open.

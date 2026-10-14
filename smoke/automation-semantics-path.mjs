@@ -17,6 +17,7 @@
  * Prerequisites: MJAPI running, and `smoke/seed-binding-smoke.mjs` already run.
  *   set -a && . ./.env && set +a && node smoke/automation-semantics-path.mjs
  */
+import { randomUUID } from 'node:crypto';
 import { AUTHORED_AUTOMATION_FIELDS, buildPublishedAutomations } from '@mj-biz-apps/forms-entities';
 import {
   buildAnswers,
@@ -26,7 +27,7 @@ import {
   resolveSeededSlug,
 } from './lib/fixture.mjs';
 import { sql, sqlWide } from './lib/sqlcmd.mjs';
-import { sessionIdFor } from './lib/session.mjs';
+import { firstSaveError, getRespondentForm, saveResponse } from './lib/operations.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
 const BASE = smokeBaseUrl();
@@ -73,23 +74,6 @@ function configure(assignments) {
   republish();
 }
 
-async function gql(token, query, variables) {
-  const res = await fetch(`${BASE}/`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      // Mirrors the widget's per-instance correlator; without it every request shares one
-      // rate-limit bucket. See smoke/lib/session.mjs.
-      'x-session-id': sessionIdFor(token),
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  const body = await res.json();
-  if (body.errors) throw new Error(`GraphQL error: ${JSON.stringify(body.errors).slice(0, 300)}`);
-  return body.data;
-}
-
 async function newSession() {
   const html = await (await fetch(`${BASE}/f/${SLUG}`)).text();
   const token = (html.match(/data-token="([^"]+)"/) || [])[1];
@@ -98,36 +82,33 @@ async function newSession() {
 }
 
 async function definitionFor(token) {
-  const published = await gql(token,
-    'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }', { slug: SLUG });
-  return JSON.parse(published?.PublishedForm?.definitionJSON ?? '{}');
+  return (await getRespondentForm(BASE, token, SLUG)).definition;
 }
 
-/** Submit through the real public path. `partial` drives the Complete/Partial distinction. */
-async function submit(token, definition, { email, name, partial = false, responseId }) {
+/**
+ * Submit through the real public path. `partial` drives the Complete/Partial distinction.
+ * `responseId` continues an earlier save; omitted, a fresh one is minted, as the widget mints one
+ * per sitting (`Forms.SaveResponse` requires it on every save since #303).
+ */
+async function submit(token, definition, { email, name, partial = false, responseId = randomUUID() }) {
   const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
   // `buildAnswers`, not a local copy of it — see the note in binding-path.mjs. The values it
   // produces are the same deterministic ones this used (7, true, the epoch) EXCEPT for choices,
   // where it picks the question's own first option instead of a literal the form never offered.
   const answers = buildAnswers(questions, { email, name });
 
-  const data = await gql(token, `
-    mutation S($input: FormSubmissionInputType!) {
-      SubmitFormResponse(input: $input) { success responseId status errors { message } }
-    }`, {
-    input: {
-      distributionSlug: SLUG,
-      formVersionId: definition.formVersionId,
-      partial,
-      ...(responseId ? { responseId } : {}),
-      startedAt: new Date(0).toISOString(),
-      clientMeta: { referrer: '', userAgent: 'semantics-smoke' },
-      answers,
-    },
+  const result = await saveResponse(BASE, token, {
+    Slug: SLUG,
+    FormVersionID: definition.formVersionId,
+    Mode: partial ? 'partial' : 'final',
+    ClientResponseID: responseId,
+    StartedAt: new Date(0).toISOString(),
+    ClientMeta: { Referrer: '', UserAgent: 'semantics-smoke' },
+    Answers: answers,
   });
-  const r = data?.SubmitFormResponse;
-  if (!r?.success) throw new Error(`submit failed: ${r?.errors?.[0]?.message ?? 'unknown'}`);
-  return r;
+  if (result.output?.Success !== true) throw new Error(`submit failed: ${firstSaveError(result)}`);
+  // The two fields the scenarios read, in the spelling they were written against.
+  return { responseId: result.output.ResponseID, status: result.output.Status };
 }
 
 /**
@@ -216,9 +197,8 @@ async function main() {
   {
     const token = await newSession();
     const def = await definitionFor(token);
-    // Read from the STORED snapshot, not `def.automations` — the anonymous PublishedForm
-    // projection this suite otherwise reads from deliberately empties `automations` before a
-    // respondent can see it (public-form-payload.ts), so `def.automations` is always [].
+    // Read from the STORED snapshot, not `def` — the respondent projection this suite otherwise
+    // reads from (`toRespondentDefinition`) carries no automations at all, by design.
     check(publishedSnapshotAutomations(SLUG).some((a) => a.isActive === false),
       'the stored snapshot carries the disabled automation rather than dropping it',
       'dropping it makes "disabled" indistinguishable from "never configured"');
@@ -291,7 +271,9 @@ async function main() {
       'a replayed submission leaves exactly ONE ledger row',
       `got ${ledgerRows} — more than one means the unique index is the only thing preventing a duplicate write`);
     const outcome = outcomeFor(first.responseId);
-    check(['Created', 'Unchanged', 'Merged'].includes(outcome),
+    // `Skipped` is a real outcome since #303 §6: an unverified respondent whose email matches an
+    // existing Person records the match and writes nothing.
+    check(['Created', 'Unchanged', 'Merged', 'Skipped'].includes(outcome),
       `the ledger records a real outcome (got ${outcome})`);
   }
 
@@ -350,8 +332,8 @@ ELSE
   sql(`UPDATE __mj_BizAppsForms.FormAutomation SET IsActive=0 WHERE ID='${SECOND_ID}';`);
   configure(`[Trigger]='OnComplete', IsActive=1, ConditionalRule=NULL, DisplayOrder=1`);
   {
-    // No session/definition fetch needed here — the anonymous PublishedForm projection never
-    // carried `automations` to begin with, so this reads the STORED snapshot directly.
+    // No session/definition fetch needed here — the respondent projection never carries
+    // `automations`, so this reads the STORED snapshot directly.
     const active = publishedSnapshotAutomations(SLUG).filter((a) => a.isActive);
     check(active.length === 1, `restored to a single active automation (got ${active.length})`);
   }

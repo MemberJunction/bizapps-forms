@@ -120,13 +120,13 @@ export async function loadFormResponseContext(
     return { status: 'absent' };
   }
 
-  const form = await provider.GetEntityObject<mjBizAppsFormsFormEntity>(ENTITY.Form, contextUser);
-  const formLoad = await loadRecord(form, response.FormID, ENTITY.Form);
-  if (!formLoad.ok || !formLoad.value) {
+  const formRead = await loadFormRow(response.FormID, contextUser, provider);
+  if (!formRead.ok || !formRead.value) {
     // The response exists, so a missing form is not "nothing to do" — it is a read that failed.
-    const why = formLoad.ok ? 'no such record' : formLoad.error;
+    const why = formRead.ok ? 'no such record' : formRead.error;
     return { status: 'failed', error: `form ${response.FormID} of response ${responseId} could not be loaded: ${why}` };
   }
+  const form = formRead.value;
 
   const answerRows = await loadAnswerRows(responseId, contextUser, provider);
   if (!answerRows.ok) {
@@ -167,6 +167,29 @@ async function loadRecord(
   } catch (e) {
     return { ok: false, error: `could not read ${entityName} ${id}: ${e instanceof Error ? e.message : String(e)}` };
   }
+}
+
+/**
+ * The response's form row, through a view rather than `Load()`.
+ *
+ * `Form.Load()` also fills the form's `Load: immediate` Pages and Screens collections (#303), so it
+ * needs Read on Form Pages and Form Screens as well — which the Forms Automation Runner does not
+ * hold, and every Action automation failed on it on the first live run. No hook needs the page tree,
+ * and a view materialises the row through `LoadFromData`, which never cascades.
+ */
+async function loadFormRow(
+  formId: string,
+  contextUser: UserInfo,
+  provider: ActionDataProvider,
+): Promise<ReadOutcome<mjBizAppsFormsFormEntity | undefined>> {
+  const result = await new RunView(provider).RunView<mjBizAppsFormsFormEntity>(
+    { EntityName: ENTITY.Form, ExtraFilter: `ID=${quoteSqlString(formId)}`, ResultType: 'entity_object' },
+    contextUser,
+  );
+  if (!result.Success) {
+    return { ok: false, error: `could not read ${ENTITY.Form} ${formId}: ${result.ErrorMessage}` };
+  }
+  return { ok: true, value: result.Results[0] };
 }
 
 async function loadAnswerRows(

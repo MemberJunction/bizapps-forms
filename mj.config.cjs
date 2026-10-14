@@ -43,9 +43,15 @@ module.exports = {
     { type: 'DBSchemaJSON', directory: './Schema Files' },
   ],
 
-  /** Build commands run after code generation */
+  /**
+   * Build commands run after code generation, in dependency order. CoreEntitiesServer sits between
+   * Entities and Actions since #303 (Actions and Server import it), so it is rebuilt against the
+   * fresh entities before either; it was missing from this list, the third hand-written package
+   * list to forget it.
+   */
   commands: [
     { workingDirectory: './packages/Entities', command: 'pnpm', args: ['run', 'build'], when: 'after' },
+    { workingDirectory: './packages/CoreEntitiesServer', command: 'pnpm', args: ['run', 'build'], when: 'after' },
     { workingDirectory: './packages/Actions', command: 'pnpm', args: ['run', 'build'], when: 'after' },
     { workingDirectory: './packages/Server', command: 'pnpm', args: ['run', 'build'], when: 'after' },
     { workingDirectory: './packages/Angular', command: 'pnpm', args: ['run', 'build'], when: 'after' },

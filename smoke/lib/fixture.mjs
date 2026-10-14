@@ -207,10 +207,10 @@ const defaultDeps = { sqlWide };
  * The automations the SERVER will actually run for `slug`: the `automations` array from the
  * latest `Status='Published'` `FormVersion.DefinitionSnapshot`.
  *
- * NOT the anonymous `PublishedForm` GraphQL query — `public-form-payload.ts` deliberately returns
- * `{ ...definition, automations: [] }` there, because automations are server configuration
- * (action/agent ids, entity bindings) that must never reach a respondent. A suite asserting on
- * automations has to read the same snapshot the server itself dispatches from.
+ * NOT `Forms.GetRespondentForm` — its definition is the respondent projection
+ * (`toRespondentDefinition`), which carries no `automations` key at all, because automations are
+ * server configuration (action/agent ids, entity bindings) that must never reach a respondent. A
+ * suite asserting on automations has to read the same snapshot the server itself dispatches from.
  *
  * Throws, naming `slug`, when no published version exists or its snapshot does not parse.
  */
@@ -300,9 +300,9 @@ export function requireQuestion(question, wanted, slug, questions) {
  * whose choices are real. Picking the question's own first option is what lets these suites run
  * against a form somebody actually built.
  *
- * The two hops matter. `toAnswerInput` (core/answer-value.ts) picks the typed COLUMN, then
- * `submission-mapping.ts` serialises it — so `jsonValue` is a JSON STRING in the SDL, and passing
- * an array straight through is rejected before any resolver runs.
+ * The shape is `FormsAnswerInput` from `Forms.SaveResponse` (#303): one typed COLUMN per answer,
+ * PascalCase, and `JSONValue` is JSON TEXT — the server's answer contract (`answer-shape.ts`) refuses
+ * an answer whose value sits in the wrong column or whose JSON is an array passed straight through.
  *
  * `Doodle` and `FileUpload` return null: both need a real artifact, and a file id has to come
  * from an actual upload so its provenance can be attributed. Callers supply those through
@@ -315,48 +315,48 @@ export function answerFor(question, { email, name } = {}) {
     case 'Number':
     case 'Rating':
     case 'NPS':
-      return { numericValue: 7 };
+      return { NumericValue: 7 };
     case 'YesNo':
-      return { booleanValue: true };
+      return { BooleanValue: true };
     case 'Date':
-      return { dateValue: new Date(0).toISOString() };
+      return { DateValue: new Date(0).toISOString() };
     // A Time answer is a bare clock reading, NOT an instant — the wire format `<input type="time">`
     // emits and the only one the server accepts (#116, `contracts/answer-date.ts`). This shared the
     // `Date` case until the format was pinned, sending an ISO instant that every Time question now
     // refuses with "Enter a valid time.", which would have failed every smoke that submits a
     // response against a form carrying one.
     case 'Time':
-      return { dateValue: '09:30' };
+      return { DateValue: '09:30' };
     case 'MultiChoice':
-      return optionValue ? { jsonValue: JSON.stringify([optionValue]) } : null;
+      return optionValue ? { JSONValue: JSON.stringify([optionValue]) } : null;
     case 'SingleChoice':
     case 'Dropdown':
     case 'PictureChoice':
-      return optionValue ? { textValue: optionValue } : null;
+      return optionValue ? { TextValue: optionValue } : null;
     case 'Email':
-      return { textValue: email ?? 'smoke@example.com' };
+      return { TextValue: email ?? 'smoke@example.com' };
     case 'Phone':
-      return { textValue: '+1 555 010 1234' };
+      return { TextValue: '+1 555 010 1234' };
     case 'Website':
-      return { textValue: 'https://example.com/smoke' };
+      return { TextValue: 'https://example.com/smoke' };
     case 'OpinionScale':
       // Default bounds are 1..10 (`opinionScaleBounds`); 1 is inside every scale an author can set,
       // since the minimum is the one end that is always offered.
-      return { numericValue: opinionScaleMinimum(question) };
+      return { NumericValue: opinionScaleMinimum(question) };
     case 'Checkbox':
     case 'Legal':
-      return { booleanValue: true };
+      return { BooleanValue: true };
     case 'Ranking':
       // Every offered option exactly once, in the order offered — the only ranking that is valid
       // whatever the options are.
-      return optionValues(question).length > 0 ? { jsonValue: JSON.stringify(optionValues(question)) } : null;
+      return optionValues(question).length > 0 ? { JSONValue: JSON.stringify(optionValues(question)) } : null;
     case 'Address':
-      return { jsonValue: JSON.stringify({ line1: '1 Smoke Street', city: 'Testville', postalCode: '00000' }) };
+      return { JSONValue: JSON.stringify({ line1: '1 Smoke Street', city: 'Testville', postalCode: '00000' }) };
     case 'ContactInfo':
-      return { jsonValue: JSON.stringify({ name: name ?? 'Smoke Check', email: email ?? 'smoke@example.com' }) };
+      return { JSONValue: JSON.stringify({ name: name ?? 'Smoke Check', email: email ?? 'smoke@example.com' }) };
     case 'ShortText':
     case 'LongText':
-      return { textValue: /name/i.test(question.prompt ?? '') && name ? name : 'smoke check' };
+      return { TextValue: /name/i.test(question.prompt ?? '') && name ? name : 'smoke check' };
     case 'Doodle':
     case 'FileUpload':
     case 'Matrix':
@@ -398,12 +398,12 @@ export function buildAnswers(questions, { email, name, overrides = {} } = {}) {
   const answers = [];
   for (const q of questions) {
     if (Object.prototype.hasOwnProperty.call(overrides, q.id)) {
-      answers.push({ questionId: q.id, ...overrides[q.id] });
+      answers.push({ QuestionID: q.id, ...overrides[q.id] });
       continue;
     }
     const answer = answerFor(q, { email, name });
     if (answer) {
-      answers.push({ questionId: q.id, ...answer });
+      answers.push({ QuestionID: q.id, ...answer });
     } else if (q.isRequired) {
       throw new Error(
         `Question "${q.prompt}" (${q.type}) is required on this form and a smoke run cannot ` +

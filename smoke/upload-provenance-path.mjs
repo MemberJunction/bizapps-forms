@@ -11,7 +11,7 @@
  *
  *   set -a && . ./.env && set +a && node smoke/upload-provenance-path.mjs
  */
-import { sessionIdFor } from './lib/session.mjs';
+import { firstSaveError, getRespondentForm, saveResponse } from './lib/operations.mjs';
 import { buildAnswers, resolveFormId, resolveSlug } from './lib/fixture.mjs';
 import { sql } from './lib/sqlcmd.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
@@ -33,23 +33,6 @@ async function session() {
   const token = (html.match(/data-token="([^"]+)"/) || [])[1];
   if (!token) throw new Error('no anonymous session token');
   return token;
-}
-
-async function gql(token, query, variables) {
-  const res = await fetch(`${BASE}/`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      // Mirrors the widget's per-instance correlator; without it every request shares one
-      // rate-limit bucket. See smoke/lib/session.mjs.
-      'x-session-id': sessionIdFor(token),
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  const body = await res.json();
-  if (body.errors) throw new Error(JSON.stringify(body.errors).slice(0, 200));
-  return body.data;
 }
 
 /**
@@ -92,28 +75,23 @@ async function submitWithFile(token, definition, responseId, fileId, fileQuestio
   const answers = buildAnswers(questions, {
     email: `provenance-${responseId.slice(0, 8)}@example.com`,
     name: 'Provenance',
-    overrides: { [target]: { fileId } },
+    overrides: { [target]: { FileID: fileId } },
   });
-  const data = await gql(token, `
-    mutation S($input: FormSubmissionInputType!) {
-      SubmitFormResponse(input: $input) { success errors { message } }
-    }`, {
-    input: {
-      distributionSlug: SLUG, formVersionId: definition.formVersionId, partial: false,
-      startedAt: new Date(0).toISOString(), responseId,
-      clientMeta: { referrer: '', userAgent: 'provenance-smoke' }, answers,
-    },
+  const result = await saveResponse(BASE, token, {
+    Slug: SLUG, FormVersionID: definition.formVersionId, ClientResponseID: responseId,
+    StartedAt: new Date(0).toISOString(),
+    ClientMeta: { Referrer: '', UserAgent: 'provenance-smoke' }, Answers: answers,
   });
-  return data?.SubmitFormResponse;
+  // `success` is the operation's own verdict on the save; a refused OPERATION (no output at all)
+  // is not a provenance refusal, so it reports as `undefined` and fails both checks below.
+  return { success: result.output?.Success, message: firstSaveError(result) };
 }
 
 async function main() {
   console.log(`Upload provenance smoke test\n  target : ${BASE}\n  slug   : ${SLUG}\n`);
 
   const tokenA = await session();
-  const published = await gql(tokenA,
-    'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }', { slug: SLUG });
-  const definition = JSON.parse(published?.PublishedForm?.definitionJSON ?? '{}');
+  const { definition } = await getRespondentForm(BASE, tokenA, SLUG);
 
   const responseA = crypto.randomUUID();
   // The question a real upload would be made against, from the published definition.
@@ -167,7 +145,7 @@ async function main() {
   const owned = await submitWithFile(tokenA, definition, responseA, fileId, fileQuestion?.id);
   check(owned?.success === true,
     'the session that uploaded it can still submit it',
-    owned?.errors?.[0]?.message ?? 'the check must not reject legitimate uploads');
+    owned?.message ?? 'the check must not reject legitimate uploads');
 
   console.log(failures === 0
     ? '\nPASS — upload provenance holds end to end.'

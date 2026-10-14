@@ -23,8 +23,9 @@
  * Usage:  node smoke/respondent-path.mjs [distribution-slug]
  *         FORMS_SMOKE_URL=http://host:port node smoke/respondent-path.mjs my-slug
  */
-import { sessionIdFor } from './lib/session.mjs';
+import { randomUUID } from 'node:crypto';
 import { buildAnswers, resolveSlug } from './lib/fixture.mjs';
+import { definitionQuestions, firstSaveError, getRespondentForm, saveResponse } from './lib/operations.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
 const BASE = smokeBaseUrl();
@@ -34,24 +35,6 @@ let failures = 0;
 const pass = (m) => console.log(`  ok    ${m}`);
 const fail = (m, detail) => { failures++; console.error(`  FAIL  ${m}${detail ? `\n          ${detail}` : ''}`); };
 const check = (cond, m, detail) => (cond ? pass(m) : fail(m, detail));
-
-/** POST a GraphQL operation as the anonymous respondent. */
-async function gql(token, query, variables) {
-  const res = await fetch(`${BASE}/`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      // Mirrors the widget's per-instance correlator; without it every request shares one
-      // rate-limit bucket. See smoke/lib/session.mjs.
-      'x-session-id': sessionIdFor(token),
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  const body = await res.json();
-  if (body.errors) throw new Error(`GraphQL error: ${JSON.stringify(body.errors).slice(0, 300)}`);
-  return body.data;
-}
 
 async function main() {
   console.log(`Respondent-path smoke test\n  target : ${BASE}\n  slug   : ${SLUG}\n`);
@@ -79,19 +62,25 @@ async function main() {
   const encoding = widget.headers.get('content-encoding');
   check(encoding === 'gzip', 'widget bundle is served compressed', `Content-Encoding: ${encoding ?? '(none)'}`);
 
-  // 4. The published definition must load for that anonymous session.
-  const published = await gql(token,
-    'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }',
-    { slug: SLUG });
-  const definition = JSON.parse(published?.PublishedForm?.definitionJSON ?? '{}');
-  const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
+  // 4. The published definition must load for that anonymous session, through
+  //    `Forms.GetRespondentForm` — the operation the widget calls (#303).
+  const { formVersionId, definition } = await getRespondentForm(BASE, token, SLUG);
+  const questions = definitionQuestions(definition);
   check(questions.length > 0, `published definition loads (${questions.length} question(s))`);
+
+  // 4b. The respondent projection must not carry the answer key (#302): no scoring, no ending
+  //     screens, no automations. A regression here leaks knockouts and endings to every visitor.
+  const leaked = ['endScreens', 'automations', 'scoring'].filter((key) => JSON.stringify(definition).includes(`"${key}"`));
+  check(leaked.length === 0, 'the respondent definition carries no scoring, endings or automations', `leaked: ${leaked.join(', ')}`);
 
   // 5. THE REGRESSION TEST. Submit with the snapshot's own formVersionId, which is the
   //    client-minted (lowercase) spelling — not the uppercase one SQL Server returns.
   //    Comparing those case-sensitively rejected every submission in 0.2.1.
   const versionIdFromSnapshot = definition.formVersionId;
   check(Boolean(versionIdFromSnapshot), 'snapshot carries a formVersionId');
+  check(versionIdFromSnapshot?.toLowerCase() === formVersionId?.toLowerCase(),
+    'the operation\'s FormVersionID names the same version as the snapshot',
+    `operation: ${formVersionId}, snapshot: ${versionIdFromSnapshot}`);
 
   // Answers must FIT THEIR QUESTION'S TYPE, and choice answers must be one of the OFFERED
   // options -- the server enforces a type-derived format, so a smoke run has to send what a
@@ -99,26 +88,22 @@ async function main() {
   // is what makes this work on a form with real choices rather than only on the fixture.
   const answers = buildAnswers(questions, { email: 'smoke@example.com' });
 
-  const submission = await gql(token, `
-    mutation S($input: FormSubmissionInputType!) {
-      SubmitFormResponse(input: $input) { success responseId status errors { message } }
-    }`, {
-    input: {
-      distributionSlug: SLUG,
-      formVersionId: versionIdFromSnapshot,
-      partial: false,
-      startedAt: new Date(0).toISOString(),
-      clientMeta: { referrer: '', userAgent: 'forms-smoke' },
-      answers,
-    },
+  const submission = await saveResponse(BASE, token, {
+    Slug: SLUG,
+    FormVersionID: versionIdFromSnapshot,
+    Mode: 'final',
+    ClientResponseID: randomUUID(),
+    StartedAt: new Date(0).toISOString(),
+    Answers: answers,
   });
 
-  const result = submission?.SubmitFormResponse;
-  check(result?.success === true,
+  const result = submission.output;
+  check(result?.Success === true,
     'anonymous submission is accepted using the snapshot formVersionId',
-    result?.errors?.[0]?.message ?? 'no error message returned');
-  check(Boolean(result?.responseId), 'a responseId comes back');
-  check(result?.status === 'Complete', `response status is Complete (got ${result?.status ?? 'null'})`);
+    firstSaveError(submission));
+  check(Boolean(result?.ResponseID), 'a ResponseID comes back');
+  check(result?.Status === 'Complete', `response status is Complete (got ${result?.Status ?? 'null'})`);
+  check(result?.Outcome === 'ended', `the server ends the form after a final submit (got ${result?.Outcome ?? 'null'})`);
 
   console.log(failures === 0 ? '\nPASS — the anonymous respondent path works end to end.' : `\nFAIL — ${failures} check(s) failed.`);
   process.exit(failures === 0 ? 0 : 1);
