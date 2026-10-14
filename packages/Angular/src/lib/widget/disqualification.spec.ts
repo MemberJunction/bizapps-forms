@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FormsSaveResponseInput, FormsSaveResponseOutput } from '@mj-biz-apps/forms-entities';
 import { SCREENED_OUT_MESSAGE } from '@mj-biz-apps/forms-entities/contracts';
 
-import { SessionExpiredError } from './api/forms-api.interface';
+import { ResponseNotSavedError, SessionExpiredError } from './api/forms-api.interface';
 import {
   deferred,
   FakeFormsApi,
@@ -60,6 +60,25 @@ async function liveScreening(respond: Responder = screeningServer) {
   const { form, host } = await mountForm({ api });
   return { api, form, host };
 }
+
+describe('a knockout whose seal is refused as a call', () => {
+  it('logs the server\'s reason, not just the fixed sentence', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const reason = 'Forms.SaveResponse (final) for response r was refused (FORBIDDEN): not your link';
+    const { form } = await liveScreening((input) => {
+      if (input.Mode === 'final') {
+        throw new ResponseNotSavedError(reason);
+      }
+      return screeningServer(input);
+    });
+    form.rt.setValue('age', 16);
+    form.commit();
+    await settle();
+
+    expect(warn.mock.calls.map((call) => call.join(' ')).some((line) => line.includes(reason))).toBe(true);
+    warn.mockRestore();
+  });
+});
 
 describe('a knockout is judged on a finished answer, never a half-typed one', () => {
   it('ignores `ended` from a keystroke autosave — the respondent is still typing', async () => {

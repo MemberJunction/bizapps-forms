@@ -59,6 +59,7 @@ import {
 } from './api/forms-api.interface';
 import { toSaveResponseInput, toWireAnswer } from './api/submission-mapping';
 import { endingScreenFrom } from './core/server-ending';
+import { failureDetail } from './core/failure-detail';
 import { fullForm, projectionForm, type WidgetForm, type WidgetRenderDefinition } from './core/widget-form';
 import { FORMS_API_CONFIG } from './api/forms-api.config';
 import { submitWaitMessage } from './core/submit-progress';
@@ -974,7 +975,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
       // as the other requests rather than swallowed here — the log line below stays for every other
       // refusal, which really is fail-soft background work.
       this.endSessionIfExpired(err);
-      console.warn(`[mj-form] the disqualification could not be recorded: ${String(err)}`);
+      console.warn(`[mj-form] the disqualification could not be recorded: ${failureDetail(err)}`);
       return undefined;
     }
   }
@@ -1079,6 +1080,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
       if (this.endSessionIfExpired(err)) {
         return;
       }
+      // The banner shows the fixed sentence; the cause goes to whoever opens the console.
+      console.warn(`[mj-form] the response could not be submitted: ${failureDetail(err)}`);
       this.phase.set('ready');
       const message = err instanceof Error ? err.message : 'Submission failed. Please try again.';
       this.errorText.set(message);

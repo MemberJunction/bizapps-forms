@@ -18,6 +18,8 @@
  * with fake timers and no Angular. The component wires it to signals + the API.
  */
 
+import { failureDetail } from './failure-detail';
+
 /**
  * The host's answer when there was nothing to send — the payload was exactly what the server last
  * accepted, or a fresh form with nothing in it (#303 Task 10c fix round 1). No request was made, so
@@ -213,7 +215,7 @@ export class AutosaveController {
       failed = true;
       // Never swallow silently: a background autosave still failed, and this is the only place
       // that says so. `status` tells the UI; this gives whoever reads the console the cause.
-      console.warn('[mj-forms] autosave failed', err);
+      console.warn(`[mj-forms] autosave failed: ${failureDetail(err)}`, err);
       this.setStatus('error');
     } finally {
       this.inFlight = false;

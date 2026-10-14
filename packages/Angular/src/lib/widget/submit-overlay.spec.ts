@@ -56,6 +56,20 @@ describe('the form survives its own submit', () => {
     expect(form.bannerText).toBe(RESPONSE_NOT_SAVED_MESSAGE);
   });
 
+  it('a call the server refuses leaves its reason in the console — the banner\'s fixed sentence names no cause', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const api = new FakeFormsApi(servedAs(screeningForm()), () => {
+      throw new ResponseNotSavedError('Forms.SaveResponse (final) for response r was refused (FORBIDDEN): not your link');
+    });
+    const { form } = await mountForm({ api });
+    form.rt.setValue('name', 'Sam');
+
+    await form.submit();
+
+    expect(warn.mock.calls.map((call) => call.join(' ')).some((line) => line.includes('Forms.SaveResponse (final) for response r was refused (FORBIDDEN): not your link'))).toBe(true);
+    warn.mockRestore();
+  });
+
   it('a refusal RESULT puts each message under the question it names, and in the banner with its prompt', async () => {
     // The server's required refusal no longer names the question in its text, so the banner alone
     // would say "This question is required." about nothing in particular.

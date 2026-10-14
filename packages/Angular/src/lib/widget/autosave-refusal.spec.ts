@@ -10,6 +10,7 @@
 import '@angular/compiler';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ResponseNotSavedError } from './api/forms-api.interface';
 import { FakeFormsApi, mountForm, refusal, screeningForm, screeningServer, servedAs } from './testing/mj-form-harness';
 
 vi.mock('@angular/core', async (importOriginal) => ({
@@ -29,6 +30,21 @@ afterEach(() => {
 });
 
 describe('a refused autosave is an error, not a save (#271)', () => {
+  it('a refused CALL leaves its reason in the console, not just the fixed sentence', async () => {
+    const reason = 'Forms.SaveResponse (partial) for response r was refused (EXECUTION_ERROR): draft ceiling';
+    const api = new FakeFormsApi(servedAs(screeningForm()), () => {
+      throw new ResponseNotSavedError(reason);
+    });
+    const { form } = await mountForm({ api });
+    form.rt.setValue('name', 'Sam');
+    form.progress();
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+    expect(form.autosaveNow).toBe('error');
+    const lines = vi.mocked(console.warn).mock.calls.map((call) => call.map(String).join(' '));
+    expect(lines.some((line) => line.includes(reason))).toBe(true);
+  });
+
   it('records `error`, never `saved`, and announces no draft', async () => {
     const api = new FakeFormsApi(servedAs(screeningForm()), () => refusal('You have saved too often.'));
     const { form, host } = await mountForm({ api });
