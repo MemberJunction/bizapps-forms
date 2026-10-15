@@ -445,12 +445,13 @@ function readDateAnswersForTarget(
   if (!questionTypes) {
     return;
   }
+  const types = new Map([...questionTypes].map(([id, type]) => [id.toLowerCase(), type]));
   const temporal = new Set([...target.temporal].map((f) => f.toLowerCase()));
   for (const field of config.fieldMappings.fields) {
     if (field.source.kind !== 'question' || temporal.has(field.targetField.toLowerCase())) {
       continue;
     }
-    const type = questionTypes.get(field.source.questionId);
+    const type = types.get(field.source.questionId.toLowerCase());
     if (!type || answerColumnFor(type) !== 'date') {
       continue;
     }

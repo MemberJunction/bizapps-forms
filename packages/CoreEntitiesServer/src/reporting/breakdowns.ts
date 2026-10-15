@@ -37,7 +37,7 @@ import {
 } from '@mj-biz-apps/forms-entities';
 import { insightRoleFor, isChartedRole, type ChartedRole } from './insight-roles.js';
 import type { InsightAnswerRow } from './insight-answers.js';
-import type { ValueCountRow } from './report-queries.js';
+import type { AnswerValueKind, ValueCountRow } from './report-queries.js';
 import { temporalBuckets } from './temporal.js';
 
 /** The scale NPS is defined on. A rating outside it did not come from an NPS control. */
@@ -70,22 +70,26 @@ export function buildQuestionBreakdowns(
 
 /** A card built from the value-count rows: every charted role but Matrix. */
 function valueCard(question: PublishedFormQuestion, role: Exclude<ChartedRole, 'composite'>, rows: readonly ValueCountRow[]): FormsQuestionBreakdown {
-  const card = emptyCard(question, role, rows[0]?.AnsweredResponses ?? 0);
+  const kindByRole: Record<Exclude<ChartedRole, 'composite'>, AnswerValueKind> = {
+    choice: 'Text', scale: 'Numeric', sentiment: 'Boolean', consent: 'Boolean', temporal: 'Date',
+  };
+  const matching = rows.filter((row) => row.ValueKind === kindByRole[role]);
+  const card = emptyCard(question, role, matching[0]?.AnsweredResponses ?? 0);
   switch (role) {
     case 'choice':
-      card.Buckets = choiceBuckets(question.options, rows.filter((row) => row.ValueKind === 'Text'));
+      card.Buckets = choiceBuckets(question.options, matching);
       break;
     case 'sentiment':
     case 'consent':
-      card.Buckets = booleanBuckets(rows.filter((row) => row.ValueKind === 'Boolean'));
+      card.Buckets = booleanBuckets(matching);
       break;
     case 'scale':
-      card.Numeric = numericAggregate(question.type, rows.filter((row) => row.ValueKind === 'Numeric'));
+      card.Numeric = numericAggregate(question.type, matching);
       break;
     case 'temporal':
       card.Buckets = temporalBuckets(
         question.type,
-        rows.filter((row) => row.ValueKind === 'Date').map((row) => ({ instant: new Date(row.Value), count: row.ValueCount })),
+        matching.map((row) => ({ instant: new Date(row.Value), count: row.ValueCount })),
       );
       break;
   }

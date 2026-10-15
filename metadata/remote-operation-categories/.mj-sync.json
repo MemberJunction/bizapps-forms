@@ -7,6 +7,7 @@
     "appendRecordsToExistingFile": true,
     "updateExistingRecords": true,
     "ignoreNullFields": true,
-    "ignoreVirtualFields": true
+    "ignoreVirtualFields": true,
+    "filter": "Name = 'Forms'"
   }
 }

@@ -58,6 +58,7 @@ import {
 import { FormEntityServer } from '../entities/FormEntityServer.js';
 import { FormVersionEntityServer } from '../entities/FormVersionEntityServer.js';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
+import { isGuid } from '../shared/guid.js';
 import { requireEntityTransactions, requireServerEntity, runEngineUnitOfWork, saveAsEngine, saveFailure } from './engine-guards.js';
 
 const ENTITY = FORMS_ENTITY;
@@ -102,11 +103,15 @@ export class FormPublishError extends Error {
    */
   public readonly fault: boolean;
 
-  constructor(message: string, options: { brokenRules?: readonly string[]; fault?: boolean } = {}) {
+  /** Provider diagnostics for the server log, never the caller-facing message. */
+  public readonly logDetail?: string;
+
+  constructor(message: string, options: { brokenRules?: readonly string[]; fault?: boolean; logDetail?: string } = {}) {
     super(message);
     this.name = 'FormPublishError';
     this.brokenRules = options.brokenRules;
     this.fault = options.fault === true;
+    this.logDetail = options.logDetail;
   }
 }
 
@@ -143,12 +148,15 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
     if (!id) {
       throw new FormPublishError('A form id is required to publish.');
     }
+    if (!isGuid(id)) {
+      throw new FormPublishError('A valid form ID is required to publish.');
+    }
     if (!user) {
       throw new FormPublishError(`Publishing form ${id} needs the acting user; none was given.`);
     }
     requireEntityTransactions(provider, `Publishing form ${id}`);
     return runEngineUnitOfWork(provider, `[FormPublishingEngine] form ${id} was not published (user ${user.ID})`, () =>
-      this.publishInTransaction(id, provider, user),
+      callerSafePublish(() => this.publishInTransaction(id, provider, user)),
     );
   }
 
@@ -310,8 +318,8 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
     }
     form.Status = 'Published';
     if (!(await saveAsEngine(form))) {
-      throw new FormPublishError(`Could not mark form ${form.ID} Published: ${saveFailure(form)}. Nothing was published.`, {
-        fault: true,
+      throw new FormPublishError(`Could not mark form ${form.ID} Published. Nothing was published.`, {
+        fault: true, logDetail: saveFailure(form),
       });
     }
   }
@@ -343,7 +351,7 @@ async function saveVersion(
   if (CONCURRENT_PUBLISH_CONSTRAINTS.some((constraint) => why.includes(constraint))) {
     throw new FormPublishError(PUBLISH_IN_PROGRESS_MESSAGE);
   }
-  throw new FormPublishError(`Could not ${step} of form ${version.FormID}: ${why}. Nothing was published.`, { fault: true });
+  throw new FormPublishError(`Could not ${step} of form ${version.FormID}. Nothing was published.`, { fault: true, logDetail: why });
 }
 
 /**
@@ -356,8 +364,8 @@ async function saveVersion(
 function rowsOrRefuse<T = unknown>(result: RunViewResult<unknown> | undefined, what: string): T[] {
   if (!result?.Success) {
     throw new FormPublishError(
-      `Could not read ${what} (${result?.ErrorMessage || 'no result'}); nothing was published.`,
-      { fault: true },
+      `Could not read ${what}; nothing was published.`,
+      { fault: true, logDetail: result?.ErrorMessage || 'no result' },
     );
   }
   return (result.Results ?? []) as T[];
@@ -419,4 +427,19 @@ function groupBy<T>(items: readonly T[], keyOf: (item: T) => string): Map<string
     }
   }
   return groups;
+}
+
+/** Provider exceptions are diagnostics, not publish refusals an author should receive verbatim. */
+async function callerSafePublish<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof FormPublishError) {
+      throw error;
+    }
+    throw new FormPublishError('Publishing failed on the server; the server log has the detail.', {
+      fault: true,
+      logDetail: error instanceof Error ? error.stack ?? error.message : String(error),
+    });
+  }
 }

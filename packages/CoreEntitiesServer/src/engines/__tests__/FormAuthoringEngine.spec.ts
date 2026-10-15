@@ -163,7 +163,7 @@ describe('BuildFromBlueprint', () => {
     // Before #303 each row committed on its own, so this left a form with a page and no questions.
     db = world({ failSaveWhen: (entity) => (entity === QUESTIONS ? 'question insert failed' : false) });
 
-    await expect(build(db)).rejects.toThrow(/Failed to save FormQuestion: question insert failed/);
+    await expect(build(db)).rejects.toThrow(/Failed to save FormQuestion/);
 
     expect(db.transactions).toEqual(['begin', 'rollback']);
     expect(rowsOf(db, FORMS)).toEqual([]);
@@ -277,7 +277,7 @@ describe('BuildFromBlueprint with publishImmediately', () => {
 
     await expect(
       build(db, withAutomations([{ actionName: 'Forms: Send Confirmation Email' }]), { publishImmediately: true }),
-    ).rejects.toThrow(/disk full/);
+    ).rejects.toThrow(/Could not|Failed to save/);
 
     // The publish's savepoint rolls back, then the build's transaction does.
     expect(db.transactions).toEqual(['begin', 'begin:nested', 'rollback:nested', 'rollback']);
@@ -289,7 +289,7 @@ describe('BuildFromBlueprint with publishImmediately', () => {
   it('logs a failure inside the nested publish ONCE, at the outermost boundary, with the form and the user', async () => {
     const runViews = vi.spyOn(db.provider, 'RunViews').mockRejectedValue(new Error('connection reset'));
 
-    await expect(build(db, blueprint, { publishImmediately: true })).rejects.toThrow('connection reset');
+    await expect(build(db, blueprint, { publishImmediately: true })).rejects.toThrow(/failed on the server/);
 
     expect(runViews).toHaveBeenCalled();
     const mentions = logged.filter((m) => m.includes('connection reset'));
@@ -300,8 +300,34 @@ describe('BuildFromBlueprint with publishImmediately', () => {
   it('logs a nested publish refusal once too', async () => {
     db = world({ failSaveWhen: (entity, values) => (entity === VERSIONS && values.Status === 'Published' ? 'disk full' : false) });
 
-    await expect(build(db, blueprint, { publishImmediately: true })).rejects.toThrow(/disk full/);
+    await expect(build(db, blueprint, { publishImmediately: true })).rejects.toThrow(/Could not|Failed to save/);
 
     expect(logged.filter((m) => m.includes('disk full'))).toHaveLength(1);
   });
+});
+
+it.each(['begin', 'commit'] as const)('retains the nested publish transaction %s diagnostic in the single outer log', async (stage) => {
+  const db = world();
+  const diagnostic = 'SQL connection failed on private-host during nested publication';
+  const begin = db.provider.BeginEntityTransaction.bind(db.provider);
+  vi.spyOn(db.provider, 'BeginEntityTransaction').mockImplementation(async () => {
+    const nested = db.provider.TransactionDepth > 0;
+    if (nested && stage === 'begin') {
+      throw new Error(diagnostic);
+    }
+    const scope = await begin();
+    return nested && stage === 'commit'
+      ? { ...scope, Commit: async () => { throw new Error(diagnostic); } }
+      : scope;
+  });
+
+  const error = await build(db, blueprint, { publishImmediately: true }).catch((error: unknown) => error);
+
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).not.toContain(diagnostic);
+  expect(logged).toHaveLength(1);
+  expect(logged[0]).toContain(diagnostic);
+  expect(logged[0]).toMatch(/Event RSVP.*author-1/);
+  expect(rowsOf(db, FORMS)).toEqual([]);
+  expect(rowsOf(db, VERSIONS)).toEqual([]);
 });

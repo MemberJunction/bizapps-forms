@@ -70,12 +70,12 @@ function world(tables: Record<string, FakeRow[]> = draftTables(), config: Partia
   return formsWorld(SUBCLASSES, tables, config);
 }
 
-function publish(db: ReturnType<typeof world>, formId = 'form-1', user: UserInfo = AUTHOR) {
+function publish(db: ReturnType<typeof world>, formId = '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', user: UserInfo = AUTHOR) {
   return FormPublishingEngine.Instance.Publish(formId, db.provider, user);
 }
 
 /** What `publish` threw, so a test can assert on it and on what was left behind. */
-async function refusal(db: ReturnType<typeof world>, formId = 'form-1'): Promise<InstanceType<typeof FormPublishError>> {
+async function refusal(db: ReturnType<typeof world>, formId = '4d81af18-d0fe-5b39-b7de-6a0eb70c5766'): Promise<InstanceType<typeof FormPublishError>> {
   const caught = await publish(db, formId).then(
     () => undefined,
     (err: unknown) => err,
@@ -104,7 +104,7 @@ describe('first publish', () => {
     const result = await publish(db);
 
     const [row] = versions(db);
-    expect(row).toMatchObject({ FormID: 'form-1', VersionNumber: 1, Status: 'Published' });
+    expect(row).toMatchObject({ FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', VersionNumber: 1, Status: 'Published' });
     expect(row.PublishedAt).toBeInstanceOf(Date);
     // Save first, snapshot second: the snapshot names the id the row was GIVEN, with no reconcile.
     expect(snapshotOf(row).formVersionId).toBe(row.ID);
@@ -171,7 +171,7 @@ describe('publishing an archived form', () => {
     const tables = draftTables();
     tables[FORMS] = [formRow({ Status: 'Closed' })];
     tables[VERSIONS] = [versionRow('v1', 1, 'Retired')];
-    tables['MJ_BizApps_Forms: Form Distributions'] = [{ ID: 'd1', FormID: 'form-1', Status: 'Closed', IsActive: false }];
+    tables['MJ_BizApps_Forms: Form Distributions'] = [{ ID: 'd1', FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', Status: 'Closed', IsActive: false }];
     const db = world(tables);
 
     const result = await publish(db);
@@ -223,7 +223,7 @@ describe('retire then publish', () => {
 
   it('touches no other form\'s versions', async () => {
     const tables = draftTables();
-    tables[VERSIONS] = [versionRow('other', 1, 'Published', 'form-2')];
+    tables[VERSIONS] = [versionRow('other', 1, 'Published', 'e9d89f6f-e43c-5d1d-aef7-c46815bbb36a')];
     const db = world(tables);
 
     await publish(db);
@@ -349,7 +349,7 @@ describe('refusals write nothing', () => {
   it('refuses a form that does not exist', async () => {
     const db = world();
 
-    expect((await refusal(db, 'form-404')).message).toMatch(/form-404 does not exist/);
+    expect((await refusal(db, 'b96cd1d3-6127-5e65-94e2-aef3a6d1a9a1')).message).toMatch(/b96cd1d3-6127-5e65-94e2-aef3a6d1a9a1 does not exist/);
     expect(versions(db)).toEqual([]);
   });
 });
@@ -416,7 +416,8 @@ describe('rollback', () => {
 
     const error = await refusal(db);
 
-    expect(error.message).toMatch(/form row locked/);
+    expect(error.message).not.toMatch(/form row locked/);
+    expect(logged.errors.join(" ")).toContain("form row locked");
     expect(db.transactions).toEqual(['begin', 'rollback']);
     expect(versions(db).map((v) => [v.ID, v.Status])).toEqual([['v1', 'Published']]);
     expect(rowsOf(db, FORMS)[0].Status).toBe('Draft');
@@ -432,7 +433,7 @@ describe('the engine is the writer the invariants allow', () => {
       LatestResult: { CompleteMessage: string } | null;
     };
     version.NewRecord();
-    Object.assign(version, { FormID: 'form-1', VersionNumber: 1, Status: 'Published', DefinitionSnapshot: '{}' });
+    Object.assign(version, { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', VersionNumber: 1, Status: 'Published', DefinitionSnapshot: '{}' });
 
     expect(await version.Save()).toBe(false);
     expect(version.LatestResult?.CompleteMessage).toMatch(/only the publishing engine/);
@@ -459,7 +460,7 @@ describe('guards', () => {
     const db = world();
 
     await expect(
-      FormPublishingEngine.Instance.Publish('form-1', db.provider as DatabaseProviderBase, undefined as unknown as UserInfo),
+      FormPublishingEngine.Instance.Publish('4d81af18-d0fe-5b39-b7de-6a0eb70c5766', db.provider as DatabaseProviderBase, undefined as unknown as UserInfo),
     ).rejects.toThrow(/user/i);
   });
 
@@ -470,6 +471,31 @@ describe('guards', () => {
 
     await refusal(db);
 
-    expect([...logged.statuses, ...logged.errors].join('\n')).toMatch(/form-1.*author-1|author-1.*form-1/);
+    expect([...logged.statuses, ...logged.errors].join('\n')).toMatch(/4d81af18-d0fe-5b39-b7de-6a0eb70c5766.*author-1|author-1.*4d81af18-d0fe-5b39-b7de-6a0eb70c5766/);
   });
+});
+
+it('keeps provider read diagnostics out of the publish refusal', async () => {
+  const db = world(draftTables(), { failRunViewFor: QUESTIONS });
+  const error = await refusal(db);
+  expect(error.message).not.toContain('forced runview failure');
+  expect(logged.errors.join(' ')).toContain('forced runview failure');
+});
+
+it('refuses malformed form IDs before attempting a publish read', async () => {
+  const db = world(draftTables(), { failRunViewFor: FORMS });
+  const error = await refusal(db, 'invalid-guid');
+  expect(error.fault).toBe(false);
+  expect(error.message).toMatch(/valid.*ID/i);
+  expect(db.transactions).toEqual([]);
+});
+
+it('logs an unexpected provider exception without returning its SQL to the author', async () => {
+  const db = world();
+  const detail = 'SELECT private_column FROM private_database';
+  vi.spyOn(db.provider, 'RunViews').mockRejectedValue(new Error(detail));
+  const error = await publish(db).catch((e: unknown) => e);
+  expect((error as Error).message).not.toContain(detail);
+  expect(error).toBeInstanceOf(FormPublishError);
+  expect(logged.errors.join(' ')).toContain(detail);
 });

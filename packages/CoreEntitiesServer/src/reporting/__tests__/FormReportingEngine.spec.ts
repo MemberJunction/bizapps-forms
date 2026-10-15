@@ -84,7 +84,7 @@ describe('GetResponseSummary', () => {
       expect(filter).not.toContain(id);
     }
     expect(filter).toContain("Status='Complete'");
-    expect(reads[0].params).toMatchObject({ OrderBy: 'ID', StartRow: 0 });
+    expect(reads[0].params).toMatchObject({ OrderBy: 'ID', AfterKey: undefined });
     expect(reads[0].params.MaxRows).toBeLessThanOrEqual(5000);
   });
 

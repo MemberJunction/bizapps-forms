@@ -289,9 +289,14 @@ export class BuilderStateService {
     const promote = vacantDefaultEnding(survivors);
     const deleted = await this.runStructural(tree, 'delete screen', false, async (graph) => {
       graph.RemoveScreen(await graph.StageScreen(screen));
-      if (promote !== null) {
-        (await graph.StageScreen(promote)).IsDefault = true;
+      const promoted = promote ? await graph.StageScreen(promote) : null;
+      if (promoted) {
+        promoted.IsDefault = true;
       }
+      await this.stageRenumber(
+        survivors.filter((s) => s.ScreenType === screen.ScreenType),
+        (s) => s === promote && promoted ? Promise.resolve(promoted) : graph.StageScreen(s),
+      );
       return this.commit(graph, 'delete screen');
     });
     if (deleted) {
@@ -324,10 +329,11 @@ export class BuilderStateService {
     });
   }
 
-  /** Delete a page; the server deletes its questions and their options in the same transaction. */
+  /** Delete a page and close its order gap; the server cascades its children in the same transaction. */
   public async deletePage(tree: FormTree, page: PageNode): Promise<boolean> {
     return this.runStructural(tree, 'delete page', false, async (graph) => {
       graph.RemovePage(await graph.StagePage(page.entity));
+      await this.stageRenumber(tree.pages.filter((p) => p !== page).map((p) => p.entity), (p) => graph.StagePage(p));
       return this.commit(graph, 'delete page');
     });
   }

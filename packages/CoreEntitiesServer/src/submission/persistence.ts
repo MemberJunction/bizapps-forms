@@ -776,12 +776,12 @@ async function reconcileAnswers(
     const answer = row as unknown as mjBizAppsFormsFormResponseAnswerEntity;
     // Last one wins on a duplicate: the row store should hold at most one answer per question,
     // and if it somehow holds two, keeping one and deleting the other is the repair.
-    stale.set(answer.QuestionID, answer);
+    stale.set(foldId(answer.QuestionID), answer);
   }
 
   for (const validated of answers) {
-    const held = stale.get(validated.question.id);
-    stale.delete(validated.question.id);
+    const held = stale.get(foldId(validated.question.id));
+    stale.delete(foldId(validated.question.id));
     const result = held
       ? await rewriteAnswer(held, validated)
       : await saveAnswer(provider, responseId, validated, contextUser);

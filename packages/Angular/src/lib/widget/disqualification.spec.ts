@@ -252,6 +252,28 @@ describe('a commit whose save never lands says so (fix round 1, Minor 4)', () =>
 });
 
 describe('the seal', () => {
+  it('announces a successful seal once, so the host can clear its resume pointer', async () => {
+    const { api, form, host } = await liveScreening();
+    form.rt.setValue('age', 16);
+    form.commit();
+    await settle();
+    expect(host.events.filter((event) => event.name === 'mjf-submitted')).toEqual([
+      { name: 'mjf-submitted', detail: { responseId: api.savesOf('final')[0].ClientResponseID } },
+    ]);
+  });
+
+  it('keeps the resume pointer when the seal is refused', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { form, host } = await liveScreening((input) =>
+      input.Mode === 'final' ? refusal('Quota reached') : screeningServer(input),
+    );
+    form.rt.setValue('age', 16);
+    form.commit();
+    await settle();
+    expect(form.phaseNow).toBe('done');
+    expect(host.events.filter((event) => event.name === 'mjf-submitted')).toEqual([]);
+  });
+
   it('is sent while the form is still in intake, and the screen shows only after it resolves', async () => {
     const seal = deferred<FormsSaveResponseOutput>();
     const { api, form } = await liveScreening((input) => (input.Mode === 'final' ? seal.promise : screeningServer(input)));

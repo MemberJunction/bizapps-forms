@@ -52,6 +52,9 @@ export function announceWrites(entityNames: readonly string[], kind: FormsWriteK
  * `Form` row (its graph root), so without it a grid behind the builder tab re-read itself once per
  * reorder, insert and delete.
  *
+ * `shouldHandle` is checked when a write arrives, before it can be deferred. A surface handling
+ * its own write can ignore its announcement even if it finishes before the debounce expires.
+ *
  * `operationsOnly` hears announced operation writes and ignores records' own save events — for a
  * surface that only needs to catch up with what the SERVER wrote (its own record saves it already
  * knows about).
@@ -60,10 +63,13 @@ export function onFormsWrite(
   entityName: string,
   kinds: readonly FormsWriteKind[],
   onWrite: () => void,
-  options: { debounceMs?: number; operationsOnly?: boolean } = {},
+  options: { debounceMs?: number; operationsOnly?: boolean; shouldHandle?: () => boolean } = {},
 ): FormsWriteSubscription {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const fire = (): void => {
+    if (options.shouldHandle && !options.shouldHandle()) {
+      return;
+    }
     if (!options.debounceMs) {
       onWrite();
       return;

@@ -117,7 +117,7 @@ export class TemplatesGalleryComponent {
         return;
       }
       void this.reload();
-    }, { debounceMs: FORM_WRITE_DEBOUNCE_MS });
+    }, { debounceMs: FORM_WRITE_DEBOUNCE_MS, shouldHandle: () => !this.deleting });
   }
 
   /** Reload the saved half. The starters are code, so they never need reloading. */

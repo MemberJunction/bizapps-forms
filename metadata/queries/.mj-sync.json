@@ -16,6 +16,13 @@
         "entity": "MJ: Query Parameters",
         "foreignKey": "QueryID"
       }
-    }
+    },
+    "filter": "CategoryID IN (SELECT ID FROM [__mj].vwQueryCategories WHERE Name = 'Forms')",
+    "externalizeFields": [
+      {
+        "field": "SQL",
+        "pattern": "@file:SQL/{Name}.sql"
+      }
+    ]
   }
 }

@@ -73,11 +73,11 @@ describe('Forms.PublishForm', () => {
 
   it('publishes and returns the new version, its number and what it retired', async () => {
     const tables = draftTables();
-    tables[VERSIONS] = [{ ID: 'v1', FormID: 'form-1', VersionNumber: 1, Status: 'Published', PublishedAt: new Date(), DefinitionSnapshot: '{}' }];
+    tables[VERSIONS] = [{ ID: 'v1', FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', VersionNumber: 1, Status: 'Published', PublishedAt: new Date(), DefinitionSnapshot: '{}' }];
     tables[FORMS] = [formRow({ Status: 'Published' })];
     const db = world(true, {}, tables);
 
-    const result = await run(db, { FormID: 'form-1' });
+    const result = await run(db, { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' });
 
     expect(result.ResultCode).toBe('SUCCESS');
     const published = rowsOf(db, VERSIONS).find((v) => v.Status === 'Published');
@@ -89,7 +89,7 @@ describe('Forms.PublishForm', () => {
       const db = world();
       const anonymous = { ...AUTHOR, IsMagicLinkAnonymous: true } as unknown as UserInfo;
 
-      const result = await run(db, { FormID: 'form-1' }, anonymous);
+      const result = await run(db, { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, anonymous);
 
       expect(result.ResultCode).toBe('FORBIDDEN');
       expect(rowsOf(db, VERSIONS)).toEqual([]);
@@ -99,13 +99,13 @@ describe('Forms.PublishForm', () => {
       const db = world();
       const scoped = { ...AUTHOR, MagicLinkScope: { ResourceID: 'dist-1', ResourceType: 'Form Distribution' } } as unknown as UserInfo;
 
-      expect((await run(db, { FormID: 'form-1' }, scoped)).ResultCode).toBe('FORBIDDEN');
+      expect((await run(db, { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, scoped)).ResultCode).toBe('FORBIDDEN');
     });
 
     it('refuses an author without Update on Forms with FORBIDDEN', async () => {
       const db = world(false);
 
-      expect((await run(db, { FormID: 'form-1' })).ResultCode).toBe('FORBIDDEN');
+      expect((await run(db, { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' })).ResultCode).toBe('FORBIDDEN');
       expect(rowsOf(db, VERSIONS)).toEqual([]);
     });
   });
@@ -128,7 +128,7 @@ describe('Forms.PublishForm', () => {
       const client = { EntityByName: db.provider.EntityByName } as unknown as IMetadataProvider;
 
       const result = await new PublishFormServerOperation().ExecuteServer(
-        { FormID: 'form-1' },
+        { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' },
         { provider: client, user: AUTHOR, emitProgress: () => undefined },
       );
 
@@ -142,7 +142,7 @@ describe('Forms.PublishForm', () => {
     tables[FORMS] = [formRow({ IsTemplate: true })];
     const db = world(true, {}, tables);
 
-    const result = await run(db, { FormID: 'form-1' });
+    const result = await run(db, { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' });
 
     expect(result.ResultCode).toBe('EXECUTION_ERROR');
     expect(result.ErrorMessage).toMatch(/is a template/);

@@ -149,14 +149,22 @@ const onlyLink = (db: ReturnType<typeof world>) => {
 };
 
 describe('Issue', () => {
+  it.each([0, -1, 1.5, NaN, Infinity])('refuses invalid response limit %s before reading or issuing credentials', async (maxResponses) => {
+    const db = world([], { failRunViewFor: FORMS });
+    const error = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', maxResponses }, db.provider, AUTHOR).catch((e: unknown) => e);
+    expect(error).toMatchObject({ fault: false });
+    expect((error as Error).message).toMatch(/positive integer/);
+    expect(minter.minted).toEqual([]);
+  });
+
   it('creates the link open to responses, under PublicLink, captcha off, with a slug from its name, and returns its URL', async () => {
     const db = world();
 
-    const link = await engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR);
+    const link = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR);
 
     const row = onlyLink(db);
     expect(row).toMatchObject({
-      FormID: 'form-1',
+      FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766',
       Name: 'Intake — Public link',
       Slug: 'intake-public-link',
       ChannelType: 'PublicLink',
@@ -184,7 +192,7 @@ describe('Issue', () => {
   it('opens no transaction of its own: a failed insert must leave the connection usable for the retry', async () => {
     const db = world();
 
-    await engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR);
+    await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR);
 
     expect(db.transactions).toEqual([]);
   });
@@ -196,7 +204,7 @@ describe('Issue', () => {
 
     const link = await engine.Issue(
       {
-        formId: 'form-1',
+        formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766',
         channelType: 'QR',
         name: '  Lobby poster ',
         slug: 'lobby',
@@ -224,15 +232,15 @@ describe('Issue', () => {
   it('derives the slug from a given name when no slug is given', async () => {
     const db = world();
 
-    await engine.Issue({ formId: 'form-1', name: 'Spring Member Survey!' }, db.provider, AUTHOR);
+    await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', name: 'Spring Member Survey!' }, db.provider, AUTHOR);
 
     expect(onlyLink(db).Slug).toBe('spring-member-survey');
   });
 
   it('appends a random suffix when the preferred slug is already taken', async () => {
-    const db = world([distributionRow({ ID: 'other', FormID: 'form-2', Slug: 'lobby' })]);
+    const db = world([distributionRow({ ID: 'other', FormID: 'e9d89f6f-e43c-5d1d-aef7-c46815bbb36a', Slug: 'lobby' })]);
 
-    const link = await engine.Issue({ formId: 'form-1', slug: 'lobby' }, db.provider, AUTHOR);
+    const link = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', slug: 'lobby' }, db.provider, AUTHOR);
 
     expect(link.slug).toMatch(/^lobby-[a-z0-9]{5}$/);
   });
@@ -251,7 +259,7 @@ describe('Issue', () => {
       },
     });
 
-    const link = await engine.Issue({ formId: 'form-1', slug: 'lobby' }, db.provider, AUTHOR);
+    const link = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', slug: 'lobby' }, db.provider, AUTHOR);
 
     expect(link.slug).toMatch(/^lobby-[a-z0-9]{5}$/);
     expect(onlyLink(db).Slug).toBe(link.slug);
@@ -269,7 +277,7 @@ describe('Issue', () => {
       },
     });
 
-    const error = await engine.Issue({ formId: 'form-1', slug: 'lobby' }, db.provider, AUTHOR).catch((e: unknown) => e);
+    const error = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', slug: 'lobby' }, db.provider, AUTHOR).catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(FormDistributionError);
     expect((error as Error).message).toContain(`after ${MAX_SLUG_ATTEMPTS} attempts`);
@@ -277,7 +285,7 @@ describe('Issue', () => {
     expect(attempts).toBe(MAX_SLUG_ATTEMPTS);
     expect(rowsOf(db, DISTRIBUTIONS)).toEqual([]);
     expect(minter.minted).toEqual([]);
-    expect(logged.errors.join('\n')).toMatch(/form-1.*author-1/);
+    expect(logged.errors.join('\n')).toMatch(/4d81af18-d0fe-5b39-b7de-6a0eb70c5766.*author-1/);
   });
 
   it('does not retry a failure that is not a slug collision — retrying cannot change it', async () => {
@@ -292,11 +300,11 @@ describe('Issue', () => {
       },
     });
 
-    const error = await engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR).catch((e: unknown) => e);
+    const error = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR).catch((e: unknown) => e);
 
     expect(attempts).toBe(1);
     // The database's words go to the log, never to the caller.
-    expect((error as Error).message).toMatch(/Could not create a share link for form form-1/);
+    expect((error as Error).message).toMatch(/Could not create a share link for form 4d81af18-d0fe-5b39-b7de-6a0eb70c5766/);
     expect((error as Error).message).not.toMatch(/FK_FormDistribution_Form|INSERT/);
     expect(logged.errors.join('\n')).toMatch(/FK_FormDistribution_Form/);
   });
@@ -304,7 +312,7 @@ describe('Issue', () => {
   it('refuses when the slug probe cannot be read, rather than guessing the slug is free', async () => {
     const db = world([], { failRunViewFor: DISTRIBUTIONS });
 
-    const error = await engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR).catch((e: unknown) => e);
+    const error = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR).catch((e: unknown) => e);
 
     expect((error as Error).message).toMatch(/could not check whether the slug "intake-public-link" is free/i);
     expect((error as Error).message).not.toMatch(/forced runview failure/);
@@ -314,9 +322,9 @@ describe('Issue', () => {
   });
 
   it.each([
-    ['a form that does not exist', 'form-404', {}, /does not exist/],
-    ['an archived form', 'form-1', { Status: 'Closed' }, /archived/],
-    ['a template', 'form-1', { IsTemplate: true }, /template/],
+    ['a form that does not exist', 'b96cd1d3-6127-5e65-94e2-aef3a6d1a9a1', {}, /does not exist/],
+    ['an archived form', '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', { Status: 'Closed' }, /archived/],
+    ['a template', '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', { IsTemplate: true }, /template/],
   ])('refuses %s, writing nothing', async (_label, formId, form, message) => {
     const db = world([], {}, form);
 
@@ -333,12 +341,12 @@ describe('Issue', () => {
     ['a template', { IsTemplate: true }],
     ['a live form', {}],
   ])('answers %s the caller cannot read exactly as a form that does not exist', async (_label, form) => {
-    const absent = world([], {}, { ID: 'form-other' });
+    const absent = world([], {}, { ID: 'cf8b0da8-ff92-5ace-8f3d-e51457bce419' });
     const hidden = world([], {}, form);
-    hideFromCaller(hidden, FORMS, 'form-1');
+    hideFromCaller(hidden, FORMS, '4d81af18-d0fe-5b39-b7de-6a0eb70c5766');
 
-    const notThere = await engine.Issue({ formId: 'form-1' }, absent.provider, AUTHOR).catch((e: unknown) => e);
-    const notVisible = await engine.Issue({ formId: 'form-1' }, hidden.provider, AUTHOR).catch((e: unknown) => e);
+    const notThere = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, absent.provider, AUTHOR).catch((e: unknown) => e);
+    const notVisible = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, hidden.provider, AUTHOR).catch((e: unknown) => e);
 
     expect((notVisible as Error).message).toBe((notThere as Error).message);
     expect(rowsOf(hidden, DISTRIBUTIONS)).toEqual([]);
@@ -347,7 +355,7 @@ describe('Issue', () => {
   it('refuses a preferred slug that is not slug-shaped, before reading anything', async () => {
     const db = world([], { failRunViewFor: FORMS });
 
-    await expect(engine.Issue({ formId: 'form-1', slug: 'Lobby Poster' }, db.provider, AUTHOR)).rejects.toThrow(
+    await expect(engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', slug: 'Lobby Poster' }, db.provider, AUTHOR)).rejects.toThrow(
       /not a usable slug/,
     );
   });
@@ -357,7 +365,7 @@ describe('Issue', () => {
 
     await expect(
       engine.Issue(
-        { formId: 'form-1', openAt: new Date('2026-12-01T00:00:00Z'), closeAt: new Date('2026-11-01T00:00:00Z') },
+        { formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', openAt: new Date('2026-12-01T00:00:00Z'), closeAt: new Date('2026-11-01T00:00:00Z') },
         db.provider,
         AUTHOR,
       ),
@@ -368,7 +376,7 @@ describe('Issue', () => {
   it('returns no URL for a channel the host does not provision a credential for (Email)', async () => {
     const db = world();
 
-    const link = await engine.Issue({ formId: 'form-1', channelType: 'Email' }, db.provider, AUTHOR);
+    const link = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', channelType: 'Email' }, db.provider, AUTHOR);
 
     expect(onlyLink(db)).toMatchObject({ ChannelType: 'Email', Status: 'Active' });
     expect(onlyLink(db).PublicLinkToken ?? null).toBeNull();
@@ -380,7 +388,7 @@ describe('Issue', () => {
     MagicLinkMinterRegistry.Instance.ClearForTests();
     const db = world();
 
-    const link = await engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR);
+    const link = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR);
 
     expect(onlyLink(db).Status).toBe('Active');
     expect(link.respondentUrl).toBeNull();
@@ -390,7 +398,7 @@ describe('Issue', () => {
     delete process.env.MJAPI_PUBLIC_URL;
     const db = world();
 
-    const link = await engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR);
+    const link = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR);
 
     expect(onlyLink(db).PublicLinkToken).toBe('tok-1');
     expect(link.respondentUrl).toBeNull();
@@ -400,7 +408,7 @@ describe('Issue', () => {
   it('issues on a provider without entity transactions — Issue opens none, so it needs none', async () => {
     const db = world([], { noTransactions: true });
 
-    const link = await engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR);
+    const link = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR);
 
     expect(link.status).toBe('Active');
   });
@@ -409,7 +417,7 @@ describe('Issue', () => {
     const db = world();
     const scope = await db.provider.BeginEntityTransaction();
     try {
-      const error = await engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR).catch((e: unknown) => e);
+      const error = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR).catch((e: unknown) => e);
 
       expect((error as Error).message).toMatch(/inside a transaction/);
       expect((error as InstanceType<typeof FormDistributionError>).fault).toBe(false);
@@ -422,9 +430,9 @@ describe('Issue', () => {
 
   it(`keeps a de-duplicated slug within the slug grammar, even for a ${'60'}-character preferred slug`, async () => {
     const long = 'a'.repeat(60);
-    const db = world([distributionRow({ ID: 'other', FormID: 'form-2', Slug: long })]);
+    const db = world([distributionRow({ ID: 'other', FormID: 'e9d89f6f-e43c-5d1d-aef7-c46815bbb36a', Slug: long })]);
 
-    const link = await engine.Issue({ formId: 'form-1', slug: long }, db.provider, AUTHOR);
+    const link = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', slug: long }, db.provider, AUTHOR);
 
     expect(link.slug).not.toBe(long);
     expect(link.slug!.length).toBeLessThanOrEqual(60);
@@ -434,11 +442,11 @@ describe('Issue', () => {
   it.each([
     ['a name longer than the column holds', { name: 'n'.repeat(256) }, /name is longer than 255 characters/],
     ['an OpenAt that is not a date', { openAt: new Date('not a date') }, /OpenAt is not a valid date/],
-    ['a CloseAt that is not a date', { closeAt: new Date('nope') }, /CloseAt is not a valid date/],
+    ['a CloseAt that is not a date', { closeAt: new Date('26f49354-6372-560b-a644-119bdc106ab1') }, /CloseAt is not a valid date/],
   ])('refuses %s as a refusal, not a fault, before reading anything', async (_label, extra, message) => {
     const db = world([], { failRunViewFor: FORMS });
 
-    const error = await engine.Issue({ formId: 'form-1', ...extra }, db.provider, AUTHOR).catch((e: unknown) => e);
+    const error = await engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', ...extra }, db.provider, AUTHOR).catch((e: unknown) => e);
 
     expect((error as Error).message).toMatch(message);
     expect((error as InstanceType<typeof FormDistributionError>).fault).toBe(false);
@@ -450,7 +458,7 @@ describe('Issue', () => {
       [DISTRIBUTIONS]: [],
     });
 
-    await expect(engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR)).rejects.toThrow(/failed on the server/);
+    await expect(engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR)).rejects.toThrow(/failed on the server/);
     expect(logged.errors.join('\n')).toMatch(/Expected FormDistributionEntityServer/);
     expect(rowsOf(db, DISTRIBUTIONS)).toEqual([]);
   });
@@ -458,30 +466,30 @@ describe('Issue', () => {
 
 describe('Open', () => {
   it('opens a closed link — both halves — and the hook issues it a fresh credential, in one transaction', async () => {
-    const db = world([distributionRow({ ID: 'd1', Slug: 'lobby', Status: 'Closed', IsActive: false })]);
+    const db = world([distributionRow({ ID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', Slug: 'lobby', Status: 'Closed', IsActive: false })]);
 
-    const link = await engine.Open('d1', db.provider, AUTHOR);
+    const link = await engine.Open('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', db.provider, AUTHOR);
 
-    expect(linkRow(db, 'd1')).toMatchObject({ Status: 'Active', IsActive: true, MagicLinkInviteID: 'inv-1', PublicLinkToken: 'tok-1' });
-    expect(link).toEqual({ distributionId: 'd1', slug: 'lobby', status: 'Active', respondentUrl: `${PUBLIC_URL}/f/lobby` });
+    expect(linkRow(db, 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c')).toMatchObject({ Status: 'Active', IsActive: true, MagicLinkInviteID: 'inv-1', PublicLinkToken: 'tok-1' });
+    expect(link).toEqual({ distributionId: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', slug: 'lobby', status: 'Active', respondentUrl: `${PUBLIC_URL}/f/lobby` });
     expect(db.transactions[0]).toBe('begin');
     expect(db.transactions.at(-1)).toBe('commit');
   });
 
   it("repairs a row that reads Active but is not IsActive — the half 'open' used to forget", async () => {
-    const db = world([distributionRow({ ID: 'd1', Status: 'Active', IsActive: false })]);
+    const db = world([distributionRow({ ID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', Status: 'Active', IsActive: false })]);
 
-    await engine.Open('d1', db.provider, AUTHOR);
+    await engine.Open('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', db.provider, AUTHOR);
 
-    expect(linkRow(db, 'd1')).toMatchObject({ Status: 'Active', IsActive: true, PublicLinkToken: 'tok-1' });
+    expect(linkRow(db, 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c')).toMatchObject({ Status: 'Active', IsActive: true, PublicLinkToken: 'tok-1' });
   });
 
   it('forces the save (IgnoreDirtyState), so an already-open row is still written and re-provisioned', async () => {
-    const db = world([distributionRow({ ID: 'd1' })]);
+    const db = world([distributionRow({ ID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c' })]);
     const save = vi.spyOn(FormDistributionEntityServer.prototype, 'Save');
 
     try {
-      await engine.Open('d1', db.provider, AUTHOR);
+      await engine.Open('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', db.provider, AUTHOR);
       expect(save.mock.calls[0]?.[0]?.IgnoreDirtyState).toBe(true);
     } finally {
       save.mockRestore();
@@ -492,47 +500,47 @@ describe('Open', () => {
     ['an archived form', { Status: 'Closed' }, /archived/],
     ['a template', { IsTemplate: true }, /template/],
   ])("refuses to open a link on %s, leaving it as it was", async (_label, form, message) => {
-    const db = world([distributionRow({ ID: 'd1', Status: 'Closed', IsActive: false })], {}, form);
+    const db = world([distributionRow({ ID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', Status: 'Closed', IsActive: false })], {}, form);
 
-    await expect(engine.Open('d1', db.provider, AUTHOR)).rejects.toThrow(message);
-    expect(linkRow(db, 'd1')).toMatchObject({ Status: 'Closed', IsActive: false });
+    await expect(engine.Open('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', db.provider, AUTHOR)).rejects.toThrow(message);
+    expect(linkRow(db, 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c')).toMatchObject({ Status: 'Closed', IsActive: false });
     expect(db.transactions).toEqual(['begin', 'rollback']);
   });
 });
 
 describe('Close', () => {
   it('closes the link and the hook revokes its credential in the same transaction; no URL', async () => {
-    const db = world([distributionRow({ ID: 'd1', Slug: 'lobby', MagicLinkInviteID: 'inv-0', PublicLinkToken: 'tok-0' })]);
+    const db = world([distributionRow({ ID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', Slug: 'lobby', MagicLinkInviteID: 'inv-0', PublicLinkToken: 'tok-0' })]);
 
-    const link = await engine.Close('d1', db.provider, AUTHOR);
+    const link = await engine.Close('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', db.provider, AUTHOR);
 
-    expect(linkRow(db, 'd1')).toMatchObject({ Status: 'Closed', MagicLinkInviteID: null, PublicLinkToken: null });
-    expect(minter.revoked).toEqual([{ inviteId: 'inv-0', resourceId: 'd1' }]);
-    expect(link).toEqual({ distributionId: 'd1', slug: 'lobby', status: 'Closed', respondentUrl: null });
+    expect(linkRow(db, 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c')).toMatchObject({ Status: 'Closed', MagicLinkInviteID: null, PublicLinkToken: null });
+    expect(minter.revoked).toEqual([{ inviteId: 'inv-0', resourceId: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c' }]);
+    expect(link).toEqual({ distributionId: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', slug: 'lobby', status: 'Closed', respondentUrl: null });
     expect(db.transactions[0]).toBe('begin');
     expect(db.transactions.at(-1)).toBe('commit');
   });
 
   it('rolls back and reports a refused save — the reason to the log with the link and the user, not to the caller', async () => {
-    const db = world([distributionRow({ ID: 'd1' })], { failSaveWhen: (name) => (name === DISTRIBUTIONS ? 'disk full' : false) });
+    const db = world([distributionRow({ ID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c' })], { failSaveWhen: (name) => (name === DISTRIBUTIONS ? 'disk full' : false) });
 
-    const error = await engine.Close('d1', db.provider, AUTHOR).catch((e: unknown) => e);
+    const error = await engine.Close('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', db.provider, AUTHOR).catch((e: unknown) => e);
 
-    expect((error as Error).message).toMatch(/Could not close share link d1/);
+    expect((error as Error).message).toMatch(/Could not close share link a40a7e57-4c4d-51b7-9e3e-a7b972231f5c/);
     expect((error as Error).message).not.toMatch(/disk full/);
-    expect(linkRow(db, 'd1')?.Status).toBe('Active');
-    expect(logged.errors.join('\n')).toMatch(/d1.*author-1.*disk full/);
+    expect(linkRow(db, 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c')?.Status).toBe('Active');
+    expect(logged.errors.join('\n')).toMatch(/a40a7e57-4c4d-51b7-9e3e-a7b972231f5c.*author-1.*disk full/);
   });
 });
 
 describe('Reissue', () => {
   it('replaces the credential and keeps the slug, so every shared URL keeps working', async () => {
-    const db = world([distributionRow({ ID: 'd1', Slug: 'lobby', MagicLinkInviteID: 'inv-0', PublicLinkToken: 'tok-0' })]);
+    const db = world([distributionRow({ ID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', Slug: 'lobby', MagicLinkInviteID: 'inv-0', PublicLinkToken: 'tok-0' })]);
 
-    const link = await engine.Reissue('d1', db.provider, AUTHOR);
+    const link = await engine.Reissue('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', db.provider, AUTHOR);
 
-    expect(minter.revoked).toEqual([{ inviteId: 'inv-0', resourceId: 'd1' }]);
-    expect(linkRow(db, 'd1')).toMatchObject({ Slug: 'lobby', MagicLinkInviteID: 'inv-1', PublicLinkToken: 'tok-1' });
+    expect(minter.revoked).toEqual([{ inviteId: 'inv-0', resourceId: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c' }]);
+    expect(linkRow(db, 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c')).toMatchObject({ Slug: 'lobby', MagicLinkInviteID: 'inv-1', PublicLinkToken: 'tok-1' });
     expect(link.respondentUrl).toBe(`${PUBLIC_URL}/f/lobby`);
   });
 
@@ -540,9 +548,9 @@ describe('Reissue', () => {
     ['closed', { Status: 'Closed' }],
     ['paused (IsActive off)', { IsActive: false }],
   ])('refuses a link that is %s — it holds no credential to reissue; opening issues one', async (_label, state) => {
-    const db = world([distributionRow({ ID: 'd1', ...state })]);
+    const db = world([distributionRow({ ID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', ...state })]);
 
-    await expect(engine.Reissue('d1', db.provider, AUTHOR)).rejects.toThrow(/not open to responses/);
+    await expect(engine.Reissue('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', db.provider, AUTHOR)).rejects.toThrow(/not open to responses/);
     expect(minter.minted).toEqual([]);
   });
 });
@@ -555,18 +563,18 @@ describe.each([
   it('refuses a link that does not exist', async () => {
     const db = world();
 
-    const error = await run('nope', db, AUTHOR).catch((e: unknown) => e);
+    const error = await run('26f49354-6372-560b-a644-119bdc106ab1', db, AUTHOR).catch((e: unknown) => e);
 
-    expect((error as Error).message).toMatch(/Share link nope does not exist/);
+    expect((error as Error).message).toMatch(/Share link 26f49354-6372-560b-a644-119bdc106ab1 does not exist/);
     expect((error as InstanceType<typeof FormDistributionError>).fault).toBe(false);
   });
 
   it('refuses when the link cannot be read, keeping the provider\'s words out of the answer', async () => {
-    const db = world([distributionRow({ ID: 'd1' })], { failRunViewFor: DISTRIBUTIONS });
+    const db = world([distributionRow({ ID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c' })], { failRunViewFor: DISTRIBUTIONS });
 
-    const error = await run('d1', db, AUTHOR).catch((e: unknown) => e);
+    const error = await run('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', db, AUTHOR).catch((e: unknown) => e);
 
-    expect((error as Error).message).toMatch(/Could not read share link d1/);
+    expect((error as Error).message).toMatch(/Could not read share link a40a7e57-4c4d-51b7-9e3e-a7b972231f5c/);
     expect((error as Error).message).not.toMatch(/forced runview failure/);
     expect(logged.errors.join('\n')).toMatch(/forced runview failure/);
     expect((error as InstanceType<typeof FormDistributionError>).fault).toBe(true);
@@ -574,21 +582,21 @@ describe.each([
 
   it('answers a link the caller cannot read exactly as one that does not exist — no existence or state oracle', async () => {
     const absent = world();
-    const hidden = world([distributionRow({ ID: 'd1', Status: 'Closed', IsActive: false })]);
-    hideFromCaller(hidden, DISTRIBUTIONS, 'd1');
+    const hidden = world([distributionRow({ ID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', Status: 'Closed', IsActive: false })]);
+    hideFromCaller(hidden, DISTRIBUTIONS, 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c');
 
-    const notThere = await run('d1', absent, AUTHOR).catch((e: unknown) => e);
-    const notVisible = await run('d1', hidden, AUTHOR).catch((e: unknown) => e);
+    const notThere = await run('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', absent, AUTHOR).catch((e: unknown) => e);
+    const notVisible = await run('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', hidden, AUTHOR).catch((e: unknown) => e);
 
     expect((notVisible as Error).message).toBe((notThere as Error).message);
-    expect(linkRow(hidden, 'd1')).toMatchObject({ Status: 'Closed', IsActive: false });
+    expect(linkRow(hidden, 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c')).toMatchObject({ Status: 'Closed', IsActive: false });
   });
 
   it('refuses a blank id and a missing user before touching the database', async () => {
     const db = world([], { failRunViewFor: DISTRIBUTIONS });
 
     await expect(run('  ', db, AUTHOR)).rejects.toThrow(/share link id is required/);
-    await expect(run('d1', db, undefined as unknown as UserInfo)).rejects.toThrow(/needs the acting user/);
+    await expect(run('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', db, undefined as unknown as UserInfo)).rejects.toThrow(/needs the acting user/);
   });
 });
 
@@ -613,9 +621,9 @@ describe('GetClaims', () => {
 
   it("asks every registered app about this form's own slugs, as the caller, and reports what they own", async () => {
     const db = world([
-      distributionRow({ ID: 'd1', FormID: FORM, Slug: 'intake' }),
-      distributionRow({ ID: 'd2', FormID: FORM, Slug: null }),
-      distributionRow({ ID: 'd3', FormID: 'form-2', Slug: 'elsewhere' }),
+      distributionRow({ ID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', FormID: FORM, Slug: 'intake' }),
+      distributionRow({ ID: 'd5d04142-7e2c-53df-ac95-7ff699b875b9', FormID: FORM, Slug: null }),
+      distributionRow({ ID: '6e7740e0-23e2-5228-9742-8e8604b06baf', FormID: 'e9d89f6f-e43c-5d1d-aef7-c46815bbb36a', Slug: 'elsewhere' }),
     ]);
     const asked = registerClaimant((slugs) =>
       slugs.map((slug) => ({ slug, ownerLabel: 'Screen step', respondentUrl: 'https://caliber.example/i/1' })),
@@ -665,7 +673,7 @@ describe('GetClaims', () => {
 describe('an unexpected exception never reaches the caller in its own words', () => {
   const SECRET = "Invalid column 'PublicLinkToken' in SELECT ... WHERE ID='other-form'";
 
-  function throwingWorld(links: FakeRow[] = [distributionRow({ ID: 'd1' })]) {
+  function throwingWorld(links: FakeRow[] = [distributionRow({ ID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c' })]) {
     const db = world(links);
     (db.provider as unknown as { RunView: () => Promise<never> }).RunView = async () => {
       throw new Error(SECRET);
@@ -674,10 +682,10 @@ describe('an unexpected exception never reaches the caller in its own words', ()
   }
 
   it.each([
-    ['Issue', (db: ReturnType<typeof world>) => engine.Issue({ formId: 'form-1' }, db.provider, AUTHOR)],
-    ['Open', (db: ReturnType<typeof world>) => engine.Open('d1', db.provider, AUTHOR)],
-    ['Close', (db: ReturnType<typeof world>) => engine.Close('d1', db.provider, AUTHOR)],
-    ['Reissue', (db: ReturnType<typeof world>) => engine.Reissue('d1', db.provider, AUTHOR)],
+    ['Issue', (db: ReturnType<typeof world>) => engine.Issue({ formId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR)],
+    ['Open', (db: ReturnType<typeof world>) => engine.Open('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', db.provider, AUTHOR)],
+    ['Close', (db: ReturnType<typeof world>) => engine.Close('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', db.provider, AUTHOR)],
+    ['Reissue', (db: ReturnType<typeof world>) => engine.Reissue('a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', db.provider, AUTHOR)],
     ['GetClaims', (db: ReturnType<typeof world>) => engine.GetClaims('11111111-1111-4111-8111-111111111111', db.provider, AUTHOR)],
   ])('%s', async (_verb, run) => {
     const error = await run(throwingWorld()).catch((e: unknown) => e);
@@ -687,4 +695,13 @@ describe('an unexpected exception never reaches the caller in its own words', ()
     expect((error as Error).message).toMatch(/failed on the server/);
     expect(logged.errors.join('\n')).toContain(SECRET);
   });
+});
+
+it.each(['Issue', 'Open', 'Close', 'Reissue'] as const)('%s refuses malformed IDs before reading', async (verb) => {
+  const db = world([], { failRunViewFor: verb === 'Issue' ? FORMS : DISTRIBUTIONS });
+  const result = verb === 'Issue' ? engine.Issue({ formId: 'invalid-guid' }, db.provider, AUTHOR) : engine[verb]('invalid-guid', db.provider, AUTHOR);
+  const error = await result.catch((e: unknown) => e);
+  expect(error).toMatchObject({ fault: false });
+  expect((error as Error).message).toMatch(/valid.*ID/i);
+  expect(db.transactions).toEqual([]);
 });

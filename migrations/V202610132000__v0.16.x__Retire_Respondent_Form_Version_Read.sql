@@ -18,10 +18,11 @@
 -- the same decision V202608131600 made for Forms, Form Questions, Form Question Options, Form Pages
 -- and Form Styles.
 --
--- MATCHED BY (ROLE NAME, ENTITY NAME), NEVER BY PERMISSION-ROW ID. The id a host holds is not ours
+-- MATCHED BY ROLE NAME AND ENTITY (SCHEMA, BASE TABLE), NEVER BY PERMISSION-ROW ID. The id a host holds is not ours
 -- to assume: on a host where a sibling app minted `Form Respondent` first, the role and its rows
 -- carry ids this repo has never seen, and `__mj.EntityPermission` has no unique constraint on
--- (EntityID, RoleID), so duplicates are reachable. Every matching row goes.
+-- (EntityID, RoleID), so duplicates are reachable. Every matching row goes. Entity names may be
+-- renamed by the host; the schema and physical table are the stable identity.
 --
 -- THE FILTER RECORD GOES TOO, BUT ONLY WHEN NOTHING POINTS AT IT. It is Forms-owned (fixed id
 -- `7F0E0003-…`, seeded by V202608131600 and extended by V202609091600), and its only consumer was
@@ -34,16 +35,21 @@
 -- installs reach this after V202608131600 has created (and asserted) the grant, so the chain's
 -- earlier postconditions still hold at the point they run.
 --
--- PLACEHOLDERS. Only the core-schema placeholder appears (no app-schema object is touched), which
--- `npm run lint:distribution` gates.
+-- PLACEHOLDERS. The core schema identifies metadata tables; the app schema identifies the
+-- FormVersion entity by its natural key. `npm run lint:distribution` gates both.
 -- =============================================================================================
+
+IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[Entity]
+               WHERE SchemaName = '${flyway:defaultSchema}' AND BaseTable = N'FormVersion')
+    THROW 51116, 'MJ Forms: FormVersion entity is missing from metadata; cannot retire respondent permissions.', 1;
+GO
 
 DELETE p
 FROM [${mjSchema}].[EntityPermission] p
 JOIN [${mjSchema}].[Entity] e ON e.ID = p.EntityID
 JOIN [${mjSchema}].[Role]   r ON r.ID = p.RoleID
 WHERE r.Name = N'Form Respondent'
-  AND e.Name = N'MJ_BizApps_Forms: Form Versions';
+  AND e.SchemaName = '${flyway:defaultSchema}' AND e.BaseTable = N'FormVersion';
 GO
 
 IF EXISTS (SELECT 1 FROM [${mjSchema}].[EntityPermission]
@@ -59,14 +65,14 @@ GO
 
 -- ── Postcondition ─────────────────────────────────────────────────────────────────────────────
 -- A security migration that half-applies and reports success is the worst outcome, so the end
--- state is asserted. It can fire: a host whose entity carries a different name, or a row added
--- between the DELETE and here, leaves the grant in place.
+-- state is asserted. A permission row added between the DELETE and here must not leave
+-- the grant in place. The same natural key also handles host-renamed entities.
 IF EXISTS (
     SELECT 1
     FROM [${mjSchema}].[EntityPermission] p
     JOIN [${mjSchema}].[Entity] e ON e.ID = p.EntityID
     JOIN [${mjSchema}].[Role]   r ON r.ID = p.RoleID
     WHERE r.Name = N'Form Respondent'
-      AND e.Name = N'MJ_BizApps_Forms: Form Versions')
+      AND e.SchemaName = '${flyway:defaultSchema}' AND e.BaseTable = N'FormVersion')
     THROW 51115, 'MJ Forms: the Form Respondent role still holds a permission row on Form Versions. It lets any holder of a public link read the raw DefinitionSnapshot (answer key, ending redirects, knockout conditions) through the generic GraphQL resolvers (#302). Forms reads the published version as the system user and needs no respondent grant here; delete the row.', 1;
 GO

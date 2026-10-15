@@ -47,7 +47,7 @@ export type AnswerValueKind = 'Text' | 'Numeric' | 'Boolean' | 'Date';
 /** `Forms: Question Answer Value Counts` — one row per (question, kind, value) over Complete responses. */
 export interface ValueCountRow {
   QuestionID: string;
-  /** Distinct Complete responses with any value for the question (the same on each of its rows). */
+  /** Distinct Complete responses with this value kind for the question (same on each kind's rows). */
   AnsweredResponses: number;
   ValueKind: AnswerValueKind;
   Value: string;

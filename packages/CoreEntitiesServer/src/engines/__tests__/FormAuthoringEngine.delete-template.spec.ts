@@ -64,12 +64,12 @@ const { FormVersionEntityServer } = await import('../../entities/FormVersionEnti
 const SUBCLASSES = { FormEntityServer, FormVersionEntityServer } as unknown as ServerSubclasses;
 const RESPONSES = 'MJ_BizApps_Forms: Form Responses';
 
-/** A template (form-1) with a page, two questions, two options, a screen, a step and its binding — and another form's rows. */
+/** A template (4d81af18-d0fe-5b39-b7de-6a0eb70c5766) with a page, two questions, two options, a screen, a step and its binding — and another form's rows. */
 function templateTables(form: Partial<FakeRow> = {}): Record<string, FakeRow[]> {
   const base = draftTables();
   return {
     ...base,
-    [FORMS]: [formRow({ IsTemplate: true, ...form }), formRow({ ID: 'form-2', Name: 'Other' })],
+    [FORMS]: [formRow({ IsTemplate: true, ...form }), formRow({ ID: 'e9d89f6f-e43c-5d1d-aef7-c46815bbb36a', Name: 'Other' })],
     [SCREENS]: [screenRow({ ID: 's1' })],
     [AUTOMATIONS]: [automationRow({ ID: 'a1', BindingID: 'b1', TargetType: 'EntityBinding' })],
     [BINDINGS]: [bindingRow({ ID: 'b1' })],
@@ -90,13 +90,35 @@ beforeEach(() => {
 });
 
 describe('DeleteTemplate', () => {
+  it('removes all children beyond the provider default row cap', async () => {
+    const tables = templateTables();
+    tables[OPTIONS] = Array.from({ length: 1001 }, (_, i) => ({ ID: `option-${i}`, QuestionID: 'q1' }));
+    const db = world(tables);
+    const read = db.provider.RunView.bind(db.provider);
+    vi.spyOn(db.provider, 'RunView').mockImplementation(async (params, user) => {
+      const result = await read(params, user);
+      return params.IgnoreMaxRows ? result : { ...result, Results: result.Results.slice(0, 1000) };
+    });
+    const result = await FormAuthoringEngine.Instance.DeleteTemplate('4d81af18-d0fe-5b39-b7de-6a0eb70c5766', db.provider, AUTHOR);
+    expect(result.optionCount).toBe(1001);
+    expect(ids(db, OPTIONS)).toEqual([]);
+  });
+
+  it('keeps provider delete diagnostics in the server log only', async () => {
+    const detail = 'DELETE failed: private database secret';
+    const db = world(templateTables(), { failDeleteWhen: (entity) => entity === SCREENS ? detail : false });
+    const error = await FormAuthoringEngine.Instance.DeleteTemplate('4d81af18-d0fe-5b39-b7de-6a0eb70c5766', db.provider, AUTHOR).catch((e: unknown) => e);
+    expect((error as Error).message).not.toContain(detail);
+    expect(logged.join(' ')).toContain(detail);
+  });
+
   it('deletes the template and everything under it, children first, in one unit of work', async () => {
     const db = world(templateTables());
 
-    const result = await FormAuthoringEngine.Instance.DeleteTemplate('form-1', db.provider, AUTHOR);
+    const result = await FormAuthoringEngine.Instance.DeleteTemplate('4d81af18-d0fe-5b39-b7de-6a0eb70c5766', db.provider, AUTHOR);
 
     expect(result).toEqual({
-      templateFormId: 'form-1',
+      templateFormId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766',
       pageCount: 1,
       questionCount: 2,
       optionCount: 2,
@@ -104,7 +126,7 @@ describe('DeleteTemplate', () => {
       automationCount: 1,
       bindingCount: 1,
     });
-    expect(ids(db, FORMS)).toEqual(['form-2']);
+    expect(ids(db, FORMS)).toEqual(['e9d89f6f-e43c-5d1d-aef7-c46815bbb36a']);
     for (const entity of [PAGES, QUESTIONS, OPTIONS, SCREENS, AUTOMATIONS, BINDINGS]) {
       expect(ids(db, entity), entity).toEqual([]);
     }
@@ -120,14 +142,14 @@ describe('DeleteTemplate', () => {
   it('refuses a working form — forms are archived, never deleted — and writes nothing', async () => {
     const db = world(templateTables({ IsTemplate: false }));
 
-    await expect(FormAuthoringEngine.Instance.DeleteTemplate('form-1', db.provider, AUTHOR)).rejects.toThrow(
+    await expect(FormAuthoringEngine.Instance.DeleteTemplate('4d81af18-d0fe-5b39-b7de-6a0eb70c5766', db.provider, AUTHOR)).rejects.toThrow(
       '"Intake" is a form, not a template, and forms are archived rather than deleted.',
     );
     expect(db.deleted).toEqual([]);
   });
 
   it.each([
-    ['responses', RESPONSES, { ID: 'r1', FormID: 'form-1' }, 'This template has 1 response(s) attached and cannot be deleted.'],
+    ['responses', RESPONSES, { ID: 'r1', FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, 'This template has 1 response(s) attached and cannot be deleted.'],
     ['versions', VERSIONS, versionRow('v1', 1, 'Draft'), 'This template has 1 published version(s) attached and cannot be deleted.'],
     ['share links', DISTRIBUTIONS, distributionRow({ ID: 'd1' }), 'This template has 1 distribution link(s) attached and cannot be deleted.'],
   ])('refuses a template with %s attached, before deleting anything', async (_label, entity, row, message) => {
@@ -135,7 +157,7 @@ describe('DeleteTemplate', () => {
     tables[entity] = [row as FakeRow];
     const db = world(tables);
 
-    await expect(FormAuthoringEngine.Instance.DeleteTemplate('form-1', db.provider, AUTHOR)).rejects.toThrow(message);
+    await expect(FormAuthoringEngine.Instance.DeleteTemplate('4d81af18-d0fe-5b39-b7de-6a0eb70c5766', db.provider, AUTHOR)).rejects.toThrow(message);
     expect(db.deleted).toEqual([]);
   });
 
@@ -144,11 +166,11 @@ describe('DeleteTemplate', () => {
       failDeleteWhen: (entity) => (entity === SCREENS ? 'The DELETE statement conflicted with a REFERENCE constraint.' : false),
     });
 
-    const failure = FormAuthoringEngine.Instance.DeleteTemplate('form-1', db.provider, AUTHOR);
+    const failure = FormAuthoringEngine.Instance.DeleteTemplate('4d81af18-d0fe-5b39-b7de-6a0eb70c5766', db.provider, AUTHOR);
 
     await expect(failure).rejects.toBeInstanceOf(FormAuthoringError);
     await expect(failure).rejects.toThrow(/Nothing was deleted/);
-    expect(ids(db, FORMS)).toEqual(['form-1', 'form-2']);
+    expect(ids(db, FORMS)).toEqual(['4d81af18-d0fe-5b39-b7de-6a0eb70c5766', 'e9d89f6f-e43c-5d1d-aef7-c46815bbb36a']);
     expect(ids(db, QUESTIONS)).toEqual(['q1', 'q2']);
     expect(ids(db, OPTIONS).sort()).toEqual(['o1', 'o2']);
     expect(db.transactions.at(-1)).toBe('rollback');
@@ -156,8 +178,30 @@ describe('DeleteTemplate', () => {
 
   it('refuses a template that does not exist', async () => {
     const db = world(templateTables());
-    await expect(FormAuthoringEngine.Instance.DeleteTemplate('nope', db.provider, AUTHOR)).rejects.toThrow(
-      'Form nope does not exist, so it cannot be deleted.',
+    await expect(FormAuthoringEngine.Instance.DeleteTemplate('26f49354-6372-560b-a644-119bdc106ab1', db.provider, AUTHOR)).rejects.toThrow(
+      'Form 26f49354-6372-560b-a644-119bdc106ab1 does not exist, so it cannot be deleted.',
     );
   });
+});
+
+it.each(['Archive', 'Restore', 'DeleteTemplate', 'Clone', 'CreateFromTemplate'] as const)('%s refuses malformed form IDs before reading', async (verb) => {
+  const db = world(templateTables(), { failRunViewFor: FORMS });
+  const engine = FormAuthoringEngine.Instance;
+  const result = verb === 'Clone' ? engine.Clone('invalid-guid', db.provider, AUTHOR, { asTemplate: false })
+    : verb === 'CreateFromTemplate' ? engine.CreateFromTemplate({ templateFormId: 'invalid-guid' }, db.provider, AUTHOR)
+      : engine[verb]('invalid-guid', db.provider, AUTHOR);
+  const error = await result.catch((e: unknown) => e);
+  expect(error).toMatchObject({ fault: false });
+  expect((error as Error).message).toMatch(/valid.*ID/i);
+  expect(db.transactions).toEqual([]);
+});
+
+it('logs a thrown provider error without returning its SQL to the author', async () => {
+  const db = world(templateTables());
+  const detail = 'SELECT private_column FROM private_database';
+  vi.spyOn(db.provider, 'RunView').mockRejectedValue(new Error(detail));
+  const error = await FormAuthoringEngine.Instance.DeleteTemplate('4d81af18-d0fe-5b39-b7de-6a0eb70c5766', db.provider, AUTHOR).catch((e: unknown) => e);
+  expect((error as Error).message).not.toContain(detail);
+  expect(error).toBeInstanceOf(FormAuthoringError);
+  expect(logged.join(' ')).toContain(detail);
 });

@@ -131,6 +131,23 @@ describe('FormsHomeDashboardComponent failure alert (#253)', () => {
 });
 
 describe('FormsHomeDashboardComponent lifecycle and templates', () => {
+  it('keeps copy warnings after its own operation announcement debounce expires', async () => {
+    vi.useFakeTimers();
+    const component = makeComponent(homeService({ createFromTemplate: async () => {
+      announceWrites([HOME_ENTITY.forms]);
+      return { ok: true, output: { FormID: 'new-1', Warnings: ['A rule could not be carried over.'] } };
+    } }));
+    try {
+      await component.Refresh();
+      await component.useTemplate({ kind: 'saved', templateId: 't1', name: 'Intake' });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(component.errorMessage).toBe('A rule could not be carried over.');
+    } finally {
+      component.ngOnDestroy();
+      vi.useRealTimers();
+    }
+  });
+
   const archivedRow: FormSummaryRow = { ...draftRow, status: 'Closed' };
 
   it('restores an archived form through restore(), and archives a live one through archive()', async () => {

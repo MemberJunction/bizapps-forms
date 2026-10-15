@@ -169,6 +169,9 @@ export class FormDistributionEngine extends BaseSingleton<FormDistributionEngine
     if (!formId) {
       throw new FormDistributionError('A form id is required to issue a share link.');
     }
+    if (!isGuid(formId)) {
+      throw new FormDistributionError('A valid form ID is required to issue a share link.');
+    }
     requireUser(user, `Issuing a share link for form ${formId}`);
     const refusal = issueRequestRefusal(request);
     if (refusal) {
@@ -287,6 +290,9 @@ export class FormDistributionEngine extends BaseSingleton<FormDistributionEngine
     if (!id) {
       throw new FormDistributionError(`A share link id is required to ${verb.name} a share link.`);
     }
+    if (!isGuid(id)) {
+      throw new FormDistributionError(`A valid share link ID is required to ${verb.name} a share link.`);
+    }
     requireUser(user, `To ${verb.name} share link ${id}`);
     requireEntityTransactions(provider, `To ${verb.name} share link ${id}`);
     return runEngineUnitOfWork(provider, `[FormDistributionEngine] share link ${id} was not ${verb.past} (user ${user.ID})`, () =>
@@ -368,6 +374,9 @@ function requireUser(user: UserInfo | undefined, what: string): asserts user is 
  * The operation checks the wire; this is what an in-process caller (an Action, an agent) meets.
  */
 function issueRequestRefusal(request: IssueLinkRequest): string | null {
+  if (request.maxResponses != null && (!Number.isInteger(request.maxResponses) || request.maxResponses <= 0)) {
+    return 'The response limit must be a positive integer.';
+  }
   if (request.slug !== undefined) {
     const refusal = slugRefusal(request.slug);
     if (refusal) {

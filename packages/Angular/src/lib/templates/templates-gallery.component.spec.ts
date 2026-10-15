@@ -32,9 +32,27 @@ afterEach(() => {
   operations?.restore();
   operations = null;
   reads.length = 0;
+  vi.useRealTimers();
 });
 
 describe('deleting a saved template', () => {
+  it('reloads only once for its own delete even after the write debounce expires', async () => {
+    vi.useFakeTimers();
+    operations = installFakeOperations(() => succeeded({ TemplateFormID: 't1', PageCount: 1, QuestionCount: 2, OptionCount: 0, ScreenCount: 0, AutomationCount: 0, BindingCount: 0 }));
+    const component = gallery();
+    component.ngOnInit();
+    await vi.advanceTimersByTimeAsync(0);
+    reads.length = 0;
+    try {
+      component.askDelete(row);
+      await component.confirmDelete();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(reads).toEqual(['templates']);
+    } finally {
+      component.ngOnDestroy();
+    }
+  });
+
   it('asks Forms.DeleteTemplate for it, then re-reads the gallery and says so', async () => {
     operations = installFakeOperations(() =>
       succeeded({ TemplateFormID: 't1', PageCount: 1, QuestionCount: 2, OptionCount: 0, ScreenCount: 0, AutomationCount: 0, BindingCount: 0 }),

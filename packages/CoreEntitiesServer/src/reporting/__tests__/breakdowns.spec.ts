@@ -62,6 +62,23 @@ describe('choice breakdowns', () => {
   });
 });
 
+describe('historical question types', () => {
+  it('counts answered responses only for the kind the current question charts', () => {
+    const rows = [valueRow('q', 7, 'Text', 'old text', 7), valueRow('q', 2, 'Numeric', '5', 2)];
+    const [card] = buildQuestionBreakdowns([question('q', 'Number')], rows, []);
+
+    expect(card.AnsweredCount).toBe(2);
+    expect(card.Numeric?.Answered).toBe(2);
+  });
+
+  it('shows zero answered when only an older incompatible kind has values', () => {
+    const [card] = buildQuestionBreakdowns([question('q', 'YesNo')], [valueRow('q', 7, 'Text', 'old text', 7)], []);
+
+    expect(card.AnsweredCount).toBe(0);
+    expect(card.Buckets.map((bucket) => bucket.Count)).toEqual([0, 0]);
+  });
+});
+
 describe('scale breakdowns', () => {
   it('weights min, max and the mean by how many answers carried each value', () => {
     const rating = question('q-rate', 'Rating', 'Rate us');

@@ -721,7 +721,7 @@ function makeTableEntity(entityName: string, table: FakeRow[], row: FakeRow | nu
         }
         if (current === null) {
           insertCount += 1;
-          const inserted: FakeRow = { ...values, ID: String(values.ID ?? `id-${entityName}-${table.length + insertCount}`) };
+          const inserted: FakeRow = { ...values, ID: String(values.ID ?? randomUUID()) };
           values.ID = inserted.ID;
           table.push(inserted);
           current = inserted;

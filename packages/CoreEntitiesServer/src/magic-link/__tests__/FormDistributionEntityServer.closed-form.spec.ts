@@ -104,7 +104,7 @@ describe('a plain save cannot open a share link on an archived form', () => {
     const db = world('Closed', []);
     const link = (await db.provider.GetEntityObject(DISTRIBUTIONS)) as unknown as Link;
     link.NewRecord();
-    Object.assign(link, { FormID: 'form-1', Name: 'x', ChannelType: 'PublicLink', Status: 'Active', IsActive: true, ResponseCount: 0 });
+    Object.assign(link, { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', Name: 'x', ChannelType: 'PublicLink', Status: 'Active', IsActive: true, ResponseCount: 0 });
 
     expect(await link.Save()).toBe(false);
     expect(rowsOf(db, DISTRIBUTIONS)).toEqual([]);

@@ -12,10 +12,11 @@
  *
  * BOUNDED: a form with a million answers must not load a million rows to draw a panel. The read
  * counts the rows first, then pages through at most {@link MAX_INSIGHT_ANSWER_ROWS} of them, ordered
- * by ID so pages neither overlap nor skip; past the cap the result says so (`capped`) and the summary
- * reports it (`InsightAnswersCapped`) rather than presenting a sample as the whole.
+ * by an ID seek cursor so concurrent membership changes cannot shift page offsets. Past the cap
+ * the result says so (`capped`), and the summary reports it (`InsightAnswersCapped`) rather than
+ * presenting a sample as the whole.
  */
-import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
+import { CompositeKey, type DatabaseProviderBase, type UserInfo } from '@memberjunction/core';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
 import type { ReportScope } from './report-queries.js';
@@ -69,9 +70,10 @@ export async function readInsightAnswers(
   const wanted = Math.min(total, MAX_INSIGHT_ANSWER_ROWS);
   const rows: InsightAnswerRow[] = [];
   for (let page = 0; page < MAX_INSIGHT_ANSWER_PAGES && rows.length < wanted; page++) {
-    // Started where the rows read so far end, not at page x size: a provider that returns a short
-    // page (an entity-level row limit) must not make the next page skip what it left out.
-    const batch = await readPage(provider, filter, rows.length, Math.min(INSIGHT_ANSWER_PAGE_SIZE, wanted - rows.length), scope, system);
+    // Seek after the last returned ID. An older partial response completing between pages must
+    // not shift an offset backwards and repeat a previously counted answer. This is a live scan,
+    // not a snapshot: rows becoming eligible behind the cursor wait for the next report.
+    const batch = await readPage(provider, filter, rows.at(-1)?.ID, Math.min(INSIGHT_ANSWER_PAGE_SIZE, wanted - rows.length), scope, system);
     rows.push(...batch);
     if (batch.length === 0) {
       // Rows were deleted between the count and this page; what was read is all there is.
@@ -108,7 +110,7 @@ async function countRows(provider: InsightAnswerSource, filter: string, scope: R
 async function readPage(
   provider: InsightAnswerSource,
   filter: string,
-  startRow: number,
+  afterId: string | undefined,
   maxRows: number,
   scope: ReportScope,
   system: UserInfo,
@@ -119,7 +121,7 @@ async function readPage(
       ExtraFilter: filter,
       Fields: ['ID', 'ResponseID', 'QuestionID', 'TextValue', 'JSONValue', 'FileID'],
       OrderBy: 'ID',
-      StartRow: startRow,
+      AfterKey: afterId == null ? undefined : CompositeKey.FromID(afterId),
       MaxRows: maxRows,
       ResultType: 'simple',
     },

@@ -524,6 +524,15 @@ describe('a date-column answer is written in the shape the TARGET field can hold
     ['q-date', 'Date' as const],
   ]);
 
+  it.each([['abcdef12-abcd-4abc-8abc-abcdef123456', 'ABCDEF12-ABCD-4ABC-8ABC-ABCDEF123456'], ['ABCDEF12-ABCD-4ABC-8ABC-ABCDEF123456', 'abcdef12-abcd-4abc-8abc-abcdef123456']])('formats Time with mixed-case mapping %s and type %s', async (mappingId, storedId) => {
+    const gateway = new FakeGateway({ writableFields: ['Notes'], temporalFields: [] });
+    await executeBinding({ respondentVerified: true, config: mappingTo('Notes', mappingId),
+      answers: answersOf([{ ...timeRow, QuestionID: storedId }]), gateway, allowedEntities: null,
+      questionTypes: new Map([[storedId, 'Time']]),
+    });
+    expect(gateway.writes[0].values.Notes).toBe('14:30');
+  });
+
   it('writes a Time as its clock when the target column is not temporal', async () => {
     const gateway = new FakeGateway({ writableFields: ['Notes'], temporalFields: [] });
     await executeBinding({

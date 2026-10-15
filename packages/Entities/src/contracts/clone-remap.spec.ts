@@ -6,6 +6,56 @@ const MAP = new Map([
   ['q-old-2', 'q-new-2'],
 ]);
 
+describe('clone references with mixed GUID casing', () => {
+  const original = 'ABCDEF12-1234-4321-8123-123456ABCDEF';
+  const replacement = 'FEDCBA12-1234-4321-8123-123456FEDCBA';
+  const ids = new Map([[original, replacement]]);
+
+  it('drops a malformed stored condition reference without aborting the copy', () => {
+    expect(remapConditionalRule(JSON.stringify({
+      show: { all: [{ questionId: 42, op: 'isAnswered' }] },
+    }), ids)).toEqual({ json: null, dropped: 1 });
+  });
+
+  it('drops a malformed stored mapping reference without aborting the copy', () => {
+    const result = remapFieldMappings(JSON.stringify({
+      version: 1, fields: [{ targetField: 'Email', source: { kind: 'question', questionId: null } }],
+    }), ids);
+    expect(result).toEqual({ json: JSON.stringify({ version: 1, fields: [] }), dropped: 1 });
+  });
+
+  it('preserves a condition referring to the same question with different casing', () => {
+    const result = remapConditionalRule(JSON.stringify({
+      show: { all: [{ questionId: original.toLowerCase(), op: 'isAnswered' }] },
+    }), ids);
+    expect(result.dropped).toBe(0);
+    expect(JSON.parse(result.json!)).toEqual({
+      show: { all: [{ questionId: replacement, op: 'isAnswered' }] },
+    });
+  });
+
+  it.each(['question', 'page', 'ending'] as const)('preserves a %s jump with different casing', (kind) => {
+    const result = remapConditionalRule(JSON.stringify({
+      jump: [{ when: {}, target: { kind, id: original.toLowerCase() } }],
+    }), ids, ids, ids);
+    expect(result.dropped).toBe(0);
+    expect(JSON.parse(result.json!)).toEqual({
+      jump: [{ when: {}, target: { kind, id: replacement } }],
+    });
+  });
+
+  it.each([original, original.toLowerCase()])('preserves a binding using map key %s', (key) => {
+    const reference = key === original ? original.toLowerCase() : original;
+    const result = remapFieldMappings(JSON.stringify({
+      version: 1, fields: [{ targetField: 'Email', source: { kind: 'question', questionId: reference } }],
+    }), new Map([[key, replacement]]));
+    expect(result.dropped).toBe(0);
+    expect(JSON.parse(result.json!)).toEqual({
+      version: 1, fields: [{ targetField: 'Email', source: { kind: 'question', questionId: replacement } }],
+    });
+  });
+});
+
 describe('remapConditionalRule', () => {
   it('rewrites every question id a rule references', () => {
     const rule = JSON.stringify({

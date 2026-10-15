@@ -114,11 +114,21 @@ describe('failures are surfaced, never swallowed', () => {
 let automationRows: Record<string, unknown>[] = [];
 /** Run rows the mocked RunView answers with. */
 let runRows: Record<string, unknown>[] = [];
+let refuseHistory = false;
 
 vi.mock('@memberjunction/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class RunView {
     public async RunView(params: RunViewParams) {
+      if (params.EntityName === 'MJ_BizApps_Forms: Form Automation Runs') {
+        const filter = typeof params.ExtraFilter === 'string' ? params.ExtraFilter : '';
+        const ids = [...filter.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+        return {
+          Success: !refuseHistory,
+          Results: refuseHistory ? [] : runRows.filter((row) => ids.includes(String(row['FormAutomationID']))).slice(0, params.MaxRows),
+          ErrorMessage: refuseHistory ? 'History unavailable' : '',
+        };
+      }
       const rows =
         params.EntityName === 'MJ_BizApps_Forms: Form Automations'
           ? automationRows
@@ -172,6 +182,7 @@ interface TabInternals {
   mappings: { set(rows: { targetField: string; questionId: string; rule: string }[]): void };
   selectedId(): string;
   actionError(): string;
+  runsFor(id: string): { id: string }[];
   seededNote(): string;
   md: { EntityByName(name: string): { ID: string; Name: string; DisplayNameOrName: string } | undefined };
 }
@@ -189,6 +200,7 @@ async function tabWith(rows: Record<string, unknown>[]): Promise<TabInternals> {
 beforeEach(() => {
   automationRows = [];
   runRows = [];
+  refuseHistory = false;
 });
 
 afterEach(() => {
@@ -200,6 +212,24 @@ const saved = (id: string, seeded: string[] = []) =>
   succeeded({ FormAutomationID: id, FormEntityBindingID: null, DisplayOrder: 5, SeededAutomationIDs: seeded });
 
 describe('recent activity', () => {
+  it('shows a quiet step latest run even when another step fills the global history window', async () => {
+    runRows = [
+      ...Array.from({ length: 10 }, (_, index) => ({ ID: `busy-${index}`, FormAutomationID: 'busy', Status: 'Succeeded', StartedAt: null, ErrorMessage: null, OutputSummary: null })),
+      { ID: 'quiet-1', FormAutomationID: 'quiet', Status: 'Succeeded', StartedAt: null, ErrorMessage: null, OutputSummary: null },
+    ];
+    const tab = await tabWith([step('busy', 1), step('quiet', 2)]);
+    expect(tab.runsFor('quiet').map((run) => run.id)).toEqual(['quiet-1']);
+    expect(tab.runsFor('busy')).toHaveLength(5);
+  });
+
+  it('preserves a refused write reason when the subsequent history read also fails', async () => {
+    const tab = await tabWith([step('a', 1)]);
+    operations = installFakeOperations(() => refused('The change was refused.'));
+    refuseHistory = true;
+    await tab.toggleActive('a');
+    expect(tab.actionError()).toContain('The change was refused.');
+  });
+
   it('shows what a run said in words — no JSON envelope, no record id (click-through observation 2)', async () => {
     runRows = [
       { ID: 'run-1', FormAutomationID: 'a1', Status: 'Succeeded', StartedAt: null, ErrorMessage: null, OutputSummary: '{"summary":"Created 7F367F15-B60D-49FF-A85F-3F62B5F2AE42"}' },

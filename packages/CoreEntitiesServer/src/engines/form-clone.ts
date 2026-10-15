@@ -155,7 +155,7 @@ function sourceRead(entityName: string, filter: string, orderBy?: string): RunVi
  */
 function rowsOrThrow<T>(result: RunViewResult<unknown> | undefined, what: string): T[] {
   if (!result?.Success) {
-    throw new FormAuthoringError(`Could not read ${what} (${result?.ErrorMessage || 'no result'}); nothing was copied.`, { fault: true });
+    throw new FormAuthoringError(`Could not read ${what}; nothing was copied.`, { fault: true, logDetail: result?.ErrorMessage || 'no result' });
   }
   return (result.Results ?? []) as T[];
 }

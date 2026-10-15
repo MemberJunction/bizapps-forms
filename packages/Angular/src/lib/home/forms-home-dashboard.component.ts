@@ -189,7 +189,7 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
       }
       // Not floating: the coalescer never rejects, and `readForms` shows its own failure.
       void this.loadForms();
-    }, { debounceMs: FORM_WRITE_DEBOUNCE_MS });
+    }, { debounceMs: FORM_WRITE_DEBOUNCE_MS, shouldHandle: () => !this.busy });
   }
 
   /**

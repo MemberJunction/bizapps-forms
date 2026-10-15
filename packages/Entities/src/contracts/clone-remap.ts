@@ -53,6 +53,11 @@ function hasConditions(group: ConditionalGroup | undefined): boolean {
   return (group?.all?.length ?? 0) > 0 || (group?.any?.length ?? 0) > 0;
 }
 
+/** SQL UUID columns and references stored in JSON can spell the same id differently. */
+function foldIdMap(ids: ReadonlyMap<string, string>): ReadonlyMap<string, string> {
+  return new Map(Array.from(ids, ([id, replacement]) => [id.toLowerCase(), replacement]));
+}
+
 export function remapConditionalRule(
   raw: string | null,
   idMap: ReadonlyMap<string, string>,
@@ -61,6 +66,9 @@ export function remapConditionalRule(
   /** Ending-screen counterparts, for ending jump targets — likewise dropped (and counted) without it. */
   screenIdMap?: ReadonlyMap<string, string>,
 ): RemapResult {
+  idMap = foldIdMap(idMap);
+  pageIdMap = pageIdMap === undefined ? undefined : foldIdMap(pageIdMap);
+  screenIdMap = screenIdMap === undefined ? undefined : foldIdMap(screenIdMap);
   if (raw === null || raw.trim() === '') {
     return { json: null, dropped: 0 };
   }
@@ -94,7 +102,7 @@ export function remapConditionalRule(
         kept.push({ ...condition });
         continue;
       }
-      const mapped = condition.questionId === undefined ? undefined : idMap.get(condition.questionId);
+      const mapped = typeof condition.questionId === 'string' ? idMap.get(condition.questionId.toLowerCase()) : undefined;
       if (mapped === undefined) {
         dropped++;
         continue;
@@ -187,15 +195,15 @@ function remapTarget(
     case 'submit':
       return target;
     case 'question': {
-      const id = idMap.get(target.id);
+      const id = idMap.get(target.id.toLowerCase());
       return id === undefined ? undefined : { kind: 'question', id };
     }
     case 'page': {
-      const id = pageIdMap?.get(target.id);
+      const id = pageIdMap?.get(target.id.toLowerCase());
       return id === undefined ? undefined : { kind: 'page', id };
     }
     case 'ending': {
-      const id = screenIdMap?.get(target.id);
+      const id = screenIdMap?.get(target.id.toLowerCase());
       return id === undefined ? undefined : { kind: 'ending', id };
     }
   }
@@ -277,6 +285,7 @@ export function remapFieldMappings(
   raw: string | null,
   idMap: ReadonlyMap<string, string>,
 ): RemapResult {
+  idMap = foldIdMap(idMap);
   if (raw === null || raw.trim() === '') {
     return { json: null, dropped: 0 };
   }
@@ -305,7 +314,7 @@ export function remapFieldMappings(
       fields.push(field);
       continue;
     }
-    const mapped = idMap.get(field.source.questionId);
+    const mapped = typeof field.source.questionId === 'string' ? idMap.get(field.source.questionId.toLowerCase()) : undefined;
     if (mapped === undefined) {
       dropped++;
       continue;

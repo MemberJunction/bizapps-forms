@@ -295,15 +295,15 @@ export class AutomationTabComponent implements OnInit {
    * Fill in the human-readable half of each step: the entity a binding writes to, an Action's or
    * Agent's own description, and what each step has been doing lately.
    *
-   * One batched `RunViews` rather than four awaited calls — these are independent reads and the
-   * tab should not pay four round trips for them.
+   * One batched `RunViews` for target details and each step's recent runs. Per-step limits keep a
+   * busy step from crowding every quieter step out of the history window.
    */
   private async resolveTargets(rows: readonly AutomationRow[]): Promise<void> {
     const bindingIds = idsOf(rows, (a) => a.BindingID);
     const actionIds = idsOf(rows, (a) => a.ActionID);
     const agentIds = idsOf(rows, (a) => a.AgentID);
 
-    const [bindings, actions, agents, runs] = await new RunView().RunViews([
+    const [bindings, actions, agents, ...histories] = await new RunView().RunViews([
       {
         EntityName: 'MJ_BizApps_Forms: Form Entity Bindings',
         ExtraFilter: inClause('ID', bindingIds),
@@ -322,16 +322,15 @@ export class AutomationTabComponent implements OnInit {
         Fields: ['ID', 'Description'],
         ResultType: 'simple',
       },
-      {
-        // Scoped to THIS form's steps. The old query had no filter and showed the database's last
-        // ten runs, so a form that had never run anything displayed another form's activity.
+      ...rows.map((row) => ({
+        // Each step gets its own bounded history within the same request.
         EntityName: 'MJ_BizApps_Forms: Form Automation Runs',
-        ExtraFilter: inClause('FormAutomationID', rows.map((r) => r.ID)),
+        ExtraFilter: inClause('FormAutomationID', [row.ID]),
         OrderBy: '__mj_CreatedAt DESC',
-        MaxRows: RUNS_PER_STEP * rows.length,
+        MaxRows: RUNS_PER_STEP,
         Fields: ['ID', 'FormAutomationID', 'Status', 'StartedAt', 'ErrorMessage', 'OutputSummary'],
-        ResultType: 'simple',
-      },
+        ResultType: 'simple' as const,
+      })),
     ]);
 
     // A failed read is NOT an empty result. Rendering it as one tells the author this step has no
@@ -340,7 +339,7 @@ export class AutomationTabComponent implements OnInit {
     if (!bindings.Success) {
       LogError(`Forms Automate tab: could not read entity bindings: ${bindings.ErrorMessage}`);
       this.actionError.set(
-        'The record-mapping details for these steps could not be loaded, so any step that saves a record is shown without its mapping.',
+        this.actionError() || 'The record-mapping details for these steps could not be loaded, so any step that saves a record is shown without its mapping.',
       );
     }
     const bindingRows = bindings.Success ? (bindings.Results as BindingRow[]) : [];
@@ -365,13 +364,14 @@ export class AutomationTabComponent implements OnInit {
     }
     this.resolved.set(resolved);
     this.mappingSummaries.set(summaries);
-    if (!runs.Success) {
-      LogError(`Forms Automate tab: could not read automation runs: ${runs.ErrorMessage}`);
+    const failedHistory = histories.find((history) => !history.Success);
+    if (failedHistory) {
+      LogError(`Forms Automate tab: could not read automation runs: ${failedHistory.ErrorMessage}`);
       this.actionError.set(
-        'Recent activity could not be loaded, so this list is not a record of what has run.',
+        this.actionError() || 'Recent activity could not be loaded, so this list is not a record of what has run.',
       );
     }
-    this.runs.set(runs.Success ? toRunRows(runs.Results as RawRunRow[]) : []);
+    this.runs.set(histories.flatMap((history) => history.Success ? toRunRows(history.Results as RawRunRow[]) : []));
   }
 
   /** A built-in hook is described in our words; anything else uses its own description. */

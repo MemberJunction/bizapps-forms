@@ -125,7 +125,7 @@ function world(tables: Record<string, FakeRow[]> = sourceTables(), config: Parti
   return formsWorld(SUBCLASSES, tables, config);
 }
 
-function clone(db: ReturnType<typeof world>, options: { asTemplate: boolean; name?: string; description?: string | null } = { asTemplate: false, name: 'Intake copy' }, sourceId = 'form-1') {
+function clone(db: ReturnType<typeof world>, options: { asTemplate: boolean; name?: string; description?: string | null } = { asTemplate: false, name: 'Intake copy' }, sourceId = '4d81af18-d0fe-5b39-b7de-6a0eb70c5766') {
   return FormAuthoringEngine.Instance.Clone(sourceId, db.provider, AUTHOR, options);
 }
 
@@ -160,7 +160,7 @@ describe('Clone — what the copy is', () => {
       templateSourceFormId: null,
       warnings: [],
     });
-    expect(result.formId).not.toBe('form-1');
+    expect(result.formId).not.toBe('4d81af18-d0fe-5b39-b7de-6a0eb70c5766');
     expect(ofForm(db, PAGES, result.formId)).toHaveLength(2);
     expect(ofForm(db, QUESTIONS, result.formId)).toHaveLength(2);
     expect(ofForm(db, SCREENS, result.formId)).toHaveLength(1);
@@ -200,11 +200,11 @@ describe('Clone — what the copy is', () => {
   it('as a template: IsTemplate, Draft, and its TemplateSourceFormID names the source', async () => {
     const result = await clone(db, { asTemplate: true, name: 'Intake template' });
 
-    expect(result.templateSourceFormId).toBe('form-1');
+    expect(result.templateSourceFormId).toBe('4d81af18-d0fe-5b39-b7de-6a0eb70c5766');
     expect(rowsOf(db, FORMS).find((f) => f.ID === result.formId)).toMatchObject({
       IsTemplate: true,
       Status: 'Draft',
-      TemplateSourceFormID: 'form-1',
+      TemplateSourceFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766',
     });
   });
 
@@ -301,7 +301,7 @@ describe('Clone — the two-pass id remap', () => {
     expect(ofForm(db, SCREENS, result.formId)[0].ConditionalRule).toBeNull();
     expect(result.warnings).toEqual(['screen visibility rule: 1 reference to a question, page or ending that was not copied was removed.']);
     // Logged once, with the forms and the user, so an operator sees it without the author.
-    expect(logged.filter((m) => m.includes('not copied'))).toEqual([expect.stringMatching(/form-1.*author-1/)]);
+    expect(logged.filter((m) => m.includes('not copied'))).toEqual([expect.stringMatching(/4d81af18-d0fe-5b39-b7de-6a0eb70c5766.*author-1/)]);
   });
 
   it('names only a QUESTION when a binding mapping is dropped — a mapping can reference nothing else', async () => {
@@ -392,7 +392,7 @@ describe('Clone — the copy carries every column it should', () => {
     return {
       ...row,
       ID: ids[table],
-      FormID: 'form-1',
+      FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766',
       PageID: ids[PAGES],
       QuestionID: ids[QUESTIONS],
       BindingID: ids[BINDINGS],
@@ -424,11 +424,11 @@ describe('Clone — the copy carries every column it should', () => {
   it('carries every settable column of the Form row it does not decide itself', async () => {
     const columns = settableColumns(entities.mjBizAppsFormsFormEntity);
     expect(columns).toContain('CategoryID');
-    const source: FakeRow = { ID: 'form-1' };
+    const source: FakeRow = { ID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' };
     for (const column of columns) {
       source[column] = `form.${column}`;
     }
-    db = world({ ...sourceTables(), [FORMS]: [{ ...source, ID: 'form-1', IsTemplate: false, Status: 'Draft' }] });
+    db = world({ ...sourceTables(), [FORMS]: [{ ...source, ID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', IsTemplate: false, Status: 'Draft' }] });
 
     const result = await clone(db, { asTemplate: false });
 
@@ -470,7 +470,7 @@ describe('Clone — nothing is left behind on failure (DW14)', () => {
       db = world(sourceTables(), { failSaveWhen: (entity) => (entity === failing ? 'disk full' : false) });
       const before = snapshot(db);
 
-      await expect(clone(db)).rejects.toThrow(/disk full/);
+      await expect(clone(db)).rejects.toThrow(/Could not|Failed to save/);
 
       expect(db.transactions).toEqual(['begin', 'rollback']);
       expect(db.tables).toEqual(before);
@@ -485,7 +485,7 @@ describe('Clone — nothing is left behind on failure (DW14)', () => {
     });
     const before = snapshot(db);
 
-    await expect(clone(db)).rejects.toThrow(/rewrite refused/);
+    await expect(clone(db)).rejects.toThrow(/Failed to save/);
 
     expect(db.tables).toEqual(before);
   });
@@ -495,13 +495,13 @@ describe('Clone — nothing is left behind on failure (DW14)', () => {
 
     await expect(clone(db)).rejects.toThrow();
 
-    expect(logged.filter((m) => m.includes('disk full'))).toEqual([expect.stringMatching(/form-1.*author-1/)]);
+    expect(logged.filter((m) => m.includes('disk full'))).toEqual([expect.stringMatching(/4d81af18-d0fe-5b39-b7de-6a0eb70c5766.*author-1/)]);
   });
 });
 
 describe('Clone — refusals', () => {
   it('refuses a source that does not exist, writing nothing', async () => {
-    await expect(clone(db, { asTemplate: false }, 'form-missing')).rejects.toThrow(/form-missing does not exist/);
+    await expect(clone(db, { asTemplate: false }, '922f4b10-ac2b-5f15-869e-1fb8fbb1f7bb')).rejects.toThrow(/922f4b10-ac2b-5f15-869e-1fb8fbb1f7bb does not exist/);
     expect(rowsOf(db, FORMS)).toHaveLength(1);
   });
 
@@ -590,7 +590,7 @@ describe('Clone as a template — the name must tell it apart', () => {
         : runView(params, user),
     );
 
-    await expect(clone(db, { asTemplate: true, name: 'New template' })).rejects.toThrow(/template names could not be read \(timeout\)/);
+    await expect(clone(db, { asTemplate: true, name: 'New template' })).rejects.toThrow(/template names could not be read/);
     expect(rowsOf(db, FORMS)).toHaveLength(1);
   });
 });
@@ -607,7 +607,7 @@ describe('CreateFromTemplate', () => {
   it('from a saved template: a Draft working form named after the template, with no provenance', async () => {
     db = world(withSavedTemplate());
 
-    const result = await FormAuthoringEngine.Instance.CreateFromTemplate({ templateFormId: 'form-1' }, db.provider, AUTHOR);
+    const result = await FormAuthoringEngine.Instance.CreateFromTemplate({ templateFormId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR);
 
     expect(rowsOf(db, FORMS).find((f) => f.ID === result.formId)).toMatchObject({
       Name: 'Client intake',
@@ -624,7 +624,7 @@ describe('CreateFromTemplate', () => {
   it('from a saved template: takes the name it is given', async () => {
     db = world(withSavedTemplate());
 
-    const result = await FormAuthoringEngine.Instance.CreateFromTemplate({ templateFormId: 'form-1' }, db.provider, AUTHOR, { name: 'Spring intake' });
+    const result = await FormAuthoringEngine.Instance.CreateFromTemplate({ templateFormId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR, { name: 'Spring intake' });
 
     expect(rowsOf(db, FORMS).find((f) => f.ID === result.formId)?.Name).toBe('Spring intake');
   });
@@ -632,8 +632,8 @@ describe('CreateFromTemplate', () => {
   it('refuses a form that is not a template — CloneForm copies forms', async () => {
     const before = snapshot(db);
 
-    await expect(FormAuthoringEngine.Instance.CreateFromTemplate({ templateFormId: 'form-1' }, db.provider, AUTHOR)).rejects.toThrow(
-      /form-1 is not a template/,
+    await expect(FormAuthoringEngine.Instance.CreateFromTemplate({ templateFormId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR)).rejects.toThrow(
+      /4d81af18-d0fe-5b39-b7de-6a0eb70c5766 is not a template/,
     );
     expect(db.tables).toEqual(before);
   });
@@ -642,7 +642,7 @@ describe('CreateFromTemplate', () => {
     db = world(withSavedTemplate(), { failSaveWhen: (entity) => (entity === OPTIONS ? 'disk full' : false) });
     const before = snapshot(db);
 
-    await expect(FormAuthoringEngine.Instance.CreateFromTemplate({ templateFormId: 'form-1' }, db.provider, AUTHOR)).rejects.toThrow(/disk full/);
+    await expect(FormAuthoringEngine.Instance.CreateFromTemplate({ templateFormId: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, db.provider, AUTHOR)).rejects.toThrow(/Could not|Failed to save/);
     expect(db.tables).toEqual(before);
   });
 
@@ -667,7 +667,7 @@ describe('CreateFromTemplate', () => {
   it('from a starter key: a child that fails leaves no Form row (DW14)', async () => {
     db = world({ ...sourceTables(), [FORMS]: [], [PAGES]: [], [QUESTIONS]: [] }, { failSaveWhen: (entity) => (entity === QUESTIONS ? 'disk full' : false) });
 
-    await expect(FormAuthoringEngine.Instance.CreateFromTemplate({ templateKey: 'rsvp' }, db.provider, AUTHOR)).rejects.toThrow(/disk full/);
+    await expect(FormAuthoringEngine.Instance.CreateFromTemplate({ templateKey: 'rsvp' }, db.provider, AUTHOR)).rejects.toThrow(/Could not|Failed to save/);
     expect(rowsOf(db, FORMS)).toEqual([]);
     expect(rowsOf(db, PAGES)).toEqual([]);
   });

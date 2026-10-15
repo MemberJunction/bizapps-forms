@@ -52,8 +52,8 @@ function world(grants: { forms?: boolean } = {}) {
       ...draftTables(),
       [FORMS]: [formRow({ ID: FORM, Settings: JSON.stringify({ onSubmitMode: 'Configured' }) })],
       [AUTOMATIONS]: [
-        automationRow({ ID: 'a', FormID: FORM, DisplayOrder: 1 }),
-        automationRow({ ID: 'b', FormID: FORM, DisplayOrder: 2 }),
+        automationRow({ ID: '4f3f2898-69e3-5a0d-820a-c4e87987dbce', FormID: FORM, DisplayOrder: 1 }),
+        automationRow({ ID: '3f10dbe8-4cbd-5e31-9b1f-af0cb9dda9cf', FormID: FORM, DisplayOrder: 2 }),
       ],
     },
     { updatePermissions: { [FORMS]: grants.forms ?? true } },
@@ -84,15 +84,15 @@ const OPERATIONS = [
     key: 'Forms.SaveAutomation',
     make: () => new SaveAutomationServerOperation(),
     load: LoadSaveAutomationOperation,
-    input: { FormID: FORM, Automation: { Name: 'Notify', TargetType: 'Action', ActionID: 'act-1' } },
-    badInput: { Automation: { Name: 'Notify', TargetType: 'Action', ActionID: 'act-1' } },
+    input: { FormID: FORM, Automation: { Name: 'Notify', TargetType: 'Action', ActionID: '3207e48e-ffb2-5c0f-a615-2313dbe72222' } },
+    badInput: { Automation: { Name: 'Notify', TargetType: 'Action', ActionID: '3207e48e-ffb2-5c0f-a615-2313dbe72222' } },
     badReason: /Forms\.SaveAutomation: FormID is required/,
   },
   {
     key: 'Forms.ReorderAutomations',
     make: () => new ReorderAutomationsServerOperation(),
     load: LoadReorderAutomationsOperation,
-    input: { FormID: FORM, OrderedAutomationIDs: ['b', 'a'] },
+    input: { FormID: FORM, OrderedAutomationIDs: ['3f10dbe8-4cbd-5e31-9b1f-af0cb9dda9cf', '4f3f2898-69e3-5a0d-820a-c4e87987dbce'] },
     badInput: { FormID: FORM, OrderedAutomationIDs: 'b,a' },
     badReason: /Forms\.ReorderAutomations: OrderedAutomationIDs must be a list of step ids/,
   },
@@ -100,7 +100,7 @@ const OPERATIONS = [
     key: 'Forms.RemoveAutomation',
     make: () => new RemoveAutomationServerOperation(),
     load: LoadRemoveAutomationOperation,
-    input: { FormAutomationID: 'a' },
+    input: { FormAutomationID: '4f3f2898-69e3-5a0d-820a-c4e87987dbce' },
     badInput: {},
     badReason: /Forms\.RemoveAutomation: FormAutomationID is required/,
   },
@@ -168,8 +168,8 @@ describe('happy paths, mapped to the generated output types', () => {
 
     expect(result.Output).toEqual({
       Automations: [
-        { FormAutomationID: 'b', DisplayOrder: 1 },
-        { FormAutomationID: 'a', DisplayOrder: 2 },
+        { FormAutomationID: '3f10dbe8-4cbd-5e31-9b1f-af0cb9dda9cf', DisplayOrder: 1 },
+        { FormAutomationID: '4f3f2898-69e3-5a0d-820a-c4e87987dbce', DisplayOrder: 2 },
       ],
     });
   });
@@ -179,14 +179,14 @@ describe('happy paths, mapped to the generated output types', () => {
 
     const result = await run(new RemoveAutomationServerOperation(), db, OPERATIONS[2].input);
 
-    expect(result.Output).toEqual({ FormAutomationID: 'a', FormID: FORM, RetainedBindingID: null, SeededAutomationIDs: [] });
-    expect(rowsOf(db, AUTOMATIONS).map((s) => s.ID)).toEqual(['b']);
+    expect(result.Output).toEqual({ FormAutomationID: '4f3f2898-69e3-5a0d-820a-c4e87987dbce', FormID: FORM, RetainedBindingID: null, SeededAutomationIDs: [] });
+    expect(rowsOf(db, AUTOMATIONS).map((s) => s.ID)).toEqual(['3f10dbe8-4cbd-5e31-9b1f-af0cb9dda9cf']);
   });
 
   it("an engine refusal reaches the caller as the engine's own sentence, never provider text", async () => {
     const db = world();
 
-    const result = await run(new ReorderAutomationsServerOperation(), db, { FormID: FORM, OrderedAutomationIDs: ['a'] });
+    const result = await run(new ReorderAutomationsServerOperation(), db, { FormID: FORM, OrderedAutomationIDs: ['4f3f2898-69e3-5a0d-820a-c4e87987dbce'] });
 
     expect(result.ResultCode).toBe('EXECUTION_ERROR');
     expect(result.ErrorMessage).toMatch(/every step/);

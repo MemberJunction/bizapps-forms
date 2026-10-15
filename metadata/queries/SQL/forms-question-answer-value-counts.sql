@@ -22,7 +22,8 @@
 -- so neither may this. Free-text values come back too (the query cannot tell a ShortText from a
 -- SingleChoice without the type table it must not duplicate); the engine uses only the rows of
 -- charted questions, and nothing here ever reaches a client: the operation returns aggregates.
--- AnsweredResponses is distinct Complete responses with any value for the question.
+-- AnsweredResponses is distinct Complete responses with a value of this ValueKind for the question.
+-- A question may change type across versions; older incompatible kinds must not inflate its card.
 --
 -- OPENJSON gets only text that already passed the array guard: the guard is INSIDE the call
 -- (CASE ... END yields NULL otherwise, and OPENJSON(NULL) returns no rows), because SQL Server
@@ -73,9 +74,9 @@ vals AS (
     WHERE a.DateValue IS NOT NULL
 ),
 answered AS (
-    SELECT v.QuestionID, COUNT(DISTINCT v.ResponseID) AS AnsweredResponses
+    SELECT v.QuestionID, v.ValueKind, COUNT(DISTINCT v.ResponseID) AS AnsweredResponses
     FROM vals v
-    GROUP BY v.QuestionID
+    GROUP BY v.QuestionID, v.ValueKind
 ),
 counted AS (
     -- Grouped on the value's BYTES, not its text: the database collation is case- and trailing-space-
@@ -95,5 +96,5 @@ SELECT
     c.NumericValue,
     c.ValueCount
 FROM counted c
-INNER JOIN answered q ON q.QuestionID = c.QuestionID
+INNER JOIN answered q ON q.QuestionID = c.QuestionID AND q.ValueKind = c.ValueKind
 ORDER BY c.QuestionID, c.ValueKind, c.ValueCount DESC, c.Value;

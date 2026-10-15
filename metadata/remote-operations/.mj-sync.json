@@ -7,6 +7,7 @@
     "appendRecordsToExistingFile": true,
     "updateExistingRecords": true,
     "ignoreNullFields": true,
-    "ignoreVirtualFields": true
+    "ignoreVirtualFields": true,
+    "filter": "CategoryID IN (SELECT ID FROM [__mj].vwRemoteOperationCategories WHERE Name = 'Forms')"
   }
 }

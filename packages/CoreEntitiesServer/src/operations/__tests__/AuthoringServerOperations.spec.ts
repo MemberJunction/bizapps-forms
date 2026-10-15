@@ -92,20 +92,20 @@ afterEach(() => {
 });
 
 const OPERATIONS = [
-  { key: 'Forms.CloneForm', make: () => new CloneFormServerOperation(), load: LoadCloneFormOperation, input: { SourceFormID: 'form-1', AsTemplate: false } },
+  { key: 'Forms.CloneForm', make: () => new CloneFormServerOperation(), load: LoadCloneFormOperation, input: { SourceFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', AsTemplate: false } },
   {
     key: 'Forms.CreateFormFromTemplate',
     make: () => new CreateFormFromTemplateServerOperation(),
     load: LoadCreateFormFromTemplateOperation,
     input: { TemplateKey: 'contact' },
   },
-  { key: 'Forms.ArchiveForm', make: () => new ArchiveFormServerOperation(), load: LoadArchiveFormOperation, input: { FormID: 'form-1' } },
-  { key: 'Forms.RestoreForm', make: () => new RestoreFormServerOperation(), load: LoadRestoreFormOperation, input: { FormID: 'form-1' } },
+  { key: 'Forms.ArchiveForm', make: () => new ArchiveFormServerOperation(), load: LoadArchiveFormOperation, input: { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' } },
+  { key: 'Forms.RestoreForm', make: () => new RestoreFormServerOperation(), load: LoadRestoreFormOperation, input: { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' } },
   {
     key: 'Forms.DeleteTemplate',
     make: () => new DeleteTemplateServerOperation(),
     load: LoadDeleteTemplateOperation,
-    input: { TemplateFormID: 'form-1' },
+    input: { TemplateFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' },
   },
 ] as const;
 
@@ -152,7 +152,7 @@ describe('Forms.CloneForm', () => {
   it('copies the form and returns the copy, its provenance, its counts and any warnings', async () => {
     const db = world();
 
-    const result = await run(new CloneFormServerOperation(), db, { SourceFormID: 'form-1', Name: 'Copy', AsTemplate: false });
+    const result = await run(new CloneFormServerOperation(), db, { SourceFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', Name: 'Copy', AsTemplate: false });
 
     expect(result.ResultCode).toBe('SUCCESS');
     const copy = rowsOf(db, FORMS).find((f) => f.Name === 'Copy');
@@ -174,10 +174,10 @@ describe('Forms.CloneForm', () => {
     tables[FORMS] = [...tables[FORMS], formRow({ ID: 'tpl-1', Name: 'Taken', IsTemplate: true })];
     const db = world(tables);
 
-    const saved = await run(new CloneFormServerOperation(), db, { SourceFormID: 'form-1', Name: 'Intake template', AsTemplate: true });
-    const duplicate = await run(new CloneFormServerOperation(), db, { SourceFormID: 'form-1', Name: 'TAKEN', AsTemplate: true });
+    const saved = await run(new CloneFormServerOperation(), db, { SourceFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', Name: 'Intake template', AsTemplate: true });
+    const duplicate = await run(new CloneFormServerOperation(), db, { SourceFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', Name: 'TAKEN', AsTemplate: true });
 
-    expect(saved.Output).toMatchObject({ TemplateSourceFormID: 'form-1' });
+    expect(saved.Output).toMatchObject({ TemplateSourceFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' });
     expect(duplicate.ResultCode).toBe('EXECUTION_ERROR');
     expect(duplicate.ErrorMessage).toBe('A template called “TAKEN” already exists. Give this one a name that tells them apart.');
   });
@@ -187,8 +187,8 @@ describe('Forms.CloneForm', () => {
     tables[FORMS] = [formRow({ Description: 'Original' })];
     const db = world(tables);
 
-    await run(new CloneFormServerOperation(), db, { SourceFormID: 'form-1', Name: 'Kept', AsTemplate: false });
-    await run(new CloneFormServerOperation(), db, { SourceFormID: 'form-1', Name: 'Cleared', Description: null, AsTemplate: false });
+    await run(new CloneFormServerOperation(), db, { SourceFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', Name: 'Kept', AsTemplate: false });
+    await run(new CloneFormServerOperation(), db, { SourceFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', Name: 'Cleared', Description: null, AsTemplate: false });
 
     expect(rowsOf(db, FORMS).find((f) => f.Name === 'Kept')?.Description).toBe('Original');
     expect(rowsOf(db, FORMS).find((f) => f.Name === 'Cleared')?.Description).toBeNull();
@@ -197,10 +197,10 @@ describe('Forms.CloneForm', () => {
   it.each([
     [{ AsTemplate: false }, 'Forms.CloneForm: SourceFormID is required.'],
     [{ SourceFormID: '  ', AsTemplate: false }, 'Forms.CloneForm: SourceFormID is required.'],
-    [{ SourceFormID: 'form-1' }, 'Forms.CloneForm: AsTemplate must be true or false.'],
-    [{ SourceFormID: 'form-1', AsTemplate: 'yes' }, 'Forms.CloneForm: AsTemplate must be true or false.'],
-    [{ SourceFormID: 'form-1', AsTemplate: false, Name: 42 }, 'Forms.CloneForm: Name must be text when given.'],
-    [{ SourceFormID: 'form-1', AsTemplate: false, Description: 7 }, 'Forms.CloneForm: Description must be text or null when given.'],
+    [{ SourceFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' }, 'Forms.CloneForm: AsTemplate must be true or false.'],
+    [{ SourceFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', AsTemplate: 'yes' }, 'Forms.CloneForm: AsTemplate must be true or false.'],
+    [{ SourceFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', AsTemplate: false, Name: 42 }, 'Forms.CloneForm: Name must be text when given.'],
+    [{ SourceFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', AsTemplate: false, Description: 7 }, 'Forms.CloneForm: Description must be text or null when given.'],
   ])('refuses %j, naming the operation', async (input, message) => {
     const db = world();
 
@@ -229,7 +229,7 @@ describe('Forms.CreateFormFromTemplate', () => {
     tables[FORMS] = [formRow({ IsTemplate: true, Name: 'Client intake' })];
     const db = world(tables);
 
-    const result = await run(new CreateFormFromTemplateServerOperation(), db, { TemplateFormID: 'form-1' });
+    const result = await run(new CreateFormFromTemplateServerOperation(), db, { TemplateFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' });
 
     expect(result.ResultCode).toBe('SUCCESS');
     const formId = (result.Output as { FormID: string }).FormID;
@@ -242,11 +242,11 @@ describe('Forms.CreateFormFromTemplate', () => {
     const tables = draftTables();
     tables[FORMS] = [formRow({ IsTemplate: true, Name: 'Client intake' })];
     tables[SCREENS] = [
-      { ID: 's1', FormID: 'form-1', ScreenType: 'Ending', Title: 'Done', DisplayOrder: 0, ConditionalRule: JSON.stringify({ show: { all: [{ questionId: 'q-gone', op: 'equals', value: 'x' }] } }) },
+      { ID: 's1', FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', ScreenType: 'Ending', Title: 'Done', DisplayOrder: 0, ConditionalRule: JSON.stringify({ show: { all: [{ questionId: 'q-gone', op: 'equals', value: 'x' }] } }) },
     ];
     const db = world(tables);
 
-    const result = await run(new CreateFormFromTemplateServerOperation(), db, { TemplateFormID: 'form-1' });
+    const result = await run(new CreateFormFromTemplateServerOperation(), db, { TemplateFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' });
 
     expect(result.ResultCode).toBe('SUCCESS');
     expect((result.Output as { Warnings: string[] }).Warnings).toEqual([
@@ -257,7 +257,7 @@ describe('Forms.CreateFormFromTemplate', () => {
   it.each([
     [{}, 'Forms.CreateFormFromTemplate: exactly one of TemplateFormID or TemplateKey is required.'],
     [{ TemplateFormID: ' ', TemplateKey: '' }, 'Forms.CreateFormFromTemplate: exactly one of TemplateFormID or TemplateKey is required.'],
-    [{ TemplateFormID: 'form-1', TemplateKey: 'contact' }, 'Forms.CreateFormFromTemplate: exactly one of TemplateFormID or TemplateKey is required.'],
+    [{ TemplateFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', TemplateKey: 'contact' }, 'Forms.CreateFormFromTemplate: exactly one of TemplateFormID or TemplateKey is required.'],
     [{ TemplateKey: 'contact', Name: false }, 'Forms.CreateFormFromTemplate: Name must be text when given.'],
   ])('refuses %j, naming the operation', async (input, message) => {
     const db = world();
@@ -290,9 +290,9 @@ describe('Forms.ArchiveForm / Forms.RestoreForm', () => {
   it('archive returns Closed, and the link is closed with it', async () => {
     const db = world(lifecycleTables('Published', true));
 
-    const result = await run(new ArchiveFormServerOperation(), db, { FormID: 'form-1' });
+    const result = await run(new ArchiveFormServerOperation(), db, { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' });
 
-    expect(result).toMatchObject({ ResultCode: 'SUCCESS', Output: { FormID: 'form-1', Status: 'Closed' } });
+    expect(result).toMatchObject({ ResultCode: 'SUCCESS', Output: { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', Status: 'Closed' } });
     expect(rowsOf(db, DISTRIBUTIONS)[0].Status).toBe('Closed');
   });
 
@@ -302,9 +302,9 @@ describe('Forms.ArchiveForm / Forms.RestoreForm', () => {
   ])('restore with a published version = %s returns %s', async (published, status) => {
     const db = world(lifecycleTables('Closed', published));
 
-    const result = await run(new RestoreFormServerOperation(), db, { FormID: 'form-1' });
+    const result = await run(new RestoreFormServerOperation(), db, { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' });
 
-    expect(result).toMatchObject({ ResultCode: 'SUCCESS', Output: { FormID: 'form-1', Status: status } });
+    expect(result).toMatchObject({ ResultCode: 'SUCCESS', Output: { FormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', Status: status } });
   });
 
   it.each([
@@ -334,11 +334,11 @@ describe('Forms.DeleteTemplate', () => {
   it('deletes the template and reports what went with it', async () => {
     const db = world(templateTables(true));
 
-    const result = await run(new DeleteTemplateServerOperation(), db, { TemplateFormID: 'form-1' });
+    const result = await run(new DeleteTemplateServerOperation(), db, { TemplateFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' });
 
     expect(result).toMatchObject({
       ResultCode: 'SUCCESS',
-      Output: { TemplateFormID: 'form-1', PageCount: 1, QuestionCount: 2, OptionCount: 2, ScreenCount: 0, AutomationCount: 0, BindingCount: 0 },
+      Output: { TemplateFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766', PageCount: 1, QuestionCount: 2, OptionCount: 2, ScreenCount: 0, AutomationCount: 0, BindingCount: 0 },
     });
     expect(rowsOf(db, FORMS)).toEqual([]);
     expect(rowsOf(db, QUESTIONS)).toEqual([]);
@@ -347,7 +347,7 @@ describe('Forms.DeleteTemplate', () => {
   it('refuses a working form with the engine\'s reason, and deletes nothing', async () => {
     const db = world(templateTables(false));
 
-    const result = await run(new DeleteTemplateServerOperation(), db, { TemplateFormID: 'form-1' });
+    const result = await run(new DeleteTemplateServerOperation(), db, { TemplateFormID: '4d81af18-d0fe-5b39-b7de-6a0eb70c5766' });
 
     expect(result.ResultCode).toBe('EXECUTION_ERROR');
     expect(result.ErrorMessage).toBe('"Intake" is a form, not a template, and forms are archived rather than deleted.');

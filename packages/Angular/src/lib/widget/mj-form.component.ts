@@ -910,6 +910,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
     this.endingScreen.set(shown.screen);
     this.phase.set('done');
+    if (sealed) {
+      this.emitHostEvent('mjf-submitted', { responseId: sealed.ResponseID });
+    }
     if (shown.redirectUrl) {
       this.redirect(shown.redirectUrl);
     }

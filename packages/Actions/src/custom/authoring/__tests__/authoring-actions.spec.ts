@@ -132,18 +132,20 @@ describe('Forms: Generate Form From Brief', () => {
     const result = await run;
 
     expect(result).toMatchObject({ Success: false, ResultCode: 'PUBLISH_REFUSED' });
-    expect(result.Message).toMatch(/^Forms: Generate Form From Brief: .*disk full/);
+    expect(result.Message).toMatch(/^Forms: Generate Form From Brief: Could not/);
+    expect(result.Message).not.toContain("disk full");
     expect(rowsOf(db, FORMS)).toEqual([]);
     expect(output(params, 'Blueprint')).toMatchObject({ name: 'Event RSVP' });
   });
 
   it('a failed build reports PERSIST_FAILED, naming the Action', async () => {
-    const db = freshWorld({ failSaveWhen: (entity) => (entity === 'MJ_BizApps_Forms: Form Pages' ? 'no' : false) });
+    const db = freshWorld({ failSaveWhen: (entity) => (entity === 'MJ_BizApps_Forms: Form Pages' ? 'SQL private failure' : false) });
 
     const result = await generate(db, {}).run;
 
     expect(result).toMatchObject({ Success: false, ResultCode: 'PERSIST_FAILED' });
-    expect(result.Message).toMatch(/^Forms: Generate Form From Brief: Failed to save FormPage: no/);
+    expect(result.Message).toBe("Forms: Generate Form From Brief: Failed to save FormPage.");
+    expect(result.Message).not.toContain("SQL private failure");
   });
 
   it('with no provider supplied (how agents call it), builds on an ISOLATED provider and releases it — never the global one', async () => {

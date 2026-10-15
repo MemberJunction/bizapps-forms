@@ -17,11 +17,14 @@ interface StubOptions {
   /** The most rows the stub hands back per page, whatever was asked (an entity-level limit). */
   pageLimit?: number;
   failPage?: boolean;
+  /** An older partial response becomes Complete before the second page. */
+  completeOlderResponse?: boolean;
 }
 
 /** A provider over `total` synthetic answer rows that records every read. */
-function stub({ total, pageLimit = Number.POSITIVE_INFINITY, failPage = false }: StubOptions) {
+function stub({ total, pageLimit = Number.POSITIVE_INFINITY, failPage = false, completeOlderResponse = false }: StubOptions) {
   const reads: RunViewParams[] = [];
+  let page = 0;
   const provider: InsightAnswerSource = {
     EntityByName: () => ({ SchemaName: '__mj_BizAppsForms', BaseView: 'vwFormResponses' }) as unknown as EntityInfo,
     QuoteSchemaAndView: (schema: string, view: string) => `[${schema}].[${view}]`,
@@ -33,7 +36,9 @@ function stub({ total, pageLimit = Number.POSITIVE_INFINITY, failPage = false }:
       if (failPage) {
         return { Success: false, Results: [], RowCount: 0, TotalRowCount: 0, ExecutionTime: 0, ErrorMessage: 'Invalid object name vwFormResponses' } as RunViewResult<T>;
       }
-      const start = params.StartRow ?? 0;
+      const completed = completeOlderResponse && page++ > 0;
+      const afterId = params.AfterKey?.KeyValuePairs[0]?.Value;
+      const start = afterId == null ? (params.StartRow ?? 0) - (completed ? 1 : 0) : Number(String(afterId).slice(1)) + 1;
       const size = Math.min(params.MaxRows ?? total, pageLimit, Math.max(0, total - start));
       const rows: InsightAnswerRow[] = Array.from({ length: size }, (_, i) => ({
         ID: `a${start + i}`,
@@ -60,11 +65,22 @@ describe('readInsightAnswers', () => {
     expect(result.rows).toHaveLength(total);
     expect(new Set(result.rows.map((r) => r.ID)).size).toBe(total);
     const pages = reads.filter((r) => r.ResultType === 'simple');
-    expect(pages.map((p) => [p.StartRow, p.MaxRows, p.OrderBy])).toEqual([
-      [0, INSIGHT_ANSWER_PAGE_SIZE, 'ID'],
-      [INSIGHT_ANSWER_PAGE_SIZE, INSIGHT_ANSWER_PAGE_SIZE, 'ID'],
-      [INSIGHT_ANSWER_PAGE_SIZE * 2, 7, 'ID'],
+    expect(pages.map((p) => [p.AfterKey?.KeyValuePairs[0]?.Value, p.MaxRows, p.OrderBy])).toEqual([
+      [undefined, INSIGHT_ANSWER_PAGE_SIZE, 'ID'],
+      [`a${INSIGHT_ANSWER_PAGE_SIZE - 1}`, INSIGHT_ANSWER_PAGE_SIZE, 'ID'],
+      [`a${INSIGHT_ANSWER_PAGE_SIZE * 2 - 1}`, 7, 'ID'],
     ]);
+  });
+
+  it('does not repeat or omit original answers when an older partial response completes between pages', async () => {
+    const total = INSIGHT_ANSWER_PAGE_SIZE + 1;
+    const { provider } = stub({ total, completeOlderResponse: true });
+
+    const result = await readInsightAnswers(provider, SCOPE, [QUESTION], SYSTEM);
+
+    expect(new Set(result.rows.map((row) => row.ID)).size).toBe(total);
+    expect(result.rows.at(-1)?.ID).toBe(`a${total - 1}`);
+    expect(result.capped).toBe(false);
   });
 
   it('stops at the cap and says so', async () => {

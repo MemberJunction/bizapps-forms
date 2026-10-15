@@ -36,11 +36,12 @@ import {
 import { FormEntityServer } from '../entities/FormEntityServer.js';
 import type { FormStatus } from '../entities/form-status-rules.js';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
+import { isGuid } from '../shared/guid.js';
 import { FormAuthoringError, saveOrThrow } from './authoring-errors.js';
 import { readSourceForm, writeCopy, type ClonedForm, type CopyPlan, type SourceForm } from './form-clone.js';
-import { FormPublishingEngine, type FormPublishResult } from './FormPublishingEngine.js';
+import { FormPublishingEngine, FormPublishError, type FormPublishResult } from './FormPublishingEngine.js';
 import { getStarterTemplate, STARTER_TEMPLATES } from './starter-templates.js';
-import { requireEntityTransactions, requireServerEntity, runEngineUnitOfWork, saveFailure } from './engine-guards.js';
+import { EngineTransactionFailure, requireEntityTransactions, requireServerEntity, runEngineUnitOfWork, saveFailure } from './engine-guards.js';
 
 const ENTITY = { ...FORMS_ENTITY, Action: 'MJ: Actions' } as const;
 
@@ -144,12 +145,12 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
     // write means a refusal never opens (and rolls back) a transaction at all.
     let actionIdByName: Map<string, string>;
     try {
-      actionIdByName = await this.resolveActionIds(valid.data, provider, user);
+      actionIdByName = await callerSafeAuthoring(() => this.resolveActionIds(valid.data, provider, user));
     } catch (err) {
-      LogError(`${context}: ${err instanceof Error ? err.message : String(err)}`);
+      LogError(`${context}: ${err instanceof FormAuthoringError ? err.logDetail ?? err.message : String(err)}`);
       throw err;
     }
-    return runEngineUnitOfWork(provider, context, async () => {
+    return runAuthoringUnitOfWork(provider, context, async () => {
       const built = await this.writeBlueprint(valid.data, actionIdByName, provider, user, options.ownerUserId);
       const published = options.publishImmediately
         ? await FormPublishingEngine.Instance.Publish(built.formId, provider, user)
@@ -229,7 +230,7 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
     const id = requireFormId(formId, 'archive');
     requireUser(user, `Archiving form ${id}`);
     requireEntityTransactions(provider, `Archiving form ${id}`);
-    return runEngineUnitOfWork(provider, `[FormAuthoringEngine] form ${id} was not archived (user ${user.ID})`, async () => {
+    return runAuthoringUnitOfWork(provider, `[FormAuthoringEngine] form ${id} was not archived (user ${user.ID})`, async () => {
       const form = await loadForm(id, provider, user, 'archived');
       if (form.Status === 'Closed') {
         await closeStrayLinks(form);
@@ -254,7 +255,7 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
     const id = requireFormId(formId, 'restore');
     requireUser(user, `Restoring form ${id}`);
     requireEntityTransactions(provider, `Restoring form ${id}`);
-    return runEngineUnitOfWork(provider, `[FormAuthoringEngine] form ${id} was not restored (user ${user.ID})`, async () => {
+    return runAuthoringUnitOfWork(provider, `[FormAuthoringEngine] form ${id} was not restored (user ${user.ID})`, async () => {
       const form = await loadForm(id, provider, user, 'restored');
       if (form.Status !== 'Closed') {
         return { formId: form.ID, status: form.Status };
@@ -286,7 +287,7 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
     const id = requireFormId(templateFormId, 'delete');
     requireUser(user, `Deleting template ${id}`);
     requireEntityTransactions(provider, `Deleting template ${id}`);
-    return runEngineUnitOfWork(provider, `[FormAuthoringEngine] template ${id} was not deleted (user ${user.ID})`, async () => {
+    return runAuthoringUnitOfWork(provider, `[FormAuthoringEngine] template ${id} was not deleted (user ${user.ID})`, async () => {
       const form = await loadForm(id, provider, user, 'deleted');
       if (!form.IsTemplate) {
         throw new FormAuthoringError(`"${form.Name}" is a form, not a template, and forms are archived rather than deleted.`);
@@ -307,7 +308,7 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
       // Captured before the delete: a successful BaseEntity.Delete() resets the object to a fresh key.
       const templateFormIdDeleted = form.ID;
       if (!(await form.Delete())) {
-        throw new FormAuthoringError(`Could not delete template ${form.ID}: ${saveFailure(form)}. Nothing was deleted.`, { fault: true });
+        throw new FormAuthoringError(`Could not delete template ${form.ID}. Nothing was deleted.`, { fault: true, logDetail: saveFailure(form) });
       }
       return {
         templateFormId: templateFormIdDeleted,
@@ -374,7 +375,7 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
     planFor: (source: SourceForm) => Promise<CopyPlan>,
   ): Promise<ClonedForm> {
     requireEntityTransactions(provider, what.doing);
-    const copied = await runEngineUnitOfWork(provider, `[FormAuthoringEngine] ${what.failed} (user ${user.ID})`, async () => {
+    const copied = await runAuthoringUnitOfWork(provider, `[FormAuthoringEngine] ${what.failed} (user ${user.ID})`, async () => {
       const source = await readSourceForm(sourceId, provider, user);
       return writeCopy(source, await planFor(source), provider, user);
     });
@@ -430,8 +431,8 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
     );
     if (!result.Success) {
       throw new FormAuthoringError(
-        `Could not read the Action catalogue to resolve this form's on-submit steps: ${result.ErrorMessage || 'unknown error'}`,
-        { fault: true },
+        `Could not read the Action catalogue to resolve this form's on-submit steps.`,
+        { fault: true, logDetail: result.ErrorMessage || 'unknown error' },
       );
     }
     const byName = new Map((result.Results ?? []).map((a) => [a.Name, a.ID]));
@@ -589,6 +590,9 @@ function requireFormId(formId: string, verb: string): string {
   if (!id) {
     throw new FormAuthoringError(`A form id is required to ${verb} a form.`);
   }
+  if (!isGuid(id)) {
+    throw new FormAuthoringError(`A valid form ID is required to ${verb} a form.`);
+  }
   return id;
 }
 
@@ -627,8 +631,8 @@ async function requireFreeTemplateName(name: string, provider: DatabaseProviderB
   );
   if (!result.Success) {
     throw new FormAuthoringError(
-      `The template names could not be read (${result.ErrorMessage || 'no detail'}), so the template was not saved.`,
-      { fault: true },
+      `The template names could not be read, so the template was not saved.`,
+      { fault: true, logDetail: result.ErrorMessage || 'no detail' },
     );
   }
   const wanted = templateNameKey(name);
@@ -651,8 +655,8 @@ async function loadForm(formId: string, provider: DatabaseProviderBase, user: Us
     user,
   );
   if (!result.Success) {
-    throw new FormAuthoringError(`Could not read form ${formId} (${result.ErrorMessage || 'no detail'}), so it was not ${verbed}.`, {
-      fault: true,
+    throw new FormAuthoringError(`Could not read form ${formId}, so it was not ${verbed}.`, {
+      fault: true, logDetail: result.ErrorMessage || 'no detail',
     });
   }
   const [form] = result.Results ?? [];
@@ -669,9 +673,9 @@ type DeletableRow = BaseEntity & { ID: string };
 
 /** Every row of `entityName` matching `filter`, as entities to delete — a failed read refuses. */
 async function rowsToDelete(entityName: string, filter: string, provider: DatabaseProviderBase, user: UserInfo): Promise<DeletableRow[]> {
-  const result = await provider.RunView<DeletableRow>({ EntityName: entityName, ExtraFilter: filter, ResultType: 'entity_object', BypassCache: true }, user);
+  const result = await provider.RunView<DeletableRow>({ EntityName: entityName, ExtraFilter: filter, ResultType: 'entity_object', BypassCache: true, IgnoreMaxRows: true }, user);
   if (!result.Success) {
-    throw new FormAuthoringError(`Could not read ${entityName} (${result.ErrorMessage || 'no detail'}), so nothing was deleted.`, { fault: true });
+    throw new FormAuthoringError(`Could not read ${entityName}, so nothing was deleted.`, { fault: true, logDetail: result.ErrorMessage || 'no detail' });
   }
   return result.Results ?? [];
 }
@@ -681,8 +685,8 @@ async function deleteEach(rows: readonly DeletableRow[], templateId: string): Pr
   for (const row of rows) {
     if (!(await row.Delete())) {
       throw new FormAuthoringError(
-        `Could not delete ${row.EntityInfo?.Name ?? 'a row'} ${row.ID} of template ${templateId}: ${saveFailure(row)}. Nothing was deleted.`,
-        { fault: true },
+        `Could not delete ${row.EntityInfo?.Name ?? 'a row'} ${row.ID} of template ${templateId}. Nothing was deleted.`,
+        { fault: true, logDetail: saveFailure(row) },
       );
     }
   }
@@ -733,8 +737,8 @@ async function hasPublishedVersion(formId: string, provider: DatabaseProviderBas
   );
   if (!result.Success) {
     throw new FormAuthoringError(
-      `Could not read whether form ${formId} has a published version (${result.ErrorMessage || 'no detail'}), so it was not restored.`,
-      { fault: true },
+      `Could not read whether form ${formId} has a published version, so it was not restored.`,
+      { fault: true, logDetail: result.ErrorMessage || 'no detail' },
     );
   }
   return (result.Results ?? []).length > 0;
@@ -744,7 +748,7 @@ async function hasPublishedVersion(formId: string, provider: DatabaseProviderBas
 async function saveStatus(form: FormEntityServer, status: FormStatus, verb: string): Promise<void> {
   form.Status = status;
   if (!(await form.Save())) {
-    throw new FormAuthoringError(`Could not ${verb} form ${form.ID}: ${saveFailure(form)}`, { fault: true });
+    throw new FormAuthoringError(`Could not ${verb} form ${form.ID}.`, { fault: true, logDetail: saveFailure(form) });
   }
 }
 
@@ -757,8 +761,8 @@ async function closeStrayLinks(form: FormEntityServer): Promise<void> {
     await form.CloseActiveDistributions();
   } catch (err) {
     throw new FormAuthoringError(
-      `Could not close the links still open on archived form ${form.ID}: ${err instanceof Error ? err.message : String(err)}. Nothing was changed.`,
-      { fault: true },
+      `Could not close the links still open on archived form ${form.ID}. Nothing was changed.`,
+      { fault: true, logDetail: err instanceof Error ? err.message : String(err) },
     );
   }
 }
@@ -787,4 +791,24 @@ function blueprintSettings(blueprint: FormBlueprint): FormSettings {
     settings.onSubmitMode = mode;
   }
   return settings;
+}
+
+/** Keep unexpected provider exceptions out of the author-facing message, including before a build transaction. */
+async function callerSafeAuthoring<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof FormAuthoringError || error instanceof FormPublishError || error instanceof EngineTransactionFailure) {
+      throw error;
+    }
+    throw new FormAuthoringError('The form change failed on the server; the server log has the detail.', {
+      fault: true,
+      logDetail: error instanceof Error ? error.stack ?? error.message : String(error),
+    });
+  }
+}
+
+/** Sanitize inside the logging boundary so the operator retains the original diagnostic. */
+function runAuthoringUnitOfWork<T>(provider: DatabaseProviderBase, context: string, work: () => Promise<T>): Promise<T> {
+  return runEngineUnitOfWork(provider, context, () => callerSafeAuthoring(work));
 }

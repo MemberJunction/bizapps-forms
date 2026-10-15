@@ -89,7 +89,8 @@ script says which form it looked at, what role it needed, and which slugs would 
 **None of these run in CI.** `smoke/` appears in the scope list `build.yml`'s `scope` job feeds to
 `scripts/check-paths-touched.mjs`, so editing one still starts `build-and-test` — but no job
 executes them: they need a live API, a SQL Server container and a published form, which no build
-agent has. (Three plain-Node specs *under* `smoke/lib/` — `fixture`, `sqlcmd`, `target` — do run
+agent has. (Five plain-Node specs *under* `smoke/lib/` — `fixture`, `sqlcmd`, `target`, `operations`,
+`grants` — do run
 there, and run nowhere else.) They are manual, and they are the only thing standing
 between you and the failure class below.
 

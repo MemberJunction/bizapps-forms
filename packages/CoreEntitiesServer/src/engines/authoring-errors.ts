@@ -19,16 +19,20 @@ export class FormAuthoringError extends Error {
    */
   public readonly fault: boolean;
 
-  constructor(message: string, options: { fault?: boolean } = {}) {
+  /** Provider diagnostics for the server log, never the caller-facing message. */
+  public readonly logDetail?: string;
+
+  constructor(message: string, options: { fault?: boolean; logDetail?: string } = {}) {
     super(message);
     this.name = 'FormAuthoringError';
     this.fault = options.fault === true;
+    this.logDetail = options.logDetail;
   }
 }
 
-/** Save, or throw naming the row and MJ's reason — which rolls the unit of work back. */
+/** Save, or throw a caller-safe failure with MJ diagnostics retained for the server log. */
 export async function saveOrThrow(entity: Pick<BaseEntity, 'Save' | 'LatestResult'>, label: string): Promise<void> {
   if (!(await entity.Save())) {
-    throw new FormAuthoringError(`Failed to save ${label}: ${saveFailure(entity)}`, { fault: true });
+    throw new FormAuthoringError(`Failed to save ${label}.`, { fault: true, logDetail: saveFailure(entity) });
   }
 }

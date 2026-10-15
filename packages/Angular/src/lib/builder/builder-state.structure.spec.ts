@@ -23,6 +23,27 @@ const ids = (page: PageNode): string[] => page.questions.map((q) => q.entity.ID)
 const orders = (page: PageNode): number[] => page.questions.map((q) => q.entity.DisplayOrder);
 
 describe('deleting a page', () => {
+  it('closes the order gap before an appended page takes the next position', async () => {
+    const { tree, store } = fakeTree([{ id: 'p0' }, { id: 'p1' }, { id: 'p2' }]);
+    const state = new GraphedBuilderState(store);
+    const removed = tree.pages[0];
+    expect(await state.deletePage(tree, removed)).toBe(true);
+    tree.pages = tree.pages.filter((page) => page !== removed);
+    const added = await state.addPage(tree, 'Next');
+    expect(tree.pages.map((page) => page.entity.DisplayOrder)).toEqual([0, 1]);
+    expect(['p1', 'p2'].map((id) => store.stored(id)?.DisplayOrder)).toEqual([0, 1]);
+    expect(added?.entity.DisplayOrder).toBe(2);
+  });
+
+  it('rolls back the page deletion when renumbering a survivor is refused', async () => {
+    const { tree, store } = fakeTree([{ id: 'p0' }, { id: 'p1' }]);
+    store.refuse.set('p1', 'refused');
+    const state = new GraphedBuilderState(store);
+    expect(await state.deletePage(tree, tree.pages[0])).toBe(false);
+    expect(store.stored('p0')).toBeDefined();
+    expect(tree.pages.map((page) => page.entity.DisplayOrder)).toEqual([0, 1]);
+  });
+
   it('stages ONE removal of the page and saves once — the server deletes its questions and options in that save', async () => {
     const { tree, store } = fakeTree([
       { id: 'p1', questions: [{ id: 'q1' }] },

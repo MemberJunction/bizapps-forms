@@ -126,7 +126,7 @@ afterEach(() => {
   delete GetGlobalObjectStore()?.[DISTRIBUTION_CLAIM_PROVIDERS_KEY];
 });
 
-const LIVE = () => distributionRow({ ID: 'd1', FormID: FORM, Slug: 'lobby', MagicLinkInviteID: 'inv-0', PublicLinkToken: 'tok-0' });
+const LIVE = () => distributionRow({ ID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', FormID: FORM, Slug: 'lobby', MagicLinkInviteID: 'inv-0', PublicLinkToken: 'tok-0' });
 
 const OPERATIONS = [
   {
@@ -141,21 +141,21 @@ const OPERATIONS = [
     scope: 'forms:write',
     make: () => new ReissueDistributionLinkServerOperation(),
     load: LoadReissueDistributionLinkOperation,
-    input: { FormDistributionID: 'd1' },
+    input: { FormDistributionID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c' },
   },
   {
     key: 'Forms.OpenDistribution',
     scope: 'forms:write',
     make: () => new OpenDistributionServerOperation(),
     load: LoadOpenDistributionOperation,
-    input: { FormDistributionID: 'd1' },
+    input: { FormDistributionID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c' },
   },
   {
     key: 'Forms.CloseDistribution',
     scope: 'forms:write',
     make: () => new CloseDistributionServerOperation(),
     load: LoadCloseDistributionOperation,
-    input: { FormDistributionID: 'd1' },
+    input: { FormDistributionID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c' },
   },
   {
     key: 'Forms.GetDistributionClaims',
@@ -186,7 +186,7 @@ describe.each(OPERATIONS)('$key — registration and Authorize', ({ key, scope, 
 
   it("refuses a respondent's magic-link scope — even for this very link — with FORBIDDEN", async () => {
     const db = world([LIVE()]);
-    const scoped = { ...AUTHOR, MagicLinkScope: { ResourceID: 'd1', ResourceType: 'Form Distribution' } } as unknown as UserInfo;
+    const scoped = { ...AUTHOR, MagicLinkScope: { ResourceID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', ResourceType: 'Form Distribution' } } as unknown as UserInfo;
 
     expect((await run(make(), db, input, scoped)).ResultCode).toBe('FORBIDDEN');
     expect(db.saved).toEqual([]);
@@ -279,10 +279,10 @@ describe.each([
   it('acts on the link and returns its state after the verb', async () => {
     const db = world([{ ...LIVE(), ...before }]);
 
-    const result = await run(make(), db, { FormDistributionID: '  d1 ' });
+    const result = await run(make(), db, { FormDistributionID: '  a40a7e57-4c4d-51b7-9e3e-a7b972231f5c ' });
 
     expect(result.ResultCode).toBe('SUCCESS');
-    expect(result.Output).toEqual({ FormDistributionID: 'd1', Slug: 'lobby', Status: status, RespondentURL: url });
+    expect(result.Output).toEqual({ FormDistributionID: 'a40a7e57-4c4d-51b7-9e3e-a7b972231f5c', Slug: 'lobby', Status: status, RespondentURL: url });
   });
 
   it('refuses a missing FormDistributionID', async () => {

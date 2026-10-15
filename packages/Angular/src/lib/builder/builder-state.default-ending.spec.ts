@@ -128,3 +128,20 @@ describe('a new ending fills a vacancy, rather than counting endings', () => {
     expect(screen?.IsDefault).toBe(false);
   });
 });
+
+
+describe('deleting an ending preserves display order', () => {
+  it('closes only the ending gap, so an appended ending has a distinct position', async () => {
+    const { tree, state } = endings(
+      ending('welcome', 0, false, { ScreenType: 'Welcome' }),
+      ending('a', 0, false), ending('b', 1, false), ending('c', 2, true),
+    );
+    expect(await state.deleteScreen(tree, tree.screens[1])).toBe(true);
+    const added = await state.addScreen(tree, 'Ending', 'Next');
+    expect(tree.screens.map((screen) => [screen.ID, screen.DisplayOrder])).toEqual([
+      ['welcome', 0], ['b', 0], ['c', 1],
+    ]);
+    expect(['b', 'c'].map((id) => state.store.stored(id)?.DisplayOrder)).toEqual([0, 1]);
+    expect(added?.DisplayOrder).toBe(2);
+  });
+});

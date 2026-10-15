@@ -41,6 +41,7 @@ import {
 import { allowedBindingEntities } from '../automation/allowed-entities.js';
 import { FormEntityServer } from '../entities/FormEntityServer.js';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
+import { isGuid } from '../shared/guid.js';
 import { FormAutomationError } from './automation-errors.js';
 import { requireServerEntity, saveFailure } from './engine-guards.js';
 
@@ -515,6 +516,9 @@ function requireId(value: unknown, field: string): string {
   const text = typeof value === 'string' ? value.trim() : '';
   if (!text) {
     throw new FormAutomationError(`${field} is required.`);
+  }
+  if (!isGuid(text)) {
+    throw new FormAutomationError(`${field} must be a valid ID.`);
   }
   return text;
 }

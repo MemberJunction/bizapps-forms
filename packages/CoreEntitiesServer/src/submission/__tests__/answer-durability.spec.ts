@@ -115,3 +115,20 @@ describe('a re-save writes only what changed', () => {
     });
   });
 });
+
+ it('updates an existing answer when SQL and snapshot question IDs differ only in case', async () => {
+  const request = inputs({ complete: false });
+  const id = 'abcdef12-abcd-4abc-8abc-abcdef123456';
+  request.answers[0].question = { ...request.answers[0].question, id };
+  request.answers[0].input.questionId = id;
+  const fake = makeFakeProvider({
+    createPermissions: respondentPermissions(),
+    existingResponses: [{ ID: EXISTING_ID, Status: 'Partial', FormVersionID: request.formVersionId, AnonymousSessionID: request.sessionId }],
+    existingAnswers: [{ ID: 'existing-answer', QuestionID: id.toUpperCase() }],
+  });
+  const result = await persistSubmission(fake.provider, request, makeContextUser());
+  expect(result.outcome).toBe('saved');
+  expect(answerWrites(fake)).toHaveLength(1);
+  expect(answerWrites(fake)[0].values.ID).toBe('existing-answer');
+  expect(answerDeletes(fake)).toEqual([]);
+});
