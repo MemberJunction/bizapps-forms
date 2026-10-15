@@ -44,6 +44,7 @@ Rules:
 - Doodle is a freehand drawing pad; it is not a signature and carries no legal weight. Its settings may include { "penColor": string, "penWidth": string, "penControls": string } — leave them out unless the brief asks for a particular pen.
 - Statement is display-only (a section header / instructional text); it is never required and has no options.
 - Do NOT emit a welcome or thank-you "question". Those are SCREENS, configured separately from the questions, and a Statement standing in for one appears in the middle of the form instead of around it.
+- Design the form ONLY. Do NOT include "automations", "onSubmitMode" or any other on-submit behaviour (emails, tasks, actions, integrations) — even if the request asks for it. What happens on submit is configured by the caller, not by you, and a response carrying either key is rejected.
 - Keep prompts concise. Mark only genuinely-required fields as required.
 - Return valid JSON parseable by JSON.parse. Output the JSON object and nothing else.
 

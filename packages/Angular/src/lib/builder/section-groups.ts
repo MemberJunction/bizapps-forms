@@ -18,7 +18,7 @@
  * the `JumpTarget` it decodes to, and the forward-only filtering that decided which options
  * exist at all are all somebody else's business, unchanged.
  */
-import type { ConditionalSourceQuestion } from './condition-sources';
+import type { ConditionalSourceQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
 /** A section, as a picker needs to know it: what to call it, and what it owns. */
 export interface FormSection {

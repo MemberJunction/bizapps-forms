@@ -20,7 +20,6 @@ const stripped = (file: string): string =>
     .replace(/\/\/[^\n]*/g, '');
 
 const screenEditor = (): string => stripped('screen-editor.component.ts');
-const state = (): string => stripped('builder-state.service.ts');
 const builderHtml = (): string => stripped('form-builder.component.html');
 
 /** One method's source, from its signature to whatever member follows it. */
@@ -66,47 +65,14 @@ describe('the default ending is chosen, not toggled', () => {
 });
 
 // Ordering and the no-debounce rule used to be asserted here, by matching the literal call text
-// inside `setDefaultEnding`. Both now live in `builder-state.default-ending.spec.ts`, which
-// models the unique index and observes the outcome instead — `BuilderStateService` instantiates
-// fine in this environment, so there was never a reason to read its source for behaviour that a
-// test can simply exercise. The regex guard also failed on a refactor that changed nothing an
-// author could observe, which is what a test coupled to implementation does.
-describe('moving the default is ordered, not debounced', () => {
-  it('is proven behaviourally, not by reading the method body', () => {
-    expect(state()).toMatch(/public async setDefaultEnding/);
-  });
-});
+// inside `setDefaultEnding`. Both live in `builder-state.default-ending.spec.ts`, which models the
+// unique index and observes the outcome instead.
 
-describe('a new ending fills a vacancy, rather than counting endings', () => {
-  it('addScreen asks whether the form HAS a default, not whether it has any endings', () => {
-    // "no ending exists yet" is not the same question. A form whose only ending is screened out
-    // has an ending and no default, so the next ending an author adds was left un-flagged and
-    // the form kept no catch-all at all — invisible before this invariant existed, and a broken
-    // promise now that the label says every form has exactly one.
-    const body = methodBody(state(), 'public async addScreen');
-    expect(body).toMatch(/defaultEndingId\(/);
-    expect(body).not.toMatch(/!tree\.screens\.some\(\(s\) => s\.ScreenType === 'Ending'\)/);
-  });
-});
-
-describe('deleting the default leaves a default behind', () => {
-  it('the delete path promotes a survivor rather than returning a bare boolean', () => {
-    // The reported defect: deleting the default ending left the form with none, and the one
-    // remaining ending rendered "Never shown — add a condition" while being the only screen a
-    // respondent could reach.
-    const body = methodBody(state(), 'public async deleteScreen');
-    expect(body).toMatch(/vacantDefaultEnding\(tree\.screens\)/);
-    expect(body).toMatch(/promote\.IsDefault = true/);
-  });
-
-  it('the tree splice moved in with it, so no caller can delete without repairing', () => {
-    expect(methodBody(state(), 'public async deleteScreen')).toMatch(/tree\.screens = tree\.screens\.filter/);
-    expect(stripped('form-builder.component.ts')).not.toMatch(
-      /this\.tree\.screens = this\.tree\.screens\.filter\(\(s\) => s\.ID !== screen\.ID\)/,
-    );
-  });
-});
-
+// The two `builder-state.service.ts` decisions that used to be read out of method bodies here — a
+// new ending fills a VACANCY rather than counting endings, and deleting the default promotes a
+// survivor and takes the screen out of the tree — are executed in `builder-state.default-ending.spec.ts`
+// now (#303): the promotion became part of the same graph save as the delete, which a regex over
+// the method text could neither see nor survive.
 
 describe('a refused move releases the builder instead of freezing it', () => {
   const builder = (): string => stripped('form-builder.component.ts');

@@ -49,15 +49,10 @@ export {
   type AnalyzedAnswer,
 } from './on-submit/response-analyzer-model';
 export * from './shared/action-params';
-export * from './shared/form-response-context';
-// Server needs this seam too — not to build the isolated-provider instance itself (that is
-// `withIsolatedProvider` in `@mj-biz-apps/forms-server`, which knows nothing about this package),
-// but because `ActionDataProvider` appears in `loadFormResponseContext`'s own public signature:
-// Server calls that function directly (`submit-pipeline-configured-load-failure.spec.ts` types a
-// variable against it), so the type has to be importable from here for that call site to typecheck.
-export * from './shared/action-provider';
+// The blueprint schema and the Builder moved to forms-entities (contracts) and
+// forms-core-entities-server (FormAuthoringEngine) in #303; what stays here is the Designer's
+// LLM-output parsing.
 export * from './authoring/form-blueprint';
-export * from './authoring/form-blueprint-builder';
 export * from './authoring/llm-form-designer';
 export {
   GenerateFormFromBriefAction as GenerateFormAction,
@@ -78,7 +73,6 @@ export {
   type ConfirmationEmailConfig,
   type ConfirmationEmailEngine,
 } from './on-submit/confirmation-email-sender';
-export * from './templates/starter-templates';
 
 /**
  * The set of action classes this package contributes. Referencing them here (and

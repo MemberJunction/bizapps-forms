@@ -15,7 +15,7 @@ import { MJ_CORE_ENTITY } from '../shared/entity-names';
 import type {
   ResponseAnswerView,
   ResponseFileView,
-  ResponseAutomationRunView,
+  ResponseAutomationAttempt,
   ResponseBindingRecordView,
   ResponseDetail,
   ResponseRecordLink,
@@ -33,7 +33,7 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
  * one of them. Both maps are total over their CodeGen union, so a new value in the
  * CHECK constraint fails the build here instead of silently rendering as neutral.
  */
-const RUN_TONE: Record<ResponseAutomationRunView['status'], string> = {
+const RUN_TONE: Record<ResponseAutomationAttempt['status'], string> = {
   Succeeded: 'mjf-badge--success',
   Failed: 'mjf-badge--danger',
   Running: 'mjf-badge--info',
@@ -79,7 +79,13 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
         </div>
       </header>
 
-      @if (Detail.unlabelledAnswerCount > 0) {
+      @if (Detail.labelsMissing) {
+        <p class="rd-note" role="status">
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+          The form version used for labels has no readable published definition, so this
+          response’s answers cannot be labelled and are not shown. They are still stored.
+        </p>
+      } @else if (Detail.unlabelledAnswerCount > 0) {
         <p class="rd-note" role="status">
           <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
           {{ Detail.unlabelledAnswerCount }}
@@ -91,7 +97,7 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
 
       @if (Detail.answers.length === 0) {
         <p class="rd-empty">
-          {{ Detail.unlabelledAnswerCount > 0
+          {{ Detail.labelsMissing || Detail.unlabelledAnswerCount > 0
              ? 'None of this response’s answers could be labelled.'
              : 'This response has no answers.' }}
         </p>
@@ -171,17 +177,23 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
             <div class="run">
               <span class="mjf-badge" [class]="RunTone(r)">{{ r.status }}</span>
               <span class="run-name">{{ r.automationName }}</span>
+              <!-- "Delivery attempt", not "N attempts": AttemptCount is which delivery of the submit
+                   message last ran this step (a replay starts again at 1), not how many times it ran. -->
               <span class="run-meta">
                 @if (r.durationSeconds !== null) {
                   {{ r.durationSeconds }}s ·
                 }
-                {{ r.attemptCount }} {{ r.attemptCount === 1 ? 'attempt' : 'attempts' }}
+                <span title="Which delivery of the submission's queue message last ran this step. A redelivery raises it; a replay starts again at 1.">delivery attempt {{ r.deliveryAttempt }}</span>
               </span>
               @if (r.actionExecutionLogId) {
                 <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="OpenActionLog(r)">Action log</button>
               }
               @if (r.aiAgentRunId) {
                 <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="OpenAgentRun(r)">Agent run</button>
+              }
+              @if (r.workQueueMessageId) {
+                <!-- For an operator: the id to look the delivery up by in MJ's Work Queue. -->
+                <span class="run-msg" title="The Work Queue message whose delivery ran this step">Message {{ r.workQueueMessageId }}</span>
               }
               @if (r.errorMessage) {
                 <p class="run-error">{{ r.errorMessage }}</p>
@@ -344,6 +356,14 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
       .bind-entity { font-weight: 600; }
       .run-meta,
       .bind-fields { color: var(--mj-text-muted); }
+      /* An id to copy, not to read: set apart, and allowed to wrap on a phone. */
+      .run-msg {
+        font-family: var(--mj-font-family-mono, monospace);
+        font-size: var(--mjf-label);
+        color: var(--mj-text-muted);
+        overflow-wrap: anywhere;
+        user-select: all;
+      }
       .run-error,
       .run-output { flex-basis: 100%; margin: 0; font-size: var(--mjf-label); line-height: 1.5; white-space: pre-wrap; }
       .run-error { color: var(--mj-status-error-text); }
@@ -395,7 +415,7 @@ export class FormsResponseDetailComponent implements AfterViewInit {
   }
 
   /** Badge tone for an automation run's status. See RUN_TONE. */
-  public RunTone(r: ResponseAutomationRunView): string {
+  public RunTone(r: ResponseAutomationAttempt): string {
     return RUN_TONE[r.status] ?? '';
   }
 
@@ -437,7 +457,7 @@ export class FormsResponseDetailComponent implements AfterViewInit {
     this.OpenRecord.emit({ entityName: MJ_CORE_ENTITY.File, recordId: fileId });
   }
 
-  public OpenActionLog(r: ResponseAutomationRunView): void {
+  public OpenActionLog(r: ResponseAutomationAttempt): void {
     if (r.actionExecutionLogId) {
       this.OpenRecord.emit({
         entityName: MJ_CORE_ENTITY.ActionExecutionLog,
@@ -446,7 +466,7 @@ export class FormsResponseDetailComponent implements AfterViewInit {
     }
   }
 
-  public OpenAgentRun(r: ResponseAutomationRunView): void {
+  public OpenAgentRun(r: ResponseAutomationAttempt): void {
     if (r.aiAgentRunId) {
       this.OpenRecord.emit({ entityName: MJ_CORE_ENTITY.AIAgentRun, recordId: r.aiAgentRunId });
     }

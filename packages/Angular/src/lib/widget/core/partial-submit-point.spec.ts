@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { passedSubmitPoints } from './partial-submit-point';
-import type { PublishedFormPage, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
+import { toRespondentDefinition, type PublishedFormDefinition, type PublishedFormPage, type PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
 function question(id: string): PublishedFormQuestion {
   return { id, type: 'ShortText', prompt: id, isRequired: false, displayOrder: 0, options: [] };
@@ -62,5 +62,52 @@ describe('passedSubmitPoints', () => {
   it('ignores answers to questions that are not on any page', () => {
     // A stale answer left over from a conditional branch that has since been removed.
     expect(passedSubmitPoints(pages, new Set(['ghost']))).toEqual([]);
+  });
+});
+
+/**
+ * Checkpoints on the respondent PROJECTION (#303 Task 10c carry). The projection drops a page nobody
+ * can see — here, one shown only above a score, which visibility can never reach — and a dropped
+ * partial-submit page leaves a copy-less stub behind so its checkpoint survives. Banking is by
+ * POSITION (`passedSubmitPoints` reads pages in order), so the stub must keep the page's place: answer
+ * something after it and its checkpoint counts as passed, exactly as on the full snapshot.
+ */
+describe('passedSubmitPoints on the respondent projection', () => {
+  const full: PublishedFormDefinition = {
+    formId: 'f',
+    formVersionId: 'v',
+    name: 'Checkpoints',
+    renderMode: 'Scroll',
+    settings: { anonymousAllowed: true, captchaRequired: false },
+    styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
+    pages: [
+      { id: 'p1', displayOrder: 1, questions: [question('q1')] },
+      {
+        id: 'hidden-checkpoint',
+        displayOrder: 2,
+        isPartialSubmitPoint: true,
+        conditionalRule: { show: { all: [{ source: 'score', op: 'greaterThan', value: 5 }] } },
+        questions: [question('secret')],
+      },
+      { id: 'p3', displayOrder: 3, questions: [question('q3')] },
+    ],
+  };
+
+  it('keeps a dropped page\'s checkpoint in its place, with nothing a respondent can read', () => {
+    const projection = toRespondentDefinition(full);
+    expect(projection.pages.map((p) => p.id)).toEqual(['p1', 'hidden-checkpoint', 'p3']);
+    expect(projection.pages[1]).toMatchObject({ isPartialSubmitPoint: true, questions: [] });
+    expect(JSON.stringify(projection)).not.toContain('secret');
+  });
+
+  it('banks it once the respondent answers past it — the same verdict as on the full snapshot', () => {
+    const projection = toRespondentDefinition(full);
+    const answered = new Set(['q1', 'q3']);
+    expect(passedSubmitPoints(projection.pages, answered)).toEqual(['hidden-checkpoint']);
+    expect(passedSubmitPoints(projection.pages, answered)).toEqual(passedSubmitPoints(full.pages, answered));
+    // ...and not before.
+    expect(passedSubmitPoints(projection.pages, new Set(['q1']))).toEqual([]);
   });
 });

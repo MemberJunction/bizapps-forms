@@ -2,9 +2,20 @@
   "name": "@mj-biz-apps/forms-core-entities-server",
   "type": "module",
   "version": "0.15.1",
-  "description": "Server-side entity subclasses for MJ Forms — lifecycle hooks (validation, hardening, cross-record invariants) that run only on the server.",
+  "description": "Server-side domain layer for MJ Forms — entity server subclasses (invariants that hold for every writer), the engines and Remote Operations, the Forms.RunAutomations work-queue handler, and the shared helpers the actions and the server both run (response context, entity binding, provider resolution).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -26,10 +37,17 @@
     "@mj-biz-apps/forms-entities": "0.15.1"
   },
   "peerDependencies": {
-    "@memberjunction/core": "^6.1.0-edge.6",
-    "@memberjunction/core-entities": "^6.1.0-edge.6",
-    "@memberjunction/global": "^6.1.0-edge.6",
-    "@memberjunction/sqlserver-dataprovider": "^6.1.0-edge.6"
+    "@memberjunction/actions": "^6.2.0-edge.3",
+    "@memberjunction/actions-base": "^6.2.0-edge.3",
+    "@memberjunction/ai-agents": "^6.2.0-edge.3",
+    "@memberjunction/ai-core-plus": "^6.2.0-edge.3",
+    "@memberjunction/core": "^6.2.0-edge.3",
+    "@memberjunction/core-entities": "^6.2.0-edge.3",
+    "@memberjunction/generic-database-provider": "^6.2.0-edge.3",
+    "@memberjunction/global": "^6.2.0-edge.3",
+    "@memberjunction/sqlserver-dataprovider": "^6.2.0-edge.3",
+    "@memberjunction/work-queue-core": "^6.2.0-edge.3",
+    "@memberjunction/work-queue-engine": "^6.2.0-edge.3"
   },
   "repository": {
     "type": "git",

@@ -25,13 +25,13 @@ const REL = {
 };
 
 describe('PERSON_FORMS_REGISTRATION', () => {
-  it('targets People, after-related, with the forms key and no join field', () => {
+  it('targets People, after-related, with the forms key, joined on RespondentPersonID', () => {
     expect(PERSON_FORMS_REGISTRATION.entity).toBe('MJ_BizApps_Common: People');
     expect(PERSON_FORMS_REGISTRATION.slot).toBe('after-related');
     expect(PERSON_FORMS_REGISTRATION.relatedEntity).toBe(RESPONSES);
     expect(PERSON_FORMS_REGISTRATION.contributionKey).toBe('forms');
     expect(PERSON_FORMS_SECTION_KEY).toBe('forms');
-    expect(PERSON_FORMS_REGISTRATION.relatedJoinField).toBeUndefined();
+    expect(PERSON_FORMS_REGISTRATION.relatedJoinField).toBe('RespondentPersonID');
   });
 
   it('claims the stock grid and wins as the only registered contribution', () => {
@@ -62,21 +62,23 @@ describe('PERSON_FORMS_REGISTRATION', () => {
     expect(r.HiddenBakedSectionKeys).toContain(key);
   });
 
-  it('counter-example: adding relatedJoinField leaves a stock grid mounted', () => {
-    // MJ resolver defect, filed as MemberJunction/MJ#4990: with both contributionKey and
-    // relatedJoinField set, the stock grid key is never claimed. If this test flips, MJ fixed it
-    // and the registration may name RespondentPersonID explicitly.
+  it('claims only the RespondentPersonID grid, so a second People FK keeps its stock grid', () => {
+    // Why the registration names its join field. Up to MJ 6.1.x, naming it alongside
+    // contributionKey left the stock grid unclaimed (MemberJunction/MJ#4990), so the registration
+    // omitted it and claimed EVERY Form Responses -> People FK instead. MJ fixed the resolver by
+    // 6.2.0-edge.3, the floor of mjVersionRange, so the precise claim is now the correct one: a
+    // future second FK to Person keeps MJ's stock grid rather than vanishing into this panel.
+    const REVIEWER = { ...REL, RelatedEntityJoinField: 'ReviewerPersonID' };
     const r = ResolveFormContributions({
       EntityName: PEOPLE,
-      RelatedEntities: [REL],
+      RelatedEntities: [REL, REVIEWER],
       IsaChildEntityIDs: [],
-      Registrations: [
-        { Priority: 0, Metadata: { ...PERSON_FORMS_REGISTRATION, relatedJoinField: 'RespondentPersonID' } },
-      ],
+      Registrations: [{ Priority: 0, Metadata: PERSON_FORMS_REGISTRATION }],
       BakedSectionKeys: [],
       ShowRelatedEntities: true,
     });
-    expect(r.StockGrids.length).toBeGreaterThan(0);
+    expect(r.StockGrids.map((g) => g.RelatedJoinField)).toEqual(['ReviewerPersonID']);
+    expect(r.Winners.filter((w) => w.Kind === 'registered')).toHaveLength(1);
   });
 });
 

@@ -80,17 +80,19 @@ import { fileURLToPath } from 'node:url';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/** The `mj migrate -t` tag a host sitting at our declared floor would be on. */
+/**
+ * The `mj migrate -t` tag a host sitting at our declared floor would be on — prerelease included:
+ * a host at `>=6.2.0-edge.3` runs 6.2.0-edge.3, and before 6.2.0 ships `v6.2.0` names no tag at all.
+ */
 export function coreMigrationTag(mjVersionRange) {
-  const lowerBound = /(?:^|\s)>=\s*(\d+)\.(\d+)\.(\d+)/.exec(mjVersionRange ?? '');
+  const lowerBound = /(?:^|\s)>=\s*(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(mjVersionRange ?? '');
   if (!lowerBound) {
     throw new Error(
       `mj-app.json's mjVersionRange ${JSON.stringify(mjVersionRange)} has no '>=X.Y.Z' lower bound, ` +
         'so the core migration tag cannot be derived. Pass --core-tag vX.Y.Z to say it explicitly.',
     );
   }
-  const [, major, minor, patch] = lowerBound;
-  return `v${major}.${minor}.${patch}`;
+  return `v${lowerBound[1]}`;
 }
 
 /**

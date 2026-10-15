@@ -10,7 +10,14 @@ export { registerMjFormElement, MJ_FORM_TAG } from './register-element';
 export { formsWidgetProviders } from './widget-providers';
 
 // S1 API seam
-export { FORMS_API_SERVICE, type IFormsApiService } from './api/forms-api.interface';
+export {
+  FORMS_API_SERVICE,
+  FormUnavailableError,
+  ResponseNotSavedError,
+  SessionExpiredError,
+  type IFormsApiService,
+  type RespondentFormLoad,
+} from './api/forms-api.interface';
 export {
   FORMS_API_CONFIG,
   type FormsApiConfig,
@@ -18,6 +25,8 @@ export {
   normalizeApiConfig,
 } from './api/forms-api.config';
 export { FormsGraphQLApiService } from './api/forms-api.graphql.service';
+export { FormsOfflineApiService } from './api/forms-api.offline.service';
+// Development only — never bound by `formsWidgetProviders`, so it is not in the `<mj-form>` bundle.
 export { FormsMockApiService } from './api/forms-api.mock.service';
 export {
   FORMS_UPLOAD_SERVICE,
@@ -43,6 +52,8 @@ export { WIDGET_ICON_GLYPHS, type WidgetIconGlyph, type WidgetIconName } from '.
 
 // Headless runtime + helpers
 export { FormRuntime } from './core/form-runtime';
+// What a FormRuntime is built from: the live projection, or an author's full draft.
+export { fullForm, projectionForm, type WidgetForm, type WidgetRenderDefinition } from './core/widget-form';
 export {
   AutosaveController,
   type AutosaveFn,
@@ -60,7 +71,6 @@ export {
   shownScreenFor,
   type ShownScreen,
 } from './core/shown-screen';
-export { validateQuestion, hasValue, type FieldValidationResult } from './core/validation';
 export { toAnswerInputs, type AnswerMap } from './core/answer-value';
 export {
   captchaRequired,

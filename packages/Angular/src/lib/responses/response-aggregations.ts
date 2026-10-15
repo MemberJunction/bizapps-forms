@@ -1,36 +1,37 @@
 /**
- * Pure builders for the individual-response read-model.
+ * Pure builders for the individual-response read-model, over what the operations return.
  *
- * Deliberately free of Angular / RunView so they are trivially unit-testable: each takes
- * already-fetched rows plus the published questions and returns view-model shapes. The
- * data service does the I/O, including resolving `TargetEntityID` through `Metadata` —
- * that lookup arrives here as a plain map so this file stays pure.
+ * `Forms.ListResponses` and `Forms.GetResponseDetail` (#303) return STORED rows — the response, its
+ * answers as the columns hold them, the files, runs and ledger rows — plus the definition snapshot
+ * that labels them. Turning those into what a reader sees (prompts in page order, choice labels,
+ * file names, durations) stays here in the client, in one place, through the contracts' answer
+ * helpers the server uses too. Angular-free and I/O-free, so every rule is a unit test away.
  */
-import type {
-  mjBizAppsFormsFormResponseEntityType,
-  mjBizAppsFormsFormResponseAnswerEntityType,
-  mjBizAppsFormsFormUploadEntityType,
-  mjBizAppsFormsFormAutomationRunEntityType,
-  mjBizAppsFormsFormEntityBindingRecordEntityType,
-  PublishedFormQuestion,
-} from '@mj-biz-apps/forms-entities';
 import { LogError } from '@memberjunction/core';
-import { deriveRespondent, renderAnswer } from '../shared/answer-values';
+import {
+  deriveRespondentLabel,
+  foldQuestionId,
+  renderAnswer,
+  type FormsGetResponseDetailOutput,
+  type FormsResponseAutomationRun,
+  type FormsResponseBindingRecord,
+  type FormsResponseListRow,
+  type FormsResponseUpload,
+  type FormsStoredAnswer,
+  type PublishedFormDefinition,
+  type PublishedFormQuestion,
+} from '@mj-biz-apps/forms-entities';
+import { flattenQuestions } from '../shared/published-questions';
 import { toDate } from '../shared/runview-dates';
 import type {
-  ResponseListRow,
   ResponseAnswerView,
-  ResponseAutomationRunView,
+  ResponseAutomationAttempt,
   ResponseBindingRecordView,
   ResponseDetail,
   ResponseFileView,
+  ResponseListRow,
 } from './response-models';
-
-type ResponseRow = mjBizAppsFormsFormResponseEntityType;
-type AnswerRow = mjBizAppsFormsFormResponseAnswerEntityType;
-type UploadRow = mjBizAppsFormsFormUploadEntityType;
-type AutomationRunRow = mjBizAppsFormsFormAutomationRunEntityType;
-type BindingRecordRow = mjBizAppsFormsFormEntityBindingRecordEntityType;
+import { runOutputText } from '../shared/run-output-text';
 
 /** Shown when a `FormUpload` row exists but carries no `FileName`. */
 const UNNAMED_FILE = 'Unnamed file';
@@ -38,124 +39,92 @@ const UNNAMED_FILE = 'Unnamed file';
 /** Shown when no `FormUpload` row matched the answer's `FileID` at all. */
 const UNRESOLVED_FILE = 'File (details unavailable)';
 
-/** Everything one response's detail view is built from. */
-export interface ResponseDetailInput {
-  response: ResponseRow;
-  answers: AnswerRow[];
-  /** The published questions of the version this response was submitted against. */
-  questions: PublishedFormQuestion[];
-  /** Provenance rows for the files these answers reference. */
-  uploads: UploadRow[];
-  /** On-submit automation attempts triggered by this response. */
-  automationRuns: AutomationRunRow[];
-  /** Entity-binding ledger rows written by this response. */
-  bindingRecords: BindingRecordRow[];
-  /** `TargetEntityID` → entity display name, resolved by the caller from `Metadata`. */
-  entityNameById: ReadonlyMap<string, string>;
-  /** Sections whose read failed; they arrive empty and are reported as missing, not empty. */
-  unavailableSections?: string[];
+/** One row of the response list. The server already derived who responded and what they answered. */
+export function toResponseListRow(row: FormsResponseListRow): ResponseListRow {
+  return {
+    responseId: row.ResponseID,
+    status: row.Status,
+    startedAt: toDate(row.StartedAt),
+    submittedAt: toDate(row.SubmittedAt),
+    respondent: row.Respondent,
+    answeredCount: row.AnsweredCount,
+  };
 }
 
 /**
- * Builds the response-list rows. Lists COMPLETE responses only — a Partial is an in-progress
- * autosave, not a submitted response, so it must not appear in the headline response list
- * (it is still reflected in the funnel/drop-off metric, which reads all answers).
- */
-/**
- * Whether an answer row actually holds an answer.
+ * The questions of a definition snapshot, flattened in page order — or `null` when there is no
+ * definition to label with: none was returned, or the text is not a definition.
  *
- * Every answerable question a respondent reaches can leave a row behind, blank ones
- * included, so counting rows reports questions SEEN rather than questions answered — and
- * the column it feeds is headed "Answered", the only per-response completeness signal the
- * list gives a reader.
- *
- * Tests each typed column for EMPTINESS, never for falsiness. A numeric `0`, a `false`
- * boolean and an empty-string-but-present text answer are not the same thing: the first two
- * are real answers a respondent chose, and reading them as blank would under-count exactly
- * the responses that answered "no" or "none".
+ * Null is not swallowed: a malformed snapshot is logged with `context` (which version, for which
+ * response), and the caller shows that the answers could not be labelled rather than an empty list.
  */
-function storedSomething(a: AnswerRow): boolean {
-  if (a.TextValue !== null && a.TextValue !== undefined && a.TextValue.trim() !== '') return true;
-  if (a.NumericValue !== null && a.NumericValue !== undefined) return true;
-  if (a.BooleanValue !== null && a.BooleanValue !== undefined) return true;
-  if (a.DateValue !== null && a.DateValue !== undefined) return true;
-  if (a.FileID !== null && a.FileID !== undefined && a.FileID !== '') return true;
-  if (a.JSONValue !== null && a.JSONValue !== undefined && a.JSONValue.trim() !== '') return true;
-  return false;
-}
-
-export function buildResponseRows(
-  responses: ResponseRow[],
-  answers: AnswerRow[],
-  questions: PublishedFormQuestion[] = [],
-): ResponseListRow[] {
-  const answersByResponse = new Map<string, AnswerRow[]>();
-  for (const a of answers) {
-    const bucket = answersByResponse.get(a.ResponseID);
-    if (bucket) bucket.push(a);
-    else answersByResponse.set(a.ResponseID, [a]);
+export function parseDefinitionQuestions(json: string | null | undefined, context: string): PublishedFormQuestion[] | null {
+  if (!json) {
+    return null;
   }
-  return responses
-    .filter((r) => r.Status === 'Complete')
-    .map((r) => {
-      const own = answersByResponse.get(r.ID) ?? [];
-      return {
-        responseId: r.ID,
-        status: r.Status,
-        startedAt: toDate(r.StartedAt),
-        submittedAt: toDate(r.SubmittedAt),
-        // `questions` defaults to empty so a caller with no snapshot still gets rows —
-        // it just falls back to the Person name, or to "Anonymous", as before.
-        respondent: deriveRespondent(r, own, questions),
-        answeredCount: own.filter(storedSomething).length,
-      };
-    });
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (err) {
+    LogError(`Forms: the definition snapshot for ${context} is not JSON (${err instanceof Error ? err.message : String(err)}); its answers are shown unlabelled.`);
+    return null;
+  }
+  if (!isDefinitionShaped(parsed)) {
+    LogError(`Forms: the definition snapshot for ${context} has no pages list; its answers are shown unlabelled.`);
+    return null;
+  }
+  return flattenQuestions(parsed);
 }
 
-/** Builds one response's full detail: labelled answers, plus what the submission did. */
-export function buildResponseDetail(input: ResponseDetailInput): ResponseDetail {
-  const { response } = input;
-  const { views, unlabelled } = buildAnswerViews(input.answers, input.questions, input.uploads);
+function isDefinitionShaped(value: unknown): value is PublishedFormDefinition {
+  return typeof value === 'object' && value !== null && Array.isArray((value as { pages?: unknown }).pages);
+}
+
+/** One response's full detail: labelled answers, plus what the submission did. */
+export function buildResponseDetail(output: FormsGetResponseDetailOutput): ResponseDetail {
+  const { Response: response } = output;
+  const questions = parseDefinitionQuestions(output.DefinitionJSON, `version ${output.LabelFormVersionID} labelling response ${response.ID}`);
+  const { views, unlabelled } = buildAnswerViews(output.Answers, questions ?? [], output.Uploads);
   return {
     responseId: response.ID,
     status: response.Status,
     startedAt: toDate(response.StartedAt),
     submittedAt: toDate(response.SubmittedAt),
-    respondent: deriveRespondent(response, input.answers, input.questions),
+    respondent: deriveRespondentLabel(response.RespondentPerson, output.Answers, questions ?? []),
     answers: views,
     unlabelledAnswerCount: unlabelled,
-    unavailableSections: input.unavailableSections ?? [],
-    automationRuns: input.automationRuns.map(toAutomationRunView),
-    bindingRecords: input.bindingRecords.map((b) => toBindingRecordView(b, input.entityNameById)),
+    labelsMissing: questions === null,
+    unavailableSections: output.UnavailableSections,
+    automationRuns: output.AutomationRuns.map(toAutomationAttempt),
+    bindingRecords: output.BindingRecords.map(toBindingRecordView),
   };
 }
 
 /**
  * Labels each answer by its question, attaching — for file answers — the upload behind it.
  *
- * An answer whose question is absent from `questions` is dropped: it was submitted against
- * a version where the question still existed, and there is nothing truthful to label it
- * with. Statement questions are display-only and never have answers worth showing.
+ * Driven by QUESTIONS, not by answers: `questions` arrive in page/display order, the answers in
+ * whatever order the server read them — which is how a response once rendered "Last name" above
+ * "First name". Ids are compared folded, because a server read hands back the database's GUID
+ * casing, which need not be the snapshot's.
+ *
+ * An answer whose question is absent from `questions` is dropped (there is nothing truthful to label
+ * it with) and COUNTED, so its omission is visible. Statements are display-only and never shown.
  */
 function buildAnswerViews(
-  answers: AnswerRow[],
-  questions: PublishedFormQuestion[],
-  uploads: UploadRow[],
+  answers: readonly FormsStoredAnswer[],
+  questions: readonly PublishedFormQuestion[],
+  uploads: readonly FormsResponseUpload[],
 ): { views: ResponseAnswerView[]; unlabelled: number } {
-  const answerByQuestion = new Map(answers.map((a) => [a.QuestionID, a]));
-  const uploadByFileId = new Map(uploads.map((u) => [u.FileID, u]));
+  const answerByQuestion = new Map(answers.map((a) => [foldQuestionId(a.QuestionID), a]));
+  const uploadByFileId = new Map(uploads.map((u) => [u.FileID.toLowerCase(), u]));
   const views: ResponseAnswerView[] = [];
 
-  // Driven by QUESTIONS, not by answers. `questions` arrives flattened in page/display
-  // order, whereas `answers` arrives in whatever order the view returned — which is how a
-  // response rendered "Last name" above "First name". Reading a transcript out of order
-  // is not a cosmetic problem: it silently misrepresents what the respondent filled in.
   for (const q of questions) {
     if (q.type === 'Statement') {
-      // Display-only prose; a Statement never carries an answer worth showing.
       continue;
     }
-    const a = answerByQuestion.get(q.id);
+    const a = answerByQuestion.get(foldQuestionId(q.id));
     if (!a) {
       // Not answered — skipped, conditionally hidden, or added after this submission.
       continue;
@@ -169,42 +138,26 @@ function buildAnswerViews(
     });
   }
 
-  // Real answers we cannot name: counted, not forgotten. Statements are excluded because a
-  // stray answer against one is display-only noise, not lost respondent input.
-  const knownIds = new Set(questions.filter((q) => q.type !== 'Statement').map((q) => q.id));
-  const unlabelled = answers.filter((a) => !knownIds.has(a.QuestionID)).length;
-
+  const knownIds = new Set(questions.filter((q) => q.type !== 'Statement').map((q) => foldQuestionId(q.id)));
+  const unlabelled = answers.filter((a) => !knownIds.has(foldQuestionId(a.QuestionID))).length;
   return { views, unlabelled };
 }
 
 /**
- * Resolves an answer's file, matching on the answer's `FileID`.
+ * The file behind an answer, matched on the answer's `FileID`.
  *
- * `FileID` and NOT `ResponseDraftID` is the join key on purpose: a draft can accumulate
- * uploads the respondent replaced or abandoned, and those revoked/orphaned rows must never
- * surface as though they were this answer's file.
- *
- * Null means "this answer has no file". A `FileID` whose provenance row did not come back
- * returns an UNRESOLVED view, not null: the respondent did attach something, and rendering
- * that as an empty answer would be a lie the reader has no way to detect.
+ * `FileID` and NOT the draft is the join key on purpose: a draft can accumulate uploads the
+ * respondent replaced or abandoned, and those revoked/orphaned rows must never surface as this
+ * answer's file. A `FileID` whose provenance row did not come back is an UNRESOLVED view, not null:
+ * the respondent did attach something, and an empty answer would be a lie nobody could detect.
  */
-function toFileView(
-  a: AnswerRow,
-  uploadByFileId: ReadonlyMap<string, UploadRow>,
-): ResponseFileView | null {
+function toFileView(a: FormsStoredAnswer, uploadByFileId: ReadonlyMap<string, FormsResponseUpload>): ResponseFileView | null {
   if (!a.FileID) {
     return null;
   }
-  const upload = uploadByFileId.get(a.FileID);
+  const upload = uploadByFileId.get(a.FileID.toLowerCase());
   if (!upload) {
-    return {
-      fileId: a.FileID,
-      fileName: UNRESOLVED_FILE,
-      contentType: null,
-      sizeBytes: null,
-      isRevoked: false,
-      isResolved: false,
-    };
+    return { fileId: a.FileID, fileName: UNRESOLVED_FILE, contentType: null, sizeBytes: null, isRevoked: false, isResolved: false };
   }
   return {
     fileId: upload.FileID,
@@ -216,40 +169,37 @@ function toFileView(
   };
 }
 
-/** One automation attempt as the detail view shows it. */
-function toAutomationRunView(run: AutomationRunRow): ResponseAutomationRunView {
+/** One automation step as the detail view shows it. */
+function toAutomationAttempt(run: FormsResponseAutomationRun): ResponseAutomationAttempt {
   const startedAt = toDate(run.StartedAt);
   const completedAt = toDate(run.CompletedAt);
   return {
     runId: run.ID,
     automationName: run.FormAutomation,
     status: run.Status,
-    attemptCount: run.AttemptCount,
+    deliveryAttempt: run.AttemptCount,
+    workQueueMessageId: run.WorkQueueMessageID,
     startedAt,
     completedAt,
-    durationSeconds:
-      startedAt && completedAt ? (completedAt.getTime() - startedAt.getTime()) / 1000 : null,
+    durationSeconds: startedAt && completedAt ? (completedAt.getTime() - startedAt.getTime()) / 1000 : null,
     errorMessage: run.ErrorMessage,
-    outputSummary: run.OutputSummary,
+    outputSummary: runOutputText(run.OutputSummary),
     actionExecutionLogId: run.ActionExecutionLogID,
     aiAgentRunId: run.AIAgentRunID,
   };
 }
 
-/** One binding-ledger row as the detail view shows it. */
-function toBindingRecordView(
-  record: BindingRecordRow,
-  entityNameById: ReadonlyMap<string, string>,
-): ResponseBindingRecordView {
+/**
+ * One binding-ledger row as the detail view shows it. `TargetEntityName` is resolved on the server
+ * (the column is deliberately not a foreign key); null keeps the row visible, labelled by the id,
+ * with no link to an entity name that does not exist.
+ */
+function toBindingRecordView(record: FormsResponseBindingRecord): ResponseBindingRecordView {
   return {
     bindingRecordId: record.ID,
     bindingName: record.Binding,
     targetEntityId: record.TargetEntityID,
-    // TargetEntityID is deliberately not an FK, so there is no denormalised name to read —
-    // the caller resolves it through Metadata. Null when it cannot: the row stays visible
-    // (labelled by the id, which is debuggable) but the view offers no link, rather than a
-    // link that would navigate to an entity name that does not exist.
-    targetEntityName: entityNameById.get(record.TargetEntityID) ?? null,
+    targetEntityName: record.TargetEntityName,
     targetRecordId: record.TargetRecordID,
     outcome: record.Outcome,
     writtenFields: parseWrittenFields(record.WrittenFields, record.ID),
@@ -257,12 +207,9 @@ function toBindingRecordView(
 }
 
 /**
- * Parses the ledger's `WrittenFields` JSON list.
- *
- * Malformed content yields an empty list rather than throwing — this column is diagnostic
- * and a display view must not fail on it — but it is LOGGED with the row id, because a
- * ledger that cannot say what it wrote is a real defect upstream, and silently returning
- * `[]` would make it look like the execution simply wrote nothing.
+ * The ledger's `WrittenFields` JSON list. Malformed content yields an empty list — the column is
+ * diagnostic and a display view must not fail on it — but is LOGGED with the row id, because a
+ * ledger that cannot say what it wrote is a real defect upstream.
  */
 function parseWrittenFields(json: string | null, bindingRecordId: string): string[] {
   if (!json) {
@@ -273,10 +220,7 @@ function parseWrittenFields(json: string | null, bindingRecordId: string): strin
     if (Array.isArray(parsed)) {
       return parsed.map((v) => String(v));
     }
-    LogError(
-      `Form Entity Binding Record ${bindingRecordId}: WrittenFields is valid JSON but not ` +
-        `an array; treating as no fields written.`,
-    );
+    LogError(`Form Entity Binding Record ${bindingRecordId}: WrittenFields is valid JSON but not an array; treating as no fields written.`);
     return [];
   } catch (err) {
     LogError(

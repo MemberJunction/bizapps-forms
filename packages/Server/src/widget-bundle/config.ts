@@ -113,7 +113,8 @@ export function getWidgetBundleConfig(): WidgetBundleConfig {
  * silently: `NODE_ENV` unset is what `node server.mjs` gives you (the path `docs/local-host.md`
  * documents), nothing in this repo exports it, and the withheld-branch `LogStatus` in the
  * middleware only ever fires when the gate is already doing its job. Once per process, at boot,
- * exactly as `http/hash-salt.ts` announces the default session salt.
+ * exactly as `shared/hash-salt.ts` (in `@mj-biz-apps/forms-core-entities-server`) announces the
+ * default session salt.
  */
 function resolveSourcemapEnabled(): boolean {
   const byDefault = process.env.NODE_ENV !== 'production';

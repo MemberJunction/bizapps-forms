@@ -53,21 +53,14 @@ export const SCANNED_DIRS = Object.freeze(['packages', 'apps']);
  * An entry is matched on package, peer AND version. Matching the version is the point: if the
  * upstream value these track ever moves and we follow it, the exception expires and has to be
  * re-argued here rather than silently inherited by a value nobody checked.
+ *
+ * Empty since #303's final review: the one entry was forms-server -> type-graphql@2.0.0-beta.3,
+ * excused because MJ's server pins type-graphql at exactly that build. forms-server no longer
+ * declares type-graphql at all — its hand-written resolvers are gone, and the generated ones take
+ * their decorators through `@memberjunction/server` — so the gate reported the entry stale, which is
+ * what it is for. An entry added here needs the same shape: package, peer, version and a reason.
  */
-export const ALLOWED_EXACT_PEERS = Object.freeze([
-    Object.freeze({
-        package: '@mj-biz-apps/forms-server',
-        peer: 'type-graphql',
-        version: '2.0.0-beta.3',
-        reason:
-            "@memberjunction/server declares type-graphql as an EXACT direct dependency at this same " +
-            'version, so every host that has MJ installed has exactly this build and the peer is always ' +
-            'satisfiable — the opposite of the @angular/cdk case, where the host chooses the version. A ' +
-            'range here would be the lie instead: type-graphql 2.x is a prerelease line whose betas and ' +
-            'rcs break each other, and forms-server has only ever been built against beta.3. This tracks ' +
-            "MJ's pin; when MJ moves it, move it here and update this entry.",
-    }),
-]);
+export const ALLOWED_EXACT_PEERS = Object.freeze([]);
 
 /**
  * True when `spec` names one concrete version rather than a set of them.
@@ -87,8 +80,8 @@ export function isExactVersion(spec) {
 }
 
 /** True when this package/peer/version triple is a documented, still-current exception. */
-function isAllowed(packageName, peer, version) {
-    return ALLOWED_EXACT_PEERS.some(
+function isAllowed(packageName, peer, version, allowances) {
+    return allowances.some(
         (a) => a.package === packageName && a.peer === peer && a.version === version.trim(),
     );
 }
@@ -98,8 +91,8 @@ function isAllowed(packageName, peer, version) {
  * expired allowance (the pin moved, but ALLOWED_EXACT_PEERS was not updated to follow it) apart
  * from an ordinary, never-allowlisted violation. Undefined when no allowance names this pair.
  */
-function allowanceFor(packageName, peer) {
-    return ALLOWED_EXACT_PEERS.find((a) => a.package === packageName && a.peer === peer);
+function allowanceFor(packageName, peer, allowances) {
+    return allowances.find((a) => a.package === packageName && a.peer === peer);
 }
 
 /**
@@ -107,8 +100,10 @@ function allowanceFor(packageName, peer) {
  *
  * @param {{name?: string, peerDependencies?: Record<string, string>}} manifest parsed package.json
  * @param {string} relPath path reported in the violation, relative to the repo root
+ * @param {readonly {package: string, peer: string, version: string}[]} [allowances] the documented
+ *   exceptions; {@link ALLOWED_EXACT_PEERS} unless a spec supplies its own
  */
-export function findExactPeers(manifest, relPath) {
+export function findExactPeers(manifest, relPath, allowances = ALLOWED_EXACT_PEERS) {
     if (manifest === null || typeof manifest !== 'object') {
         throw new TypeError(`check-peer-ranges: ${relPath} did not parse to an object`);
     }
@@ -119,7 +114,7 @@ export function findExactPeers(manifest, relPath) {
     const packageName = manifest.name ?? relPath;
     const found = [];
     for (const [peer, version] of Object.entries(peers)) {
-        if (isExactVersion(version) && !isAllowed(packageName, peer, version)) {
+        if (isExactVersion(version) && !isAllowed(packageName, peer, version, allowances)) {
             found.push({ package: packageName, peer, version: version.trim(), file: relPath });
         }
     }
@@ -159,9 +154,10 @@ function manifestsUnder(root, dir) {
 /**
  * Scan the repo. Returns violations (exact peers) and stale allowances (documented exceptions that
  * no longer match anything on disk). Both fail the gate — a dead exception reads as a considered
- * decision long after the thing it excused is gone.
+ * decision long after the thing it excused is gone. `allowances` defaults to
+ * {@link ALLOWED_EXACT_PEERS}; a spec passes its own to exercise the allowance rules.
  */
-export function runCheck(root) {
+export function runCheck(root, allowances = ALLOWED_EXACT_PEERS) {
     const violations = [];
     const seenAllowances = new Set();
 
@@ -174,8 +170,8 @@ export function runCheck(root) {
             } catch (err) {
                 throw new SyntaxError(`check-peer-ranges: ${relPath} is not valid JSON — ${err.message}`);
             }
-            for (const hit of findExactPeers(manifest, relPath)) {
-                const expired = allowanceFor(hit.package, hit.peer);
+            for (const hit of findExactPeers(manifest, relPath, allowances)) {
+                const expired = allowanceFor(hit.package, hit.peer, allowances);
                 if (expired) {
                     // This pair has a documented exception, but at a version that no longer matches —
                     // the allowance's own reasoning is that a RANGE here would be the lie (see
@@ -199,7 +195,7 @@ export function runCheck(root) {
                 }
             }
             const peers = manifest.peerDependencies ?? {};
-            for (const allowance of ALLOWED_EXACT_PEERS) {
+            for (const allowance of allowances) {
                 if (manifest.name === allowance.package && peers[allowance.peer]?.trim() === allowance.version) {
                     seenAllowances.add(allowance);
                 }
@@ -207,7 +203,7 @@ export function runCheck(root) {
         }
     }
 
-    const stale = ALLOWED_EXACT_PEERS.filter((a) => !seenAllowances.has(a)).map(
+    const stale = allowances.filter((a) => !seenAllowances.has(a)).map(
         (a) =>
             `ALLOWED_EXACT_PEERS allows ${a.package} -> ${a.peer}@${a.version}, which no longer appears in ` +
             `any manifest. Delete the entry, or correct its version if the pin moved.`,

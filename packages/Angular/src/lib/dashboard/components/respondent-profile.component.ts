@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
 import { FORMS_UI_CSS, FORMS_VIZ_CSS, vizSeriesClass } from '../../shared';
 import { percent } from '../reporting-view-model';
-import type { ProfileDistribution, RespondentProfile } from '../services/respondent-profile';
+import type { ProfileDistribution, RespondentProfile } from '../models/reporting.model';
 
 /**
  * "Who responded" — the aggregate reading of a form's identity and attachment questions.
@@ -13,8 +13,9 @@ import type { ProfileDistribution, RespondentProfile } from '../services/respond
  * contacted, how many are distinct, where their addresses are hosted — is both safe and the
  * thing a form owner was actually trying to find out.
  *
- * Every value here is a count or a rate. `buildRespondentProfile` guarantees no answer value
- * reaches this component; nothing in the template can undo that, because nothing is passed.
+ * Every value here is a count, a rate or a coarse grouping. The server builds the profile
+ * (`Forms.GetResponseSummary`) and never sends an answer value, so no email address, phone number
+ * or name reaches this component; nothing in the template can undo that, because nothing is passed.
  */
 @Component({
   selector: 'mj-forms-respondent-profile',

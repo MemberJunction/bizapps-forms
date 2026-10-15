@@ -1,0 +1,48 @@
+[
+  {
+    "_comments": [
+      "Runs a submitted response's on-submit automations. The handler registers under HandlerKey",
+      "'Forms.RunAutomations' (BaseWorkHandler, forms-core-entities-server) on hosts of type MJWorker;",
+      "a host opts in through workQueue.subscriptions in its mj.config.cjs.",
+      "",
+      "Delivery is at-least-once: retries back off with jitter between BackoffBaseSeconds and",
+      "BackoffMaxSeconds and dead-letter after MaxAttempts, so the handler must be idempotent. It",
+      "is, in the handler rather than in the schema: a (FormAutomationID, FormResponseID) pair is",
+      "NOT unique by design (an OnPartial step writes one run row per partial save), so idempotency",
+      "is event-scoped by exact identity: every run row carries the MessageID of the delivery that ran",
+      "it (FormAutomationRun.WorkQueueMessageID), a redelivery re-runs only the steps with no terminal",
+      "run (Succeeded, Failed, Skipped) carrying that id, on their open row, and a dead-lettered final",
+      "closes its open rows Failed (a replay reopens exactly those).",
+      "",
+      "PartitionMode Ordered, keyed on the response id (forms-core-entities-server's",
+      "responseSubmittedRequest sets the PartitionKey): one response's messages are handled in publish",
+      "order, so a partial save's run never overtakes the final submit's, and a partial delivery that",
+      "finds its response already Complete is stale and runs nothing. Different responses still run in",
+      "parallel. Ordered needs a Database topic (forms.response-submitted is one).",
+      "",
+      "A partial save never dead-letters (it closes its open rows as abandoned and completes), so it can",
+      "never block the response's final message; a retrying partial delays the final only by its backoff",
+      "(about 30 s over 5 attempts) plus LeaseSeconds for an attempt that hangs. A dead-lettered FINAL",
+      "blocks nothing after it (it is the response's last message); replaying it reopens and runs the",
+      "steps its dead letter closed. Because runs are matched by MessageID, no save's runs are ever",
+      "mistaken for another's (spec #303 section 12)."
+    ],
+    "fields": {
+      "Name": "forms.run-automations",
+      "Description": "MJ Forms: runs the on-submit automations of each submitted response (HandlerKey Forms.RunAutomations).",
+      "TopicID": "@lookup:MJ: Work Queue Topics.Name=forms.response-submitted",
+      "PartitionMode": "Ordered",
+      "MaxAttempts": 5,
+      "BackoffBaseSeconds": 2,
+      "BackoffMaxSeconds": 300,
+      "LeaseSeconds": 120,
+      "HeartbeatMode": "Auto",
+      "HostType": "MJWorker",
+      "HandlerKey": "Forms.RunAutomations",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "2CED079E-FA0A-4813-8A1B-10B9AA1ABFC4"
+    }
+  }
+]

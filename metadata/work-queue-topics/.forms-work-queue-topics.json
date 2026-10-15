@@ -1,0 +1,33 @@
+[
+  {
+    "_comments": [
+      "The Forms submit outbox (#303). FormSubmissionEngine publishes one message here per FINAL",
+      "submit, and one per partial save of a version that has OnPartial automations (#303 spec section 12),",
+      "inside the submit transaction (a DatabaseProviderBase publish enlists in the caller's",
+      "transaction), so the response and its 'run my automations' message commit together or not at",
+      "all. That replaces the detached promise that a killed process could lose.",
+      "",
+      "Database transport: it is the one every host has, and it is what makes the enlisted publish",
+      "possible. IsFifo false: automation runs for different responses are independent. External",
+      "publish is off: only the submit engine may announce a submission. The payload is ids only",
+      "(ResponseID, FormVersionID, FormDistributionID, Trigger, PartialSaveKey), far under the payload cap.",
+      "The deduplication key is the response id for a final submit and <responseId>:partial:<key> for a",
+      "partial save; both are built by forms-core-entities-server's work-queue/response-submitted.ts,",
+      "the one definition the publisher and the Forms.RunAutomations handler share."
+    ],
+    "fields": {
+      "Name": "forms.response-submitted",
+      "Description": "MJ Forms: one message per final response submission, and one per partial save of a version with OnPartial automations, published in the submit transaction. Payload { ResponseID, FormVersionID, FormDistributionID, Trigger, PartialSaveKey }; DeduplicationKey is the response id (final) or <responseId>:partial:<key> (partial).",
+      "TransportID": "@lookup:MJ: Work Queue Transports.Name=Database",
+      "IsFifo": false,
+      "AllowExternalPublish": false,
+      "MaxPayloadBytes": 262144,
+      "DefaultDeduplicationTTLSeconds": 3600,
+      "RetentionDays": 7,
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "CA6885E2-154E-4894-87E6-BC05A38E130C"
+    }
+  }
+]

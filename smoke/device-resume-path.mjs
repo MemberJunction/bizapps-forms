@@ -31,6 +31,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { resolveSlug, buildAnswers } from './lib/fixture.mjs';
+import { definitionQuestions, requireOperation } from './lib/operations.mjs';
 import { requireDbEnv, sql } from './lib/sqlcmd.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
@@ -49,28 +50,17 @@ const section = (m) => console.log(`\n--- ${m} ---`);
 /** Single-quote escaping for the ids this script interpolates into its verification SQL. */
 const esc = (v) => String(v).replace(/'/g, "''");
 
-const SUBMIT = `
-  mutation S($input: FormSubmissionInputType!) {
-    SubmitFormResponse(input: $input) { success responseId status errors { message } }
-  }`;
+/**
+ * Run one respondent operation as an anonymous session with an EXPLICIT session correlator
+ * (`undefined` omits the header), returning its parsed output; throws when the operation itself was
+ * refused, so a transport or Authorize failure can never read as a product answer.
+ */
+const runOp = (token, sessionId, operationKey, input) => requireOperation(BASE, { token, sessionId }, operationKey, input);
 
-const PUBLISHED = `
-  query P($slug: String!) {
-    PublishedForm(distributionSlug: $slug) { definitionJSON resumeJSON }
-  }`;
-
-/** POST a GraphQL operation as an anonymous respondent, with an explicit session correlator. */
-async function gql(token, sessionId, query, variables) {
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  if (sessionId !== undefined) {
-    headers['x-session-id'] = sessionId;
-  }
-  const res = await fetch(`${BASE}/`, { method: 'POST', headers, body: JSON.stringify({ query, variables }) });
-  const body = await res.json();
-  if (body.errors) {
-    throw new Error(`GraphQL error: ${JSON.stringify(body.errors).slice(0, 300)}`);
-  }
-  return body.data;
+/** `Forms.GetRespondentForm` for the slug, as `{ definition, resumeJSON }`. */
+async function respondentForm(token) {
+  const output = await runOp(token, undefined, 'Forms.GetRespondentForm', { Slug: SLUG });
+  return { definition: JSON.parse(output.DefinitionJSON), resumeJSON: output.ResumeJSON };
 }
 
 /**
@@ -128,11 +118,11 @@ function cookiePair(setCookie) {
  */
 function partialInput(questions, versionId, responseId) {
   return {
-    distributionSlug: SLUG,
-    formVersionId: versionId,
-    partial: true,
-    responseId,
-    answers: buildAnswers(questions, { email: 'smoke@example.com' }),
+    Slug: SLUG,
+    FormVersionID: versionId,
+    Mode: 'partial',
+    ClientResponseID: responseId,
+    Answers: buildAnswers(questions, { email: 'smoke@example.com' }),
   };
 }
 
@@ -142,17 +132,16 @@ async function run() {
   section('first sitting: a draft, then a pointer');
   const first = await loadPage();
   check(first.hasDraft === false, 'a browser with no cookie is not told there is a draft');
-  const definition = JSON.parse((await gql(first.token, undefined, PUBLISHED, { slug: SLUG })).PublishedForm.definitionJSON);
+  const { definition } = await respondentForm(first.token);
   const versionId = definition.formVersionId;
-  // Same flattening the other smoke scripts use; the published definition nests questions per page.
-  const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
+  const questions = definitionQuestions(definition);
   check(questions.length > 0, `published definition loads (${questions.length} question(s))`);
 
   const S1 = randomUUID();
   const R1 = randomUUID();
-  const saved = await gql(first.token, S1, SUBMIT, { input: partialInput(questions, versionId, R1) });
-  check(saved.SubmitFormResponse.success === true, 'the first partial save succeeds');
-  const responseId = saved.SubmitFormResponse.responseId;
+  const saved = await runOp(first.token, S1, 'Forms.SaveResponse', partialInput(questions, versionId, R1));
+  check(saved.Success === true, 'the first partial save succeeds', saved.Errors?.[0]?.Message);
+  const responseId = saved.ResponseID;
   created.responseIds.push(responseId);
 
   const rowLink = sql(`SELECT FormDistributionID FROM __mj_BizAppsForms.vwFormResponses WHERE ID='${esc(responseId)}'`);
@@ -191,13 +180,13 @@ async function run() {
   const rotated = cookiePair(resumed.setCookie);
   check(Boolean(rotated) && rotated !== cookie, 'the pointer is rotated, so the spent one is worthless');
 
-  const resumeJson = (await gql(resumedToken, undefined, PUBLISHED, { slug: SLUG })).PublishedForm.resumeJSON;
+  const resumeJson = (await respondentForm(resumedToken)).resumeJSON;
   check(Boolean(resumeJson), 'the resumed session is handed its draft back');
   const snapshot = resumeJson ? JSON.parse(resumeJson) : { answers: [] };
   check(snapshot.responseId?.toLowerCase() === responseId.toLowerCase(), 'it is the SAME draft');
   check(snapshot.answers.length > 0, 'the saved answers come with it');
 
-  const publicResume = (await gql(first.token, undefined, PUBLISHED, { slug: SLUG })).PublishedForm.resumeJSON;
+  const publicResume = (await respondentForm(first.token)).resumeJSON;
   check(!publicResume, 'an ordinary public-link session is handed NOTHING — the row filter is the gate');
 
   section('the two-tab race must not orphan the draft');
@@ -217,9 +206,9 @@ async function run() {
 
   section('continuing writes the SAME row');
   const S2 = randomUUID();
-  const continued = await gql(resumedToken, S2, SUBMIT, { input: partialInput(questions, versionId, responseId) });
-  check(continued.SubmitFormResponse.success === true, 'a save from the resumed session succeeds');
-  check(continued.SubmitFormResponse.responseId?.toLowerCase() === responseId.toLowerCase(), 'it lands on the original row');
+  const continued = await runOp(resumedToken, S2, 'Forms.SaveResponse', partialInput(questions, versionId, responseId));
+  check(continued.Success === true, 'a save from the resumed session succeeds', continued.Errors?.[0]?.Message);
+  check(continued.ResponseID?.toLowerCase() === responseId.toLowerCase(), 'it lands on the original row');
 
   const rowCount = sql(
     `SELECT COUNT(*) FROM __mj_BizAppsForms.vwFormResponses ` +

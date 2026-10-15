@@ -742,6 +742,22 @@ native entities. This is the reporting differentiator no incumbent has.
 
 ## 12. Progress Log
 
+- **2026-10-14 — PR #304 verified review fixes.** Addressed the confirmed GUID-casing,
+  builder ordering, knockout resume, delayed notification, automation history/error, permission
+  retirement, safe error reporting, answer aggregation, input validation, template deletion,
+  metadata pull and reporting pagination defects. Behavioral regressions were observed red before
+  their fixes. The smoke-helper inventory now names all five helpers. Validation against the
+  existing MJ 6.2 edge workspace dependencies: all five packages build; 5,754 unit tests pass
+  (26 opt-in integration tests skipped); root typecheck, UI tokens, migration order, CodeGen
+  append, distribution and generated-scope gates pass. Live respondent, device-resume, binding
+  and respondent-error smokes pass on the edge test harness (the error suite skips two conditional
+  failure paths and reports two pre-existing MJ-core development-mode error disclosures).
+  `smoke/review-data-regressions.mjs`
+  executes the reporting query, renamed-entity permission retirement and metadata filters against
+  SQL Server temporary fixtures; it passes without modifying host metadata. Reporting now seeks
+  by answer ID and remains a live scan rather than a point-in-time snapshot. Release metadata
+  seeding remains the existing release step.
+
 - **2026-08-13 — the seed that finally shipped was shipping an exploit, and could not install
   where it was needed most.** Found from the other side: bizapps-caliber#219 was bricked by our
   0.8.0 seed, and fixing it there surfaced three defects here (#39, plan

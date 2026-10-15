@@ -84,6 +84,11 @@ export const mjBizAppsFormsFormAutomationRunSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    WorkQueueMessageID: z.string().nullable().describe(`
+        * * Field Name: WorkQueueMessageID
+        * * Display Name: Work Queue Message ID
+        * * SQL Data Type: uniqueidentifier
+        * * Description: The Work Queue message (MessageID) whose delivery ran this step: the run's identity for at-least-once delivery. A redelivery of the same message re-runs only the steps with no terminal run carrying that id, and reuses a step's open row; a run with a different id belongs to another save of the response. NULL on runs written before this column and on runs the submit path makes inline, which belong to no message. Deliberately not a foreign key: the work queue purges its messages on a retention schedule and this history outlives them.`),
     FormAutomation: z.string().describe(`
         * * Field Name: FormAutomation
         * * Display Name: Form Automation Name
@@ -326,7 +331,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Default Value: newsequentialid()`),
     FormID: z.string().describe(`
         * * Field Name: FormID
-        * * Display Name: Form ID
+        * * Display Name: Form
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)`),
     Name: z.string().describe(`
@@ -385,7 +390,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Description: Running count of responses received through this distribution`),
     MagicLinkInviteID: z.string().nullable().describe(`
         * * Field Name: MagicLinkInviteID
-        * * Display Name: Magic Link Invite ID
+        * * Display Name: Magic Link Invite
         * * SQL Data Type: uniqueidentifier
         * * Description: ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.`),
     CaptchaRequired: z.boolean().describe(`
@@ -428,7 +433,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Description: JSON array of the browser ORIGINS permitted to embed this distribution and call the public form API with its link — e.g. ["https://careers.acme.com","https://acme.com:8443"]. Values are full origins exactly as a browser sends them (scheme, host, optional port), matched EXACTLY after case-normalising scheme and host. No wildcards and no subdomain implication: "acme.com" does not admit "https://careers.acme.com", and an author needing three subdomains names three origins — a pattern is refused at authoring time rather than accepted and ignored. Plain http is accepted only for loopback hosts, so a local harness is authorable without a proxy. NULL or an empty array (the default, and every distribution until an author sets one) means UNRESTRICTED, so no existing embed changes behaviour. Once ANY origin is authored the distribution is fail-closed: the respondent host page is served with a Content-Security-Policy frame-ancestors directive naming exactly these origins, and a public API call whose Origin is neither this API's own origin nor one of them is refused. An authored value that parses to nothing usable is a refusal of everything, never a fall back to unrestricted. Defense in depth behind the magic link, not a replacement for it: it bounds where a leaked multi-use link can be replayed. The array container differs deliberately from the keyed object bizapps-caliber uses for Step.AllowedOrigins, which is keyed only because Caliber steps inherit and must tombstone an inherited origin; a Forms distribution is a leaf and inherits from nothing. The per-entry grammar is identical.`),
     Form: z.string().describe(`
         * * Field Name: Form
-        * * Display Name: Form
+        * * Display Name: Form Name
         * * SQL Data Type: nvarchar(255)`),
 });
 
@@ -967,7 +972,7 @@ export const mjBizAppsFormsFormResponseSchema = z.object({
         * * Description: The distribution this response was submitted through, stamped once when the row is created and never rewritten. A resume session is scoped to one FormResponse, and it must still be able to load the definition of the link it came through — so the row-level-security filter that permits that read needs a real column to name. Putting it on JSON_VALUE(SourceMetadata) instead would make a free-form JSON blob the authorization key. NULL on rows created before resume shipped; those rows are not resumable by either channel.`),
     Form: z.string().describe(`
         * * Field Name: Form
-        * * Display Name: Form
+        * * Display Name: Form Name
         * * SQL Data Type: nvarchar(255)`),
     RespondentPerson: z.string().nullable().describe(`
         * * Field Name: RespondentPerson
@@ -992,7 +997,7 @@ export const mjBizAppsFormsFormScreenSchema = z.object({
         * * Default Value: newsequentialid()`),
     FormID: z.string().describe(`
         * * Field Name: FormID
-        * * Display Name: Form
+        * * Display Name: Form ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)`),
     ScreenType: z.union([z.literal('Ending'), z.literal('Welcome')]).describe(`
@@ -1069,7 +1074,7 @@ export const mjBizAppsFormsFormScreenSchema = z.object({
         * * Description: Ending only: this screen is a disqualification — its ConditionalRule is evaluated while the respondent answers, and a match ends the form immediately with FormResponse.Status = Disqualified. The flag alone never fires; the rule arms it`),
     Form: z.string().describe(`
         * * Field Name: Form
-        * * Display Name: Form Name
+        * * Display Name: Form
         * * SQL Data Type: nvarchar(255)`),
 });
 
@@ -1608,6 +1613,19 @@ export class mjBizAppsFormsFormAutomationRunEntity extends BaseEntity<mjBizAppsF
     */
     get __mj_UpdatedAt(): Date {
         return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: WorkQueueMessageID
+    * * Display Name: Work Queue Message ID
+    * * SQL Data Type: uniqueidentifier
+    * * Description: The Work Queue message (MessageID) whose delivery ran this step: the run's identity for at-least-once delivery. A redelivery of the same message re-runs only the steps with no terminal run carrying that id, and reuses a step's open row; a run with a different id belongs to another save of the response. NULL on runs written before this column and on runs the submit path makes inline, which belong to no message. Deliberately not a foreign key: the work queue purges its messages on a retention schedule and this history outlives them.
+    */
+    get WorkQueueMessageID(): string | null {
+        return this.Get('WorkQueueMessageID');
+    }
+    set WorkQueueMessageID(value: string | null) {
+        this.Set('WorkQueueMessageID', value);
     }
 
     /**
@@ -2263,7 +2281,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: FormID
-    * * Display Name: Form ID
+    * * Display Name: Form
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
     */
@@ -2394,7 +2412,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: MagicLinkInviteID
-    * * Display Name: Magic Link Invite ID
+    * * Display Name: Magic Link Invite
     * * SQL Data Type: uniqueidentifier
     * * Description: ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.
     */
@@ -2495,7 +2513,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: Form
-    * * Display Name: Form
+    * * Display Name: Form Name
     * * SQL Data Type: nvarchar(255)
     */
     get Form(): string {
@@ -2881,6 +2899,27 @@ export class mjBizAppsFormsFormEntityBindingEntity extends BaseEntity<mjBizAppsF
  */
 @RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Pages')
 export class mjBizAppsFormsFormPageEntity extends BaseEntity<mjBizAppsFormsFormPageEntityType> {
+
+  /**
+  * Related records: MJ_BizApps_Forms: Form Questions
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Forms: Form Pages record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Forms: Form Pages → MJ_BizApps_Forms: Form Questions' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Questions = this.DeclareRelatedRecords<mjBizAppsFormsFormQuestionEntity>({
+      Name: 'Questions',
+        RelatedEntity: 'MJ_BizApps_Forms: Form Questions',
+        RelatedEntityJoinField: 'PageID',
+        OrderBy: 'DisplayOrder ASC',
+        Load: 'immediate',
+        OnRemove: 'delete',
+        Source: 'database',
+        ReadOnly: false,
+        Sequence: { Field: 'DisplayOrder', From: 0 },
+  });
+
     /**
     * Loads the MJ_BizApps_Forms: Form Pages record from the database
     * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Pages record.
@@ -3197,6 +3236,27 @@ export class mjBizAppsFormsFormQuestionOptionEntity extends BaseEntity<mjBizApps
  */
 @RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Questions')
 export class mjBizAppsFormsFormQuestionEntity extends BaseEntity<mjBizAppsFormsFormQuestionEntityType> {
+
+  /**
+  * Related records: MJ_BizApps_Forms: Form Question Options
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Forms: Form Questions record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Forms: Form Questions → MJ_BizApps_Forms: Form Question Options' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Options = this.DeclareRelatedRecords<mjBizAppsFormsFormQuestionOptionEntity>({
+      Name: 'Options',
+        RelatedEntity: 'MJ_BizApps_Forms: Form Question Options',
+        RelatedEntityJoinField: 'QuestionID',
+        OrderBy: 'DisplayOrder ASC',
+        Load: 'immediate',
+        OnRemove: 'delete',
+        Source: 'database',
+        ReadOnly: false,
+        Sequence: { Field: 'DisplayOrder', From: 0 },
+  });
+
     /**
     * Loads the MJ_BizApps_Forms: Form Questions record from the database
     * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Questions record.
@@ -3832,7 +3892,7 @@ export class mjBizAppsFormsFormResponseEntity extends BaseEntity<mjBizAppsFormsF
 
     /**
     * * Field Name: Form
-    * * Display Name: Form
+    * * Display Name: Form Name
     * * SQL Data Type: nvarchar(255)
     */
     get Form(): string {
@@ -3904,7 +3964,7 @@ export class mjBizAppsFormsFormScreenEntity extends BaseEntity<mjBizAppsFormsFor
 
     /**
     * * Field Name: FormID
-    * * Display Name: Form
+    * * Display Name: Form ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
     */
@@ -4087,7 +4147,7 @@ export class mjBizAppsFormsFormScreenEntity extends BaseEntity<mjBizAppsFormsFor
 
     /**
     * * Field Name: Form
-    * * Display Name: Form Name
+    * * Display Name: Form
     * * SQL Data Type: nvarchar(255)
     */
     get Form(): string {
@@ -4679,6 +4739,47 @@ export class mjBizAppsFormsFormVersionEntity extends BaseEntity<mjBizAppsFormsFo
  */
 @RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Forms')
 export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntityType> {
+
+  /**
+  * Related records: MJ_BizApps_Forms: Form Pages
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Forms: Forms record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Forms: Forms → MJ_BizApps_Forms: Form Pages' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Pages = this.DeclareRelatedRecords<mjBizAppsFormsFormPageEntity>({
+      Name: 'Pages',
+        RelatedEntity: 'MJ_BizApps_Forms: Form Pages',
+        RelatedEntityJoinField: 'FormID',
+        OrderBy: 'DisplayOrder ASC',
+        Load: 'immediate',
+        OnRemove: 'delete',
+        Source: 'database',
+        ReadOnly: false,
+        Sequence: { Field: 'DisplayOrder', From: 0 },
+  });
+
+
+  /**
+  * Related records: MJ_BizApps_Forms: Form Screens
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Forms: Forms record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Forms: Forms → MJ_BizApps_Forms: Form Screens' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Screens = this.DeclareRelatedRecords<mjBizAppsFormsFormScreenEntity>({
+      Name: 'Screens',
+        RelatedEntity: 'MJ_BizApps_Forms: Form Screens',
+        RelatedEntityJoinField: 'FormID',
+        OrderBy: 'DisplayOrder ASC',
+        Load: 'immediate',
+        OnRemove: 'delete',
+        Source: 'database',
+        ReadOnly: false,
+  });
+
     /**
     * Loads the MJ_BizApps_Forms: Forms record from the database
     * @param ID: string - primary key value to load the MJ_BizApps_Forms: Forms record.

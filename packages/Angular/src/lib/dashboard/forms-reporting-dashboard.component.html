@@ -86,7 +86,7 @@
         </div>
 
         <div class="rp-head-actions">
-          @if (report) {
+          @if (hasSelection) {
             <div class="mjf-seg" role="group" aria-label="What to show">
               @for (m of modes; track m.key) {
                 <button
@@ -105,16 +105,16 @@
             class="mjf-btn mjf-btn--quiet mjf-btn--icon"
             title="Re-read this form’s responses"
             aria-label="Refresh"
-            [disabled]="loadingReport || busy"
+            [disabled]="loadingReport || busy || responsesBusy"
             (click)="refresh()">
             <i class="fa-solid fa-rotate-right" [class.fa-spin]="loadingReport" aria-hidden="true"></i>
           </button>
 
           <div class="rp-export" role="group" aria-label="Export responses">
-            <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" [disabled]="!report || busy" (click)="export('csv')">
+            <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" [disabled]="!hasSelection || busy || responsesBusy" (click)="export('csv')">
               <i class="fa-solid fa-file-csv" aria-hidden="true"></i> CSV
             </button>
-            <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" [disabled]="!report || busy" (click)="export('excel')">
+            <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" [disabled]="!hasSelection || busy || responsesBusy" (click)="export('excel')">
               <i class="fa-solid fa-file-excel" aria-hidden="true"></i> Excel
             </button>
           </div>
@@ -123,12 +123,6 @@
 
       <div class="rp-scroll">
         <div class="rp-scroll-inner">
-          @if (useMock) {
-            <p class="mjf-badge mjf-badge--info rp-mock" title="Showing seeded sample data until live responses exist">
-              <i class="fa-solid fa-flask" aria-hidden="true"></i> Sample data
-            </p>
-          }
-
           @if (errorMessage) {
             <div class="mjf-alert rp-alert" role="alert">
               <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
@@ -139,8 +133,27 @@
             </div>
           }
 
+          @if (exportNotice) {
+            <div class="rp-notice" role="status">
+              <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+              <span class="mjf-spacer">{{ exportNotice }}</span>
+              <button type="button" class="rp-alert-close" (click)="dismissExportNotice()" aria-label="Dismiss">
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+          }
+
           @if (loadingReport) {
             <p class="mjf-state"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading this form’s responses…</p>
+          } @else if (summaryUnavailable && mode === 'insights') {
+            <!-- A refusal about WHO is reading, not a failure: no error banner. Worded to promise
+                 nothing else — a reader refused for lacking read access cannot list the responses
+                 either, and the dashboard cannot tell that reader from a row-restricted one. -->
+            <div class="mjf-empty">
+              <span class="mjf-empty-icon"><i class="fa-solid fa-lock" aria-hidden="true"></i></span>
+              <span class="mjf-empty-title">Summary not available to you</span>
+              <p class="mjf-empty-body">{{ summaryUnavailable }}</p>
+            </div>
           } @else if (report; as r) {
             @if (!hasResponses) {
               <!-- A published form with nothing in it. Charts of nothing are noise; the
@@ -154,11 +167,24 @@
                 </p>
               </div>
             } @else {
-              @switch (mode) {
-                @case ('insights') {
+              @if (mode === 'insights') {
                   <!-- Ordered the way the question is asked: how many, where they
                        stopped, what they said. -->
                   <mj-forms-summary-stats [stats]="r.summary" [now]="loadedAt"></mj-forms-summary-stats>
+
+                  @if (r.insightAnswersCapped) {
+                    <!-- The server reads a fixed number of identity, written and grid answers per
+                         summary. Past it, those three sections describe part of the form, and the
+                         reader is told which sections, rather than left to trust them. -->
+                    <p class="rp-notice" role="status">
+                      <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                      <span>
+                        This form has more answers than one summary reads. “Who responded”, “What they
+                        wrote” and the grid questions describe only the answers that were read; every
+                        other figure counts every response.
+                      </span>
+                    </p>
+                  }
 
                   @if (hasFunnel) {
                     <section class="mjf-section">
@@ -213,19 +239,22 @@
                         (ReadAnswers)="setMode('responses')"></mj-forms-open-text-panel>
                     </section>
                   }
-                }
-                @case ('responses') {
-                  @if (responseDetail; as d) {
-                    <mj-forms-response-detail
-                      [Detail]="d"
-                      (Back)="closeResponse()"
-                      (OpenRecord)="openLinkedRecord($event)"></mj-forms-response-detail>
-                  } @else {
-                    <mj-forms-response-list [Rows]="r.responses" (Open)="openResponse($event)"></mj-forms-response-list>
-                  }
-                }
               }
             }
+          }
+
+          @if (showResponsesView && selectedForm) {
+            <!-- The builder's Responses tab, under this page's header: one paged list and one
+                 detail view for both mounts. Mounted on the first visit to Responses and then only
+                 HIDDEN while Insights shows, so switching back keeps the list, the pages loaded and
+                 an open response, instead of re-reading the first page every time. -->
+            <div [hidden]="mode !== 'responses'">
+              <mjf-responses-tab
+                [FormID]="selectedForm.formId"
+                [Embedded]="true"
+                (BusyChange)="setResponsesBusy($event)"
+                (OpenRecord)="openLinkedRecord($event)"></mjf-responses-tab>
+            </div>
           }
         </div>
       </div>

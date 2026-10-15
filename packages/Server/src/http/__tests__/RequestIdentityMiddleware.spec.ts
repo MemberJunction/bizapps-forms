@@ -25,8 +25,8 @@ import {
   resetForwardedWithoutHopsWarningForTests,
   trustedProxyHops,
 } from '../RequestIdentityMiddleware';
-import { FORMS_SELF_CALL_HEADER, currentRequestIdentity, hashClientIp } from '../request-identity';
-import type { RequestIdentity } from '../request-identity';
+import { FORMS_SELF_CALL_HEADER, hashClientIp } from '../request-identity';
+import { currentRequestIdentity, type RequestIdentity } from '@mj-biz-apps/forms-core-entities-server';
 
 afterEach(() => {
   delete process.env.FORMS_TRUSTED_PROXY_HOPS;
