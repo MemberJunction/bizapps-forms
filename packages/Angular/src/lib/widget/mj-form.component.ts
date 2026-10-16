@@ -430,6 +430,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.saveNotice.set(false);
     try {
       const { form, resume } = await this.loadForm();
+      // The await is where the widget can move on: destroyed by its host, or reloaded by "Try
+      // again". A load resuming after either builds nothing — no runtime, no autosave controller
+      // that nothing would dispose, no overwrite of the newer load's form and response identity.
+      if (!this.isCurrentLoad(generation)) {
+        return;
+      }
       const def = form.render;
       applyStyleTokens(this.hostRef.nativeElement, def.styleTokens);
       this.form.set(form);
@@ -468,6 +474,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
         this.phase.set(opening);
       }
     } catch (err) {
+      if (!this.isCurrentLoad(generation)) {
+        return;
+      }
       // A load can meet an expired session too — the error page's "Try again" re-fetches with
       // the same token, and after eight hours that is a 401 with a retry button that loops.
       if (this.endSessionIfExpired(err)) {
@@ -482,6 +491,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
       }
       this.fail(err instanceof Error ? err.message : 'Failed to load the form.');
     }
+  }
+
+  /** Whether the load numbered `generation` is still the one this widget is showing. */
+  private isCurrentLoad(generation: number): boolean {
+    return !this.destroyed && generation === this.loadGeneration;
   }
 
   /**
@@ -607,7 +621,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.waitingForWelcomeImage.set(true);
     const logo = this.logoUrl();
     gateWelcomeScreen(logo ? [welcomeImage, logo] : [welcomeImage], {
-      isCurrent: () => !this.destroyed && generation === this.loadGeneration,
+      isCurrent: () => this.isCurrentLoad(generation),
       reveal: (failed) => {
         // The gate already saw this logo fail; rendering it would request it again and drop the bar
         // a round trip later, moving the screen just shown. Only the logo the gate loaded: a preview

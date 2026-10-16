@@ -117,6 +117,10 @@ export class MjFormHarness extends MjFormComponent {
   public solveCaptcha(token: string): void {
     this.onTurnstileSolved(token);
   }
+  /** The error page's "Try again": a second load while the first may still be in flight. */
+  public reload(): void {
+    this.retry();
+  }
 }
 
 /** Host events the widget dispatched, by name. */
@@ -135,6 +139,13 @@ export interface MountOptions {
 
 /** Build the component, set its inputs, and run `ngOnInit` (the load). */
 export async function mountForm(options: MountOptions): Promise<{ form: MjFormHarness; host: HostRecorder }> {
+  const { form, host, loaded } = startMount(options);
+  await loaded;
+  return { form, host };
+}
+
+/** {@link mountForm} without waiting for the load: the component is handed back while it is on the wire. */
+export function startMount(options: MountOptions): { form: MjFormHarness; host: HostRecorder; loaded: Promise<void> } {
   const host: HostRecorder = { events: [] };
   const element = {
     style: { setProperty: () => undefined, removeProperty: () => undefined },
@@ -169,8 +180,7 @@ export async function mountForm(options: MountOptions): Promise<{ form: MjFormHa
     const definition = form.definitionInput[SIGNAL];
     definition.applyValueToInputSignal(definition, options.definition);
   }
-  await form.ngOnInit();
-  return { form, host };
+  return { form, host, loaded: form.ngOnInit() };
 }
 
 /** A live load of `full`'s respondent projection, as `Forms.GetRespondentForm` serves it. */
