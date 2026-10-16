@@ -40,8 +40,10 @@ const GENERATED_ROOT = join(REPO_ROOT, 'packages', 'Angular', 'src', 'lib', 'gen
 /**
  * The MJ version this repo pins, read from the file an upgrade actually edits.
  *
- * Any `@memberjunction/*` exact dependency answers this — they move together by construction
+ * Any `@memberjunction/*` dependency answers this — they move together by construction
  * (`bump-pins.sh`, and the caret peers float above the same floor), so the first one is the pin.
+ * The pins are caret floors (`^6.1.5`); the floor is returned. The installed build is at or above
+ * it, so a rule retired at the floor is retired for the installed build too.
  */
 export function pinnedMJVersion(repoRoot = REPO_ROOT) {
   const pkg = JSON.parse(readFileSync(join(repoRoot, 'apps', 'MJAPI', 'package.json'), 'utf8'));
@@ -49,7 +51,7 @@ export function pinnedMJVersion(repoRoot = REPO_ROOT) {
   if (!entry) {
     throw new Error('no @memberjunction/* dependency in apps/MJAPI/package.json — cannot resolve the pin');
   }
-  return entry[1];
+  return entry[1].replace(/^[\^~=v]+/, '');
 }
 
 /**
