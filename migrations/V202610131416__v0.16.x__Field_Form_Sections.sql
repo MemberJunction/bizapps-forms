@@ -13,7 +13,9 @@
 --
 -- `V202609141900` §3 set `Category` on the first four, saying that was why they landed in "Details".
 -- It was half the cause: their `GeneratedFormSection` is still 'Details' on every host built from
--- migrations, so the curated category never takes effect. FormAutomationEventID has neither column.
+-- migrations, so the curated category never takes effect. FormAutomationEventID gets both from the
+-- CodeGen block V202610131349 appends (by the row's id: 'Automation Context', 'Category'); it is
+-- listed here, with that same category, only for a host whose row carries another id.
 --
 -- The generated Explorer forms committed in `packages/Angular/src/lib/generated/` place the first
 -- four in their category panels, because the database CodeGen ran against already had them as
@@ -26,10 +28,10 @@
 -- `excludeSchemas`, so CodeGen never revisits these rows on a host — `V202609142000` gives the
 -- source lines. `migrations/` is the only channel that reaches one.
 --
--- WHY BOTH COLUMNS. Setting only `GeneratedFormSection` would make FormAutomationEventID vanish from
--- its form (see above), so it also gets 'Execution Details', the panel of the other two pointers a
--- run keeps to what executed it (ActionExecutionLogID, AIAgentRunID). The other four are listed with
--- the category `V202609141900` gave them, which every host built from migrations already holds.
+-- WHY BOTH COLUMNS. Setting only `GeneratedFormSection` would make a field with no `Category` vanish
+-- from its form (see above). Each row is listed with the category it already has where it has one:
+-- the four with what `V202609141900` gave them, FormAutomationEventID with the 'Automation Context'
+-- panel V202610131349 and the generated Explorer form put it in.
 --
 -- WHAT IT OVERWRITES, AND WHAT IT LEAVES. Only the values nobody chose: `GeneratedFormSection` is
 -- changed only where it still holds the column default 'Details', and `Category` only where it is
@@ -63,7 +65,7 @@ INSERT INTO @Wanted ([BaseTable], [FieldName], [Category]) VALUES
     ('FormDistribution',  'AllowedOrigins',     'Access and Limits'),
     ('FormResponse',      'FormDistributionID', 'Form & Status'),
     ('FormResponse',      'FormDistribution',   'Form & Status'),
-    ('FormAutomationRun', 'FormAutomationEventID', 'Execution Details');
+    ('FormAutomationRun', 'FormAutomationEventID', 'Automation Context');
 
 DECLARE @Found INT = (
     SELECT COUNT(*)

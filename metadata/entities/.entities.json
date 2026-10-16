@@ -128,6 +128,27 @@
   },
   {
     "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Automation Events"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=FormResponseID&EntityID=@parent:ID"
+          },
+          "fields": {
+            "IncludeRelatedEntityNameFieldInBaseView": false
+          }
+        }
+      ]
+    }
+  },
+  {
+    "primaryKey": {
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Automation Runs"
     },
     "fields": {
@@ -306,8 +327,8 @@
     },
     "_comments": [
       "Form is the record name: present on every response, where RespondentPerson is null for an",
-      "anonymous one. Without a name field MJ's record-name lookup failed for every response. The three",
-      "foreign keys to this entity turn IncludeRelatedEntityNameFieldInBaseView off, so CodeGen adds no",
+      "anonymous one. Without a name field MJ's record-name lookup failed for every response. Every",
+      "foreign key to this entity turns IncludeRelatedEntityNameFieldInBaseView off, so CodeGen adds no",
       "vwFormResponses join to their views (a schema change for a column nobody reads)."
     ]
   },
