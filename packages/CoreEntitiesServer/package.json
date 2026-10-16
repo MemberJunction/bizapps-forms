@@ -2,9 +2,20 @@
   "name": "@mj-biz-apps/forms-core-entities-server",
   "type": "module",
   "version": "0.15.1",
-  "description": "Server-side entity subclasses for MJ Forms — lifecycle hooks (validation, hardening, cross-record invariants) that run only on the server.",
+  "description": "Server-side domain layer for MJ Forms — entity server subclasses (invariants that hold for every writer), the engines and Remote Operations, the on-submit automation outbox and its drain, and the shared helpers the actions and the server both run (response context, entity binding, provider resolution).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -19,6 +30,9 @@
   "author": "MemberJunction.com",
   "license": "BUSL-1.1",
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "axios": "1.19.0",
+    "encoding": "0.1.13",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },
@@ -26,9 +40,16 @@
     "@mj-biz-apps/forms-entities": "0.15.1"
   },
   "peerDependencies": {
+    "@memberjunction/actions": "^6.1.0-edge.6",
+    "@memberjunction/actions-base": "^6.1.0-edge.6",
+    "@memberjunction/ai-agents": "^6.1.0-edge.6",
+    "@memberjunction/ai-core-plus": "^6.1.0-edge.6",
     "@memberjunction/core": "^6.1.0-edge.6",
     "@memberjunction/core-entities": "^6.1.0-edge.6",
+    "@memberjunction/generic-database-provider": "^6.1.0-edge.6",
     "@memberjunction/global": "^6.1.0-edge.6",
+    "@memberjunction/scheduling-base-types": "^6.1.0-edge.6",
+    "@memberjunction/scheduling-engine": "^6.1.0-edge.6",
     "@memberjunction/sqlserver-dataprovider": "^6.1.0-edge.6"
   },
   "repository": {

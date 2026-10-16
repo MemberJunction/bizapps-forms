@@ -126,11 +126,9 @@ describe('the Distribute component', () => {
     }
   });
 
-  it('mentions IgnoreDirtyState in the service (whether it is PASSED is tested behaviourally)', () => {
-    // Save() skips a clean record entirely, and the records needing a link are usually
-    // already Active — so without this the button is a no-op exactly when it matters.
-    expect(source('distribution.service.ts')).toContain('IgnoreDirtyState = true');
-  });
+  // "Mentions IgnoreDirtyState in the service" is gone with the client-side open: opening is
+  // `Forms.OpenDistribution`, and the forced save is pinned server-side
+  // (`FormDistributionEngine.spec.ts`, "forces the save (IgnoreDirtyState)").
 
   it('mentions Revert in the service (tested behaviourally in distribution.service.behaviour.spec.ts)', () => {
     // The database bounced a too-large limit and the box kept displaying it, because the
@@ -209,31 +207,15 @@ describe('the Distribute component', () => {
 });
 
 describe('the reissue request, where the builder must not do the server\'s job', () => {
-  // Both comment-stripped, like the module-level bindings. Re-reading raw here (which this block
-  // used to do) passes only for as long as no docstring happens to contain `dist.PublicLinkToken =`
-  // — and these files discuss that exact assignment at length, so it was one comment away from
-  // reddening four tests for no behavioural reason.
-  const service = stripComments(source('distribution.service.ts'));
+  // Comment-stripped, like the module-level bindings: these files discuss the credential
+  // assignments at length, so a raw read is one docstring away from a false red.
   const component = stripComments(source('distribution-manager.component.ts'));
 
-  it('clears ONLY the token — never the invite id, which is what tells the server what to revoke', () => {
-    // This is the one security-relevant line in the change, and it was guarded by reading the
-    // COMPONENT — the file that deliberately never touches these columns — so the guard could
-    // not see the service at all. Clearing `MagicLinkInviteID` here flips the server's verdict
-    // from `reissue` (revoke, then mint) to `mint`: the old invite stays Active and redeemable,
-    // referenced by no distribution, so no later save can ever find it to revoke. That is the
-    // orphaned live credential the whole change exists to remove.
-    const reissue = service.slice(service.indexOf('public async reissueLink'));
-    const body = reissue.slice(0, reissue.indexOf('\n  }'));
-    expect(body).toMatch(/PublicLinkToken\s*=\s*null/);
-    expect(body).not.toMatch(/MagicLinkInviteID\s*=/);
-  });
-
-  it('leaves both credential columns alone everywhere else in the service', () => {
-    const writes = service.match(/dist\.(?:MagicLinkInviteID|PublicLinkToken)\s*=/g) ?? [];
-    // Exactly one: the reissue request above.
-    expect(writes).toHaveLength(1);
-  });
+  // "Clears ONLY the token" and "leaves both credential columns alone everywhere else in the service"
+  // were read out of the service's source; reissuing is `Forms.ReissueDistributionLink` now (#303).
+  // That the builder writes NO credential column, and asks for the right operation, is executed in
+  // `distribution.service.behaviour.spec.ts`; that the server clears only the token is pinned in
+  // `FormDistributionEngine.spec.ts`.
 
   it('never lets the component write a credential column itself', () => {
     expect(component).not.toMatch(/(?:MagicLinkInviteID|PublicLinkToken)\s*=[^=]/);

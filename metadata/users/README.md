@@ -12,7 +12,7 @@
 > principal that resolves and then fails on permissions at the first read. `metadata/user-roles/`
 > did not exist until 2026-08-08, which is why an earlier pass excluded this directory entirely.
 >
-> `packages/Server/src/automation/service-principal.ts` argues the user is "a deployment step,
+> `packages/CoreEntitiesServer/src/automation/service-principal.ts` argues the user is "a deployment step,
 > deliberately". That reasoning holds for the part that is genuinely a deployment decision — the
 > grants on **binding target entities**, which remain unshipped and are the real ceiling on what a
 > form author can reach. It does not extend to the principal itself, which cannot authenticate

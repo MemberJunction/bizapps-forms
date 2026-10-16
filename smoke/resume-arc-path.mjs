@@ -4,7 +4,7 @@
  *
  * Drives the full file-answer path a consumer like bizapps-ats depends on:
  *   anonymous session → POST /forms/upload (bytes + MJ: Files row + provenance ledger row)
- *   → SubmitFormResponse carrying the fileId answer → entity binding verifies provenance at
+ *   → `Forms.SaveResponse` carrying the FileID answer → entity binding verifies provenance at
  *   bind time and copies the file id onto the bound record (Person.PhotoURL stands in for
  *   ATS's Applicant.ResumeFileID) → a SECOND session submitting the same fileId is rejected.
  *
@@ -17,9 +17,10 @@
  *     only failed deep in the ledger insert, orphaning the stored bytes. Pinned by the
  *     unknown-questionId POST, which asserts a 400 AND that no `MJ: Files` row appeared.
  *
- * Seeds (idempotently, dev DB only): a FileUpload question on the form (row + published-
- * snapshot splice) and a binding FieldMap for it. Requires a running MJAPI with a working
- * storage account (any driver), and seed-binding-smoke.mjs run first.
+ * Seeds (idempotently, dev DB only): a FileUpload question on the form and a binding FieldMap for
+ * it, then republishes through `Forms.PublishForm` so both reach the snapshot. Requires a running
+ * MJAPI with a working storage account (any driver, e.g. `scripts/dev-local-storage.mjs`),
+ * `MJ_API_KEY` set to that API's system key, and seed-binding-smoke.mjs run first.
  *
  * THE FORM IS NOT DISCOVERED THE WAY THE OTHER SUITES DISCOVER ONE, and the difference is the
  * whole reason this file works. `resolveSlug` picks the first published form carrying an Email
@@ -36,7 +37,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from './lib/sqlcmd.mjs';
 import { buildAnswers, pickEmailQuestion, pickNameQuestion, requireQuestion, resolveFormId, resolveQuestions, resolveSeededSlug } from './lib/fixture.mjs';
-import { sessionIdFor } from './lib/session.mjs';
+import { definitionQuestions as questionsOf, firstSaveError, getRespondentForm, republishForm, saveResponse } from './lib/operations.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
 const BASE = smokeBaseUrl();
@@ -83,41 +84,6 @@ async function eventually(read, isDone) {
   return value;
 }
 
-async function gql(token, query, variables) {
-  const body = await gqlRaw(token, query, variables);
-  if (body.errors) throw new Error(JSON.stringify(body.errors).slice(0, 300));
-  return body.data;
-}
-
-/**
- * The un-throwing form, for the adversarial check.
- *
- * That check asserts a REJECTION, so routing it through `gql` made it unfalsifiable: `gql` throws
- * on a GraphQL error, on a non-JSON body (a 502 or an auth redirect), and on a dead connection,
- * and the caller's `catch` reported every one of those as "rejected — ok". A regression that let a
- * stranger claim the file, occurring alongside any unrelated 500, would have been reported as a
- * pass. The caller now inspects the body itself and matches on WHY it was rejected.
- */
-async function gqlRaw(token, query, variables) {
-  const res = await fetch(`${BASE}/`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      // Mirrors the widget's per-instance correlator; without it every request shares one
-      // rate-limit bucket. See smoke/lib/session.mjs.
-      'x-session-id': sessionIdFor(token),
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  const text = await res.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { transportError: `HTTP ${res.status}: ${text.slice(0, 120)}` };
-  }
-}
-
 async function session() {
   const html = await (await fetch(`${BASE}/f/${SLUG}`)).text();
   const token = (html.match(/data-token="([^"]+)"/) || [])[1];
@@ -133,19 +99,6 @@ INSERT INTO __mj_BizAppsForms.FormQuestion (ID, FormID, PageID, QuestionType, Pr
 SELECT '${Q_RESUME}', f.ID, '${PAGE_ID}', 'FileUpload', N'Upload your résumé', 0, 4
 FROM __mj_BizAppsForms.Form f JOIN __mj_BizAppsForms.FormDistribution d ON d.FormID=f.ID WHERE d.Slug='${SLUG}';
 `);
-sql(`
-DECLARE @VerID UNIQUEIDENTIFIER = (
-  SELECT TOP 1 v.ID FROM __mj_BizAppsForms.FormVersion v
-  JOIN __mj_BizAppsForms.FormDistribution d ON d.FormID=v.FormID
-  WHERE d.Slug='${SLUG}' AND v.Status='Published' ORDER BY v.VersionNumber DESC);
-DECLARE @Snap NVARCHAR(MAX) = (SELECT DefinitionSnapshot FROM __mj_BizAppsForms.FormVersion WHERE ID=@VerID);
-IF CHARINDEX('${Q_RESUME}', @Snap) = 0
-BEGIN
-  SET @Snap = JSON_MODIFY(@Snap, 'append $.pages[0].questions',
-    JSON_QUERY('{"id":"${Q_RESUME}","type":"FileUpload","prompt":"Upload your resume","isRequired":false,"displayOrder":4,"options":[]}'));
-  UPDATE __mj_BizAppsForms.FormVersion SET DefinitionSnapshot=@Snap WHERE ID=@VerID;
-END
-`);
 const fieldMappings = JSON.stringify({
   version: 1,
   fields: [
@@ -157,6 +110,20 @@ const fieldMappings = JSON.stringify({
   ],
 }).replace(/'/g, "''");
 sql(`UPDATE __mj_BizAppsForms.FormEntityBinding SET FieldMappings='${fieldMappings}' WHERE ID='${BINDING_ID}';`);
+// Republish so the question AND the patched mapping are in the snapshot the server runs from —
+// since #303 publish freezes the binding's FieldMappings into it, so a live-row patch alone left
+// PhotoURL unwritten. Only when the current snapshot lacks either, so reruns do not mint a version
+// each time. (This used to splice the question into the snapshot with JSON_MODIFY; the real publish
+// builds it from the row instead, which is one less hand-written copy of the snapshot shape.)
+const publishedSnapshot = () => sql(
+  `SET NOCOUNT ON; SELECT TOP 1 CASE WHEN CHARINDEX('${Q_RESUME}', DefinitionSnapshot) > 0
+     AND CHARINDEX('PhotoURL', DefinitionSnapshot) > 0 THEN 'current' ELSE 'stale' END
+   FROM __mj_BizAppsForms.FormVersion WHERE FormID='${FORM_ID}' AND Status='Published' ORDER BY VersionNumber DESC;`,
+);
+if (publishedSnapshot() !== 'current') {
+  const republished = await republishForm(BASE, FORM_ID);
+  console.log(`  note  republished "${SLUG}" as v${republished.VersionNumber} so the snapshot carries the patch`);
+}
 // Assert the seeding actually landed rather than announcing it. Each statement above exits 0 when
 // it affects zero rows — a missing distribution, or seed-binding-smoke.mjs never having run — so an
 // unconditional pass() here reported "ok" for a fixture that had established nothing.
@@ -168,6 +135,7 @@ check(
   sql(`SELECT COUNT(*) FROM __mj_BizAppsForms.FormEntityBinding WHERE ID='${BINDING_ID}' AND FieldMappings LIKE '%${Q_RESUME}%';`) === '1',
   'binding field map references the résumé question (seed-binding-smoke.mjs has run)',
 );
+check(publishedSnapshot() === 'current', 'the published snapshot carries the résumé question and its PhotoURL mapping');
 
 // The automation that RUNS the patched binding on this form. `resolveSeededSlug` has already
 // refused a slug whose form is not wired to the binding, so this resolves — but it is asserted
@@ -229,40 +197,32 @@ check(/unknown "questionid"/i.test(bogusBody.error ?? ''), 'rejected for the rig
 // The load-bearing half: rejected BEFORE storage, so no orphaned bytes or MJ: Files row.
 check(sql(`SELECT COUNT(*) FROM __mj.[File];`) === filesBefore, 'no MJ: Files row was created by the rejected upload');
 
-const published = await gql(token,
-  'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }', { slug: SLUG });
-const definition = JSON.parse(published?.PublishedForm?.definitionJSON ?? '{}');
+const { definition } = await getRespondentForm(BASE, token, SLUG);
 const formVersionId = definition.formVersionId;
 check(Boolean(formVersionId), 'published definition carries formVersionId');
-const definitionQuestions = (definition.pages ?? []).flatMap((pg) => pg.questions ?? []);
+const definitionQuestions = questionsOf(definition);
 check(definitionQuestions.some((q) => q.id.toLowerCase() === Q_RESUME.toLowerCase()),
   'published definition now contains the FileUpload question');
 
-const submission = await gql(token, `
-  mutation S($input: FormSubmissionInputType!) {
-    SubmitFormResponse(input: $input) { success responseId status errors { message } }
-  }`, {
-  input: {
-    distributionSlug: SLUG,
-    formVersionId,
-    responseId: rid,
-    partial: false,
-    startedAt: new Date().toISOString(),
-    clientMeta: { referrer: '', userAgent: 'resume-arc-smoke' },
-    // Built from the published definition rather than a fixed list, so this runs against whatever
-    // form was resolved. Only the résumé is supplied by hand: a file id has to come from a real
-    // upload for its provenance to be attributable, which is the whole point of this test.
-    answers: buildAnswers(definitionQuestions, {
-      email,
-      name: 'Resume Arc',
-      overrides: { [Q_RESUME]: { fileId } },
-    }),
-  },
+const submission = await saveResponse(BASE, token, {
+  Slug: SLUG,
+  FormVersionID: formVersionId,
+  ClientResponseID: rid,
+  StartedAt: new Date().toISOString(),
+  ClientMeta: { Referrer: '', UserAgent: 'resume-arc-smoke' },
+  // Built from the published definition rather than a fixed list, so this runs against whatever
+  // form was resolved. Only the résumé is supplied by hand: a file id has to come from a real
+  // upload for its provenance to be attributable, which is the whole point of this test.
+  Answers: buildAnswers(definitionQuestions, {
+    email,
+    name: 'Resume Arc',
+    overrides: { [Q_RESUME]: { FileID: fileId } },
+  }),
 });
-const result = submission?.SubmitFormResponse;
-check(result?.success === true, 'submission accepted', result?.errors?.[0]?.message);
-check(result?.status === 'Complete', `status Complete (got ${result?.status})`);
-const responseId = result?.responseId;
+const result = submission.output;
+check(result?.Success === true, 'submission accepted', firstSaveError(submission));
+check(result?.Status === 'Complete', `status Complete (got ${result?.Status})`);
+const responseId = result?.ResponseID;
 
 // ---------- 3. verify artifacts ----------
 console.log('--- verifying artifacts ---');
@@ -292,32 +252,37 @@ check(person.toLowerCase() === fileId.toLowerCase(), 'Person.PhotoURL carries th
 console.log('--- adversarial: second session submits the same fileId ---');
 const token2 = await session();
 const rid2 = randomUUID();
-const stolen = await gqlRaw(token2, `
-  mutation S($input: FormSubmissionInputType!) {
-    SubmitFormResponse(input: $input) { success errors { message } }
-  }`, {
-  input: {
-    distributionSlug: SLUG, formVersionId, responseId: rid2, partial: false,
-    startedAt: new Date().toISOString(), clientMeta: { referrer: '', userAgent: 'resume-arc-smoke' },
-    answers: buildAnswers(definitionQuestions, {
+// `saveResponse` never throws for a refusal — it returns the result whatever it says — so this
+// check stays falsifiable: a transport failure surfaces as a throw (caught below and reported as a
+// FAILED run), and an operation that did not run at all is told apart from a refused save.
+let stolen;
+try {
+  stolen = await saveResponse(BASE, token2, {
+    Slug: SLUG, FormVersionID: formVersionId, ClientResponseID: rid2,
+    StartedAt: new Date().toISOString(), ClientMeta: { Referrer: '', UserAgent: 'resume-arc-smoke' },
+    Answers: buildAnswers(definitionQuestions, {
       email: `thief+${Date.now()}@example.invalid`,
       name: 'Thief',
-      overrides: { [Q_RESUME]: { fileId } },
+      overrides: { [Q_RESUME]: { FileID: fileId } },
     }),
-  },
-});
+  });
+} catch (err) {
+  stolen = { transportError: err.message };
+}
 
 // Assert POSITIVELY on the reason. A transport failure or an unrelated server error is a FAILED
 // run, not a pass — the whole point of this check is that the file was refused *for provenance*.
-const stolenResult = stolen.data?.SubmitFormResponse;
-const rejectionText = JSON.stringify(stolen.errors ?? stolenResult?.errors ?? '');
+const stolenResult = stolen.output;
+const rejectionText = JSON.stringify(stolenResult?.Errors ?? stolen.errorMessage ?? stolen.errors ?? '');
 if (stolen.transportError) {
   fail('stranger submission with stolen fileId is REJECTED', `transport failure, not a rejection: ${stolen.transportError}`);
-} else if (stolenResult?.success === true) {
+} else if (!stolenResult) {
+  fail('stranger submission with stolen fileId is REJECTED', `the operation did not run (${stolen.resultCode}): ${stolen.errorMessage}`);
+} else if (stolenResult.Success === true) {
   fail('stranger submission with stolen fileId is REJECTED', 'the submission SUCCEEDED — provenance did not hold');
 } else {
-  // Anchored on the message the submit pipeline actually emits for a file it cannot attribute
-  // (`submit-pipeline.ts` — "That file could not be verified as your upload."), plus the
+  // Anchored on the message the submit engine actually emits for a file it cannot attribute
+  // ("That file could not be verified as your upload."), plus the
   // provenance vocabulary a future rewording would plausibly use. Matching the real string is the
   // point: the first version of this check guessed at the wording and reported a correct rejection
   // as a failure, which is the honest direction to fail in but still a false alarm.

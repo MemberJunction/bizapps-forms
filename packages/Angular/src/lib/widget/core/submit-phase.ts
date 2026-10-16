@@ -6,7 +6,10 @@
  * these to its `phase` signal. This is the guard layer that closes the "success but no
  * thank-you screen" and "double-submit" bugs.
  */
-import type { FormSubmissionResult, PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
+import type { FormsSaveResponseOutput } from '@mj-biz-apps/forms-entities';
+import type { ResumeStatus } from '@mj-biz-apps/forms-entities/contracts';
+
+import type { WidgetRenderDefinition } from './widget-form';
 
 /**
  * Lifecycle phase of the widget. Mirrors the component's `WidgetPhase`.
@@ -30,7 +33,7 @@ export type WidgetPhase = 'loading' | 'welcome' | 'ready' | 'submitting' | 'done
  * A form with a welcome screen opens on it; every other form goes straight to the questions,
  * which is what every form published before screens existed does.
  */
-export function initialPhaseFor(definition: Pick<PublishedFormDefinition, 'welcomeScreen'>): WidgetPhase {
+export function initialPhaseFor(definition: Pick<WidgetRenderDefinition, 'welcomeScreen'>): WidgetPhase {
   return definition.welcomeScreen ? 'welcome' : 'ready';
 }
 
@@ -57,11 +60,11 @@ export interface SubmitOutcome {
  * still shows 'done' first, so a blocked/slow navigation never leaves a blank screen). On
  * failure it returns to 'ready' so the respondent can fix + retry.
  */
-export function outcomeForResult(result: FormSubmissionResult): SubmitOutcome {
-  if (!result.success) {
+export function outcomeForResult(result: Pick<FormsSaveResponseOutput, 'Success' | 'RedirectURL'>): SubmitOutcome {
+  if (!result.Success) {
     return { phase: 'ready', redirect: false };
   }
-  return { phase: 'done', redirect: Boolean(result.redirectUrl) };
+  return { phase: 'done', redirect: Boolean(result.RedirectURL) };
 }
 
 /**
@@ -77,6 +80,6 @@ export function outcomeForResult(result: FormSubmissionResult): SubmitOutcome {
  * `Partial` is the only resumable status, and it opens where a fresh load would — never on the
  * welcome screen, because somebody who is coming BACK has already been welcomed.
  */
-export function resumedPhaseFor(status: FormSubmissionResult['status']): WidgetPhase {
+export function resumedPhaseFor(status: ResumeStatus): WidgetPhase {
   return status === 'Partial' ? 'ready' : 'done';
 }

@@ -153,7 +153,7 @@
                   [class.home-archive]="!isArchived(row)"
                   [class.home-restore]="isArchived(row)"
                   [disabled]="busy"
-                  [attr.title]="isArchived(row) ? 'Restore to Draft' : 'Archive this form'"
+                  [attr.title]="isArchived(row) ? 'Restore this form' : 'Archive this form'"
                   [attr.aria-label]="(isArchived(row) ? 'Restore ' : 'Archive ') + row.name"
                   (click)="toggleArchive(row); $event.stopPropagation()"
                 >

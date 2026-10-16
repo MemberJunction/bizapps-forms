@@ -5,8 +5,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { checkUploadRateLimit } from '../upload-rate-limit';
-import { FormsRateLimiter } from '../../public-submit/rate-limit.service';
-import { resetPublicSubmitConfigForTests } from '../../public-submit/config';
+import { FormsRateLimiter, resetPublicSubmitConfigForTests } from '@mj-biz-apps/forms-core-entities-server';
 
 beforeEach(() => {
   // Cleared up front, not on each test's last line: a test that throws mid-body never reaches

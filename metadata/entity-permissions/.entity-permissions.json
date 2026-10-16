@@ -18,7 +18,7 @@
       "checksum": "daceb5fec70ad23f46993a375ee4cda018a756652d20b1718e070e564b98ecf0"
     },
     "_comments": [
-      "The four Form Respondent grants in this file carry their RLS filter by @lookup, so a",
+      "The three Form Respondent grants in this file carry their RLS filter by @lookup, so a",
       "REGENERATED metadata seed reproduces the FILTERED state instead of the exploitable one",
       "(#39). Verified by real push, not assumed: the generated SQL emits",
       "@CreateRLSFilterID = '7F0E0001-...' and drops that column's _Clear flag, where before this",
@@ -28,10 +28,11 @@
       "oversight to correct. MJ grants NO role Create on 'MJ: Row Level Security Filters'",
       "(Developer holds Read + Delete; Integration and UI hold Read), so `mj sync push` fails",
       "outright on them -- 'Does NOT have permission to Create MJ: Row Level Security Filters'.",
-      "They are created by V202608131600 and must stay there. Adding a",
+      "They are created by V202608131600 and V202609091600 and must stay there. Adding a",
       "metadata/row-level-security-filters/ directory does not work; it was tried.",
       "",
-      "CONSEQUENCE FOR THE REGENERATION RECIPE: the three filter records must EXIST in the",
+      "CONSEQUENCE FOR THE REGENERATION RECIPE: the four filter records this file looks up",
+      "(Gate Only, Own Distribution, Own Response, Own Response Answers) must EXIST in the",
       "database before you push, and the teardown script deletes them (they are in its doom",
       "list). See migrations/README.md. If they are missing the push FAILS LOUDLY -- 'Lookup",
       "failed: No record found in MJ: Row Level Security Filters' -- which is the desired",
@@ -42,6 +43,15 @@
       "code path ever read them, because the published version's DefinitionSnapshot already",
       "carries the whole definition. If a future widget feature needs a direct definition read,",
       "it adds a SCOPED grant then -- a new decision with its own evidence.",
+      "",
+      "THE FORM VERSIONS READ IS RETIRED TOO (#302, #303). It let any holder of a public link",
+      "query mjBizAppsFormsFormVersion(ID) through the generic resolvers and read the raw",
+      "DefinitionSnapshot -- the scoring table, every ending's redirect URL, the knockout",
+      "conditions. The server now reads the Published version as the system user, after the",
+      "respondent-scoped Form Distributions read has bound the session to its link, and hands the",
+      "respondent only the allowlisted projection. V202610132000 deletes the grant (matched by",
+      "role name + entity name) and its 'Respondent Own Form Versions' filter on existing hosts.",
+      "Do not restore it here: a consolidated seed regenerated from this file would re-open #302.",
       "",
       "READ IS DECLARED HERE ON PURPOSE, on this row and on Form Response Answers. It mirrors",
       "exactly what V202609091600 installs for resume-own-response (#138): CanRead = 1 with the",
@@ -70,24 +80,6 @@
     "sync": {
       "lastModified": "2026-09-12T03:02:29.794Z",
       "checksum": "241a42bb96ecf88966ab3d12b7a1ecff8c43e2278d82c5473ecc8f554f727e8c"
-    }
-  },
-  {
-    "fields": {
-      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Versions",
-      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
-      "CanRead": true,
-      "CanCreate": false,
-      "CanUpdate": false,
-      "CanDelete": false,
-      "ReadRLSFilterID": "@lookup:MJ: Row Level Security Filters.Name=MJ Forms: Respondent Own Form Versions"
-    },
-    "primaryKey": {
-      "ID": "822CC66A-AAA0-4CBE-9498-471BF2E0ED36"
-    },
-    "sync": {
-      "lastModified": "2026-09-12T02:14:08.525Z",
-      "checksum": "8f75fab6ff0b6b0c90eab21ab9565fa28e1d5ae03f613f4a183d495d4970971d"
     }
   },
   {

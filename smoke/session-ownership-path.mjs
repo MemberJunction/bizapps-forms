@@ -19,7 +19,8 @@
  *     in-memory string map cannot check, and case-skew of this shape is what broke the whole
  *     respondent path in 0.2.1 (see respondent-path.mjs).
  *
- * So this drives the PUBLIC mutation, as an attacker would reach it, and then reads the victim's
+ * So this drives the PUBLIC operation (`Forms.SaveResponse` since #303), as an attacker would reach
+ * it, and then reads the victim's
  * row back OUT OF SQL SERVER rather than believing the API's own report about it. The load-bearing
  * assertions are the database ones: a refusal that still wrote is not a refusal.
  *
@@ -36,6 +37,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { resolveSlug, buildAnswers } from './lib/fixture.mjs';
+import { requireOperation } from './lib/operations.mjs';
 import { requireDbEnv, sql } from './lib/sqlcmd.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
@@ -64,24 +66,19 @@ const ATTACKER_EMAIL = 'smoke78-attacker@example.com';
 const esc = (v) => String(v).replace(/'/g, "''");
 
 /**
- * POST a GraphQL operation as an anonymous respondent.
+ * Run one respondent Remote Operation as an anonymous session, returning its parsed output.
  *
  * `sessionId` is passed EXPLICITLY rather than derived from the token, which is the whole point of
  * this script: the attack is a caller choosing what to put in (or leave out of) `x-session-id`
  * while presenting somebody else's response id. `undefined` omits the header entirely — that is
  * route 2, and it must not be more permissive than sending the wrong value.
+ *
+ * Throws when the OPERATION was refused rather than answered (a refused save is still an answer:
+ * `Success: false` in the output) — no check here may read a transport or Authorize failure as an
+ * ownership refusal.
  */
-async function gql(token, sessionId, query, variables) {
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  if (sessionId !== undefined) {
-    headers['x-session-id'] = sessionId;
-  }
-  const res = await fetch(`${BASE}/`, { method: 'POST', headers, body: JSON.stringify({ query, variables }) });
-  const body = await res.json();
-  if (body.errors) {
-    throw new Error(`GraphQL error: ${JSON.stringify(body.errors).slice(0, 300)}`);
-  }
-  return body.data;
+async function runOperation(token, sessionId, operationKey, input) {
+  return requireOperation(BASE, { token, sessionId }, operationKey, input);
 }
 
 /** Mint a fresh anonymous session by fetching the public host page, as a real respondent does. */
@@ -97,15 +94,10 @@ async function newAnonymousSession() {
   return token;
 }
 
-const SUBMIT = `
-  mutation S($input: FormSubmissionInputType!) {
-    SubmitFormResponse(input: $input) { success responseId status errors { message } }
-  }`;
-
 /** A refusal that came from the rate limiter, which is not a result this script can interpret. */
 class RateLimitedError extends Error {}
 
-/** The first words of `rateLimitedMessage` in `rate-limit.service.ts`, both of its branches. */
+/** The first words of `rateLimitedMessage` in `submission/rate-limit.ts` (forms-core-entities-server), both of its branches. */
 const RATE_LIMIT_PREFIX = 'Too many submissions.';
 
 /**
@@ -114,7 +106,7 @@ const RATE_LIMIT_PREFIX = 'Too many submissions.';
  * EVERY security assertion in this script is shaped `success === false`, so ANY refusal satisfies
  * it — including one this script provoked itself. A headerless submission is not charged to any
  * per-session bucket while the server can resolve the caller's IP (`rateLimitGatesFor`,
- * `submit-pipeline.ts`); it is bounded by the per-IP ceilings instead — `FORMS_RATELIMIT_IP_MAX`
+ * `submission/save-gates.ts`); it is bounded by the per-IP ceilings instead — `FORMS_RATELIMIT_IP_MAX`
  * saves (default 120) and `FORMS_COMPLETION_MAX` completions (default 20) per minute per
  * distribution — which every run from this machine shares. Only when no IP resolves do all
  * headerless callers share ONE per-session bucket (`rateLimitKey` → `distributionId:sha256(salt +
@@ -150,7 +142,8 @@ function assertNotRateLimited(result, sessionId) {
 }
 
 /**
- * One submission attempt. Returns the `SubmitFormResponse` payload.
+ * One submission attempt. Returns `{ success, responseId, status, errors: [{ message }] }`, the
+ * `Forms.SaveResponse` output in the spelling every check below reads.
  *
  * THE HEADERLESS SUBMISSIONS, because on a host that cannot resolve IPs they share one real
  * per-session bucket (see `assertNotRateLimited`): this script sends 4 — the route-2 probe that
@@ -166,18 +159,21 @@ function assertNotRateLimited(result, sessionId) {
  * cover the primary-key collision and the SQL collation it exists for.
  */
 async function submit(token, sessionId, { responseId, answers, formVersionId, partial }) {
-  const data = await gql(token, sessionId, SUBMIT, {
-    input: {
-      distributionSlug: SLUG,
-      formVersionId,
-      partial,
-      responseId,
-      startedAt: new Date(0).toISOString(),
-      clientMeta: { referrer: '', userAgent: 'forms-smoke-78' },
-      answers,
-    },
+  const output = await runOperation(token, sessionId, 'Forms.SaveResponse', {
+    Slug: SLUG,
+    FormVersionID: formVersionId,
+    Mode: partial ? 'partial' : 'final',
+    ClientResponseID: responseId,
+    StartedAt: new Date(0).toISOString(),
+    ClientMeta: { Referrer: '', UserAgent: 'forms-smoke-78' },
+    Answers: answers,
   });
-  const result = data?.SubmitFormResponse;
+  const result = {
+    success: output.Success,
+    responseId: output.ResponseID,
+    status: output.Status,
+    errors: (output.Errors ?? []).map((e) => ({ message: e.Message })),
+  };
   assertNotRateLimited(result, sessionId);
   return result;
 }
@@ -219,10 +215,8 @@ async function main() {
   const victimSession = randomUUID();
   const victimResponseId = randomUUID();
 
-  const published = await gql(victimToken, victimSession,
-    'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }',
-    { slug: SLUG });
-  const definition = JSON.parse(published?.PublishedForm?.definitionJSON ?? '{}');
+  const published = await runOperation(victimToken, victimSession, 'Forms.GetRespondentForm', { Slug: SLUG });
+  const definition = JSON.parse(published.DefinitionJSON);
   const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
   const formVersionId = definition.formVersionId;
   check(questions.length > 0 && Boolean(formVersionId),

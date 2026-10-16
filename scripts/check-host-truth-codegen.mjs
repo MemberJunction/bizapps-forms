@@ -80,17 +80,66 @@ import { fileURLToPath } from 'node:url';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/** The `mj migrate -t` tag a host sitting at our declared floor would be on. */
-export function coreMigrationTag(mjVersionRange) {
-  const lowerBound = /(?:^|\s)>=\s*(\d+)\.(\d+)\.(\d+)/.exec(mjVersionRange ?? '');
-  if (!lowerBound) {
+/**
+ * The `mj migrate -t` tag the oldest host that can run every app in the room would be on — ours,
+ * common's and tasks' `mjVersionRange` floors, the HIGHEST of them, prerelease included: a host at
+ * `>=6.2.0-edge.3` runs 6.2.0-edge.3, and before 6.2.0 ships `v6.2.0` names no tag at all. Our floor
+ * alone is not enough: the room installs the siblings' heads, and when common 5.54 raised its floor
+ * to 6.1.5 a room at our 6.1.0-edge.6 failed on common's first migration (#306 CI).
+ */
+export function coreMigrationTag(...mjVersionRanges) {
+  const floors = mjVersionRanges.map((range) => {
+    const lowerBound = /(?:^|\s)>=\s*(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(range ?? '');
+    if (!lowerBound) {
+      throw new Error(
+        `The mjVersionRange ${JSON.stringify(range)} has no '>=X.Y.Z' lower bound, ` +
+          'so the core migration tag cannot be derived. Pass --core-tag vX.Y.Z to say it explicitly.',
+      );
+    }
+    return lowerBound[1];
+  });
+  if (floors.length === 0) {
+    throw new Error('No mjVersionRange was given, so the core migration tag has no lower bound to read.');
+  }
+  return `v${floors.reduce((highest, floor) => (compareVersions(floor, highest) > 0 ? floor : highest))}`;
+}
+
+/** Semver precedence for `X.Y.Z[-pre]`: a prerelease sorts below its release, numeric identifiers numerically. */
+function compareVersions(a, b) {
+  const [coreA, preA] = splitVersion(a);
+  const [coreB, preB] = splitVersion(b);
+  for (let i = 0; i < 3; i++) {
+    if (coreA[i] !== coreB[i]) return coreA[i] - coreB[i];
+  }
+  if (!preA || !preB) return preA ? -1 : preB ? 1 : 0;
+  const partsA = preA.split('.');
+  const partsB = preB.split('.');
+  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+    if (partsA[i] === undefined) return -1;
+    if (partsB[i] === undefined) return 1;
+    const numeric = /^\d+$/.test(partsA[i]) && /^\d+$/.test(partsB[i]);
+    const order = numeric ? Number(partsA[i]) - Number(partsB[i]) : partsA[i].localeCompare(partsB[i]);
+    if (order !== 0) return order;
+  }
+  return 0;
+}
+
+function splitVersion(version) {
+  const dash = version.indexOf('-');
+  const core = (dash === -1 ? version : version.slice(0, dash)).split('.').map(Number);
+  return [core, dash === -1 ? '' : version.slice(dash + 1)];
+}
+
+/** The `mjVersionRange` of the app whose `migrations/` directory is `migrationsDir`, read from the `mj-app.json` beside it. */
+function siblingVersionRange(migrationsDir) {
+  const manifest = path.join(path.resolve(REPO_ROOT, migrationsDir), '..', 'mj-app.json');
+  if (!existsSync(manifest)) {
     throw new Error(
-      `mj-app.json's mjVersionRange ${JSON.stringify(mjVersionRange)} has no '>=X.Y.Z' lower bound, ` +
-        'so the core migration tag cannot be derived. Pass --core-tag vX.Y.Z to say it explicitly.',
+      `${manifest} does not exist, so that app's MJ floor is unknown and the room's core tag cannot be derived. ` +
+        'Check out the whole sibling repository, or pass --core-tag vX.Y.Z.',
     );
   }
-  const [, major, minor, patch] = lowerBound;
-  return `v${major}.${minor}.${patch}`;
+  return JSON.parse(readFileSync(manifest, 'utf8')).mjVersionRange;
 }
 
 /**
@@ -308,7 +357,13 @@ function main() {
   const options = parseArgs(process.argv.slice(2));
   checkPreconditions(options);
 
-  const coreTag = options.coreTag ?? coreMigrationTag(require(path.join(REPO_ROOT, 'mj-app.json')).mjVersionRange);
+  const coreTag =
+    options.coreTag ??
+    coreMigrationTag(
+      require(path.join(REPO_ROOT, 'mj-app.json')).mjVersionRange,
+      siblingVersionRange(options.commonMigrations),
+      siblingVersionRange(options.tasksMigrations),
+    );
   const capture = captureDirectory();
   const before = listCaptures(capture);
 

@@ -1,10 +1,6 @@
 /**
- * Entity binding lives in the Actions package rather than the Server package so that the
- * `Forms: Bind Response To Entity` action can reach it. forms-server already depends on
- * forms-actions; the reverse would invert that, so the executor sits on the side both callers can
- * import from.
+ * The `Forms: Bind Response To Entity` action. The binding executor, ledger and gateway it drives
+ * live in `@mj-biz-apps/forms-core-entities-server`, beside the automation code that also runs them,
+ * and are imported from there by every caller — this barrel does not re-export them.
  */
-export * from './binding-executor';
-export * from './binding-ledger';
 export * from './bind-response-to-entity.action';
-export * from './mj-binding-gateway';

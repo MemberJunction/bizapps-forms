@@ -54,7 +54,8 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 
 import { AssetMiddleware } from '../AssetMiddleware';
-import { ASSET_ROUTE, resetAssetConfigForTests } from '../config';
+import { ASSET_ROUTE } from '@mj-biz-apps/forms-entities';
+import { resetAssetConfigForTests } from '../config';
 
 const MJ_COMPRESSION_THRESHOLD_BYTES = 1024;
 const MJ_COMPRESSION_LEVEL = 6;

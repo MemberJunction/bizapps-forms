@@ -1,8 +1,10 @@
 /**
  * Pure, Angular-free helpers for the client-side Cloudflare Turnstile gate (DG-4).
  *
- * Captcha is a per-form / per-distribution toggle: the published definition carries
- * `settings.captchaRequired`, and the server is fail-closed. The widget mirrors that
+ * Captcha is a per-form / per-distribution toggle: the form the widget renders carries
+ * `captchaRequired` (the respondent projection lifts it to the top level, already widened by the
+ * link's own toggle; Preview reads the draft's `settings.captchaRequired`), and the server is
+ * fail-closed. The widget mirrors that
  * decision here — deciding whether to render a challenge, whether the config is complete
  * enough to render one, whether a final submit may proceed, and whether a failed
  * submit's error came from Turnstile (so the challenge can be reset for a retry).
@@ -10,13 +12,19 @@
  * These functions are deliberately free of Angular/DOM so they can be unit-tested
  * without a browser or the Turnstile global (the package's Vitest suite is node-only).
  */
-import { CAPTCHA_NOT_CONFIGURED_MESSAGE, type PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
+import { CAPTCHA_NOT_CONFIGURED_MESSAGE } from '@mj-biz-apps/forms-entities/contracts';
+
+import type { WidgetRenderDefinition } from './widget-form';
+
+/** The one field the gate reads. */
+type CaptchaBearing = Pick<WidgetRenderDefinition, 'captchaRequired'>;
 
 /**
- * Server-side Turnstile error codes that reach the client inside a message
- * (see Server/turnstile.service.ts, and `Captcha verification failed (<code>).` in submit-pipeline).
+ * Server-side Turnstile error codes that reach the client inside a message (see forms-core-entities-
+ * server's `submission/turnstile.ts`, and `Captcha verification failed (<code>).` in
+ * `FormSubmissionEngine.SaveResponse`).
  *
- * `turnstile-not-configured` is listed but is NO LONGER one of them: the pipeline intercepts that
+ * `turnstile-not-configured` is listed but is NO LONGER one of them: the engine intercepts that
  * code and answers with {@link CAPTCHA_NOT_CONFIGURED_MESSAGE} instead, so it can only arrive here
  * from an older server. It stays in the list for exactly that reason — a widget bundle outlives the
  * server it was built against — not because the current server can still send it.
@@ -30,9 +38,9 @@ export const TURNSTILE_ERROR_CODES = [
   'timeout-or-duplicate',
 ] as const;
 
-/** Does this published form require a captcha challenge before submit? */
-export function captchaRequired(def: PublishedFormDefinition | null): boolean {
-  return def?.settings.captchaRequired === true;
+/** Does this form require a captcha challenge before submit? */
+export function captchaRequired(def: CaptchaBearing | null): boolean {
+  return def?.captchaRequired === true;
 }
 
 /**
@@ -41,7 +49,7 @@ export function captchaRequired(def: PublishedFormDefinition | null): boolean {
  * shows a config-gap message rather than a silent dead-end.
  */
 export function canRenderChallenge(
-  def: PublishedFormDefinition | null,
+  def: CaptchaBearing | null,
   siteKey: string | undefined,
 ): boolean {
   return captchaRequired(def) && isSiteKeyConfigured(siteKey);
@@ -49,7 +57,7 @@ export function canRenderChallenge(
 
 /** True when captcha is required but no site key was supplied to the widget. */
 export function isConfigGap(
-  def: PublishedFormDefinition | null,
+  def: CaptchaBearing | null,
   siteKey: string | undefined,
 ): boolean {
   return captchaRequired(def) && !isSiteKeyConfigured(siteKey);
@@ -67,7 +75,7 @@ export function isSiteKeyConfigured(siteKey: string | undefined): boolean {
  * config-gap message is what the respondent sees instead.
  */
 export function canSubmit(
-  def: PublishedFormDefinition | null,
+  def: CaptchaBearing | null,
   siteKey: string | undefined,
   token: string | null,
 ): boolean {

@@ -10,6 +10,11 @@ type StatusFilter = 'all' | ResponseStatus;
  * Individual-response list with text search + status filter (simple cross-tab).
  * A semantic, token-styled table — clicking a row emits the response id so the
  * dashboard can open the detail view. Horizontal scroll is contained.
+ *
+ * The host pages the rows (`Forms.ListResponses`, 200 at a time) and says how many there are in
+ * all (`Total`) and whether another page may be asked for (`CanLoadMore` — the host knows when a
+ * page came back short, or when the list changed under it, and then says why in `Notice`). The
+ * search says it searches only the rows loaded so far, which is the truth until every page is in.
  */
 @Component({
   selector: 'mj-forms-response-list',
@@ -23,7 +28,7 @@ type StatusFilter = 'all' | ResponseStatus;
         <input
           class="mjf-input"
           type="search"
-          placeholder="Search respondent"
+          [placeholder]="AllLoaded() ? 'Search respondent' : 'Search the loaded responses'"
           [ngModel]="search()"
           (ngModelChange)="search.set($event)"
           aria-label="Search responses by respondent" />
@@ -50,7 +55,7 @@ type StatusFilter = 'all' | ResponseStatus;
         <p class="mjf-empty-body">Clear the search or the status filter to see them all.</p>
       </div>
     } @else {
-      <div class="mjf-table-wrap">
+      <div class="mjf-table-wrap" [class.rl-busy]="Busy" [attr.aria-busy]="Busy">
         <table class="mjf-table">
           <thead>
             <tr>
@@ -87,6 +92,23 @@ type StatusFilter = 'all' | ResponseStatus;
         </table>
       </div>
     }
+
+    @if (Total !== null && Total > 0) {
+      <div class="rl-more">
+        <span class="rl-count">{{ countLine() }}</span>
+        @if (Notice) {
+          <span class="rl-notice" role="status">{{ Notice }}</span>
+        } @else if (CanLoadMore) {
+          <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" [disabled]="LoadingMore" (click)="LoadMore.emit()">
+            @if (LoadingMore) {
+              <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading…
+            } @else {
+              <i class="fa-solid fa-chevron-down" aria-hidden="true"></i> Load more
+            }
+          </button>
+        }
+      </div>
+    }
   `,
   styles: [
     FORMS_UI_CSS,
@@ -103,6 +125,19 @@ type StatusFilter = 'all' | ResponseStatus;
       .rl-toolbar .mjf-search { flex: 1 1 240px; max-width: 360px; }
 
       .rl-when { color: var(--mj-text-secondary); white-space: nowrap; }
+
+      .rl-more {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--mjf-gap-sm);
+        margin-top: var(--mjf-gap);
+      }
+      .rl-count { font-size: var(--mjf-meta); color: var(--mj-text-muted); font-variant-numeric: tabular-nums; }
+      .rl-notice { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-status-warning-text); }
+      /* While a response opens: the rows stay where the reader clicked, visibly on hold. */
+      .rl-busy { opacity: 0.6; pointer-events: none; }
       .rl-open-cell { width: 1%; text-align: right; padding-left: 0; }
 
       /* The header cell above the open button needs an accessible name without a
@@ -121,6 +156,21 @@ type StatusFilter = 'all' | ResponseStatus;
 export class FormsResponseListComponent {
   @Output() Open = new EventEmitter<string>();
 
+  /** Asks the host for the next page. Offered only while fewer than `Total` rows are loaded. */
+  @Output() LoadMore = new EventEmitter<void>();
+
+  /** While the host is fetching the next page. */
+  @Input() LoadingMore = false;
+
+  /** Whether the host can fetch another page. */
+  @Input() CanLoadMore = false;
+
+  /** While the host is opening a response: the rows are held, dimmed, and announced busy. */
+  @Input() Busy = false;
+
+  /** A sentence shown where "Load more" would be, when paging has stopped for a reason. */
+  @Input() Notice: string | null = null;
+
   public readonly search = signal('');
   public readonly statusFilter = signal<StatusFilter>('all');
 
@@ -136,12 +186,30 @@ export class FormsResponseListComponent {
     this._rows.set(value ?? []);
   }
 
+  private readonly _total = signal<number | null>(null);
+  /** How many rows the list has in all, across pages; `null` when the host does not page. */
+  @Input()
+  set Total(value: number | null) {
+    this._total.set(value);
+  }
+  get Total(): number | null {
+    return this._total();
+  }
+
+  /** Whether every row is loaded (always, when the host does not page). */
+  public readonly AllLoaded = computed(() => {
+    const total = this._total();
+    return total === null || this._rows().length >= total;
+  });
+
+  /** "Showing 200 of 1,204 responses" while paging; "1,204 responses" once all are in. */
+  public readonly countLine = computed(() => responseCountLine(this._rows().length, this._total() ?? this._rows().length));
+
   /**
    * Whether the status filter is worth offering.
    *
-   * All three callers build their rows with `buildResponseRows`, which lists COMPLETE
-   * responses only — so against them the Partial chip can never match and the filter is
-   * dead controls. The component still takes arbitrary `Rows`, so rather than delete a
+   * Every caller lists COMPLETE responses only (`Forms.ListResponses` with `Status: 'Complete'`),
+   * so against them the Partial chip can never match and the filter is dead controls. The component still takes arbitrary `Rows`, so rather than delete a
    * working capability we show the filter only when the rows actually span more than one
    * status. Today that means it is hidden; a caller that passes Partials gets it back.
    */
@@ -165,4 +233,10 @@ export class FormsResponseListComponent {
   public submittedLabel(r: ResponseListRow): string {
     return r.submittedAt ? r.submittedAt.toLocaleString() : '—';
   }
+}
+
+/** The paging line under the list. */
+export function responseCountLine(loaded: number, total: number): string {
+  const all = `${total.toLocaleString()} ${total === 1 ? 'response' : 'responses'}`;
+  return loaded >= total ? all : `Showing ${loaded.toLocaleString()} of ${all}`;
 }

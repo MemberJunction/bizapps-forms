@@ -36,7 +36,7 @@ export { GeneratedFormsModule } from './lib/generated/generated-forms.module';
 // exported from './lib/builder'; it moved here when the responses surface began sharing it.
 export * from './lib/shared';
 
-// Individual-response surface (list + detail + data service), shared by all three mounts.
+// Individual-response surface (list + detail + the operation reads behind them), shared by all three mounts.
 export * from './lib/responses';
 
 // WP-F (reporting dashboard) public surface

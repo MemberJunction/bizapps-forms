@@ -232,6 +232,15 @@
               </p>
             }
           }
+          <!-- Committed answers the server could not save after every retry (fix round 1). A notice, not a
+               blocker: the respondent keeps going, and the final submit is judged by the server anyway.
+               role="status" so it is announced without stealing focus. -->
+          @if (saveNotice()) {
+            <p class="mjf-resume-notice mjf-resume-notice--warn" role="status">
+              <mjf-icon name="triangle-exclamation" />
+              Your progress couldn't be saved — keep going; we'll try again.
+            </p>
+          }
         }
       }
     }
