@@ -65,7 +65,7 @@ import { InFlightLimiter } from '../shared/in-flight-limiter.js';
 import { withIsolatedProvider } from '../shared/isolated-provider.js';
 import { revokeResponseInvites } from '../magic-link/response-invite-revocation.js';
 import { getPublicSubmitConfig } from '../submission/config.js';
-import { FOREIGN_RESPONSE_MESSAGE, persistSubmission, type PersistenceResult } from '../submission/persistence.js';
+import { FOREIGN_RESPONSE_MESSAGE, isValidUuid, persistSubmission, type PersistenceResult } from '../submission/persistence.js';
 import { resolvePublishedDefinition, type ResolvedDefinition } from '../submission/published-link.js';
 import { partialSaveKey, queuedTrigger } from '../submission/queued-automations.js';
 import { consumeDistributionSlot, distributionQuotaExceeded, formQuotaReached } from '../submission/quota.js';
@@ -515,7 +515,16 @@ export class FormSubmissionEngine extends BaseSingleton<FormSubmissionEngine> {
 
     // The copy follows the PERSISTED status, not this request's verdict: a concurrent save may have
     // sealed the row differently, and a mismatched status/copy pair is resolved by the widget in
-    // whichever direction it happens to look.
+    // whichever direction it happens to look. A save that met an already-sealed row (`deduped` — an
+    // autosave naming it, or a final that raced the seal) wrote nothing, so it is answered exactly
+    // as the final-mode short-circuit above is: with the ending the ROW stored (#302).
+    const ending =
+      committed.deduped && isTerminalResponseStatus(committed.status)
+        ? await storedEndingFor({ ID: committed.responseId, Status: committed.status, SourceMetadata: committed.sourceMetadata }, resolved.definition, provider, system)
+        : endingFor(committed.status, resolved.definition.settings, completionScreen, knockout ?? partialKnockout);
+    if (!ending) {
+      return report(refusal(SUBMIT_FAILED_MESSAGE));
+    }
     const ended = isTerminalResponseStatus(committed.status) || (partialKnockout !== undefined && committed.status === 'Partial');
     return report({
       success: true,
@@ -523,7 +532,7 @@ export class FormSubmissionEngine extends BaseSingleton<FormSubmissionEngine> {
       status: committed.status,
       outcome: ended ? 'ended' : 'continue',
       errors: [],
-      ...endingFor(committed.status, resolved.definition.settings, completionScreen, knockout ?? partialKnockout),
+      ...ending,
     });
   }
 
@@ -537,7 +546,8 @@ export class FormSubmissionEngine extends BaseSingleton<FormSubmissionEngine> {
     requireEntityTransactions(gate.provider, `Saving a response to ${request.distributionSlug}`);
     try {
       return await RunInEntityTransaction(gate.provider, async () => {
-        if (plan.terminalCompletion && (await formQuotaReached(gate.provider, resolved.definition.formId, resolved.definition.settings, gate.system))) {
+        const ownResponseId = plan.existingResponseId ?? (isValidUuid(request.clientResponseId) ? request.clientResponseId : undefined);
+        if (plan.terminalCompletion && (await formQuotaReached(gate.provider, resolved.definition.formId, resolved.definition.settings, gate.system, ownResponseId))) {
           throw new SaveRefusal(QUOTA_REACHED_MESSAGE);
         }
         const persisted = await persistSubmission(

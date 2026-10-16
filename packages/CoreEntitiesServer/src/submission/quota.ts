@@ -85,6 +85,12 @@ export async function consumeDistributionSlot(
  * taken only when the form HAS a quota, so a form without one pays nothing. Lock order is form, then
  * distribution — the order archiving takes them — so the two cannot deadlock each other.
  *
+ * It counts completions OTHER than `ownResponseId`, the row this save writes: two finals of one
+ * response that both missed the sealed-repeat lookup reach here in turn, and the second — whose
+ * response the first just completed — is the idempotent no-op persistence answers, not a new
+ * completion. Counting its own row refused that retry on a form's last slot. Naming someone else's
+ * Complete row gains nothing: the write that follows refuses a foreign row, and rolls back.
+ *
  * Fail-closed: a count that cannot be read reports the quota as reached, and logs why.
  */
 export async function formQuotaReached(
@@ -92,6 +98,7 @@ export async function formQuotaReached(
   formId: string,
   settings: Pick<FormSettings, 'quota'>,
   contextUser: UserInfo,
+  ownResponseId?: string,
 ): Promise<boolean> {
   if (settings.quota === undefined) {
     return false;
@@ -107,7 +114,7 @@ export async function formQuotaReached(
   const result = await provider.RunView(
     {
       EntityName: FORMS_ENTITY.FormResponse,
-      ExtraFilter: `FormID=${quoteSqlString(formId)} AND Status='Complete'`,
+      ExtraFilter: `FormID=${quoteSqlString(formId)} AND Status='Complete'` + (ownResponseId ? ` AND ID<>${quoteSqlString(ownResponseId)}` : ''),
       ResultType: 'count_only',
     },
     contextUser,

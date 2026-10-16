@@ -246,6 +246,44 @@ describe('SaveResponse — the quota is decided by the conditional UPDATE, insid
     expect(fake.saved).toHaveLength(0);
   });
 
+  it('lets a retry of a response a concurrent final already sealed through on the LAST slot (review finding 5)', async () => {
+    // Both finals missed the sealed-repeat lookup; the first then took the last slot and committed.
+    // The second is a retry of the SAME response — the idempotent no-op persistence answers — so the
+    // completion it would be counted against is its own.
+    const definition = screener();
+    definition.settings.quota = 1;
+    const id = '66666666-2222-4333-8444-555555555555';
+    const fake = fakeFor(
+      {
+        formResponseCount: 1,
+        concurrentlyCreated: [{ ID: id, Status: 'Complete', FormVersionID: 'ver-1', AnonymousSessionID: 'sess-1', SourceMetadata: `{"clientResponseId":"${id}"}` }],
+      },
+      definition,
+    );
+
+    const result = await saveThroughEngine(ctxFor(fake), { ...ADULT, clientResponseId: id });
+
+    expect(result.success).toBe(true);
+    expect(result.responseId).toBe(id);
+    expect(result.status).toBe('Complete');
+  });
+
+  it('still refuses a NEW completion when the quota is reached', async () => {
+    const definition = screener();
+    definition.settings.quota = 1;
+    const fake = fakeFor(
+      {
+        formResponseCount: 1,
+        concurrentlyCreated: [{ ID: '66666666-2222-4333-8444-000000000000', Status: 'Complete', FormVersionID: 'ver-1', AnonymousSessionID: 'sess-1' }],
+      },
+      definition,
+    );
+
+    const result = await saveThroughEngine(ctxFor(fake), ADULT);
+
+    expect(result.errors[0]?.message).toBe(QUOTA_REACHED_MESSAGE);
+  });
+
   it('takes no lock at all for a form without a form-level quota', async () => {
     const fake = fakeFor();
     await saveThroughEngine(ctxFor(fake), ADULT);

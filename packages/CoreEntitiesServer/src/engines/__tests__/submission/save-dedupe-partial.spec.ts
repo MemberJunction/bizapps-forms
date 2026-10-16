@@ -579,4 +579,60 @@ describe('an idempotent resubmit lands on the SAME ending the first submit did',
     expect(result.redirectUrl).toBeUndefined();
     expect(JSON.stringify(result)).not.toContain('secret.example');
   });
+
+  // The same probe through the two doors the final-mode short-circuit does not guard: an AUTOSAVE
+  // naming the sealed row's id (no captcha, no required-field check), and a final that raced the
+  // seal and met the row at the primary key. Both reach the duplicate-key recovery, which answers
+  // `deduped` against the sealed row — and must answer it with the row's ending, not the probe's.
+  function gatedEndings(): ReturnType<typeof makeDefinition> {
+    return makeDefinition({
+      endScreens: [
+        {
+          id: 'end-booking',
+          screenType: 'Ending',
+          title: 'Book your call',
+          displayOrder: 0,
+          redirectURL: 'https://secret.example/booking-link',
+          conditionalRule: { show: { all: [{ questionId: 'q-name', op: 'equals', value: 'Ada Lovelace' }] } },
+        },
+        { id: 'end-default', screenType: 'Ending', title: 'Thanks', displayOrder: 1, isDefault: true },
+      ],
+    });
+  }
+  const SEALED_ID = '77777777-2222-4333-8444-555555555555';
+
+  it('answers an autosave naming a sealed row with the ending the row stored, never the probe’s', async () => {
+    const { ctx, fake } = build({
+      definition: gatedEndings(),
+      existingResponses: [{ ID: SEALED_ID, Status: 'Complete', FormVersionID: 'ver-1', AnonymousSessionID: SESSION }],
+      existingAnswers: [{ ID: 'ans-1', QuestionID: 'q-name', TextValue: 'Someone Else' }],
+    });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ partial: true, clientResponseId: SEALED_ID, answers: [{ questionId: 'q-name', textValue: 'Ada Lovelace' }] }),
+    );
+
+    expect(result.status).toBe('Complete');
+    expect(JSON.stringify(result)).not.toContain('secret.example');
+    expect(result.confirmationMessage).toBe('Thanks');
+    expect(fake.saved.filter((s) => s.entityName === FORM_RESPONSE_ANSWER_ENTITY)).toEqual([]);
+  });
+
+  it('answers a final that met the sealed row at the primary key with the row’s stored ending', async () => {
+    const { ctx } = build({
+      definition: gatedEndings(),
+      concurrentlyCreated: [{ ID: SEALED_ID, Status: 'Complete', FormVersionID: 'ver-1', AnonymousSessionID: SESSION }],
+      existingAnswers: [{ ID: 'ans-1', QuestionID: 'q-name', TextValue: 'Someone Else' }],
+    });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ clientResponseId: SEALED_ID, answers: [{ questionId: 'q-name', textValue: 'Ada Lovelace' }] }),
+    );
+
+    expect(result.status).toBe('Complete');
+    expect(JSON.stringify(result)).not.toContain('secret.example');
+    expect(result.confirmationMessage).toBe('Thanks');
+  });
 });

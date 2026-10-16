@@ -105,6 +105,12 @@ export type PersistenceResult =
        */
       deduped?: boolean;
       /**
+       * The sealed row's `SourceMetadata`, set only with `deduped`: a Disqualified row's knockout
+       * screen is recorded there, and the caller answers a deduped save with the row's STORED ending
+       * (#302) — never the one this request's answers would earn.
+       */
+      sourceMetadata?: string | null;
+      /**
        * True when THIS write transitioned the row to `Complete` for the first time (a fresh
        * completion, or a Partial promoted). Exactly the writes that take a quota slot and enqueue
        * the `OnComplete` message; a re-completion or a deduped no-op is neither.
@@ -905,7 +911,7 @@ export async function persistSubmission(
   // A concurrent request already Completed this row (duplicate-key recovery): it is terminal, so
   // its answers and count are already recorded — return the existing id/status untouched.
   if (saved.skipAnswers) {
-    return { outcome: 'saved', responseId, status: saved.entity.Status, deduped: true, completedNow: false };
+    return { outcome: 'saved', responseId, status: saved.entity.Status, deduped: true, completedNow: false, sourceMetadata: saved.entity.SourceMetadata };
   }
 
   // One pass for both paths. A fresh CREATE has nothing stored, so this inserts; an upsert or a

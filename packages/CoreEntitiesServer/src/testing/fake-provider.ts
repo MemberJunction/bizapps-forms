@@ -457,7 +457,7 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
     if (name === FORM_RESPONSE_ENTITY) {
       // Quota uses count_only; the dedupe/partial lookups use entity_object with a Status filter.
       if (params.ResultType === 'count_only') {
-        return runViewResult<T>(true, [], config.formResponseCount ?? 0);
+        return runViewResult<T>(true, [], completeCountExcluding(config.formResponseCount ?? 0, params.ExtraFilter, responseStore));
       }
       const rawFilter = params.ExtraFilter;
       const filter = IsPlatformSQL(rawFilter) ? rawFilter.default : rawFilter ?? '';
@@ -1052,4 +1052,16 @@ export function respondentPermissions(): CreatePermissions {
     'MJ_BizApps_Forms: Form Versions': false,
     'MJ_BizApps_Forms: Form Distributions': false,
   };
+}
+
+/**
+ * `formResponseCount` is every Complete response of the form, the stored rows included; a count
+ * that excludes one id (`ID<>'…'`, the form quota's "other than this save's own response") drops
+ * that row when the store holds it Complete — as the database would.
+ */
+function completeCountExcluding(total: number, extraFilter: RunViewParams['ExtraFilter'], store: ResponseStore): number {
+  const filter = IsPlatformSQL(extraFilter) ? extraFilter.default : extraFilter ?? '';
+  const excluded = /\bID<>'([^']+)'/.exec(filter)?.[1];
+  const row = excluded ? store.get(excluded) : undefined;
+  return row?.Status === 'Complete' ? total - 1 : total;
 }
