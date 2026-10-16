@@ -487,4 +487,54 @@ describe('toRespondentDefinition — items no respondent can ever see', () => {
       );
     }
   });
+
+  // #306 review finding 4: the two pages pruning must KEEP — a jump target, and a page that carries a
+  // Go to of its own — kept everything the droppable path strips or preserves. A jump-targeted gated
+  // checkpoint lost its flag; an emptied page kept its title and description.
+  it('keeps the checkpoint of a never-visible page it must keep for a jump', () => {
+    const published = formWith([
+      {
+        id: 'p1',
+        displayOrder: 0,
+        questions: [
+          q('a', {
+            conditionalRule: { jump: [{ when: { all: [{ questionId: 'a', op: 'equals', value: 'go' }] }, target: { kind: 'page', id: 'p-gated' } }] },
+          }),
+        ],
+      },
+      { id: 'p-gated', displayOrder: 1, title: 'Gated section', isPartialSubmitPoint: true, conditionalRule: scoreGated, questions: [q('g')] },
+      { id: 'p3', displayOrder: 2, questions: [q('z')] },
+    ]);
+    const projection = toRespondentDefinition(published);
+
+    const kept = projection.pages.find((page) => page.id === 'p-gated');
+    expect(kept?.isPartialSubmitPoint).toBe(true);
+    expect(JSON.stringify(projection)).not.toContain('Gated');
+  });
+
+  it('ships no copy for an emptied page it keeps because the page has a Go to of its own', () => {
+    const published = formWith([
+      { id: 'p1', displayOrder: 0, questions: [q('a')] },
+      {
+        id: 'p-emptied',
+        displayOrder: 1,
+        title: 'Emptied section',
+        description: 'Emptied description',
+        conditionalRule: { jump: [{ when: { all: [{ questionId: 'a', op: 'equals', value: 'x' }] }, target: { kind: 'page', id: 'p4' } }] },
+        questions: [q('h', { conditionalRule: scoreGated, prompt: 'Emptied prompt' })],
+      },
+      { id: 'p3', displayOrder: 2, questions: [q('m')] },
+      { id: 'p4', displayOrder: 3, questions: [q('z')] },
+    ]);
+    const projection = toRespondentDefinition(published);
+
+    const kept = projection.pages.find((page) => page.id === 'p-emptied');
+    expect(kept?.conditionalRule?.jump).toHaveLength(1);
+    expect(JSON.stringify(projection)).not.toContain('Emptied');
+    for (const answers of [new Map([['a', 'x']]), new Map([['a', 'y']])]) {
+      expect(settleVisibility(projection, answers).rendered.map((question) => question.id)).toEqual(
+        settleVisibility(published, answers).rendered.map((question) => question.id),
+      );
+    }
+  });
 });

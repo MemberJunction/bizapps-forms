@@ -266,9 +266,27 @@ function pruneNeverShown(pages: RespondentFormPage[]): RespondentFormPage[] {
     if (droppable) {
       continue;
     }
-    kept.push(pageNever ? { id: page.id, displayOrder: page.displayOrder, conditionalRule: { show: NEVER }, questions } : { ...page, questions });
+    kept.push(keptPage(page, questions, pageNever));
   }
   return kept;
+}
+
+/**
+ * A page pruning must keep — a jump target, or one leaving by a `Go to` of its own — with only what
+ * the walk needs once nothing on it can be seen: never its copy, always its checkpoint (the flag a
+ * dropped page leaves behind in {@link checkpointStub}, for the same reason).
+ */
+function keptPage(page: RespondentFormPage, questions: RespondentFormQuestion[], pageNever: boolean): RespondentFormPage {
+  const checkpoint = page.isPartialSubmitPoint === true ? { isPartialSubmitPoint: true } : {};
+  if (pageNever) {
+    return { id: page.id, displayOrder: page.displayOrder, ...checkpoint, conditionalRule: { show: NEVER }, questions };
+  }
+  const nothingToShow = page.questions.length > 0 && questions.every((question) => isNeverShown(question.conditionalRule));
+  if (nothingToShow) {
+    const { title: _title, description: _description, ...walk } = page;
+    return { ...walk, questions };
+  }
+  return { ...page, questions };
 }
 
 /**
