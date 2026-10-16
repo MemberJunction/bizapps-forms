@@ -19,6 +19,18 @@ test('coreMigrationTag reads the floor of the declared range, prerelease include
   assert.equal(coreMigrationTag('>= 6.1.0-edge.5 <7.0.0'), 'v6.1.0-edge.5');
 });
 
+// The room is built with common and tasks on it, so it sits at the HIGHEST floor of the three: a
+// host cannot run bizapps-common 5.54 (>=6.1.5) on core 6.1.0-edge.6, whatever ours admits. Taking
+// only our floor built that impossible room the day common 5.54 shipped, and its first migration
+// called a core procedure parameter edge.6 does not have (#306 CI).
+test('coreMigrationTag takes the highest floor across every app the room installs', () => {
+  assert.equal(coreMigrationTag('>=6.1.0-edge.6 <7.0.0', '>=6.1.5 <7.0.0', '>=6.1.0-edge.6 <7.0.0'), 'v6.1.5');
+  assert.equal(coreMigrationTag('>=6.1.5 <7.0.0', '>=6.1.0-edge.6 <7.0.0'), 'v6.1.5');
+  assert.equal(coreMigrationTag('>=6.2.0-edge.3 <7.0.0', '>=6.1.5 <7.0.0'), 'v6.2.0-edge.3');
+  assert.equal(coreMigrationTag('>=6.1.0-edge.6 <7.0.0', '>=6.1.0-edge.10 <7.0.0'), 'v6.1.0-edge.10');
+  assert.equal(coreMigrationTag('>=6.1.0 <7.0.0', '>=6.1.0-edge.6 <7.0.0'), 'v6.1.0');
+});
+
 test('coreMigrationTag refuses a range with no lower bound rather than guessing one', () => {
   assert.throws(() => coreMigrationTag('^6.1.0'), /lower bound/i);
   assert.throws(() => coreMigrationTag(''), /lower bound/i);

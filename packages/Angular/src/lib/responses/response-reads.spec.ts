@@ -117,6 +117,20 @@ describe('readResponseDetail', () => {
   });
 });
 
+/**
+ * The export's refusal message — or, when it did NOT refuse, how many rows it read. A bare
+ * `rejects.toThrow` prints the whole resolved value when it fails: 50,000 rows, 14 MB of output on
+ * the page-cap case, which overflowed the guard-mutant gate's pipe and read as a crash (#306 CI).
+ */
+async function exportRefusal(): Promise<string> {
+  try {
+    const read = await readResponsesForExport('form-1');
+    return `resolved with ${read.rows.length} rows`;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
 describe('readResponsesForExport', () => {
   /** Serves a form of `total` Complete responses, oldest first, a page at a time. */
   function serve(total: number, overrides: (input: FormsListResponsesInput) => Partial<FormsListResponsesOutput> = () => ({})) {
@@ -167,7 +181,7 @@ describe('readResponsesForExport', () => {
       return succeeded(input.StartRow === 0 ? page(rows(0, MAX_RESPONSE_PAGE_SIZE), 250) : page(rows(MAX_RESPONSE_PAGE_SIZE + 1, 49), 249));
     });
 
-    await expect(readResponsesForExport('form-1')).rejects.toThrow(RESPONSES_CHANGED_MESSAGE);
+    expect(await exportRefusal()).toBe(RESPONSES_CHANGED_MESSAGE);
   });
 
   it('refuses when a response arrives between pages', async () => {
@@ -176,7 +190,7 @@ describe('readResponsesForExport', () => {
       return succeeded(input.StartRow === 0 ? page(rows(0, MAX_RESPONSE_PAGE_SIZE), 250) : page(rows(MAX_RESPONSE_PAGE_SIZE, 51), 251));
     });
 
-    await expect(readResponsesForExport('form-1')).rejects.toThrow(RESPONSES_CHANGED_MESSAGE);
+    expect(await exportRefusal()).toBe(RESPONSES_CHANGED_MESSAGE);
   });
 
   it('refuses when a page hands back a row it already read, even with the count unchanged (one arrival, one deletion)', async () => {
@@ -185,7 +199,7 @@ describe('readResponsesForExport', () => {
       return succeeded(input.StartRow === 0 ? page(rows(0, MAX_RESPONSE_PAGE_SIZE), 250) : page(rows(MAX_RESPONSE_PAGE_SIZE - 1, 50), 250));
     });
 
-    await expect(readResponsesForExport('form-1')).rejects.toThrow(RESPONSES_CHANGED_MESSAGE);
+    expect(await exportRefusal()).toBe(RESPONSES_CHANGED_MESSAGE);
   });
 
   it('refuses a count that changes between FULL pages — the only guard left when the page cap, not a short page, ends the read', async () => {
@@ -194,13 +208,13 @@ describe('readResponsesForExport', () => {
     const total = MAX_RESPONSE_PAGE_SIZE * MAX_EXPORT_PAGES + 1;
     operations = serve(total, (input) => (input.StartRow > 0 ? { TotalRowCount: total + 1 } : {}));
 
-    await expect(readResponsesForExport('form-1')).rejects.toThrow(RESPONSES_CHANGED_MESSAGE);
+    expect(await exportRefusal()).toBe(RESPONSES_CHANGED_MESSAGE);
   });
 
   it('refuses when the pages end short of the count they reported', async () => {
     operations = installFakeOperations(() => succeeded(page(rows(0, 3), 4)));
 
-    await expect(readResponsesForExport('form-1')).rejects.toThrow(RESPONSES_CHANGED_MESSAGE);
+    expect(await exportRefusal()).toBe(RESPONSES_CHANGED_MESSAGE);
   });
 
   it('refuses a form published again mid-export rather than writing answers under the wrong columns', async () => {

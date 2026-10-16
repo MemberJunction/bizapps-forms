@@ -1904,6 +1904,10 @@ function runSuite(cwd, files) {
     cwd,
     encoding: 'utf-8',
     timeout: SUITE_TIMEOUT_MS,
+    // A KILLED mutant can print a great deal: a failing `rejects` assertion dumps the whole value
+    // the promise resolved with, and one export spec printed 14 MB. At spawnSync's 1 MB default the
+    // pipe overflows (ENOBUFS) and the gate reports a kill as CRASHED (#306's first CI run).
+    maxBuffer: 256 * 1024 * 1024,
     // NO_COLOR asks vitest not to colour at all; the parser strips colour anyway. Both, because
     // the failure mode is a gate that silently cannot run.
     env: { ...process.env, CI: '1', NO_COLOR: '1', FORCE_COLOR: '0' },
