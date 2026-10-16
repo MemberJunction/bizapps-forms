@@ -117,6 +117,99 @@ migrations ran against — along with `bizapps-common` and `bizapps-tasks`, whic
 on. MJAPI reads **its own** `.env`, not MJ's root one — a common hour-waster, and the same trap as
 the `ln -sf ../../.env apps/MJAPI/.env` step in the Quick start.
 
+### 5. Host requirements since #303: the automation outbox and READ_COMMITTED_SNAPSHOT
+
+Since #303 a submitted response's on-submit automations do not run inside the submit. The submit
+writes one `FormAutomationEvent` row in the same transaction as the response (both commit or neither
+does), and the **automation drain** runs it: first from the submitting process, right after the
+commit, then — for retries, and for events a stopped process left behind — from the **Forms —
+Automation Outbox Sweep** scheduled job every 30 seconds. Nothing waits on a message queue, and
+nothing needs MJ 6.2: this runs on MJ's 6.1 LTS.
+
+What a host needs:
+
+- **MJ's scheduler** (`scheduledJobs` in `mj.config.cjs`). MJ enables it by default; its
+  `systemUserEmail` must name an existing user, which the sweep reads as (the steps themselves run as
+  the Forms automation principal). With the scheduler **off**, first attempts still run from the
+  submitting process; only retries and recovery wait. `apps/MJAPI/mj.config.cjs` states it for the
+  harness:
+
+  ```js
+  scheduledJobs: {
+    enabled: true,
+    // A fresh MJ install's System user is this address; set FORMS_SCHEDULER_SYSTEM_USER_EMAIL where not.
+    systemUserEmail: process.env.FORMS_SCHEDULER_SYSTEM_USER_EMAIL || 'not.set@nowhere.com',
+  },
+  ```
+
+- **`READ_COMMITTED_SNAPSHOT ON`** on its database. No migration sets it (it is a database-wide
+  setting, and switching it needs exclusive access):
+
+  ```sql
+  ALTER DATABASE [<your database>] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
+  SELECT is_read_committed_snapshot_on FROM sys.databases WHERE name = '<your database>';  -- 1
+  ```
+
+  RCSI matters to Forms for a **lock order**. Saving a `FormDistribution` takes `UPDLOCK, HOLDLOCK`
+  on the link row and then reads its form; archiving a form (`Forms.ArchiveForm`) writes the form and
+  then closes its links, which is the opposite order. With RCSI **off**, the reads block on the
+  writers and the two can deadlock; SQL Server picks a victim and rolls it back cleanly (nothing
+  half-written — the caller sees a failed save and retries). With RCSI **on**, the form read is a
+  snapshot read and does not wait, so the cycle cannot form. The drain's claim reads past rows other
+  drains hold either way. Treat RCSI as required, not as a tuning option.
+
+The `Form Respondent` role loses one grant in #303: its Read on **Form Versions** is retired by
+`V202610132000` (with its row filter), because any holder of a public link could read the raw
+snapshot — answer key, ending redirects, knockout conditions — through the generated
+`mjBizAppsFormsFormVersion` resolver (#302). Its grants on Form Responses, Form Response Answers and
+Form Distributions are as before (narrowing them is a follow-up). The respondent operations
+authorize the session against the link — the Form Distributions read is still made as the
+respondent, so its row filter binds the session to its own link — and then read the version and
+write as the system user.
+
+## Running the API harness (`apps/MJAPI`)
+
+What the #303 harness run needed, beyond `node server.mjs`, in order:
+
+1. **`.env` in `apps/MJAPI`.** `server.mjs` loads `dotenv/config` from its own directory, and a fresh
+   checkout or worktree has none. Link the repo root's: `ln -s ../../.env apps/MJAPI/.env` (gitignored).
+   Set `GRAPHQL_PORT` and `MJAPI_PUBLIC_URL` together — both are read at import time.
+2. **File storage**, for any upload smoke: `MJ_ENV_FILE=$PWD/.env FORMS_LOCAL_STORAGE_ROOT=<dir> node
+   scripts/dev-local-storage.mjs`, then start the API with the same `FORMS_LOCAL_STORAGE_ROOT`.
+   Pass `MJ_ENV_FILE` explicitly: the script's default is MJ's own `.env`, which names another database.
+3. **`MJ_API_KEY`** in `.env`, for `smoke/resume-arc-path.mjs`: it republishes its fixture form through
+   `Forms.PublishForm` with that system key (`x-mj-api-key`), because a published snapshot now
+   carries each automation's binding settings and a live-row patch alone changes nothing.
+
+Then `cd apps/MJAPI && node server.mjs`, and run the smokes with `FORMS_SMOKE_URL` set to the harness
+(the `npm run smoke:*` scripts; `npm run smoke:binding:seed` first for the binding, résumé and
+automation suites). Stop the harness **by PID** (`lsof -tiTCP:<port> -sTCP:LISTEN`), never by
+process name — other agents and your own host run `node server.mjs` too.
+
+## Operating the automation outbox
+
+Each `FormAutomationEvent` is claimed by one drain at a time under a **120-second lease**, renewed
+every 40 seconds while its run is in flight, one response's events in the order they were queued (a
+final submit makes any partial-save event still waiting out a backoff due at once, so it cannot hold
+the final back). A failed attempt is retried after an exponential
+backoff from 2 s (capped at 300 s), for **at most 5 attempts**. Every attempt's steps are recorded on
+`FormAutomationRun` rows stamped with the event's id, so a re-run never repeats a step that already
+finished for that event.
+
+| What you see | What it means | What to do |
+|---|---|---|
+| An event `DeadLetter`, its `FormAutomationRun` rows `Failed` with `ErrorMessage` starting `Dead-lettered: ` | The drain gave up on purpose (final submits only): the response or its snapshot cannot be read, the response is not Complete, or a step kept failing transiently through the last attempt. `LastError` says which | Fix the cause (usually a grant or a target system), then re-queue it: `UPDATE __mj_BizAppsForms.FormAutomationEvent SET Status = 'Pending', AttemptCount = 0, IsReplay = 1, NextAttemptAt = SYSDATETIMEOFFSET() WHERE ID = '<event id>'`. The replay reopens exactly the `Dead-lettered: ` rows of that event and runs only those steps; steps that already `Succeeded` are never run twice. |
+| An event `Abandoned`, one error line naming the response and its steps, rows `Failed` with `ErrorMessage` starting `Abandoned after the retry limit (partial save): ` | Partial saves never dead-letter: a held partial would hold the response's final behind it. The next save, and the final submit, supersede it | Nothing, unless the OnPartial step matters on its own; it runs again on the next partial save. |
+| An event `Running` long after its save | A drain is mid-run (a long step keeps its lease renewed), or died mid-run. An expired lease is reclaimed by the next sweep (within 30 s of expiry), and the run continues on the event's open rows; an event reclaimed past its 5th attempt is given up on (`DeadLetter`, or `Abandoned` for a partial) without running again | Nothing, unless it stays `Running` for minutes with no drain alive: then check the scheduler is enabled on some host. |
+| A response's final automations delayed by tens of seconds | A partial save for the same response is retrying, and events of one response run in order — at most ~30 s over its attempts, plus up to 120 s for an attempt that hangs until its lease expires | Nothing; it drains itself. |
+| Legacy-mode on-submit Actions (confirmation email, follow-up task) fired twice | A drain died in the middle of the legacy chain and the event was reclaimed. The four legacy hooks write no run rows, so a re-run fires them again | Configure the form's own steps if a side effect must happen exactly once; those are deduplicated by the event's run rows. |
+
+To see a response's automations: `SELECT ID, [Trigger], Status, AttemptCount, LastError FROM
+__mj_BizAppsForms.FormAutomationEvent WHERE FormResponseID = '<id>'`, and its steps:
+`SELECT [Status], ErrorMessage, FormAutomationEventID FROM __mj_BizAppsForms.FormAutomationRun WHERE
+FormResponseID = '<id>'`. A run belongs to the event whose id it carries; rows with a NULL
+`FormAutomationEventID` predate #303 and belong to no event.
+
 ## Daily loop
 
 ```bash
@@ -190,6 +283,9 @@ costs whoever is working in them a reinstall.
 | API startup log | `Loaded Open App server package: @mj-biz-apps/forms-server (ran LoadBizAppsFormsServer)` |
 | Explorer startup log | `Open App client bootstrap: N client packages wired` (N = your `client[]` length) |
 | Either log | zero `InitializeEmbeddedRecords is not a function`, zero `Failed to resolve import` |
+| API startup log | zero `not found in metadata` (a partially-migrated core; see `docs/database-operations.md`) |
+| After a final submit to a form with automations | `SELECT Status FROM __mj_BizAppsForms.FormAutomationEvent WHERE FormResponseID = '<id>'` reads `Complete` within seconds (the post-commit drain), never stays `Pending` past the next 30-second sweep |
+| `MJ: Scheduled Job Runs` for *Forms — Automation Outbox Sweep* | a run every 30 seconds, `Success` true; its `Details` count the events it claimed |
 
 `Failed to resolve import` is raised at **page load**, not at build — a clean bundle build proves
 nothing about it. When one appears, census every dep the linked packages declare that the Explorer
