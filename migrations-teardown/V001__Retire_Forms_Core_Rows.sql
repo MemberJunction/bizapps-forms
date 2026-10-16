@@ -10,9 +10,10 @@
 -- remove, and the next install re-INSERTs the same fixed UUIDs and fails on a primary-key
 -- collision. That is the whole reason the file exists.
 --
--- WHAT IS LISTED BELOW IS ONLY THE ROOTS. Twenty-two rows — the ones this app's migrations create
--- that nothing else creates: nineteen from the metadata seed, plus the three row-level-security
--- filters V202608131600 adds for #39. (This line said "Eighteen" while the list held nineteen, from
+-- WHAT IS LISTED BELOW IS ONLY THE ROOTS. Fifty rows — the ones this app's migrations create
+-- that nothing else creates: forty-seven from the metadata seed (nineteen before the #303 server
+-- engines added twenty-eight), plus the three row-level-security filters V202608131600 adds for
+-- #39. (This line said "Eighteen" while the list held nineteen, from
 -- the file's first revision until 2026-08-13. Recounted rather than incremented, which is how the
 -- off-by-one was found; if you add a row here, count the list again instead of trusting this number.) Their children are NOT listed, because listing them is what breaks: a static
 -- delete list only orders rows the SEED made, while a real installation also holds runtime
@@ -80,8 +81,10 @@ INSERT INTO #FormsDoomed (SchemaName, TableName, RowID, Depth) VALUES
     -- being removed, its own filters go with it.
     ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0001-A1B2-4C3D-8E4F-000000000001', 0),  -- Respondent Gate Only, Never A Writer
     ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0002-A1B2-4C3D-8E4F-000000000002', 0),  -- Respondent Own Distribution
-    ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0003-A1B2-4C3D-8E4F-000000000003', 0),  -- Respondent Own Form Versions
-    -- Actions (ActionParam.ActionID is NOT NULL, so the 13 params follow automatically).
+    -- Respondent Own Form Versions: retired by V202610132000 (#302), which deletes it unless another
+    -- permission row still names it. Kept here for that leftover, and for hosts below that migration.
+    ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0003-A1B2-4C3D-8E4F-000000000003', 0),
+    -- Actions (ActionParam.ActionID is NOT NULL, so their params follow automatically).
     ('${mjSchema}', 'Action',            '7F0A0001-A1B2-4C3D-8E4F-000000000001', 0),  -- Generate Form From Brief
     ('${mjSchema}', 'Action',            '7F0A0002-A1B2-4C3D-8E4F-000000000002', 0),  -- Create Form From Template
     ('${mjSchema}', 'Action',            '7F0A0003-A1B2-4C3D-8E4F-000000000003', 0),  -- Upsert Respondent Person
@@ -112,7 +115,48 @@ INSERT INTO #FormsDoomed (SchemaName, TableName, RowID, Depth) VALUES
     -- also retires the audit rows for changes IT made — automation writes to form responses. Those
     -- rows cannot outlive the identity that authored them, and the plan is printed before it runs,
     -- but it is the one place this teardown removes history rather than configuration.
-    ('${mjSchema}', 'User',              '9F2B7C41-6E8D-4A53-B1F0-3C7D5E9A2B84', 0);  -- Forms Automation Service
+    ('${mjSchema}', 'User',              '9F2B7C41-6E8D-4A53-B1F0-3C7D5E9A2B84', 0),  -- Forms Automation Service
+    -- The server-engine seed (#303): Remote Operations, the reporting queries, the API scopes and the
+    -- automation sweep's job type and job. Each is created under a fixed UUID, and none is a NOT NULL child
+    -- of anything above, so unless it is a root here it survives a remove and the next install's seed
+    -- collides on it. The operations, queries and scopes hang off their categories / parent scope
+    -- through NULLABLE references (RemoteOperation.CategoryID, Query.CategoryID, APIScope.ParentID),
+    -- which the engine would release and keep — so each is a root. Their NOT NULL children follow:
+    -- QueryPermission, the two APIApplicationScope grants and the sweep's ScheduledJobRun
+    -- rows. Retiring the scopes also retires any API key's grant of them (APIKeyScope.ScopeID is
+    -- NOT NULL): a grant of a scope that no longer exists names nothing.
+    ('${mjSchema}', 'RemoteOperation',   'A4E84F51-2A3B-4258-B041-24ABBA7EDBFE', 0),  -- Forms.PublishForm
+    ('${mjSchema}', 'RemoteOperation',   'AE3999C9-EA19-4301-8F19-AA3D53B928EF', 0),  -- Forms.CloneForm
+    ('${mjSchema}', 'RemoteOperation',   'E1393600-D93C-43D7-A550-470876E2A4E5', 0),  -- Forms.CreateFormFromTemplate
+    ('${mjSchema}', 'RemoteOperation',   '72871573-D420-479B-923E-39862EBC0B98', 0),  -- Forms.ArchiveForm
+    ('${mjSchema}', 'RemoteOperation',   'B67534D8-F319-4D02-812B-A687F56B42E0', 0),  -- Forms.RestoreForm
+    ('${mjSchema}', 'RemoteOperation',   '2C94EA26-8DF3-4D01-88D2-37923FE349BC', 0),  -- Forms.IssueDistributionLink
+    ('${mjSchema}', 'RemoteOperation',   'FB420DC8-36C9-465C-BBFF-C4AE3F6DC82F', 0),  -- Forms.ReissueDistributionLink
+    ('${mjSchema}', 'RemoteOperation',   '98D39998-22AD-4B84-A6E0-666EA3EB55E0', 0),  -- Forms.OpenDistribution
+    ('${mjSchema}', 'RemoteOperation',   'B3AEE29C-29E3-41EC-A3DC-BA684EEC9FF9', 0),  -- Forms.CloseDistribution
+    ('${mjSchema}', 'RemoteOperation',   '3E0331F7-E0EF-439B-BE53-A12B7062AE86', 0),  -- Forms.GetDistributionClaims
+    ('${mjSchema}', 'RemoteOperation',   'FAFBF717-C07C-4D39-A777-7ED64068FFE5', 0),  -- Forms.SaveAutomation
+    ('${mjSchema}', 'RemoteOperation',   '37752C2C-12BB-45FC-998C-D4123A09EE3C', 0),  -- Forms.ReorderAutomations
+    ('${mjSchema}', 'RemoteOperation',   'B662E9A2-F200-46E1-9788-235C3D429FC4', 0),  -- Forms.RemoveAutomation
+    ('${mjSchema}', 'RemoteOperation',   '64C43464-03CB-471F-8207-E8246BA103BA', 0),  -- Forms.GetResponseSummary
+    ('${mjSchema}', 'RemoteOperation',   '4E98ADC2-73E2-4296-8E79-3380C3F9EF65', 0),  -- Forms.ListResponses
+    ('${mjSchema}', 'RemoteOperation',   '80AF1E01-3A05-46E7-BE39-5B803B52FDA7', 0),  -- Forms.GetResponseDetail
+    ('${mjSchema}', 'RemoteOperation',   '00DC6D34-937F-48C2-9AA8-34DC06468A38', 0),  -- Forms.GetRespondentForm
+    ('${mjSchema}', 'RemoteOperation',   '8D4E68A9-73CA-4C10-95F1-A8BD76806E58', 0),  -- Forms.SaveResponse
+    ('${mjSchema}', 'RemoteOperation',   '2A8946C7-0045-4B58-9B34-5E030D9D0DF0', 0),  -- Forms.DeleteTemplate
+    ('${mjSchema}', 'RemoteOperationCategory', '180A2931-7AAE-4545-9F2C-FD933176DC3D', 0),  -- Forms
+    -- Reporting queries (QueryPermission.QueryID is NOT NULL, so their permissions follow).
+    ('${mjSchema}', 'Query',             'B51015E9-0EE4-4F44-B4CB-F9948D6394EC', 0),  -- Forms: Response Completion Stats
+    ('${mjSchema}', 'Query',             '2D37244B-05F6-4B7C-8A33-B3537C2F0851', 0),  -- Forms: Question Answer Value Counts
+    ('${mjSchema}', 'Query',             'A49D124C-056D-422E-B2FD-95131B546E84', 0),  -- Forms: Page Funnel Reach
+    ('${mjSchema}', 'QueryCategory',     '38044DBA-A933-4A8D-A5B6-25EC82210B93', 0),  -- Forms
+    -- API scopes forms, forms:read, forms:write (their MJAPI application grants follow).
+    ('${mjSchema}', 'APIScope',          'C03D0945-22A2-400E-8711-2F9B2C30F449', 0),  -- forms
+    ('${mjSchema}', 'APIScope',          '72BABE5C-ABD9-428A-8E4F-825E2DA8C238', 0),  -- forms:read
+    ('${mjSchema}', 'APIScope',          'E816B2EA-F669-40B2-895B-3928245AF1B6', 0),  -- forms:write
+    -- The on-submit automation outbox sweep: its job type and the job (the job's runs follow).
+    ('${mjSchema}', 'ScheduledJob',      '918925E8-CB7C-43AF-A743-A5AB3998E106', 0),  -- Forms — Automation Outbox Sweep
+    ('${mjSchema}', 'ScheduledJobType',  '13CCEF27-0BE4-4194-945C-53FAD408F69A', 0);  -- Forms Automation Outbox Drain
 
 -- MJ's own AtomicBatchScript sets this, and for the same reason: with XACT_ABORT OFF an error
 -- inside EXEC sp_executesql does NOT abort the batch, so the loop would keep issuing destructive

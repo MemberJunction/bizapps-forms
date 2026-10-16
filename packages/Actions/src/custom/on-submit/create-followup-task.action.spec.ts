@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
-import type { ActionDataProvider } from '../shared/action-provider';
+import type { ActionDataProvider } from '@mj-biz-apps/forms-core-entities-server';
 // PRECONDITION, not decoration. The action refuses to run when no generated class is registered
 // for the entities it writes, because MJ's fallback would silently discard every field it sets
 // (#60). In production `custom/register.ts` imports this package for exactly that reason, and
@@ -150,7 +150,8 @@ function fakeProvider(): ActionDataProvider {
 }
 
 // The action loads the response via a shared helper; stub it to return our fake context.
-vi.mock('../shared/form-response-context', () => ({
+vi.mock('@mj-biz-apps/forms-core-entities-server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mj-biz-apps/forms-core-entities-server')>()),
   loadFormResponseContext: async () => ({
     status: 'loaded',
     context: {

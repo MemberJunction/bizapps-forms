@@ -17,7 +17,7 @@
  * The returned `fileId` is the `MJ: Files` record ID the widget submits as the answer's
  * `FileID` (that column already exists on FormResponseAnswer).
  */
-import { LogError, Metadata } from '@memberjunction/core';
+import { LogError, LogStatus, Metadata } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import { answerColumnFor, isFormQuestionType } from '@mj-biz-apps/forms-entities';
 import { randomUUID } from 'node:crypto';
@@ -25,14 +25,20 @@ import { inspect } from 'node:util';
 
 
 import type { mjBizAppsFormsFormUploadEntity } from '@mj-biz-apps/forms-entities';
-import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names';
-import { checkRespondentScope, type ScopeMetadataProvider } from '../public-submit/scope-check.service';
-import { resolvePublishedDefinition, type DefinitionRunViewProvider } from '../public-submit/definition-loader.service';
-import { withoutQueryEcho } from '../public-submit/persistence.service';
 import { redactStorageKey } from '../storage/read-object';
-import { checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE } from '../http/embed-origin';
 import { contentTypeAllowed, getUploadConfig, uploadTooLargeMessage } from './config';
 import type { ParsedFile } from './multipart';
+import {
+  checkEmbedOrigin,
+  checkRespondentScope,
+  FOREIGN_ORIGIN_MESSAGE,
+  FORM_UNAVAILABLE_MESSAGE,
+  FORMS_ENTITY,
+  resolvePublishedDefinition,
+  withoutQueryEcho,
+  type DefinitionRunViewProvider,
+  type ScopeMetadataProvider,
+} from '@mj-biz-apps/forms-core-entities-server';
 
 /** What the service needs about the just-parsed request. */
 export interface UploadRequest {
@@ -78,8 +84,8 @@ export interface UploadContext {
    * The principal the File row and the provenance row are written as.
    *
    * Separate from `contextUser` on purpose: eligibility is checked against the anonymous caller,
-   * and only the WRITE runs elevated. Falls back to the caller when absent, which keeps existing
-   * tests honest — but the middleware always supplies it.
+   * and only the WRITE (and the form-status read) runs elevated. Absent means the host has no system
+   * user: a configuration error, refused before anything is read or stored.
    */
   elevatedUser?: UserInfo;
   /** The anonymous session id, a fallback correlation key for provenance. */
@@ -197,10 +203,11 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   }
 
   // 3a. Embed origin (#203). A distribution may name the browser origins permitted to use its
-  //     link; this refuses everyone else, exactly as the submit pipeline's gate 2a does.
+  //     link; this refuses everyone else, exactly as `FormSubmissionEngine`'s embed-origin gate does.
   //
-  //     THIS IS THE THIRD DOOR, and it was the one the origin gate first missed. `PublishedForm`
-  //     and `SubmitFormResponse` are the two the change reasons about, because enumerating
+  //     THIS IS THE THIRD DOOR, and it was the one the origin gate first missed. The read and the
+  //     save (then `PublishedForm` / `SubmitFormResponse`, now the two respondent Remote Operations)
+  //     are the two the change reasons about, because enumerating
   //     `@Query`/`@Mutation` finds them; this route is Express middleware contributed through
   //     `GetPostAuthMiddleware`, so it is invisible to that enumeration while being reachable by
   //     the same widget, on the same public path, with the same anonymous session, through the
@@ -214,7 +221,7 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   //     IT DOES NOT PRECEDE THE RATE LIMITER, AND THAT IS THE ONE PLACE THIS DOOR DIVERGES FROM THE
   //     SUBMIT PIPELINE -- deliberately, so do not "fix" it by moving this gate earlier. On the
   //     submit path the whole sequence lives in one function, so `checkEmbedOrigin` genuinely
-  //     precedes `charge` (`submit-pipeline.ts:509` then `:526`) and a refused request spends no
+  //     precedes `charge` (`FormSubmissionEngine.saveResponse`) and a refused request spends no
   //     budget. Here the per-caller window is charged one layer up, in the Express middleware:
   //     `processUpload` -> `refuseIfRateLimited` (`UploadMiddleware.ts:141`) -> `checkUploadRateLimit`
   //     -> `FormsRateLimiter.Instance.charge` (`upload-rate-limit.ts:50`), all of it before
@@ -293,7 +300,7 @@ function validateFile(file: ParsedFile | undefined): UploadResult {
 export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<boolean> {
   try {
     const row = await new Metadata().GetEntityObject<mjBizAppsFormsFormUploadEntity>(
-      FORM_UPLOAD_ENTITY,
+      FORMS_ENTITY.FormUpload,
       input.writer,
     );
     if (!row) {
@@ -356,9 +363,24 @@ async function resolveOpenDistribution(
   if (!slug) {
     return fail(400, 'Missing required field "distributionSlug" (or "distributionId").');
   }
-  const loaded = await resolvePublishedDefinition(ctx.runViewProvider, slug, ctx.contextUser);
+  // The same link resolution `Forms.SaveResponse` runs (FormSubmissionEngine): an upload is refused
+  // for exactly the links a save would be, archived forms included. The form's own `Status` is read
+  // as the elevated principal — the respondent role has no grant on `Forms`, so without one every
+  // upload would read as "form not published". That is a host configuration error, said as one.
+  if (!ctx.elevatedUser) {
+    LogError(
+      `[Forms] upload refused for ${slug}: MJ has no system user on this host, so the form's status cannot be read ` +
+        'and the upload cannot be recorded. Check the host user configuration (UserCache.GetSystemUser).',
+    );
+    return fail(500, UPLOAD_FAILED_MESSAGE);
+  }
+  const loaded = await resolvePublishedDefinition(ctx.runViewProvider, slug, ctx.contextUser, ctx.elevatedUser);
   if (!loaded.ok || !loaded.value) {
-    return fail(404, `Form unavailable (${loaded.failure ?? 'not-found'}).`);
+    // The reason is for the operator; the respondent gets one fixed sentence for every reason, as
+    // `Forms.SaveResponse` answers (re-review N2). A status that could not be READ is the database's
+    // failure, not a missing form: a 503 with the generic upload failure, never a 404.
+    LogStatus(`[Forms] upload refused for ${slug}: ${loaded.failure ?? 'not-found'}.`);
+    return loaded.failure === 'form-unreadable' ? fail(503, UPLOAD_FAILED_MESSAGE) : fail(404, FORM_UNAVAILABLE_MESSAGE);
   }
   return {
     ok: true,
@@ -423,7 +445,12 @@ async function storeFile(
   // (F-SEC-2); and a provenance row the caller could write would prove nothing, since every
   // IncludeInAPI entity has a generated CreateRecord mutation gated on the caller's own roles.
   // Eligibility was already checked against the caller above — only the WORK runs elevated.
-  const writer = ctx.elevatedUser ?? ctx.contextUser;
+  const writer = ctx.elevatedUser;
+  if (!writer) {
+    // Deliberately restated: `resolveOpenDistribution` has already refused (and logged) a host with
+    // no system user, but this function WRITES, and must never fall back to writing as the caller.
+    return fail(500, UPLOAD_FAILED_MESSAGE);
+  }
   const fileName = safeFileName(file.filename);
   const pathPrefix = uploadPathPrefix(cfg.pathPrefix);
   let stored: Awaited<ReturnType<UploadStorageEngine['UploadFile']>>;

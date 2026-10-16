@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { settingsFor, settingText, withSetting } from './question-settings';
 import { doodlePen, type JSONValue } from '@mj-biz-apps/forms-entities';
+import { FORM_QUESTION_TYPES, RESPONDENT_SETTING_KEYS } from '@mj-biz-apps/forms-entities/contracts';
 
 const numberField = { key: 'max', label: 'Max', kind: 'number' } as const;
 const textField = { key: 'labelMin', label: 'Low label', kind: 'text' } as const;
@@ -123,5 +124,18 @@ describe('the Doodle pen rows and the pad agree, by construction', () => {
     // what makes "Follow the form" and "an unset question" the same stored state.
     const [color] = settingsFor('Doodle');
     expect(withSetting({ penColor: 'Blue' }, color, '')).toEqual({});
+  });
+});
+
+/**
+ * The respondent projection ships only the settings keys `RESPONDENT_SETTING_KEYS` lists (#303).
+ * A key the builder lets an author set but the projection does not ship would be configured and
+ * then silently never rendered — so adding a setting here fails until the contract decides it.
+ */
+describe('every setting the builder offers reaches the respondent', () => {
+  it.each([...FORM_QUESTION_TYPES])('%s', (type) => {
+    for (const field of settingsFor(type)) {
+      expect(RESPONDENT_SETTING_KEYS[type]).toContain(field.key);
+    }
   });
 });

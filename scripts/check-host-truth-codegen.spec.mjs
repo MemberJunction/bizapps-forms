@@ -9,10 +9,14 @@ import {
   workingDatabaseName,
 } from './check-host-truth-codegen.mjs';
 
-test('coreMigrationTag reads the floor of the declared range and drops the prerelease', () => {
-  assert.equal(coreMigrationTag('>=6.1.0-edge.5 <7.0.0'), 'v6.1.0');
+// A host at a prerelease floor runs that prerelease, so its tag keeps the suffix. Dropping it once
+// passed only because the GA tag happened to exist (`>=6.1.0-edge.5` → v6.1.0); at `>=6.2.0-edge.3`,
+// before 6.2.0 shipped, the derived `v6.2.0` named no tag and the CI job died cloning it (#304).
+test('coreMigrationTag reads the floor of the declared range, prerelease included', () => {
+  assert.equal(coreMigrationTag('>=6.2.0-edge.3 <7.0.0'), 'v6.2.0-edge.3');
+  assert.equal(coreMigrationTag('>=6.1.0-edge.5 <7.0.0'), 'v6.1.0-edge.5');
   assert.equal(coreMigrationTag('>=5.31.0 <6.0.0'), 'v5.31.0');
-  assert.equal(coreMigrationTag('>= 6.1.0-edge.5 <7.0.0'), 'v6.1.0');
+  assert.equal(coreMigrationTag('>= 6.1.0-edge.5 <7.0.0'), 'v6.1.0-edge.5');
 });
 
 test('coreMigrationTag refuses a range with no lower bound rather than guessing one', () => {

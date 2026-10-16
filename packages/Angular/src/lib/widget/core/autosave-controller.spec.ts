@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { AutosaveController } from './autosave-controller';
+import { AutosaveController, NOTHING_TO_SAVE } from './autosave-controller';
 
 describe('AutosaveController', () => {
   beforeEach(() => vi.useFakeTimers());
@@ -203,7 +203,40 @@ describe('AutosaveController', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  describe('a save with nothing to send (#303 Task 10c fix round 1)', () => {
+    it('reports the status it had before, never `saved` for a request that was not made', async () => {
+      const statuses: string[] = [];
+      const c = new AutosaveController(async () => NOTHING_TO_SAVE, (s) => statuses.push(s), 500);
+      c.ping();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(statuses).toEqual(['pending', 'saving', 'idle']);
+    });
+
+    it('after a real save, skipping keeps `saved` — the server already has these answers', async () => {
+      const results: Array<string | typeof NOTHING_TO_SAVE> = ['r1', NOTHING_TO_SAVE];
+      const c = new AutosaveController(async () => results.shift() ?? NOTHING_TO_SAVE, () => {}, 500);
+      c.ping();
+      await vi.advanceTimersByTimeAsync(500);
+      c.ping();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(c.status).toBe('saved');
+    });
+  });
+
   describe('capped retry after a refused/failed save (bizapps-forms#271)', () => {
+    it('says when the cap is spent — once, after the last retry fails, so the host can tell the respondent', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const spent = vi.fn();
+      const c = new AutosaveController(() => Promise.reject(new Error('refused')), () => {}, 500, undefined, { onRetriesSpent: spent });
+      c.ping();
+      await vi.advanceTimersByTimeAsync(500 + 5_000 + 15_000);
+      expect(spent).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(spent).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(spent).toHaveBeenCalledTimes(1);
+    });
+
     it('retries on the backoff — 5s, then 15s, then 60s — and not a 4th time', async () => {
       const save = vi.fn().mockRejectedValue(new Error('Too many submissions'));
       const c = new AutosaveController(save, () => {}, 500);

@@ -19,6 +19,7 @@ import { requireDbEnv, sql, sqlWide } from './lib/sqlcmd.mjs';
 import {
   pickEmailQuestion,
   pickNameQuestion,
+  readAuthoredBindingRows,
   requireQuestion,
   resolveFormId,
   resolveQuestions,
@@ -159,7 +160,7 @@ console.log('  ok    binding + automation rows');
 // while stepping around the code meant to produce them. Anything the mapper gets wrong — a field
 // name, an omitted id, the sort — now fails here too.
 const authored = readAuthoredAutomationRow(AUTOMATION_ID);
-const automationJson = JSON.stringify(buildPublishedAutomations([authored])).replace(/'/g, "''");
+const automationJson = JSON.stringify(buildPublishedAutomations([authored], readAuthoredBindingRows(formId))).replace(/'/g, "''");
 console.log(`  ok    snapshot automations built by the real mapper (${AUTHORED_AUTOMATION_FIELDS.length} columns read)`);
 
 sql(`

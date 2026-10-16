@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { findServerOnlyInputs, createPackageNameResolver } from './widget-bundle-guard.mjs';
+import { findServerOnlyInputs, findDevOnlyCode, createPackageNameResolver } from './widget-bundle-guard.mjs';
 
 // A real on-disk tree, because the rule is about path SHAPES only a filesystem produces. It holds
 // both install layouts the widget is built in: a store install (CI, a worktree with its own
@@ -99,5 +99,42 @@ describe('createPackageNameResolver', () => {
   it('returns undefined for an input no named package owns', () => {
     write('loose/file.js');
     expect(createPackageNameResolver(join(root, 'loose'))('file.js')).toBeUndefined();
+  });
+});
+
+/**
+ * Code that is not server-only but must still never SHIP to respondents (#303 Task 10c fix round 1):
+ * the projection builder (`toRespondentDefinition`, the server's job) and the development mock that
+ * used it. They sit in packages the widget legitimately imports — the contracts barrel re-exports the
+ * builder — so esbuild reads them every build; what matters is whether any of their bytes reach the
+ * output, which is why this rule takes the output's `bytesInOutput` per input.
+ */
+describe('findDevOnlyCode', () => {
+  const findDev = (inputs) => findDevOnlyCode(inputs, createPackageNameResolver(cwd));
+
+  it('passes a module that was read but tree-shaken to nothing', () => {
+    expect(findDev({ '../Entities/dist/contracts/respondent-projection.js': { bytesInOutput: 0 } }).size).toBe(0);
+  });
+
+  it('flags the projection builder when any of it is bundled', () => {
+    const offenders = findDev({
+      '../Entities/dist/contracts/respondent-projection.js': { bytesInOutput: 3100 },
+      '../Entities/dist/contracts/respondent-definition.js': { bytesInOutput: 1800 },
+    });
+    expect([...offenders.keys()]).toEqual(['@mj-biz-apps/forms-entities [respondent projection builder]']);
+  });
+
+  it('flags the development mock and its seed data', () => {
+    const offenders = findDev({
+      'dist/lib/widget/api/forms-api.mock.service.js': { bytesInOutput: 900 },
+      'dist/lib/widget/api/mock-form.data.js': { bytesInOutput: 7000 },
+      'dist/lib/widget/api/forms-api.offline.service.js': { bytesInOutput: 400 },
+    });
+    expect([...offenders.entries()]).toEqual([
+      [
+        '@mj-biz-apps/forms-ng [development mock transport]',
+        ['dist/lib/widget/api/forms-api.mock.service.js', 'dist/lib/widget/api/mock-form.data.js'],
+      ],
+    ]);
   });
 });

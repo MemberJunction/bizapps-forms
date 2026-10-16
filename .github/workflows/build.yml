@@ -324,6 +324,12 @@ jobs:
       - name: Smoke target resolution tests
         run: node smoke/lib/target.spec.mjs
 
+      # Stdlib-only. Since #303 every smoke reaches the respondent surface through one Remote
+      # Operation client; this pins its mutation text to the widget's and its x-session-id rules
+      # (an ownership suite that meant to omit the header must not send one).
+      - name: Smoke operation client tests
+        run: node smoke/lib/operations.spec.mjs
+
       # Stdlib-only and databaseless. Guards the binding seed's grant MERGE: it must only ever
       # RAISE an EntityPermission flag, never lower one. An unconditional overwrite here once
       # silently revoked V202608201200's shipped CanUpdate on Form Response Answers, breaking

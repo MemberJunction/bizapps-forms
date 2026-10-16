@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
-import type { ActionDataProvider } from '../shared/action-provider';
+import type { ActionDataProvider } from '@mj-biz-apps/forms-core-entities-server';
 // PRECONDITION, not decoration. The action refuses to run when no generated class is registered
 // for `MJ_BizApps_Common: People`, because MJ's fallback would silently discard every field it
 // sets (#60). In production `custom/register.ts` imports this package for exactly that reason,
@@ -115,6 +115,8 @@ const state: {
   /** When set, the answers read FAILS with this message. */
   answersReadError: string | undefined;
   getEntityCalls: string[];
+  /** Every entity the action read through `provider.RunView`, in order. */
+  runViewCalls: string[];
 } = {
   formResponse: new FakeEntity(),
   form: new FakeEntity(),
@@ -125,6 +127,7 @@ const state: {
   peopleReadError: undefined,
   answersReadError: undefined,
   getEntityCalls: [],
+  runViewCalls: [],
 };
 
 // The global Metadata always throws — `new Metadata()` (no args) is never legitimate once the
@@ -175,8 +178,12 @@ function fakeProvider(): ActionDataProvider {
       if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers' && state.answersReadError) {
         return { Success: false, Results: [], ErrorMessage: state.answersReadError };
       }
+      state.runViewCalls.push(opts.EntityName);
       let results: unknown[] = [];
-      if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') results = state.answers;
+      // The response context reads its form through a view since #303 (`Form.Load()` would also
+      // fill the form's immediate Pages/Screens collections, which the automation principal cannot read).
+      if (opts.EntityName === 'MJ_BizApps_Forms: Forms') results = [state.form];
+      else if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') results = state.answers;
       else if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') results = state.questions;
       else if (opts.EntityName === 'MJ_BizApps_Common: People') results = state.existingPeople;
       return { Success: true, Results: results as T[] };
@@ -244,6 +251,7 @@ beforeEach(() => {
   state.peopleReadError = undefined;
   state.answersReadError = undefined;
   state.getEntityCalls = [];
+  state.runViewCalls = [];
 });
 
 // ---------------------------------------------------------------------------
@@ -262,8 +270,9 @@ describe('Forms: Upsert Respondent Person', () => {
 
     expect(result.Success).toBe(true);
     expect(state.getEntityCalls).toEqual(
-      expect.arrayContaining(['MJ_BizApps_Forms: Form Responses', 'MJ_BizApps_Forms: Forms', 'MJ_BizApps_Common: People']),
+      expect.arrayContaining(['MJ_BizApps_Forms: Form Responses', 'MJ_BizApps_Common: People']),
     );
+    expect(state.runViewCalls).toEqual(expect.arrayContaining(['MJ_BizApps_Forms: Forms', 'MJ_BizApps_Common: People']));
   });
 
   it('new email → creates a Person and stamps RespondentPersonID on the response', async () => {

@@ -9,7 +9,8 @@
  *
  *   1. Resolve `:slug` → the `FormDistribution` row; refuse before minting if the link is not yet
  *      open, closed, full, or its form has no published version ({@link distributionRefusalReason},
- *      {@link hasPublishedVersion}); otherwise read its raw `PublicLinkToken`.
+ *      {@link hasPublishedVersion}) or is not itself Published (`readFormPublication`, refused as
+ *      a closed link); otherwise read its raw `PublicLinkToken`.
  *   2. POST that token to core's redeem endpoint with `format=json` so it returns the session
  *      JWT as JSON (instead of a 302 to Explorer).
  *   3. Hand the JWT to the host page via an escaped `data-token` attribute.
@@ -22,10 +23,13 @@ import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 
 import { FORMS_SELF_CALL_HEADER, forwardableAddress } from '../http/request-identity.js';
-import { publishedVersionFilter } from '../public-submit/definition-loader.service.js';
-import { distributionWindowRefusal } from '../public-submit/distribution-window.js';
-import { FORM_DISTRIBUTION_ENTITY, FORM_VERSION_ENTITY } from '../public-submit/entity-names.js';
-import { distributionQuotaExceeded } from '../public-submit/quota.service.js';
+import {
+  distributionQuotaExceeded,
+  distributionWindowRefusal,
+  FORMS_ENTITY,
+  publishedVersionFilter,
+  readFormPublication,
+} from '@mj-biz-apps/forms-core-entities-server';
 
 /**
  * The narrow slice of a data provider this flow uses: a single `RunView`. Typed minimally (not
@@ -246,7 +250,7 @@ async function loadDistribution(
 ): Promise<DistributionLookup> {
   const result = await deps.provider.RunView<mjBizAppsFormsFormDistributionEntityType>(
     {
-      EntityName: FORM_DISTRIBUTION_ENTITY,
+      EntityName: FORMS_ENTITY.FormDistribution,
       ExtraFilter: `Slug=${quoteSqlString(slug)}`,
       ResultType: 'simple',
       MaxRows: 1,
@@ -281,7 +285,7 @@ async function hasPublishedVersion(
 ): Promise<boolean | undefined> {
   const result = await deps.provider.RunView<{ ID: string }>(
     {
-      EntityName: FORM_VERSION_ENTITY,
+      EntityName: FORMS_ENTITY.FormVersion,
       ExtraFilter: publishedVersionFilter(dist.FormID),
       Fields: ['ID'],
       ResultType: 'simple',
@@ -653,6 +657,17 @@ export async function redeemSlugToToken(deps: RedeemDeps, slug: string): Promise
   }
   if (!published) {
     return { ok: false, reason: 'form-unpublished' };
+  }
+  // The FORM must be Published too (#303 Task 8 fix round 1) — the same read the respondent
+  // operations make, as this door's system user. A form archived while a link's status escaped the
+  // archive rule is refused exactly as a closed link is: the same reason, so the same page and words.
+  // A read that failed is a failure, never a closure.
+  const publication = await readFormPublication(deps.provider, dist.FormID, deps.contextUser, `the /f/${slug} door`);
+  if (publication === 'unreadable') {
+    return { ok: false, reason: 'redeem-failed' };
+  }
+  if (publication === 'not-published') {
+    return { ok: false, reason: 'distribution-closed' };
   }
   const redeemed = await postRedeem(deps, judged.rawToken, slug);
   // We asked and never got a usable answer. Distinct from every refusal below, which is core

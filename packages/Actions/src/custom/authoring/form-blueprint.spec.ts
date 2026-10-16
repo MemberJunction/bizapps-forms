@@ -1,15 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import {
-  parseFormBlueprint,
-  extractJSON,
-  formQuestionTypeSchema,
-  CHOICE_QUESTION_TYPES,
-} from './form-blueprint';
-import { FORM_QUESTION_TYPES, questionTypeBehavior } from '@mj-biz-apps/forms-entities';
+import { DesignerSideEffectError, parseDesignerBlueprint, extractJSON } from './form-blueprint';
 
-describe('parseFormBlueprint', () => {
+describe('parseDesignerBlueprint', () => {
   it('parses a valid blueprint object', () => {
-    const bp = parseFormBlueprint({
+    const bp = parseDesignerBlueprint({
       name: 'RSVP',
       pages: [{ questions: [{ type: 'Email', prompt: 'Email' }] }],
     });
@@ -23,7 +17,7 @@ describe('parseFormBlueprint', () => {
     // example became valid stops testing rejection and starts asserting nothing. `Payment` is a
     // type we have deliberately NOT implemented, so it is a stable stand-in for "not a type".
     expect(() =>
-      parseFormBlueprint({
+      parseDesignerBlueprint({
         name: 'Bad',
         pages: [{ questions: [{ type: 'Payment', prompt: 'Pay here' }] }],
       }),
@@ -31,16 +25,16 @@ describe('parseFormBlueprint', () => {
   });
 
   it('rejects a form with no pages', () => {
-    expect(() => parseFormBlueprint({ name: 'Empty', pages: [] })).toThrow();
+    expect(() => parseDesignerBlueprint({ name: 'Empty', pages: [] })).toThrow();
   });
 
   it('rejects a page with no questions', () => {
-    expect(() => parseFormBlueprint({ name: 'Empty page', pages: [{ questions: [] }] })).toThrow();
+    expect(() => parseDesignerBlueprint({ name: 'Empty page', pages: [{ questions: [] }] })).toThrow();
   });
 
   it('parses JSON wrapped in a markdown fence + prose', () => {
     const text = 'Here is your form:\n```json\n{"name":"X","pages":[{"questions":[{"type":"ShortText","prompt":"Q"}]}]}\n```\nEnjoy!';
-    const bp = parseFormBlueprint(text);
+    const bp = parseDesignerBlueprint(text);
     expect(bp.name).toBe('X');
   });
 });
@@ -57,55 +51,25 @@ describe('extractJSON', () => {
   });
 });
 
-describe('taxonomy', () => {
-  // Both assertions now check that the blueprint DERIVES from the contract rather than pinning
-  // the numbers it derived to. Pinning is what let the enum sit at 15 while the contract moved
-  // to 25: the test kept passing and the AI Designer quietly could not author the new types.
-  it('offers exactly the contract\'s question types', () => {
-    expect([...formQuestionTypeSchema.options].sort()).toEqual([...FORM_QUESTION_TYPES].sort());
-  });
+describe('parseDesignerBlueprint — the model authors questions, never side effects (#303)', () => {
+  const content = { name: 'RSVP', pages: [{ questions: [{ type: 'Email', prompt: 'Email' }] }] };
 
-  it('treats every option-carrying type as a choice type, not just the original three', () => {
-    const expected = FORM_QUESTION_TYPES.filter((t) => questionTypeBehavior(t).optionMode !== 'none');
-    expect([...CHOICE_QUESTION_TYPES].sort()).toEqual([...expected].sort());
-    // The ones the hand-written set missed, named explicitly so a regression is legible.
-    for (const type of ['Ranking', 'Matrix', 'PictureChoice'] as const) {
-      expect(CHOICE_QUESTION_TYPES.has(type), type).toBe(true);
+  it('refuses a reply carrying automations or onSubmitMode with a typed error naming them', () => {
+    const reply = JSON.stringify({ ...content, onSubmitMode: 'Configured', automations: [{ actionName: 'Some Powerful Action' }] });
+    let caught: unknown;
+    try {
+      parseDesignerBlueprint(reply);
+    } catch (err) {
+      caught = err;
     }
-  });
-});
-
-/**
- * The one combination that cannot mean anything: `Legacy` says the built-in steps run, and
- * `automations` names steps that then never would. Rejecting it in `applyOnSubmitConfig` covers
- * both shipping actions, but `buildFormFromBlueprint` is exported and `parseFormBlueprint` is the
- * boundary LLM output crosses — so the invariant belongs on the schema, where nothing can route
- * around it.
- */
-describe('formBlueprintSchema — Legacy with authored steps', () => {
-  const base = {
-    name: 'Intake',
-    pages: [{ title: 'p', questions: [{ type: 'Email', prompt: 'Email' }] }],
-  };
-
-  it('rejects an explicit Legacy mode alongside authored steps', () => {
-    expect(() =>
-      parseFormBlueprint({
-        ...base,
-        onSubmitMode: 'Legacy',
-        automations: [{ actionName: 'Forms: Send Confirmation Email' }],
-      }),
-    ).toThrow();
+    expect(caught).toBeInstanceOf(DesignerSideEffectError);
+    expect((caught as DesignerSideEffectError).keys).toEqual(['automations', 'onSubmitMode']);
+    expect((caught as Error).message).toMatch(/must not author on-submit side effects .*automations, onSubmitMode/);
   });
 
-  it('accepts Legacy when no steps are authored', () => {
-    expect(parseFormBlueprint({ ...base, onSubmitMode: 'Legacy' }).onSubmitMode).toBe('Legacy');
-    expect(parseFormBlueprint({ ...base, onSubmitMode: 'Legacy', automations: [] }).automations).toEqual([]);
-  });
-
-  it('accepts steps with Configured, and with no mode at all', () => {
-    const steps = [{ actionName: 'Forms: Send Confirmation Email' }];
-    expect(parseFormBlueprint({ ...base, onSubmitMode: 'Configured', automations: steps }).automations).toHaveLength(1);
-    expect(parseFormBlueprint({ ...base, automations: steps }).automations).toHaveLength(1);
+  it('returns a value with no side-effect keys for a clean reply', () => {
+    const parsed = parseDesignerBlueprint(content);
+    expect('automations' in parsed).toBe(false);
+    expect('onSubmitMode' in parsed).toBe(false);
   });
 });

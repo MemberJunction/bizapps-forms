@@ -20,6 +20,10 @@ import { describe, it, expect } from 'vitest';
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
 import { FormRuntime } from './form-runtime';
+import { fullForm } from './widget-form';
+
+/** A runtime over an author's full definition — the kind every case here was written against. */
+const runtimeFor = (definition: PublishedFormDefinition): FormRuntime => new FormRuntime(fullForm(definition));
 import { FormUploadStore } from './upload-store';
 
 /** A stand-in for the PNG the pad exports on every stroke. */
@@ -67,7 +71,7 @@ function twoSectionForm(): PublishedFormDefinition {
 }
 
 function connectedStore(): { store: FormUploadStore; runtime: FormRuntime } {
-  const runtime = new FormRuntime(twoSectionForm());
+  const runtime = runtimeFor(twoSectionForm());
   const store = new FormUploadStore();
   store.connect(runtime);
   return { store, runtime };

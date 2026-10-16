@@ -5,21 +5,24 @@ import { LogError, Metadata, RunView } from '@memberjunction/core';
 import type { EntityFieldInfo, EntityInfo } from '@memberjunction/core';
 import {
   CanonicalAnswers,
+  FormsRemoveAutomationOperation,
+  FormsReorderAutomationsOperation,
+  FormsSaveAutomationOperation,
   LEGACY_ON_SUBMIT_AUTOMATIONS,
   parseFieldMappings,
   escapeSqlString,
   parseIdentityRule,
   resolveMappedValues,
   type FieldMappings,
+  type FormsAutomationFields,
+  type FormsSaveAutomationInput,
   type MergeRule,
   type StoredAnswerRow,
 } from '@mj-biz-apps/forms-entities';
-import type {
-  JSONValue,
-  mjBizAppsFormsFormAutomationEntity,
-  mjBizAppsFormsFormEntity,
-  mjBizAppsFormsFormEntityBindingEntity,
-} from '@mj-biz-apps/forms-entities';
+import type { JSONValue, mjBizAppsFormsFormAutomationEntityType } from '@mj-biz-apps/forms-entities';
+import { runOperation, type OperationOutcome } from '../shared/remote-operation';
+import { FORMS_ENTITY } from '../shared/entity-names';
+
 
 import { FORMS_UI_CSS } from '../shared';
 import { AUTOMATION_STYLES } from './automation-tab.styles';
@@ -34,14 +37,19 @@ import {
   type StepKind,
   type SubmitStep,
 } from './automation-steps';
-import { settingsUpdateToMarkAuthoritative } from './on-submit-mode';
-import { FORMS_ENTITY } from '../shared/entity-names';
 import {
   pickEntities,
   pickTargets,
   type EntityChoice,
   type NamedTarget,
 } from './entity-suggestions';
+import { runOutputText } from '../shared/run-output-text';
+
+/**
+ * What the step verbs write: the steps, the binding a step runs, and the form's settings (marked as
+ * owning its own step list). Announced so the builder's publish state notices (`forms-writes.ts`).
+ */
+const STEP_WRITES = [FORMS_ENTITY.FormAutomation, FORMS_ENTITY.FormEntityBinding, FORMS_ENTITY.Form];
 
 /** A question the author can map from, in display order. */
 export interface MappableQuestion {
@@ -74,6 +82,12 @@ interface MappingSummary {
   rows: { field: string; answer: string }[];
   identity: string;
 }
+
+/**
+ * One step as this tab reads it. A plain row, not an entity: the tab never saves a step itself —
+ * every write is a `Forms.*Automation*` operation — so it has no use for a savable record.
+ */
+type AutomationRow = mjBizAppsFormsFormAutomationEntityType;
 
 /** How many past runs to show per step. Enough to see a pattern, few enough to stay a sidebar note. */
 const RUNS_PER_STEP = 5;
@@ -129,8 +143,10 @@ export class AutomationTabComponent implements OnInit {
   protected readonly loadError = signal('');
   protected readonly busy = signal(false);
   protected readonly actionError = signal('');
+  /** Why steps the author did not add just appeared (the server seeded the built-ins), or ''. */
+  protected readonly seededNote = signal('');
 
-  private readonly automations = signal<mjBizAppsFormsFormAutomationEntity[]>([]);
+  private readonly automations = signal<AutomationRow[]>([]);
   /** Per automation: the entity a binding writes to, and the sentence describing it. */
   private readonly resolved = signal<Map<string, { entity?: string | null; description?: string | null }>>(new Map());
   private readonly mappingSummaries = signal<Map<string, MappingSummary>>(new Map());
@@ -243,7 +259,7 @@ export class AutomationTabComponent implements OnInit {
         EntityName: 'MJ_BizApps_Forms: Form Automations',
         ExtraFilter: `FormID='${escapeSqlString(this.FormID)}'`,
         OrderBy: 'DisplayOrder ASC',
-        ResultType: 'entity_object',
+        ResultType: 'simple',
       },
       {
         EntityName: 'MJ: Actions',
@@ -256,7 +272,7 @@ export class AutomationTabComponent implements OnInit {
       throw new Error(autos.ErrorMessage || 'The automations for this form could not be read.');
     }
 
-    const rows = autos.Results as mjBizAppsFormsFormAutomationEntity[];
+    const rows = autos.Results as AutomationRow[];
     this.automations.set(rows);
     this.builtIns.set(
       legacy.Success
@@ -279,15 +295,15 @@ export class AutomationTabComponent implements OnInit {
    * Fill in the human-readable half of each step: the entity a binding writes to, an Action's or
    * Agent's own description, and what each step has been doing lately.
    *
-   * One batched `RunViews` rather than four awaited calls — these are independent reads and the
-   * tab should not pay four round trips for them.
+   * One batched `RunViews` for target details and each step's recent runs. Per-step limits keep a
+   * busy step from crowding every quieter step out of the history window.
    */
-  private async resolveTargets(rows: readonly mjBizAppsFormsFormAutomationEntity[]): Promise<void> {
+  private async resolveTargets(rows: readonly AutomationRow[]): Promise<void> {
     const bindingIds = idsOf(rows, (a) => a.BindingID);
     const actionIds = idsOf(rows, (a) => a.ActionID);
     const agentIds = idsOf(rows, (a) => a.AgentID);
 
-    const [bindings, actions, agents, runs] = await new RunView().RunViews([
+    const [bindings, actions, agents, ...histories] = await new RunView().RunViews([
       {
         EntityName: 'MJ_BizApps_Forms: Form Entity Bindings',
         ExtraFilter: inClause('ID', bindingIds),
@@ -306,16 +322,15 @@ export class AutomationTabComponent implements OnInit {
         Fields: ['ID', 'Description'],
         ResultType: 'simple',
       },
-      {
-        // Scoped to THIS form's steps. The old query had no filter and showed the database's last
-        // ten runs, so a form that had never run anything displayed another form's activity.
+      ...rows.map((row) => ({
+        // Each step gets its own bounded history within the same request.
         EntityName: 'MJ_BizApps_Forms: Form Automation Runs',
-        ExtraFilter: inClause('FormAutomationID', rows.map((r) => r.ID)),
+        ExtraFilter: inClause('FormAutomationID', [row.ID]),
         OrderBy: '__mj_CreatedAt DESC',
-        MaxRows: RUNS_PER_STEP * rows.length,
+        MaxRows: RUNS_PER_STEP,
         Fields: ['ID', 'FormAutomationID', 'Status', 'StartedAt', 'ErrorMessage', 'OutputSummary'],
-        ResultType: 'simple',
-      },
+        ResultType: 'simple' as const,
+      })),
     ]);
 
     // A failed read is NOT an empty result. Rendering it as one tells the author this step has no
@@ -324,7 +339,7 @@ export class AutomationTabComponent implements OnInit {
     if (!bindings.Success) {
       LogError(`Forms Automate tab: could not read entity bindings: ${bindings.ErrorMessage}`);
       this.actionError.set(
-        'The record-mapping details for these steps could not be loaded, so any step that saves a record is shown without its mapping.',
+        this.actionError() || 'The record-mapping details for these steps could not be loaded, so any step that saves a record is shown without its mapping.',
       );
     }
     const bindingRows = bindings.Success ? (bindings.Results as BindingRow[]) : [];
@@ -349,18 +364,19 @@ export class AutomationTabComponent implements OnInit {
     }
     this.resolved.set(resolved);
     this.mappingSummaries.set(summaries);
-    if (!runs.Success) {
-      LogError(`Forms Automate tab: could not read automation runs: ${runs.ErrorMessage}`);
+    const failedHistory = histories.find((history) => !history.Success);
+    if (failedHistory) {
+      LogError(`Forms Automate tab: could not read automation runs: ${failedHistory.ErrorMessage}`);
       this.actionError.set(
-        'Recent activity could not be loaded, so this list is not a record of what has run.',
+        this.actionError() || 'Recent activity could not be loaded, so this list is not a record of what has run.',
       );
     }
-    this.runs.set(runs.Success ? toRunRows(runs.Results as RawRunRow[]) : []);
+    this.runs.set(histories.flatMap((history) => history.Success ? toRunRows(history.Results as RawRunRow[]) : []));
   }
 
   /** A built-in hook is described in our words; anything else uses its own description. */
   private describeAutomation(
-    automation: mjBizAppsFormsFormAutomationEntity,
+    automation: AutomationRow,
     actions: Map<string, string>,
     agents: Map<string, string>,
   ): string | null {
@@ -458,28 +474,28 @@ export class AutomationTabComponent implements OnInit {
     return this.rowFor(automationId)?.ContinueOnError ?? false;
   }
 
-  private rowFor(automationId: string): mjBizAppsFormsFormAutomationEntity | undefined {
+  private rowFor(automationId: string): AutomationRow | undefined {
     return this.automations().find((a) => a.ID === automationId);
   }
 
   // ---- editing a step -----------------------------------------------------------------------
+  //
+  // Every write on this tab is a Remote Operation (spec #303 §3): `Forms.SaveAutomation`,
+  // `Forms.ReorderAutomations`, `Forms.RemoveAutomation`. The rules that used to live here — the
+  // built-in steps seeded on a form's first configured step, the form marked as owning its own step
+  // list, the next free `DisplayOrder`, a reorder written as one change — run on the server, each in
+  // one transaction, so an Action or an agent editing a form's steps gets the same result.
 
   protected async toggleActive(automationId: string): Promise<void> {
-    await this.update(automationId, (row) => {
-      row.IsActive = !row.IsActive;
-    });
+    await this.updateStep(automationId, (row) => ({ IsActive: !row.IsActive }));
   }
 
   protected async toggleSequential(automationId: string): Promise<void> {
-    await this.update(automationId, (row) => {
-      row.ExecutionMode = row.ExecutionMode === 'Sync' ? 'Async' : 'Sync';
-    });
+    await this.updateStep(automationId, (row) => ({ ExecutionMode: row.ExecutionMode === 'Sync' ? 'Async' : 'Sync' }));
   }
 
   protected async toggleContinue(automationId: string): Promise<void> {
-    await this.update(automationId, (row) => {
-      row.ContinueOnError = !row.ContinueOnError;
-    });
+    await this.updateStep(automationId, (row) => ({ ContinueOnError: !row.ContinueOnError }));
   }
 
   /**
@@ -487,86 +503,37 @@ export class AutomationTabComponent implements OnInit {
    *
    * Only among steps that run the same way. Sync always precedes Async no matter what
    * `DisplayOrder` says, so a button that appeared to move a background step above a sequential
-   * one would save a number the runner then ignores — the author would watch the list snap back
-   * and conclude the tab was broken.
+   * one would ask for an order the server refuses — the author would read an error for a button
+   * the tab should not have offered.
    */
   protected canMove(automationId: string, delta: number): boolean {
     return this.neighbourOf(automationId, delta) !== undefined;
   }
 
+  /**
+   * Swap a step with its neighbour: the COMPLETE new order in one `Forms.ReorderAutomations`, so
+   * the swap is one write and there is no half-done move to compensate for.
+   */
   protected async move(automationId: string, delta: number): Promise<void> {
-    const mine = this.rowFor(automationId);
     const theirs = this.neighbourOf(automationId, delta);
-    if (!mine || !theirs) {
+    if (!theirs) {
       return;
     }
-    const myOrder = mine.DisplayOrder;
-    const theirOrder = theirs.DisplayOrder;
-    mine.DisplayOrder = theirOrder;
-    theirs.DisplayOrder = myOrder;
-    await this.run(async () => {
-      // A reorder is ONE change expressed as two rows, and the obvious `a.Save() || b.Save()`
-      // gets it wrong twice: `||` short-circuits, so a failure on the first leaves the second
-      // holding the first one's old order in memory — dirty, unreverted, and flushed to the
-      // database minutes later by an unrelated edit — and a failure on the SECOND leaves the
-      // first one's swap committed, so two steps share a DisplayOrder and the runner's tie-break
-      // decides the order instead of the author.
-      const mineSaved = await mine.Save();
-      const theirsSaved = await theirs.Save();
-      if (mineSaved && theirsSaved) {
-        return;
-      }
-      const failed = mineSaved ? theirs : mine;
-      const reason = failed.LatestResult?.CompleteMessage ?? 'Those steps could not be reordered.';
-      const stranded = await this.undoHalfDoneSwap(
-        { entity: mine, saved: mineSaved, order: myOrder },
-        { entity: theirs, saved: theirsSaved, order: theirOrder },
-      );
-      throw new Error(
-        stranded
-          ? `${reason} The saved half of that move could not be undone either, so the order shown here may not match what runs — reload the tab.`
-          : reason,
-      );
-    });
+    const order = this.steps().map((s) => s.id);
+    const mine = order.indexOf(automationId);
+    const other = order.indexOf(theirs.ID);
+    [order[mine], order[other]] = [order[other], order[mine]];
+    await this.run(() =>
+      runOperation(
+        new FormsReorderAutomationsOperation(),
+        { FormID: this.FormID, OrderedAutomationIDs: order },
+        `reordering the steps of form ${this.FormID}`,
+        STEP_WRITES,
+      ),
+    );
   }
 
-  /**
-   * Put back whichever half of a failed swap actually committed.
-   *
-   * `Revert()` cannot do this job and it is worth being explicit about why, because reaching for
-   * it here is the obvious move and it silently does nothing: it copies `OldValue` back over
-   * `Value` in MEMORY and returns early when the entity is not dirty — and a successful `Save()`
-   * has already advanced `OldValue` and cleared the dirty flag. So after a commit, `Revert()` is
-   * a no-op against a row that is already changed in the database. Undoing a committed write
-   * takes another write.
-   *
-   * Returns true when a compensating write was needed and itself failed, which is the one case
-   * the author has to be told about explicitly: the database is then genuinely inconsistent with
-   * the list, and no amount of re-rendering will fix it.
-   */
-  private async undoHalfDoneSwap(
-    ...halves: Array<{ entity: mjBizAppsFormsFormAutomationEntity; saved: boolean; order: number }>
-  ): Promise<boolean> {
-    let stranded = false;
-    for (const half of halves) {
-      if (!half.saved) {
-        // Never reached the database, so memory is the only thing to clean up — and here Revert
-        // is exactly right, because the entity IS still dirty.
-        half.entity.Revert();
-        continue;
-      }
-      half.entity.DisplayOrder = half.order;
-      if (!(await half.entity.Save())) {
-        stranded = true;
-      }
-    }
-    return stranded;
-  }
-
-  private neighbourOf(
-    automationId: string,
-    delta: number,
-  ): mjBizAppsFormsFormAutomationEntity | undefined {
+  private neighbourOf(automationId: string, delta: number): AutomationRow | undefined {
     const ordered = this.steps();
     const index = ordered.findIndex((s) => s.id === automationId);
     const neighbour = index < 0 ? undefined : ordered[index + delta];
@@ -579,56 +546,43 @@ export class AutomationTabComponent implements OnInit {
   }
 
   /**
-   * Remove a step.
+   * Remove a step (`Forms.RemoveAutomation`).
    *
-   * Deletes only the automation, never the binding it points at: the binding may be referenced by
-   * a ledger row recording what a past submission produced, and deleting it would leave that
-   * lineage pointing at nothing. An orphaned binding is inert and re-attachable; a broken ledger
-   * is not repairable.
+   * Never deletes the binding the step ran: a binding's ledger of what past submissions produced
+   * outlives the step. The server marks the form as owning its step list in the same transaction —
+   * so removing the last step cannot bring the legacy built-ins back — and on a form that was still
+   * running the built-ins, seeds them as visible steps, which the note says.
    */
   protected async remove(automationId: string): Promise<void> {
-    const row = this.rowFor(automationId);
-    if (!row) {
+    if (!this.rowFor(automationId)) {
       return;
     }
     await this.run(async () => {
-      // BEFORE the delete, and on every removal rather than only the last one.
-      //
-      // Marking on add alone covers forms whose steps this builder created, and misses every form
-      // that already had them — `V202608081400__Backfill_Legacy_Automations` gave every pre-0.8.0
-      // form four automation rows and no mode. Such an author could delete all four, republish,
-      // and get an empty snapshot with the mode still absent, which infers `legacy` and restores
-      // the four built-ins: the exact regression this was meant to end.
-      //
-      // Before rather than after, because the failure directions are not symmetric: marking then
-      // failing to delete leaves the rows and the mode, which is what the author sees anyway;
-      // deleting then failing to mark can leave zero rows and no mode, which is indistinguishable
-      // from a form that configured nothing.
-      await this.markAutomationsAuthoritative();
-      if (!(await row.Delete())) {
-        throw new Error(row.LatestResult?.CompleteMessage ?? 'That step could not be removed.');
+      const outcome = await runOperation(
+        new FormsRemoveAutomationOperation(),
+        { FormAutomationID: automationId },
+        `removing step ${automationId} of form ${this.FormID}`,
+        STEP_WRITES,
+      );
+      if (outcome.ok) {
+        this.confirmingRemove.set(false);
+        this.selectedId.set('');
+        this.noteSeeded(outcome.output.SeededAutomationIDs);
       }
-      this.confirmingRemove.set(false);
-      this.selectedId.set('');
+      return outcome;
     });
   }
 
-  private async update(
+  /** Change one setting of a saved step (`Forms.SaveAutomation`, update shape). */
+  private async updateStep(
     automationId: string,
-    change: (row: mjBizAppsFormsFormAutomationEntity) => void,
+    change: (row: AutomationRow) => FormsAutomationFields,
   ): Promise<void> {
     const row = this.rowFor(automationId);
     if (!row) {
       return;
     }
-    change(row);
-    await this.run(async () => {
-      if (!(await row.Save())) {
-        // Revert, or the screen keeps showing a setting the database rejected.
-        row.Revert();
-        throw new Error(row.LatestResult?.CompleteMessage ?? 'That change could not be saved.');
-      }
-    });
+    await this.run(() => this.saveAutomation({ FormID: this.FormID, Automation: { ID: row.ID, ...change(row) } }));
   }
 
   // ---- adding a step ------------------------------------------------------------------------
@@ -864,7 +818,7 @@ export class AutomationTabComponent implements OnInit {
     };
   }
 
-  /** Create the binding and the step that runs it. */
+  /** Create the binding and the step that runs it — one `Forms.SaveAutomation`, one transaction. */
   protected async saveBinding(): Promise<void> {
     const chosen = this.chosenEntity();
     const entity = chosen ? this.md.EntityByName(chosen.name) : undefined;
@@ -872,40 +826,27 @@ export class AutomationTabComponent implements OnInit {
       this.actionError.set('That entity could not be resolved.');
       return;
     }
-    await this.run(async () => {
-      const binding = await this.md.GetEntityObject<mjBizAppsFormsFormEntityBindingEntity>(
-        'MJ_BizApps_Forms: Form Entity Bindings',
-      );
-      if (!binding) {
-        throw new Error('The binding record could not be created.');
-      }
-      binding.NewRecord();
-      binding.FormID = this.FormID;
-      binding.Name = `Send responses to ${entity.DisplayNameOrName}`;
-      binding.TargetEntityID = entity.ID;
-      binding.TargetEntityName = entity.Name;
-      binding.FieldMappings = JSON.stringify(this.buildFieldMappings());
-      binding.IdentityRule = JSON.stringify(
-        this.identityField()
-          ? { mode: 'MatchThenCreate', match: [{ targetField: this.identityField(), normalize: 'LowerCaseTrim' }] }
-          : { mode: 'AlwaysCreate' },
-      );
-      binding.MergePolicy = JSON.stringify({
-        default: 'neverBlank',
-        fields: Object.fromEntries(
-          this.mappings().filter((m) => m.rule !== 'neverBlank').map((m) => [m.targetField, m.rule]),
+    const name = `Send responses to ${entity.DisplayNameOrName}`;
+    await this.addStep({
+      FormID: this.FormID,
+      Automation: { Name: name, TargetType: 'EntityBinding' },
+      Binding: {
+        Name: name,
+        TargetEntityName: entity.Name,
+        FieldMappings: JSON.stringify(this.buildFieldMappings()),
+        IdentityRule: JSON.stringify(
+          this.identityField()
+            ? { mode: 'MatchThenCreate', match: [{ targetField: this.identityField(), normalize: 'LowerCaseTrim' }] }
+            : { mode: 'AlwaysCreate' },
         ),
-      });
-      binding.Status = 'Active';
-      if (!(await binding.Save())) {
-        throw new Error(binding.LatestResult?.CompleteMessage ?? 'Saving the binding failed.');
-      }
-
-      await this.addAutomation((row) => {
-        row.Name = binding.Name;
-        row.TargetType = 'EntityBinding';
-        row.BindingID = binding.ID;
-      });
+        MergePolicy: JSON.stringify({
+          default: 'neverBlank',
+          fields: Object.fromEntries(
+            this.mappings().filter((m) => m.rule !== 'neverBlank').map((m) => [m.targetField, m.rule]),
+          ),
+        }),
+        Status: 'Active',
+      },
     });
   }
 
@@ -915,218 +856,85 @@ export class AutomationTabComponent implements OnInit {
     if (kind !== 'action' && kind !== 'agent') {
       return;
     }
+    await this.addStep({
+      FormID: this.FormID,
+      Automation:
+        kind === 'action'
+          ? { Name: target.name, TargetType: 'Action', ActionID: target.id }
+          : { Name: target.name, TargetType: 'Agent', AgentID: target.id },
+    });
+  }
+
+  /**
+   * Add one step. The server orders it one past the highest step, runs it on complete,
+   * sequentially and tolerant of failure (its create defaults) — and, when it is the form's FIRST
+   * configured step, seeds the four built-in hooks as steps in the same transaction. Dispatch is
+   * all-or-nothing, so without them adding one step would silently switch off the confirmation
+   * email, the follow-up task, the respondent-Person upsert and the answer scoring.
+   */
+  private async addStep(input: FormsSaveAutomationInput): Promise<void> {
     await this.run(async () => {
-      await this.addAutomation((row) => {
-        row.Name = target.name;
-        row.TargetType = kind === 'action' ? 'Action' : 'Agent';
-        if (kind === 'action') {
-          row.ActionID = target.id;
-        } else {
-          row.AgentID = target.id;
-        }
-      });
+      const outcome = await this.saveAutomation(input);
+      if (outcome.ok) {
+        this.selectedId.set(outcome.output.FormAutomationID);
+        this.adding.set(null);
+        this.resetAddState();
+        this.noteSeeded(outcome.output.SeededAutomationIDs);
+      }
+      return outcome;
     });
   }
 
+  private saveAutomation(input: FormsSaveAutomationInput) {
+    const which = input.Automation.ID ? `step ${input.Automation.ID}` : 'a new step';
+    return runOperation(new FormsSaveAutomationOperation(), input, `saving ${which} of form ${input.FormID}`, STEP_WRITES);
+  }
+
   /**
-   * Write one automation row, seeding the built-in defaults first if this is the form's first.
-   *
-   * Dispatch is all-or-nothing: a form whose snapshot carries any automations runs those and
-   * nothing else. Without seeding, adding one step would silently switch off the confirmation
-   * email, the follow-up task, the respondent-Person upsert and the answer scoring — a regression
-   * triggered by using the feature. Seeding makes the cutover visible: the four appear as ordinary
-   * steps the author can reorder or switch off deliberately.
+   * Say why steps the author did not add just appeared. The server seeds the built-in hooks as
+   * visible steps when a form starts running its own list; unexplained, four new rows read as a bug.
    */
-  private async addAutomation(
-    configure: (row: mjBizAppsFormsFormAutomationEntity) => void,
-  ): Promise<void> {
-    const seeded = await this.seedLegacyDefaultsIfFirst();
-    const automation = await this.md.GetEntityObject<mjBizAppsFormsFormAutomationEntity>(
-      'MJ_BizApps_Forms: Form Automations',
+  private noteSeeded(seededIds: readonly string[]): void {
+    this.seededNote.set(
+      seededIds.length > 0
+        ? `This form now runs its own list of steps, so the ${seededIds.length} built-in steps it was ` +
+            'already running were added to it — switch off or remove any you do not want.'
+        : '',
     );
-    if (!automation) {
-      throw new Error('That step could not be created.');
-    }
-    automation.NewRecord();
-    automation.FormID = this.FormID;
-    automation.Trigger = 'OnComplete';
-    // Sequential by default so a later step can rely on what this one produced — the confirmation
-    // email that reports a created record, or a follow-up task that links to it.
-    automation.ExecutionMode = 'Sync';
-    // One past the highest order in use, NOT a count, and taking the rows just seeded into
-    // account — `automations()` is not reloaded between the seed and here, so on the seeding path
-    // it is still empty and cannot answer this on its own.
-    //
-    // Count-derived orders collide two different ways. After a deletion: seed four built-ins
-    // (1-4), add two steps (5, 6), delete the one at 3, and `length + 1` hands the next step 6,
-    // on top of the step already there. And on the seeding path, a built-in whose action is not
-    // registered here is skipped while the rest keep their own displayOrder, so the rows can
-    // occupy 1, 3, 4 while the count says 3. Either way two steps end up sharing a DisplayOrder,
-    // this tab and the server then fall back to different tie-breaks (the DisplayOrder-sorted
-    // read here, the published snapshot's order there), and the sequence the author sees stops
-    // being the sequence that runs — while the arrows silently do nothing between the tied pair,
-    // since swapping two equal numbers writes nothing.
-    automation.DisplayOrder = Math.max(this.highestDisplayOrder(), seeded) + 1;
-    automation.ContinueOnError = true;
-    automation.IsActive = true;
-    configure(automation);
-    if (!(await automation.Save())) {
-      throw new Error(automation.LatestResult?.CompleteMessage ?? 'Saving that step failed.');
-    }
-    // AFTER the row, not before. Marking first and then failing to write the row leaves a form
-    // marked authoritative with zero automations, which runs NOTHING on submit — neither
-    // configured steps nor the built-ins. This order fails the other way: rows exist, mode unset,
-    // which still infers `configured` and is corrected by the next edit.
-    await this.markAutomationsAuthoritative();
-    this.selectedId.set(automation.ID);
-    this.adding.set(null);
-    this.resetAddState();
   }
 
   /**
-   * Record on the form that its own automations are what run on submit.
-   *
-   * Idempotent and cheap: {@link settingsUpdateToMarkAuthoritative} returns null once the form
-   * already says so, which is every call after the first.
-   *
-   * Failing here THROWS rather than warning, and that is deliberate. The caller wraps this in
-   * `run()`, which surfaces the message and abandons the operation. The alternative — carry on
-   * anyway — produces exactly the state this whole change exists to remove: a form whose
-   * automation list the server cannot tell apart from a form that configured nothing.
-   *
-   * Called from BOTH the add and the remove paths, so its messages must not name either one.
-   */
-  private async markAutomationsAuthoritative(): Promise<void> {
-    const form = await this.md.GetEntityObject<mjBizAppsFormsFormEntity>(FORMS_ENTITY.Form);
-    if (!form || !(await form.Load(this.FormID))) {
-      throw new Error('This form could not be read, so nothing was changed.');
-    }
-    const updated = settingsUpdateToMarkAuthoritative(form.Settings);
-    if (updated === null) {
-      return;
-    }
-    form.Settings = updated;
-    if (!(await form.Save())) {
-      throw new Error(
-        form.LatestResult?.CompleteMessage ??
-          'This form could not be updated to run its own steps, so nothing was changed.',
-      );
-    }
-  }
-
-  /** The highest DisplayOrder among the steps currently loaded, or 0 when there are none. */
-  private highestDisplayOrder(): number {
-    const orders = this.automations().map((a) => a.DisplayOrder ?? 0);
-    return orders.length === 0 ? 0 : Math.max(...orders);
-  }
-
-  /**
-   * Write the built-in defaults as steps, if this form has none yet.
-   *
-   * Returns the highest DisplayOrder it actually WROTE, not how many rows it wrote. The two
-   * differ, and the difference is a bug: a default whose Action is not registered here is skipped
-   * while the rest keep their own displayOrder, so three seeded rows can occupy 1, 3 and 4 while
-   * the count says 3 — and a caller deriving the next order from a count lands on 4, on top of a
-   * row that is already there. Returns 0 when nothing was seeded.
-   *
-   * A default whose Action is not registered in this deployment is skipped rather than failing the
-   * save — it was not running before either, since the legacy runner also resolves by name and
-   * skips what it cannot find, so skipping preserves the behaviour instead of inventing a failure.
-   */
-  private async seedLegacyDefaultsIfFirst(): Promise<number> {
-    if (this.automations().length > 0) {
-      return 0;
-    }
-    const actions = await new RunView().RunView<{ ID: string; Name: string }>({
-      EntityName: 'MJ: Actions',
-      ExtraFilter: legacyActionFilter(),
-      Fields: ['ID', 'Name'],
-      ResultType: 'simple',
-    });
-    if (!actions.Success) {
-      throw new Error('The built-in steps could not be read, so adding this one was stopped rather than silently replacing them.');
-    }
-    const idByName = new Map(actions.Results.map((a) => [a.Name, a.ID]));
-
-    let seeded = 0;
-    for (const legacy of LEGACY_ON_SUBMIT_AUTOMATIONS) {
-      const actionId = idByName.get(legacy.actionName);
-      if (!actionId) {
-        continue;
-      }
-      const row = await this.md.GetEntityObject<mjBizAppsFormsFormAutomationEntity>(
-        'MJ_BizApps_Forms: Form Automations',
-      );
-      if (!row) {
-        continue;
-      }
-      row.NewRecord();
-      row.FormID = this.FormID;
-      row.Name = legacy.actionName;
-      row.TargetType = 'Action';
-      row.ActionID = actionId;
-      row.Trigger = 'OnComplete';
-      // Sequential and tolerant, matching how the legacy runner fired them: one after another,
-      // with a failure logged and the rest continuing.
-      row.ExecutionMode = 'Sync';
-      row.DisplayOrder = legacy.displayOrder;
-      row.ContinueOnError = true;
-      row.IsActive = true;
-      if (!(await row.Save())) {
-        // Not skippable. Dispatch is all-or-nothing: a form carrying ANY automations runs those
-        // and nothing else, so a built-in that fails to seed here is not "one row missing" — it
-        // is that hook switched off for this form permanently, silently, at the moment the author
-        // added something unrelated. `Forms: Send Confirmation Email` is one of the four.
-        //
-        // Throwing also keeps `seeded` honest: the caller derives the new step's DisplayOrder
-        // from it, so an under-count collides with an existing row's order.
-        throw new Error(
-          row.LatestResult?.CompleteMessage ??
-            `The built-in step "${legacy.actionName}" could not be saved, so adding this one was stopped rather than silently switching that step off.`,
-        );
-      }
-      // The highest order actually written, NOT a count. The two diverge whenever a built-in
-      // is skipped because its action is not registered on this deployment: the remaining rows
-      // keep their own `legacy.displayOrder`, so three seeded rows can occupy 1, 3 and 4 while
-      // the count says 3 — and a caller deriving the next order from the count lands on 4, on top
-      // of a row that is already there.
-      seeded = Math.max(seeded, legacy.displayOrder);
-    }
-    return seeded;
-  }
-
-  /**
-   * Run one mutation: busy while it works, its message on screen if it fails, a reload after.
+   * Run one write: busy while it works, the server's refusal on screen if it fails, a reload after.
    *
    * Every write on this tab goes through here so none of them can forget the reload — a saved
    * change that leaves the list showing the old value is the bug this screen is least able to
-   * afford, since the list IS the explanation of what the form does.
+   * afford, since the list IS the explanation of what the form does. A refusal reloads too: the
+   * operations write in one transaction, so a refusal changed nothing, but the list may still have
+   * been stale before it.
    */
-  private async run(work: () => Promise<void>): Promise<void> {
+  private async run<T>(work: () => Promise<OperationOutcome<T>>): Promise<void> {
     this.busy.set(true);
     this.actionError.set('');
+    this.seededNote.set('');
     try {
-      await work();
-      await this.loadConfigured();
+      const outcome = await work();
+      if (!outcome.ok) {
+        this.actionError.set(outcome.error);
+      }
     } catch (err) {
       LogError(err);
       this.actionError.set(err instanceof Error ? err.message : String(err));
-      // Reload after a FAILURE too, not just after a success.
-      //
-      // A failed mutation is rarely a mutation that did nothing: seeding the built-in hooks
-      // writes four rows one at a time and can stop on the third, and a failed reorder can leave
-      // a compensating write behind. Leaving the signals holding pre-failure state meant the list
-      // disagreed with the database, and worse, `seedLegacyDefaultsIfFirst` decides whether to
-      // seed by asking whether `automations()` is empty — so after a partial seed the stale empty
-      // signal told it to seed again from scratch and DUPLICATE the rows that had succeeded.
+    } finally {
       try {
         await this.loadConfigured();
       } catch (reloadErr) {
-        // Reported, never allowed to replace the original message: the author needs to know what
-        // failed, not what failed while we were tidying up after it.
+        // Reported, never allowed to replace the message the author needs: what failed, not what
+        // failed while we were tidying up after it.
         LogError(reloadErr);
+        if (!this.actionError()) {
+          this.actionError.set(reloadErr instanceof Error ? reloadErr.message : String(reloadErr));
+        }
       }
-    } finally {
       this.busy.set(false);
     }
   }
@@ -1157,7 +965,7 @@ function toRunRows(rows: readonly RawRunRow[]): RunRow[] {
     status: r.Status,
     when: r.StartedAt ? new Date(r.StartedAt) : null,
     // The error wins over the summary: a run that failed has one thing worth reading.
-    message: r.ErrorMessage || r.OutputSummary || '',
+    message: r.ErrorMessage || runOutputText(r.OutputSummary) || '',
   }));
 }
 
@@ -1174,8 +982,8 @@ function describedById(result: { Success: boolean; Results: unknown[] }): Map<st
 
 /** The distinct non-null ids one column of the automation rows points at. */
 function idsOf(
-  rows: readonly mjBizAppsFormsFormAutomationEntity[],
-  read: (row: mjBizAppsFormsFormAutomationEntity) => string | null,
+  rows: readonly AutomationRow[],
+  read: (row: AutomationRow) => string | null,
 ): string[] {
   return [...new Set(rows.map(read).filter((id): id is string => Boolean(id)))];
 }

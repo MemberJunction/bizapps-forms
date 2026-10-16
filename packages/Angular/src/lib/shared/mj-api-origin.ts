@@ -11,7 +11,7 @@
  * used only for the respondent link) and {@link resolveApiBase} (origin plus any path prefix, used
  * for every request to a `/forms/*` route). What a form STORES for an uploaded image is neither —
  * it is the host-independent `/forms/asset/<id>`, resolved against `resolveApiBase()` only when the
- * builder renders it (#270; see `widget/core/asset-ref.ts`).
+ * builder renders it (#270; see `asset-ref.ts` in `@mj-biz-apps/forms-entities/contracts`).
  *
  * Extracted from `DistributionManagerComponent` so there is one resolution rule rather than two that
  * can disagree about where the API is. Moved out of `builder/` when the Responses tab needed it
@@ -19,7 +19,7 @@
  * dependency.
  */
 import { GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
-import { apiBaseOf } from '../widget/core/asset-ref';
+import { apiBaseOf } from '@mj-biz-apps/forms-entities/contracts';
 
 /**
  * Origin of the configured MJAPI GraphQL endpoint, or `''` when it cannot be determined.

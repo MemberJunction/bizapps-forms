@@ -23,7 +23,7 @@
  * bounds, plus the `Date` / `Time` cases here, because those are the one column the row cannot
  * store an unparsed value in. A draft can never reach `Complete` without the full check.
  */
-import { dateAnswerInstant } from './answer-date';
+import { dateAnswerInstant, isZonelessDateTime } from './answer-date';
 import { isAnswerSupplied } from './conditional-rule';
 import type { AnswerValue } from './conditional-rule';
 import { ADDRESS_FIELDS, CONTACT_INFO_FIELDS, questionTypeBehavior } from './question-types';
@@ -199,7 +199,7 @@ export function validateAnswerFormat(
     case 'Number':
     case 'Rating':
     case 'NPS':
-      return coerceAnswerToNumber(value) === undefined ? 'Enter a number.' : undefined;
+      return coerceAnswerToNumber(value) === undefined ? NOT_A_NUMBER_MESSAGE : undefined;
     case 'OpinionScale':
       return validateOpinionScale(question, value);
     case 'SingleChoice':
@@ -213,7 +213,7 @@ export function validateAnswerFormat(
     case 'Website':
       return isWebUrl(String(value)) ? undefined : 'Enter a valid web address.';
     case 'Date':
-      return isStorableDate(type, value) ? undefined : 'Enter a valid date.';
+      return isStorableDate(type, value) ? undefined : dateRefusal(value);
     case 'Time':
       return isStorableDate(type, value) ? undefined : 'Enter a valid time.';
     case 'Checkbox':
@@ -477,7 +477,7 @@ function validateMatrix(question: AnswerFormatQuestion, value: AnswerValue): str
 function validateOpinionScale(question: AnswerFormatQuestion, value: AnswerValue): string | undefined {
   const numeric = coerceAnswerToNumber(value);
   if (numeric === undefined) {
-    return 'Enter a number.';
+    return NOT_A_NUMBER_MESSAGE;
   }
   const { min, max } = opinionScaleBounds(question.settings);
   const outOfRange = !Number.isInteger(numeric) || numeric < min || numeric > max;
@@ -575,6 +575,17 @@ function isStorableDate(type: FormQuestionType, value: AnswerValue): boolean {
   return typeof value === 'string' && dateAnswerInstant(type, value) !== undefined;
 }
 
+/** Said of a date-time that names no offset — refused in every mode, see `isZonelessDateTime`. */
+export const ZONELESS_DATE_TIME_MESSAGE = 'Include a time zone with the time, such as Z or +02:00.';
+
+/**
+ * Why a `Date` answer cannot be stored. A zone-less date-time gets its own sentence because it is
+ * otherwise well formed — "Enter a valid date." would send its sender looking for the wrong fault.
+ */
+function dateRefusal(value: AnswerValue): string {
+  return typeof value === 'string' && isZonelessDateTime(value) ? ZONELESS_DATE_TIME_MESSAGE : 'Enter a valid date.';
+}
+
 /**
  * A decimal number as a person would write one: optional sign, digits with an optional
  * fractional part (or a bare `.5`), and optional scientific-notation exponent.
@@ -583,6 +594,9 @@ function isStorableDate(type: FormQuestionType, value: AnswerValue): boolean {
  * reads back — see {@link coerceAnswerToNumber}.
  */
 const DECIMAL_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+/** What a value that is not a number is told — by the type check, and by the draft rule for numeric columns. */
+export const NOT_A_NUMBER_MESSAGE = 'Enter a number.';
 
 /**
  * Coerce to a finite number, or `undefined` when the value is not numeric at all.
