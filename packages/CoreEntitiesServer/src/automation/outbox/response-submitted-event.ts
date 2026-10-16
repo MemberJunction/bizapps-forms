@@ -11,10 +11,11 @@
  *
  * Ids only: the event is a claim check, never the answers (a respondent's personal data).
  */
+import type { mjBizAppsFormsFormAutomationEventEntity } from '@mj-biz-apps/forms-entities';
 import { isGuid } from '../../shared/guid.js';
 
-/** Which save an event announces — and so which automations its drain runs. */
-export type ResponseSubmittedTrigger = 'OnComplete' | 'OnPartial';
+/** Which save an event announces — and so which automations its drain runs. The column's CHECK is the source. */
+export type ResponseSubmittedTrigger = mjBizAppsFormsFormAutomationEventEntity['Trigger'];
 
 const TRIGGERS: readonly ResponseSubmittedTrigger[] = ['OnComplete', 'OnPartial'];
 

@@ -118,10 +118,10 @@ export async function readSavedTemplates(rv: Reader = new RunView()): Promise<Sa
     return [];
   }
   const inList = templates.Results.map((t) => quoteSqlString(t.ID)).join(',');
-  const [questionsRes, pagesRes] = (await rv.RunViews([
+  const [questionsRes, pagesRes] = await rv.RunViews<{ FormID: string }>([
     { EntityName: FORMS_ENTITY.FormQuestion, ExtraFilter: `FormID IN (${inList})`, ResultType: 'simple', Fields: ['FormID'] },
     { EntityName: FORMS_ENTITY.FormPage, ExtraFilter: `FormID IN (${inList})`, ResultType: 'simple', Fields: ['FormID'] },
-  ])) as [RunViewResult<{ FormID: string }>, RunViewResult<{ FormID: string }>];
+  ]);
   if (!questionsRes.Success) {
     LogError(`Template gallery: question counts unavailable — ${questionsRes.ErrorMessage}`);
   }
