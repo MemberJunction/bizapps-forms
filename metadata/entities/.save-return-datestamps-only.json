@@ -1,0 +1,38 @@
+[
+  {
+    "_comments": [
+      "Configures MJ_BizApps_Forms: Form Automation Runs to use SaveReturnMode = datestamps_only so spCreate/spUpdate return only [ID], [__mj_CreatedAt], [__mj_UpdatedAt] from BaseTable instead of re-reading BaseView."
+    ],
+    "fields": {
+      "Name": "MJ_BizApps_Forms: Form Automation Runs",
+      "Configuration": {
+        "SaveReturnMode": "datestamps_only"
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Automation Runs"
+    },
+    "sync": {
+      "lastModified": "2026-10-17T20:28:22.909Z",
+      "checksum": "e5d7e7a144cc2f44060c1d6423e28187cbad09c7433c63b1753cab6a12b9c751"
+    }
+  },
+  {
+    "_comments": [
+      "Configures MJ_BizApps_Forms: Form Response Answers to use SaveReturnMode = datestamps_only so spCreate/spUpdate return only [ID], [__mj_CreatedAt], [__mj_UpdatedAt] from BaseTable instead of re-reading BaseView."
+    ],
+    "fields": {
+      "Name": "MJ_BizApps_Forms: Form Response Answers",
+      "Configuration": {
+        "SaveReturnMode": "datestamps_only"
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Response Answers"
+    },
+    "sync": {
+      "lastModified": "2026-10-17T20:28:22.947Z",
+      "checksum": "74efc9b7ead9923a64fa1e8133f4e285afb484f7fa4956c94fc66cdbf2d27e05"
+    }
+  }
+]
