@@ -26,7 +26,7 @@ import {
 import { runSubmitPipeline, SUBMIT_FAILED_MESSAGE, type PipelineSubmission } from './submit-pipeline';
 import { toAnswerInputs } from './input-mapping';
 import { respondentSafe } from './respondent-safe';
-import { currentRequestIdentity } from '../http/request-identity';
+import { currentRequestIdentity, forwardableAddress } from '../http/request-identity';
 import { checkEmbedOrigin } from '../http/embed-origin';
 import { publicFormPayload } from './public-form-payload';
 
@@ -164,6 +164,11 @@ export class PublicFormResolver extends ResolverBase {
         // header beside it, a browser cannot choose what it says.
         scopeResourceId: contextUser.MagicLinkScope?.ResourceID,
         clientIpHash: currentRequestIdentity()?.ipHash,
+        // The raw address, for ONE outbound consumer: Turnstile's `remoteip`, which lets
+        // Cloudflare bind the token to the machine that solved the challenge. Screened by
+        // `forwardableAddress` because it leaves the process as an address, not an opaque key —
+        // the same rule the server-side redeem applies. Forms itself never stores or logs it.
+        clientIp: forwardableAddress(currentRequestIdentity()?.ip),
         // Rides the same request-scoped store for the same reason: `AppContext` carries no request
         // object, so the header is unreachable at the point the decision is made. Unlike the hash
         // above it, the caller chose this — which is why the pipeline checks it against the
