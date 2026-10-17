@@ -9,42 +9,43 @@
  * `resetDefaultSaltWarningForTests` exists precisely so these can run independently; before this
  * spec it was exported and never called.
  *
- * `LogStatus` is captured with `vi.mock` + `vi.hoisted`, NOT `vi.spyOn(core, 'LogStatus')`.
+ * `LogError` is captured with `vi.mock` + `vi.hoisted`, NOT `vi.spyOn(core, 'LogError')`.
  * `vi.spyOn` on a module export passes locally and fails in CI, and the difference is invisible
  * from here: in this dev workspace `@memberjunction/core` resolves to MJ's LINKED SOURCE
  * (`MJ/packages/MJCore/dist/index.js`), which Vitest transforms into a namespace whose properties
  * can be redefined. On a clean install it resolves to the published tarball, which Vitest
  * externalises as real ESM — and an ESM namespace object is frozen, so the spy throws
- * `Cannot redefine property: LogStatus`. Replacing the module sidesteps the difference entirely.
+ * `Cannot redefine property: LogError`. Replacing the module sidesteps the difference entirely.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { logStatus } = vi.hoisted(() => ({ logStatus: vi.fn() }));
+const { logError } = vi.hoisted(() => ({ logError: vi.fn() }));
 
 vi.mock('@memberjunction/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@memberjunction/core')>()),
-  LogStatus: logStatus,
+  LogError: logError,
 }));
 
 import { hashSessionId } from '../source-metadata.service';
 import { hashClientIp } from '../../http/request-identity';
 import {
   DEFAULT_SESSION_HASH_SALT,
+  enforceSessionHashSaltAtBoot,
   resetDefaultSaltWarningForTests,
   warnOnceIfDefaultHashSalt,
 } from '../../http/hash-salt';
 
-/** Only the default-salt warning; other LogStatus traffic must not make a count pass. */
+/** Only the default-salt warning; other LogError traffic must not make a count pass. */
 function saltWarnings(): string[] {
-  return logStatus.mock.calls
+  return logError.mock.calls
     .map((c) => String(c[0]))
-    .filter((line) => line.includes('FORMS_SESSION_HASH_SALT'));
+    .filter((line) => line.includes('FORMS_SESSION_HASH_SALT is not set'));
 }
 
 beforeEach(() => {
   resetDefaultSaltWarningForTests();
   delete process.env.FORMS_SESSION_HASH_SALT;
-  logStatus.mockClear();
+  logError.mockClear();
 });
 
 afterEach(() => {
@@ -101,6 +102,38 @@ describe('the warning reaches both hashing sides', () => {
     hashClientIp('203.0.113.9');
     hashSessionId('some-session-id');
 
+    expect(saltWarnings()).toHaveLength(0);
+  });
+});
+
+describe('enforceSessionHashSaltAtBoot', () => {
+  it('logs the degradation on EVERY call when the salt is unset — a boot line, not a once-per-process one', () => {
+    enforceSessionHashSaltAtBoot({});
+    enforceSessionHashSaltAtBoot({});
+
+    expect(saltWarnings()).toHaveLength(2);
+    expect(saltWarnings()[0]).toMatch(/dictionary-recoverable/i);
+  });
+
+  it('stays silent when the salt is configured', () => {
+    enforceSessionHashSaltAtBoot({ FORMS_SESSION_HASH_SALT: 'a-private-per-deployment-salt' });
+
+    expect(saltWarnings()).toHaveLength(0);
+  });
+
+  it('refuses to boot when the deployment opted into FORMS_REQUIRE_SESSION_HASH_SALT=true', () => {
+    expect(() => enforceSessionHashSaltAtBoot({ FORMS_REQUIRE_SESSION_HASH_SALT: 'true' })).toThrow(
+      /FORMS_REQUIRE_SESSION_HASH_SALT=true but FORMS_SESSION_HASH_SALT is not set/,
+    );
+  });
+
+  it('boots normally under the require flag once the salt is set', () => {
+    expect(() =>
+      enforceSessionHashSaltAtBoot({
+        FORMS_REQUIRE_SESSION_HASH_SALT: 'true',
+        FORMS_SESSION_HASH_SALT: 'a-private-per-deployment-salt',
+      }),
+    ).not.toThrow();
     expect(saltWarnings()).toHaveLength(0);
   });
 });

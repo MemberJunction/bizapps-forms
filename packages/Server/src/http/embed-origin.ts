@@ -14,6 +14,12 @@
  * customer's origin, is `Content-Security-Policy: frame-ancestors` on the host page; that is a
  * different door and is not decided here.
  *
+ * WHAT THIS GATE DOES AND DOES NOT CONSTRAIN. `Origin` is asserted by the client, and only a
+ * BROWSER is compelled to assert it truthfully — so `AllowedOrigins` constrains browser embeds
+ * only, never scripted (non-browser) submissions, which can send any `Origin` they like. A
+ * scripted caller is bounded by the OTHER gates on the public path (rate limits, captcha, quotas,
+ * scope checks), not by this one.
+ *
  * WHY THIS ISN'T IN THE PURE CONTRACT. "Which origin is ours" is a deployment fact read from the
  * environment. `forms-entities` owns the grammar, the parse and the match and stays pure; this
  * module is the one seam where that meets `MJAPI_PUBLIC_URL`, and the only place that reads it.

@@ -51,7 +51,7 @@ import {
   findSessionResponse,
 } from './response-lookup.service';
 import { InFlightLimiter } from '../http/in-flight-limiter';
-import { checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE } from '../http/embed-origin';
+import { apiOwnOrigin, checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE } from '../http/embed-origin';
 import { checkRespondentScope } from './scope-check.service';
 import { resolveScopedResponseId } from './scope-response.service';
 import { revokeResponseInvites } from '../magic-link/resume-invites.service';
@@ -71,7 +71,7 @@ import {
   saveCeilingKey,
   warnOnceIfAbuseKeyingDegraded,
 } from './source-metadata.service';
-import { captchaRequired, TURNSTILE_NOT_CONFIGURED, verifyTurnstile } from './turnstile.service';
+import { captchaRequired, expectedTurnstileHostnames, TURNSTILE_NOT_CONFIGURED, verifyTurnstile } from './turnstile.service';
 import { buildAnswerMap, validateSubmission, type ValidationMode } from './validation.service';
 import {
   evaluateProvenance,
@@ -150,6 +150,16 @@ export interface PipelineContext {
    * something weaker — see `rateLimitGatesFor`.
    */
   clientIpHash?: string;
+  /**
+   * The caller's resolved peer ADDRESS itself, from `RequestIdentityMiddleware` via
+   * `currentRequestIdentity()` and screened by `forwardableAddress` so only a real address — never
+   * an arbitrary header remnant — leaves the process. Exists for exactly ONE consumer: the
+   * Turnstile siteverify call forwards it as `remoteip`, so Cloudflare binds the token to the
+   * machine that solved the challenge. Everything Forms itself stores, logs or buckets keeps using
+   * `clientIpHash` above — see `http/request-identity.ts` (`RequestIdentity.ip`) for the rule that
+   * the raw address must not reach a Forms log line, bucket key or column.
+   */
+  clientIp?: string;
   /**
    * The caller's `Origin` header, from `RequestIdentityMiddleware` via `currentRequestIdentity()`.
    *
@@ -552,7 +562,21 @@ async function runSubmitPipelineInner(
   //     being refused anyway keep costing us an outbound round trip per attempt.
   const needCaptcha =
     complete && captchaRequired(resolved.definition.settings.captchaRequired, resolved.distribution.CaptchaRequired);
-  const turnstile = await verifyTurnstile(needCaptcha, submission.turnstileToken, ctx.fetchImpl);
+  //     `remoteip` binds the token to the solver's address at Cloudflare's end; the expected
+  //     hostnames (this API's public host + the distribution's authored embed origins) feed the
+  //     service's warn-only hostname check. Both computed only when a captcha is actually
+  //     demanded, so an unchallenged submit never triggers `apiOwnOrigin()`'s unset-variable
+  //     diagnostic on a deployment that uses neither allowlists nor captchas.
+  const turnstile = await verifyTurnstile(needCaptcha, submission.turnstileToken, {
+    fetchImpl: ctx.fetchImpl,
+    remoteIp: needCaptcha ? ctx.clientIp : undefined,
+    expectedHostnames: needCaptcha
+      ? expectedTurnstileHostnames([
+          apiOwnOrigin(),
+          ...(embedOrigin.policy.kind === 'allowlist' ? embedOrigin.policy.origins : []),
+        ])
+      : undefined,
+  });
   if (!turnstile.success && turnstile.errorCode === TURNSTILE_NOT_CONFIGURED) {
     // The one refusal here that is not the respondent's doing: this form or link asks for a
     // captcha and the host never configured Turnstile. Said as such — to them, without blame,
