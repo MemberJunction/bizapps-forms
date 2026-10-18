@@ -159,7 +159,7 @@ What a host needs:
   drains hold either way. Treat RCSI as required, not as a tuning option.
 
 The `Form Respondent` role loses one grant in #303: its Read on **Form Versions** is retired by
-`V202610132000` (with its row filter), because any holder of a public link could read the raw
+`V202610172102` (with its row filter), because any holder of a public link could read the raw
 snapshot — answer key, ending redirects, knockout conditions — through the generated
 `mjBizAppsFormsFormVersion` resolver (#302). Its grants on Form Responses, Form Response Answers and
 Form Distributions are as before (narrowing them is a follow-up). The respondent operations

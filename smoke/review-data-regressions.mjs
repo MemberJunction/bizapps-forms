@@ -37,7 +37,7 @@ function checkValueKinds() {
 }
 
 function checkRetirement() {
-  const migration = readFileSync(new URL('migrations/V202610132000__v0.16.x__Retire_Respondent_Form_Version_Read.sql', root), 'utf8')
+  const migration = readFileSync(new URL('migrations/V202610172102__v0.16.x__Retire_Respondent_Form_Version_Read.sql', root), 'utf8')
     .replaceAll('[${mjSchema}].[EntityPermission]', '#Permissions')
     .replaceAll('[${mjSchema}].[Entity]', '#Entities')
     .replaceAll('[${mjSchema}].[Role]', '#Roles')

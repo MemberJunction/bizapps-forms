@@ -44,7 +44,7 @@ import { OUTBOX_RESPONSE_SUBMITTED, type ResponseSubmittedQueue } from '../../au
 import { sqlOutboxStore } from '../../automation/outbox/claim.js';
 import type { RespondentSaveRequest } from '../../submission/save-request.js';
 import { FORMS_ENTITY } from '../../shared/entity-names.js';
-import type { mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
+import type { mjBizAppsFormsFormAutomationRunEntity, mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
 
 const ENABLED = Boolean(process.env.FORMS_INTEGRATION_DB);
 
@@ -218,6 +218,7 @@ async function waitForBlockedRequest(w: World, holder: number): Promise<void> {
 
 async function deleteEverything(w: World): Promise<void> {
   const statements = [
+    `DELETE run FROM __mj_BizAppsForms.FormAutomationRun run JOIN __mj_BizAppsForms.FormResponse r ON r.ID = run.FormResponseID WHERE r.FormID = '${w.formId}'`,
     `DELETE e FROM __mj_BizAppsForms.FormAutomationEvent e JOIN __mj_BizAppsForms.FormResponse r ON r.ID = e.FormResponseID WHERE r.FormID = '${w.formId}'`,
     `DELETE a FROM __mj_BizAppsForms.FormResponseAnswer a JOIN __mj_BizAppsForms.FormResponse r ON r.ID = a.ResponseID WHERE r.FormID = '${w.formId}'`,
     `DELETE FROM __mj_BizAppsForms.FormResponse WHERE FormID = '${w.formId}'`,
@@ -506,6 +507,36 @@ describe.skipIf(!ENABLED)('the automation outbox claim on SQL Server (#303)', ()
 
     const claimed = await sqlOutboxStore(w.provider, w.system).Claim('spec-pull', response);
     expect(claimed.map((e) => e.Trigger)).toEqual(['OnPartial']);
+  }, 120_000);
+
+  it('a run row stamped with its event saves through the real procedures, whatever migration defined them last', async () => {
+    // spCreate/spUpdateFormAutomationRun are redefined by more than one migration; the LAST one to
+    // run must still take @FormAutomationEventID, or every save of a run row fails "too many arguments".
+    const w = world!;
+    const [response] = await savedResponses(w, 1);
+    const [event] = await scalar<{ ID: string }>(w, `SELECT ID FROM __mj_BizAppsForms.FormAutomationEvent WHERE FormResponseID = '${response}'`);
+    const automationId = randomUUID();
+    await scalar(
+      w,
+      `INSERT INTO __mj_BizAppsForms.FormAutomation (ID, FormID, Name, TargetType, ActionID)
+       SELECT TOP 1 '${automationId}', '${w.formId}', 'spec run-row step', 'Action', ID FROM __mj.Action`,
+    );
+
+    const run = await w.provider.GetEntityObject<mjBizAppsFormsFormAutomationRunEntity>(FORMS_ENTITY.FormAutomationRun, w.system);
+    run.NewRecord();
+    run.FormAutomationID = automationId;
+    run.FormResponseID = response;
+    run.FormAutomationEventID = event.ID;
+    run.Status = 'Running';
+    expect(await run.Save(), run.LatestResult?.CompleteMessage).toBe(true);
+    run.Status = 'Succeeded';
+    expect(await run.Save(), run.LatestResult?.CompleteMessage).toBe(true);
+
+    const [stored] = await scalar<{ Status: string; EventID: string }>(
+      w,
+      `SELECT Status, LOWER(CONVERT(NVARCHAR(36), FormAutomationEventID)) AS EventID FROM __mj_BizAppsForms.FormAutomationRun WHERE ID = '${run.ID}'`,
+    );
+    expect(stored).toEqual({ Status: 'Succeeded', EventID: event.ID.toLowerCase() });
   }, 120_000);
 
   it('renews a held lease, and refuses to renew one it does not hold', async () => {

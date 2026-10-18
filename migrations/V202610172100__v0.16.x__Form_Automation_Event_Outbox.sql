@@ -112,10 +112,22 @@ GO
 --   2. Every other reference to that id resolves the entity by natural key into
 --      `@FormAutomationEventEntityID`, with a THROW when it is missing (the V202608252340 shape), so
 --      a database that minted its own id before this file converges instead of FK-failing (#155).
+--      That covers the ENTITY id only. The seven `EntityFieldValue` INSERTs still name their
+--      `EntityFieldID` by literal: safe here, and only here, because this same file creates the
+--      table and seeds its `EntityField` rows, so no host can hold different field ids for it. Do
+--      not copy that pattern into a migration that references fields another file created.
 --   3. The EntityPermission INSERT…SELECT…WHERE NOT EXISTS become IF NOT EXISTS … INSERT … VALUES
 --      (same predicate); each EntityFieldValue INSERT is guarded on (EntityFieldID, Value) and each
 --      EntityRelationship INSERT on (EntityID, RelatedEntityID, RelatedEntityJoinField) as well as
 --      its id (lint:distribution).
+--   4. `spCreateFormAutomationRun` / `spUpdateFormAutomationRun` end in the `SaveReturnMode =
+--      datestamps_only` SELECTs — `[ID], [__mj_CreatedAt], [__mj_UpdatedAt]` from the base table —
+--      copied verbatim from V202610171645 (#310), which set that mode on Form Automation Runs. This
+--      file runs after #310's and redefines both procedures to add `@FormAutomationEventID`, so
+--      CodeGen 6.1.5's `SELECT * FROM vwFormAutomationRuns` would otherwise undo #310 for this
+--      entity. 6.1.5's CodeGen cannot emit that mode, which is why the merge is by hand; every
+--      other line of both procedures is CodeGen's. The two concerns are disjoint: #310 changed only
+--      the result SELECTs, this file only the parameter list, INSERT columns and UPDATE SET.
 -- =============================================================================================
 
 IF NOT EXISTS (
@@ -242,7 +254,7 @@ DECLARE @FormAutomationEventEntityID UNIQUEIDENTIFIER = (
     SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity]
     WHERE [BaseTable] = 'FormAutomationEvent' AND [SchemaName] = '${flyway:defaultSchema}');
 IF @FormAutomationEventEntityID IS NULL
-    THROW 51304, 'V202610131349: no [Entity] row for FormAutomationEvent in this schema. Run the Forms migrations in order.', 1;
+    THROW 51304, 'V202610172100: no [Entity] row for FormAutomationEvent in this schema. Run the Forms migrations in order.', 1;
 /* SQL text to insert 15 new entity field(s) */
 
       IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '3b47977c-3e01-4101-b662-344886efe69f' OR (EntityID = 'DC399B21-517E-4E71-9571-037AB9E2641E' AND Name = 'FormAutomationEventID')) BEGIN
@@ -1773,7 +1785,7 @@ BEGIN
             )
     END
     -- return the new record from the base view, which might have some calculated fields
-    SELECT * FROM [${flyway:defaultSchema}].[vwFormAutomationRuns] WHERE [ID] = (SELECT [ID] FROM @InsertedRow)
+    SELECT [ID], [__mj_CreatedAt], [__mj_UpdatedAt] FROM [${flyway:defaultSchema}].[FormAutomationRun] WHERE [ID] = (SELECT [ID] FROM @InsertedRow)
 END
 GO
 REVOKE EXECUTE ON [${flyway:defaultSchema}].[spCreateFormAutomationRun] FROM [cdp_Developer]
@@ -1846,16 +1858,10 @@ BEGIN
     -- Check if the update was successful
     IF @@ROWCOUNT = 0
         -- Nothing was updated, return no rows, but column structure from base view intact, semantically correct this way.
-        SELECT TOP 0 * FROM [${flyway:defaultSchema}].[vwFormAutomationRuns] WHERE 1=0
+        SELECT TOP 0 [ID], [__mj_CreatedAt], [__mj_UpdatedAt] FROM [${flyway:defaultSchema}].[FormAutomationRun] WHERE 1=0
     ELSE
         -- Return the updated record so the caller can see the updated values and any calculated fields
-        SELECT
-                                        *
-                                    FROM
-                                        [${flyway:defaultSchema}].[vwFormAutomationRuns]
-                                    WHERE
-                                        [ID] = @ID
-                                    
+        SELECT [ID], [__mj_CreatedAt], [__mj_UpdatedAt] FROM [${flyway:defaultSchema}].[FormAutomationRun] WHERE [ID] = @ID
 END
 GO
 
@@ -1976,7 +1982,7 @@ DECLARE @FormAutomationEventEntityID UNIQUEIDENTIFIER = (
     SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity]
     WHERE [BaseTable] = 'FormAutomationEvent' AND [SchemaName] = '${flyway:defaultSchema}');
 IF @FormAutomationEventEntityID IS NULL
-    THROW 51304, 'V202610131349: no [Entity] row for FormAutomationEvent in this schema. Run the Forms migrations in order.', 1;
+    THROW 51304, 'V202610172100: no [Entity] row for FormAutomationEvent in this schema. Run the Forms migrations in order.', 1;
 REVOKE EXECUTE ON [${flyway:defaultSchema}].[spDeleteFormAutomationRun] FROM [cdp_Developer]
 REVOKE EXECUTE ON [${flyway:defaultSchema}].[spDeleteFormAutomationRun] FROM [cdp_Integration]
 GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteFormAutomationRun] TO [cdp_Developer], [cdp_Integration];

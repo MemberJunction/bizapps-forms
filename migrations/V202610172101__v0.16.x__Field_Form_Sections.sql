@@ -9,12 +9,12 @@
 --
 --   V202609121200  FormDistribution.AllowDeviceResume, FormDistribution.AllowedOrigins,
 --                  FormResponse.FormDistributionID, FormResponse.FormDistribution (virtual)
---   V202610131349  FormAutomationRun.FormAutomationEventID
+--   V202610172100  FormAutomationRun.FormAutomationEventID
 --
 -- `V202609141900` §3 set `Category` on the first four, saying that was why they landed in "Details".
 -- It was half the cause: their `GeneratedFormSection` is still 'Details' on every host built from
 -- migrations, so the curated category never takes effect. FormAutomationEventID gets both from the
--- CodeGen block V202610131349 appends (by the row's id: 'Automation Context', 'Category'); it is
+-- CodeGen block V202610172100 appends (by the row's id: 'Automation Context', 'Category'); it is
 -- listed here, with that same category, only for a host whose row carries another id.
 --
 -- The generated Explorer forms committed in `packages/Angular/src/lib/generated/` place the first
@@ -31,7 +31,7 @@
 -- WHY BOTH COLUMNS. Setting only `GeneratedFormSection` would make a field with no `Category` vanish
 -- from its form (see above). Each row is listed with the category it already has where it has one:
 -- the four with what `V202609141900` gave them, FormAutomationEventID with the 'Automation Context'
--- panel V202610131349 and the generated Explorer form put it in.
+-- panel V202610172100 and the generated Explorer form put it in.
 --
 -- WHAT IT OVERWRITES, AND WHAT IT LEAVES. Only the values nobody chose: `GeneratedFormSection` is
 -- changed only where it still holds the column default 'Details', and `Category` only where it is
@@ -39,7 +39,7 @@
 -- to 'Top', or renamed its category, keeps that choice. Re-running the file changes nothing.
 --
 -- WHY THE NATURAL KEY AND NOT THE ROW IDS. `EntityField` ids are minted per database (the INSERTs
--- in V202609121200 and V202610131349 guard on `EntityID + Name` for exactly that reason), so the
+-- in V202609121200 and V202610172100 guard on `EntityID + Name` for exactly that reason), so the
 -- rows are found by entity base table, schema and field name.
 --
 -- WHY THE THROW. Each of the five rows is inserted by an earlier migration in this directory, so a

@@ -74,7 +74,7 @@ async function main() {
   check(leaked.length === 0, 'the respondent definition carries no scoring, endings or automations', `leaked: ${leaked.join(', ')}`);
 
   // 4c. ...and the raw snapshot must not be one generic query away either (#302). The respondent
-  //     role holds no read on Form Versions any more (V202610132000); the server reads the version
+  //     role holds no read on Form Versions any more (V202610172102); the server reads the version
   //     as the system user. MJ's generated resolvers honour role + row filter only, so with the old
   //     grant both reads below returned the whole DefinitionSnapshot — scoring, endings, knockouts.
   const byId = await postGraphQL(BASE, { token },

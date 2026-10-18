@@ -24,7 +24,7 @@ metadata, so this is a `minor`. Closes #302, #75 and #103.
 - **API keys need the new scopes**: `forms:read` for the response list, detail, summary and link
   claims; `forms:write` for everything that changes a form. A key without them is refused.
 - The `Form Respondent` role **loses its Read on Form Versions** (and that grant's row filter,
-  `MJ Forms: Respondent Own Form Versions`), removed by `V202610132000` (#302). With it, any holder of
+  `MJ Forms: Respondent Own Form Versions`), removed by `V202610172102` (#302). With it, any holder of
   a public link could read the raw snapshot — answer key, ending redirects, knockout conditions —
   through the generated `mjBizAppsFormsFormVersion` query. The server now reads the published version
   as the system user. Its other grants are unchanged, and its Description now says so.
@@ -128,12 +128,12 @@ metadata, so this is a `minor`. Closes #302, #75 and #103.
 
 ### Migrations
 
-- `V202610131349` creates `FormAutomationEvent`, the automation outbox (one row per run a save owes,
+- `V202610172100` creates `FormAutomationEvent`, the automation outbox (one row per run a save owes,
   with its claim state, lease and attempt count), and adds nullable `FormAutomationRun.FormAutomationEventID`
   (FK), the event whose run ran the step. Rows written before it are `NULL` and belong to no event.
-- `V202610131416` files five fields (two on FormDistribution, two on FormResponse, one on
+- `V202610172101` files five fields (two on FormDistribution, two on FormResponse, one on
   FormAutomationRun) in their category panels on hosts built from migrations (metadata only).
-- `V202610132000` deletes the `Form Respondent` role's Form Versions grant (matched by role and
+- `V202610172102` deletes the `Form Respondent` role's Form Versions grant (matched by role and
   entity name, every duplicate) and its row filter, unless another permission row still names the
   filter (#302). Idempotent; it throws if the grant survives.
 
