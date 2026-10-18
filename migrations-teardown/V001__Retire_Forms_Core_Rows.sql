@@ -10,9 +10,9 @@
 -- remove, and the next install re-INSERTs the same fixed UUIDs and fails on a primary-key
 -- collision. That is the whole reason the file exists.
 --
--- WHAT IS LISTED BELOW IS ONLY THE ROOTS. Fifty rows — the ones this app's migrations create
--- that nothing else creates: forty-seven from the metadata seed (nineteen before the #303 server
--- engines added twenty-eight), plus the three row-level-security filters V202608131600 adds for
+-- WHAT IS LISTED BELOW IS ONLY THE ROOTS. Fifty-one rows — the ones this app's migrations create
+-- that nothing else creates: forty-eight from the metadata seed (nineteen before the #303 server
+-- engines added twenty-nine), plus the three row-level-security filters V202608131600 adds for
 -- #39. (This line said "Eighteen" while the list held nineteen, from
 -- the file's first revision until 2026-08-13. Recounted rather than incremented, which is how the
 -- off-by-one was found; if you add a row here, count the list again instead of trusting this number.) Their children are NOT listed, because listing them is what breaks: a static

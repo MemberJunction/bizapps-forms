@@ -1,5 +1,9 @@
 # #303 implementation plan: server engines + Remote Operations + thin clients
 
+> **Superseded** by [`docs/superpowers/plans/2026-10-16-303-lts-6.1.md`](../../docs/superpowers/plans/2026-10-16-303-lts-6.1.md).
+> This plan built PR #304 on the MJ 6.2 edge with the Work Queue; PR #306 rebuilt it on MJ 6.1.5 LTS with a
+> `FormAutomationEvent` outbox. Kept as the record of how #304 was built.
+
 **Spec (binding authority):** `plans/303/spec.md`. Section numbers below (§0–§11) and "Done when" item numbers (DW1–DW20) refer to it. Read only the sections your task names.
 
 ## Global Constraints (every task)

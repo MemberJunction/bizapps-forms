@@ -742,7 +742,24 @@ native entities. This is the reporting differentiator no incumbent has.
 
 ## 12. Progress Log
 
-- **2026-10-14 — PR #304 verified review fixes.** Addressed the confirmed GUID-casing,
+- **2026-10-17 — PR #306: #303 rebuilt on MJ 6.1.5 LTS, plus @rkihm-bc's review of it.** #304's
+  server-engine move now ships on the LTS line: the MJ 6.2 Work Queue is replaced by a transactional
+  `FormAutomationEvent` outbox (claim/settle/renew in `automation/outbox/`, a post-commit drain and a
+  30 s scheduled sweep). The review's fixes, each with a spec observed red first: a never-attempted
+  event is claimable at once, because on insert its `NextAttemptAt` carries the API host's clock
+  (`BaseEntity.NewRecord()` stamps the column default from the process), so a host clock running
+  ahead hid a final from its post-commit drain, for good with the scheduler off; a drain whose lease
+  another drain took closes no rows and settles nothing, and a renewal in flight across the settle no
+  longer logs a lost lease; a widget load that fails after a newer load succeeded leaves the form
+  alone. Merging `next` brought #310 (`V202610171645`, `SaveReturnMode = datestamps_only`), which
+  sorted after this PR's three migrations and redefined `spCreate`/`spUpdateFormAutomationRun`
+  without `@FormAutomationEventID`; they are now `V202610172100`–`V202610172102`, and the outbox file
+  carries #310's datestamps-only result SELECTs (header edit 4). Validation: 5/5 packages build;
+  5,774 unit tests pass (33 opt-in skipped); typecheck and every local gate pass; the opt-in SQL
+  Server suite passes 31/33 on a migrations-only room (`MJ_306_Rename`), the two failures being the
+  reporting specs, whose `Forms:` queries arrive only with the release seed.
+- **2026-10-14 — PR #304 verified review fixes (superseded by PR #306 above; #304 targeted the MJ 6.2
+  edge).** Addressed the confirmed GUID-casing,
   builder ordering, knockout resume, delayed notification, automation history/error, permission
   retirement, safe error reporting, answer aggregation, input validation, template deletion,
   metadata pull and reporting pagination defects. Behavioral regressions were observed red before

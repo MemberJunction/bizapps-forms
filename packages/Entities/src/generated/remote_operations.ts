@@ -454,7 +454,8 @@ export interface FormsGetResponseSummaryInput {
  * by row filters there; the summary refuses a caller whose reads of responses are row-filtered). The
  * summary limits what a dashboard puts on screen; it is not an anonymisation boundary.
  *
- * Population rules carried over from reporting-aggregations.ts: the headline, the breakdowns, the
+ * Population rules (applied in forms-core-entities-server's `reporting/` module and the Forms
+ * reporting queries; the browser dashboard computed them until #303): the headline, the breakdowns, the
  * profile and the open-text section describe COMPLETE responses; the funnel counts every response,
  * because drop-off is a fact about the people who abandoned. Instants are ISO-8601 strings.
  *

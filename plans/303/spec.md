@@ -1,3 +1,8 @@
+> **Partly superseded.** §0's `6.2.0-edge.3` target and §5 "Outbox = MJ Work Queue" are replaced: PR #306
+> ships this work on MJ 6.1.5 LTS with a `FormAutomationEvent` outbox, planned in
+> [`docs/superpowers/plans/2026-10-16-303-lts-6.1.md`](../../docs/superpowers/plans/2026-10-16-303-lts-6.1.md).
+> The rest of this spec, including its deferred rows, still stands.
+
 ## Type
 feature
 

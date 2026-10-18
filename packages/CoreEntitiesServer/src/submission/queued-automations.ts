@@ -44,11 +44,11 @@ export function queuedTrigger(
 /**
  * The partial-save key: a hash of the answers this save STORED, in a canonical order.
  *
- * Controller ruling (2026-10-13): a hash of the canonical answers rather than a per-save counter, so
- * an autosave that changed nothing — the widget re-saves on a debounce — is answered `Duplicate` by
- * the topic's deduplication ledger inside its TTL instead of re-running every `OnPartial` step. The
- * cost, accepted with the ruling: saving A, then B, then A again inside the TTL does not re-fire on
- * the third save.
+ * A hash of the canonical answers rather than a per-save counter, so an autosave that changed
+ * nothing — the widget re-saves on a debounce — queues no new event instead of re-running every
+ * `OnPartial` step. The outbox compares it with the response's most recent partial event only
+ * (`automation/outbox/enqueue.ts`), so saving A, then B, then A again DOES re-fire on the third save:
+ * the answers changed since the last run.
  *
  * Canonical: one entry per answer, keyed on the lower-cased question id, carrying every typed column
  * the row stores, sorted by id — so the order the widget sent them in and a GUID's casing cannot
