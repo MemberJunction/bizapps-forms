@@ -30,7 +30,7 @@
  * this package (it arrives with MJ's SQL Server provider, untyped, so it is `require`d), and a normal
  * test run must neither need it nor pay for loading the provider.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -507,6 +507,23 @@ describe.skipIf(!ENABLED)('the automation outbox claim on SQL Server (#303)', ()
 
     const claimed = await sqlOutboxStore(w.provider, w.system).Claim('spec-pull', response);
     expect(claimed.map((e) => e.Trigger)).toEqual(['OnPartial']);
+  }, 120_000);
+
+  it('a final saved by an API host whose clock runs ahead of the database is claimable at once', async () => {
+    // BaseEntity.NewRecord() turns the column's SYSDATETIMEOFFSET() default into the PROCESS's time,
+    // so the event's NextAttemptAt is the API host's clock — which the claim compares with the
+    // database's. With the scheduler off, the post-commit drain is the only one that ever runs.
+    const w = world!;
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000, shouldAdvanceTime: true });
+    let response: string;
+    try {
+      [response] = await savedResponses(w, 1);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const claimed = await sqlOutboxStore(w.provider, w.system).Claim('spec-skew', response);
+    expect(claimed.map((e) => e.Trigger)).toEqual(['OnComplete']);
   }, 120_000);
 
   it('a run row stamped with its event saves through the real procedures, whatever migration defined them last', async () => {

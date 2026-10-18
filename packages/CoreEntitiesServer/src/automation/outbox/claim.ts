@@ -4,8 +4,13 @@
  *
  * CLAIM is one statement: it picks due events under `UPDLOCK, READPAST` (SQL Server) or `FOR UPDATE
  * SKIP LOCKED` (PostgreSQL), so two drains never take the same row and neither waits on the other,
- * and in the same statement marks them `Running` under a lease. "Due" is a Pending event whose
- * `NextAttemptAt` has passed, or a Running one whose lease expired (its drain died). An event is not
+ * and in the same statement marks them `Running` under a lease. "Due" is a Pending event never yet
+ * attempted, or one whose retry `NextAttemptAt` has passed, or a Running one whose lease expired (its
+ * drain died). A first attempt does not wait on `NextAttemptAt`, because on insert that column holds
+ * the API host's clock, not the database's: `BaseEntity.NewRecord()` turns the column's
+ * `SYSDATETIMEOFFSET()` default into the process's `Date`, so a host clock running ahead would hide a
+ * fresh event from the post-commit drain — for good when the scheduler is off. Only the settle writes
+ * a `NextAttemptAt` the claim compares, and it writes it from the database's clock. An event is not
  * due while an OLDER event of the same response is still Pending or Running: one response's events
  * run in the order they were queued, so a partial save's run never overtakes the final submit's.
  *
@@ -89,7 +94,7 @@ function claimStatement(provider: DatabaseProviderBase, workerId: string, respon
   const pg = provider.PlatformKey === 'postgresql';
   const now = pg ? 'now()' : 'SYSDATETIMEOFFSET()';
   const due =
-    `((e.${q('Status')} = 'Pending' AND e.${q('NextAttemptAt')} <= ${now}) OR (e.${q('Status')} = 'Running' AND e.${q('LockedUntil')} < ${now}))` +
+    `((e.${q('Status')} = 'Pending' AND (e.${q('AttemptCount')} = 0 OR e.${q('NextAttemptAt')} <= ${now})) OR (e.${q('Status')} = 'Running' AND e.${q('LockedUntil')} < ${now}))` +
     (responseId ? ` AND e.${q('FormResponseID')} = ${quoteSqlString(responseId)}` : '') +
     ` AND NOT EXISTS (SELECT 1 FROM ${table} o WHERE o.${q('FormResponseID')} = e.${q('FormResponseID')}` +
     ` AND o.${q('Status')} IN ('Pending', 'Running')` +

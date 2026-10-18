@@ -1,7 +1,8 @@
 /**
  * The outbox store's statements (#303). A fake provider cannot run SQL, so these assert the SHAPE
  * each statement must keep — the parts that make a claim atomic, ordered and leased, and a settle
- * fenced — and the DB spec (`claim.db.spec.ts`) proves the behaviour on a real SQL Server.
+ * fenced — and the opt-in DB suite in `engines/__tests__/FormSubmissionEngine.integration.spec.ts`
+ * proves the behaviour on a real SQL Server.
  */
 import { describe, expect, it } from 'vitest';
 import { makeContextUser, makeFakeProvider } from '../../../testing/index.js';
@@ -32,13 +33,14 @@ describe('the claim', () => {
     expect(sql).toMatch(/SELECT .* FROM @claimed/);
   });
 
-  it('takes a Pending event once it is due, and a Running one whose lease expired', async () => {
+  it('takes a Pending event never attempted or whose retry is due, and a Running one whose lease expired', async () => {
     const { db, outbox } = world();
 
     await outbox.Claim('worker-1');
 
     const sql = db.statements[0].sql;
-    expect(sql).toMatch(/\[Status\] = 'Pending' AND e\.\[NextAttemptAt\] <= SYSDATETIMEOFFSET\(\)/);
+    // A first attempt ignores NextAttemptAt: on insert it holds the API host's clock, not the database's.
+    expect(sql).toMatch(/\[Status\] = 'Pending' AND \(e\.\[AttemptCount\] = 0 OR e\.\[NextAttemptAt\] <= SYSDATETIMEOFFSET\(\)\)/);
     expect(sql).toMatch(/\[Status\] = 'Running' AND e\.\[LockedUntil\] < SYSDATETIMEOFFSET\(\)/);
   });
 

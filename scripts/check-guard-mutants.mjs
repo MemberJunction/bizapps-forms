@@ -537,6 +537,15 @@ export const MUTANTS = [
     killedBy: ['src/automation/outbox/__tests__/claim.spec.ts'],
   },
   {
+    name: 'claim/first-attempt-waits-on-host-clock',
+    behaviour: "a never-attempted event is due at once, so an API host whose clock runs ahead of the database cannot hide a final from its post-commit drain",
+    file: 'packages/CoreEntitiesServer/src/automation/outbox/claim.ts',
+    find: "(e.${q('AttemptCount')} = 0 OR e.${q('NextAttemptAt')} <= ${now})",
+    replace: "(1 = 0 OR e.${q('NextAttemptAt')} <= ${now})",
+    suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/automation/outbox/__tests__/claim.spec.ts'],
+  },
+  {
     name: 'drain/partial-save-dead-letters',
     behaviour: "a partial save never dead-letters, so it can never hold its response's final behind it",
     file: 'packages/CoreEntitiesServer/src/automation/outbox/drain.ts',

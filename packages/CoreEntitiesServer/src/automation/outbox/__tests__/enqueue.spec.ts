@@ -63,6 +63,8 @@ describe('OUTBOX_RESPONSE_SUBMITTED.Publish', () => {
     const pull = db.statements.find((st) => /UPDATE/.test(st.sql));
     expect(pull?.sql).toMatch(/SET \[NextAttemptAt\] = SYSDATETIMEOFFSET\(\)/);
     expect(pull?.sql).toMatch(new RegExp(`\\[FormResponseID\\] = '${RESPONSE}' AND \\[Trigger\\] = 'OnPartial' AND \\[Status\\] = 'Pending'`));
+    // Only rows still waiting: one already due keeps its NextAttemptAt, so it keeps its place.
+    expect(pull?.sql).toMatch(/AND \[NextAttemptAt\] > SYSDATETIMEOFFSET\(\)$/);
   });
 
   it('pulls nothing forward for a partial save', async () => {
