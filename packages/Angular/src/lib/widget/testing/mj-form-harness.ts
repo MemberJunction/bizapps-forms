@@ -278,11 +278,13 @@ export function refusal(message: string, questionId: string | null = null): Form
   return { Success: false, ResponseID: null, Status: null, Outcome: 'continue', Errors: [{ QuestionID: questionId, Message: message }] };
 }
 
-/** A promise resolved from outside — to hold a save on the wire while something else happens. */
-export function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+/** A promise settled from outside — to hold a save or load on the wire while something else happens. */
+export function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (reason: Error) => void } {
   let resolve: (value: T) => void = () => undefined;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
+  let reject: (reason: Error) => void = () => undefined;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }

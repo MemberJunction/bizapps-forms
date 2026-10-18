@@ -48,4 +48,21 @@ describe('a load that resumes late (#306 review finding 3)', () => {
     const questionIds = form.rt.visiblePages()[0].questions.map((q) => q.id);
     expect(questionIds).toContain('second-load');
   });
+
+  it('never replaces the form a newer load showed with the error page when it FAILS late', async () => {
+    const first = deferred<RespondentFormLoad>();
+    const loads = [() => first.promise, servedAs(renamedForm())];
+    const api = new FakeFormsApi(() => (loads.shift() ?? servedAs(renamedForm()))(), screeningServer);
+    const { form, loaded } = startMount({ api });
+
+    form.reload();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const shown = form.phaseNow;
+    first.reject(new Error('the first load failed after "Try again" had already succeeded'));
+    await loaded;
+
+    expect(form.phaseNow).toBe(shown);
+    expect(form.phaseNow).not.toBe('error');
+    expect(form.rt.visiblePages()[0].questions.map((q) => q.id)).toContain('second-load');
+  });
 });

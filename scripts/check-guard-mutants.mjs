@@ -1213,6 +1213,15 @@ export const MUTANTS = [
     killedBy: ['src/lib/widget/disqualification.spec.ts', 'src/lib/widget/autosave-refusal.spec.ts'],
   },
   {
+    name: 'widget/stale-load-failure-shown',
+    behaviour: 'a load that fails after a newer load already showed the form changes nothing, so a late failure never replaces a working form with the error page',
+    file: 'packages/Angular/src/lib/widget/mj-form.component.ts',
+    find: '    } catch (err) {\n      if (!this.isCurrentLoad(generation)) {',
+    replace: '    } catch (err) {\n      if (false) {',
+    suite: 'packages/Angular',
+    killedBy: ['src/lib/widget/load-race.spec.ts'],
+  },
+  {
     name: 'widget/unsaved-commit-not-noticed',
     behaviour: "committed answers that could not be saved after every retry are announced to the respondent, not lost silently",
     file: 'packages/Angular/src/lib/widget/mj-form.component.ts',
