@@ -83,8 +83,9 @@ metadata, so this is a `minor`. Closes #302, #75 and #103.
 - **Automations** run from the automation outbox, at least once and idempotently per event: a re-run
   never repeats a configured step that already succeeded for that event. The exception is a form that
   runs the four **legacy** on-submit hooks: they write no run rows, so a drain that dies mid-chain and
-  is reclaimed fires them again. A failed attempt is retried with exponential backoff (2 s, capped at
-  300 s) for at most 5 attempts; a final submit then dead-letters, a partial save is abandoned.
+  is reclaimed fires them again. A failed attempt is retried with exponential backoff (2, 4, 8, 16 s,
+  run on the 30 s sweep, so about two minutes in all) for at most 5 attempts; a final submit then
+  dead-letters, a partial save is abandoned.
   `FORMS_HOOKS_BLOCKING`, the in-process hook path and the recovery sweep are gone. An anonymous
   respondent is never treated as
   verified: a binding whose identity rule MATCHES an existing record records the match on the
