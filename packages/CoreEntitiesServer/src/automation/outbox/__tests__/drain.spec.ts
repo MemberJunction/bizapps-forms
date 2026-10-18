@@ -392,6 +392,44 @@ describe('the lease, while a run is in flight', () => {
     run.release();
     await drained;
   });
+
+  it('on its last attempt, a run whose lease another drain took closes no rows and settles nothing — they are the new holder\'s', async () => {
+    vi.useFakeTimers();
+    const run = longRun();
+    engine.next = (
+      (inner) => async () => ({ ...((await inner()) as Record<string, unknown>), stopped: true })
+    )(engine.next);
+    const s = store([[claimed({ AttemptCount: MAX_ATTEMPTS })]], true, () => false);
+    const src = source();
+    const drained = drainAutomationOutbox({ reason: 'spec' }, SYSTEM, { store: s.outbox, source: src.provider });
+
+    await vi.advanceTimersByTimeAsync(LEASE_RENEW_SECONDS * 1000 + 10);
+    run.release();
+    const report = await drained;
+
+    expect(engine.closes).toEqual([]);
+    expect(s.settled).toEqual([]);
+    expect(report).toMatchObject({ claimed: 1, completed: 0, retried: 0, deadLettered: 0, abandoned: 0 });
+  });
+
+  it('a renewal still in flight when the run settles logs no lost lease — the event settled, nobody took it', async () => {
+    vi.useFakeTimers();
+    const run = longRun();
+    let answerRenewal!: (held: boolean) => void;
+    const s = store([[claimed()]]);
+    s.outbox.Renew = () => new Promise<boolean>((resolve) => (answerRenewal = resolve));
+    const src = source();
+    const drained = drainAutomationOutbox({ reason: 'spec' }, SYSTEM, { store: s.outbox, source: src.provider });
+
+    await vi.advanceTimersByTimeAsync(LEASE_RENEW_SECONDS * 1000 + 10);
+    run.release();
+    await drained;
+    answerRenewal(false);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(s.settled.map((x) => x.settlement.status)).toEqual(['Complete']);
+    expect(logged.filter((l) => l.includes('lease'))).toEqual([]);
+  });
 });
 
 describe('bounds', () => {

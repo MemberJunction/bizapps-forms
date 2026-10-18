@@ -141,7 +141,13 @@ async function runAndSettle(
   source: IMetadataProvider | null,
 ): Promise<EventSettlement['status'] | 'unsettled'> {
   try {
-    const outcome = event.AttemptCount > MAX_ATTEMPTS ? neverSettled(event) : lastAttemptGuard(await runEvent(event, store, workerId, contextUser, source), event);
+    const ran = event.AttemptCount > MAX_ATTEMPTS ? neverSettled(event) : await runEvent(event, store, workerId, contextUser, source);
+    if (ran.kind === 'lease-taken') {
+      // Already logged by the renewal. Closing the event's rows or settling it is the new holder's
+      // job: a dead letter written here would close rows that drain is about to run.
+      return 'unsettled';
+    }
+    const outcome = lastAttemptGuard(ran, event);
     const settlement = await settlementFor(outcome, event, contextUser, source);
     if (!(await store.Settle(event.ID, workerId, settlement))) {
       LogError(
@@ -171,20 +177,32 @@ function neverSettled(event: ClaimedEvent): RunOutcome {
 /** What a run asks for, before the last-attempt rule. */
 type RunOutcome = { kind: 'complete' } | { kind: 'retry'; reason: string } | { kind: 'dead-letter'; reason: string };
 
+/**
+ * A run's view of its lease. `guard` stops new steps once the lease is in doubt; `taken` is set only
+ * when a renewal found another drain holding the event, the one case where this drain must write
+ * nothing more; `finished` is set when the run returns, so a renewal still in flight across the
+ * settle does not report the settled event as taken.
+ */
+interface RunLease {
+  guard: AbortController;
+  taken: boolean;
+  finished: boolean;
+}
+
 async function runEvent(
   event: ClaimedEvent,
   store: OutboxStore,
   workerId: string,
   contextUser: UserInfo,
   source: IMetadataProvider | null,
-): Promise<RunOutcome> {
+): Promise<RunOutcome | { kind: 'lease-taken' }> {
   const principal = resolveAutomationPrincipal();
   if (!principal) {
     return { kind: 'retry', reason: 'The Forms automation principal is not provisioned on this host, so no step may run yet.' };
   }
   const purpose = `Forms automation event ${event.ID} (response ${event.FormResponseID})`;
-  const leaseGuard = new AbortController();
-  const renewal = setInterval(() => void renewOrStop(event, store, workerId, leaseGuard), LEASE_RENEW_SECONDS * 1000);
+  const lease: RunLease = { guard: new AbortController(), taken: false, finished: false };
+  const renewal = setInterval(() => void renewOrStop(event, store, workerId, lease), LEASE_RENEW_SECONDS * 1000);
   try {
     const report = await withIsolatedProvider(
       purpose,
@@ -197,14 +215,14 @@ async function runEvent(
             attempt: event.AttemptCount,
             eventId: event.ID,
             isReplay: event.IsReplay,
-            signal: leaseGuard.signal,
+            signal: lease.guard.signal,
           },
           provider,
           contextUser,
         ),
       source,
     );
-    return outcomeOf(report);
+    return lease.taken ? { kind: 'lease-taken' } : outcomeOf(report);
   } catch (err) {
     if (err instanceof FormAutomationError) {
       return err.retryable ? { kind: 'retry', reason: err.message } : { kind: 'dead-letter', reason: err.message };
@@ -213,6 +231,7 @@ async function runEvent(
     return { kind: 'retry', reason: 'The automations could not be run on this attempt; the server log has the detail.' };
   } finally {
     clearInterval(renewal);
+    lease.finished = true;
   }
 }
 
@@ -220,19 +239,23 @@ async function runEvent(
  * Renew the event's lease while its run is in flight. If another drain holds it now — or the renewal
  * itself fails — stop STARTING steps: the run's remaining steps are the new holder's to run.
  */
-async function renewOrStop(event: ClaimedEvent, store: OutboxStore, workerId: string, leaseGuard: AbortController): Promise<void> {
-  if (leaseGuard.signal.aborted) {
+async function renewOrStop(event: ClaimedEvent, store: OutboxStore, workerId: string, lease: RunLease): Promise<void> {
+  if (lease.guard.signal.aborted || lease.finished) {
     return;
   }
   try {
-    if (await store.Renew(event.ID, workerId)) {
+    if ((await store.Renew(event.ID, workerId)) || lease.finished) {
       return;
     }
+    lease.taken = true;
     LogError(`[Forms automation drain] the lease on event ${event.ID} (response ${event.FormResponseID}) was taken by another drain mid-run; no further step starts here.`);
   } catch (err) {
+    if (lease.finished) {
+      return;
+    }
     LogError(`[Forms automation drain] the lease on event ${event.ID} (response ${event.FormResponseID}) could not be renewed (${describe(err)}); no further step starts here.`);
   }
-  leaseGuard.abort();
+  lease.guard.abort();
 }
 
 /** The run's outcome for a run that happened. */
