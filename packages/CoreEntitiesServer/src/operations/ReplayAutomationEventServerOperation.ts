@@ -9,6 +9,7 @@
  * write records and send mail, so it is a write.
  */
 import { BaseRemotableOperation, LogError, type DatabaseProviderBase, type IMetadataProvider, type UserInfo } from '@memberjunction/core';
+import { UserCache } from '@memberjunction/generic-database-provider';
 import { RegisterClass } from '@memberjunction/global';
 import {
   FormsReplayAutomationEventOperation,
@@ -44,7 +45,7 @@ export class ReplayAutomationEventServerOperation extends FormsReplayAutomationE
       if (!(await replayDeadLetteredEvent(database, eventId, user))) {
         throw new FormAutomationError(`Automation event ${eventId} is not dead-lettered (it is ${event.Status}), so it was not replayed.`);
       }
-      await drainReplayedResponse(eventId, event.FormResponseID, user);
+      await drainReplayedResponse(eventId, event.FormResponseID);
       return { FormAutomationEventID: eventId, Status: 'Pending' };
     });
   }
@@ -87,9 +88,16 @@ async function readEvent(database: DatabaseProviderBase, eventId: string, user: 
  * and swallowed on purpose: the event is `Pending`, the scheduled sweep runs it, and telling the
  * author "not replayed" would be false.
  */
-async function drainReplayedResponse(eventId: string, responseId: string, user: UserInfo): Promise<void> {
+async function drainReplayedResponse(eventId: string, responseId: string): Promise<void> {
   try {
-    await drainAutomationOutbox({ reason: 'replay', responseId }, user);
+    // The drain reads what plans a run (form versions) as its context user; the author may not hold
+    // that grant, and the steps run as the automation principal regardless. So it runs as the host's
+    // system user, as the sweep and the post-commit drain do.
+    const system = UserCache.Instance.GetSystemUser();
+    if (!system) {
+      throw new Error('MJ has no system user on this host');
+    }
+    await drainAutomationOutbox({ reason: 'replay', responseId }, system);
   } catch (err) {
     LogError(
       `[Forms] event ${eventId} of response ${responseId} was re-queued but its drain failed (the sweep will run it): ${err instanceof Error ? err.message : String(err)}`,

@@ -26,6 +26,12 @@ vi.mock('@mj-biz-apps/forms-entities', async () => {
   return { ...actual, mjBizAppsFormsFormEntity: WriteThroughEntityBase, mjBizAppsFormsFormVersionEntity: WriteThroughEntityBase };
 });
 
+const SYSTEM = { ID: 'system-1', Name: 'System' } as unknown as UserInfo;
+vi.mock('@memberjunction/generic-database-provider', async () => {
+  const actual = await vi.importActual<typeof import('@memberjunction/generic-database-provider')>('@memberjunction/generic-database-provider');
+  return { ...actual, UserCache: { Instance: { GetSystemUser: () => ({ ID: 'system-1', Name: 'System' }) } } };
+});
+
 // The module mocks are the seam to the outbox: keep the real module, replace the two calls.
 vi.mock('../../automation/outbox/claim.js', async () => {
   const actual = await vi.importActual<typeof import('../../automation/outbox/claim.js')>('../../automation/outbox/claim.js');
@@ -108,6 +114,8 @@ describe('Forms.ReplayAutomationEvent', () => {
     expect(replay.mock.calls[0]?.[1]).toBe(EVENT);
     expect(drain).toHaveBeenCalledTimes(1);
     expect(drain.mock.calls[0]?.[0]).toEqual({ reason: 'replay', responseId: RESPONSE });
+    // The author may not hold the grants the drain's planning reads need: it runs as the system user.
+    expect(drain.mock.calls[0]?.[1]).toMatchObject({ ID: SYSTEM.ID });
   });
 
   it('still reports Pending when the drain fails: the event is queued and the sweep will run it', async () => {
