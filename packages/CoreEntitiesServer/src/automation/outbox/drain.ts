@@ -3,7 +3,8 @@
  * outbox. It replaced the Work Queue handler of the 6.2 design; the decisions below are that
  * handler's, unchanged in meaning. Two callers: the submitting process, right after its commit
  * (narrowed to that response, so a first attempt does not wait for a schedule), and the
- * `FormsAutomationDrainDriver` scheduled job every 30 seconds (retries, and events a dead process
+ * `FormsAutomationDrainDriver` scheduled job (cron every 30 s, in practice about every 15 s: the scheduler treats a job as due up to
+ * 1 s early and runs it again at the same mark; retries, and events a dead process
  * left behind).
  *
  * At least once: an event whose drain dies mid-run is reclaimed when its lease expires. Idempotency

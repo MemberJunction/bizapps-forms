@@ -123,7 +123,7 @@ Since #303 a submitted response's on-submit automations do not run inside the su
 writes one `FormAutomationEvent` row in the same transaction as the response (both commit or neither
 does), and the **automation drain** runs it: first from the submitting process, right after the
 commit, then — for retries, and for events a stopped process left behind — from the **Forms —
-Automation Outbox Sweep** scheduled job every 30 seconds. Nothing waits on a message queue, and
+Automation Outbox Sweep** scheduled job (cron every 30 s, in practice about every 15 s). Nothing waits on a message queue, and
 nothing needs MJ 6.2: this runs on MJ's 6.1 LTS.
 
 What a host needs:
@@ -192,9 +192,11 @@ Each `FormAutomationEvent` is claimed by one drain at a time under a **120-secon
 every 40 seconds while its run is in flight, one response's events in the order they were queued (a
 final submit makes any partial-save event still waiting out a backoff due at once, so it cannot hold
 the final back). A failed attempt is retried after an exponential
-backoff of 2, 4, 8 and 16 s, for **at most 5 attempts**. Retries run on the 30 s sweep, so in practice
-they land about 30, 60, 90 and 120 s after the first: a target that stays down for longer than about
-two minutes dead-letters a final submit (re-queue it with the replay below). Every attempt's steps are recorded on
+backoff of 2, 4, 8 and 16 s, for **at most 5 attempts**. The sweep's `CronExpression` is
+`*/30 * * * * *`, but the scheduler treats a job as due up to 1 s early and then runs it again at the
+same mark, so the sweep in fact runs about every 15 s. A retry waits for the next sweep after its
+backoff, so the fifth attempt lands 55 to 85 s after the submit: a target that stays down for longer
+than that dead-letters a final submit (re-queue it with the replay below). Every attempt's steps are recorded on
 `FormAutomationRun` rows stamped with the event's id, so a re-run never repeats a step that already
 finished for that event.
 
@@ -202,8 +204,8 @@ finished for that event.
 |---|---|---|
 | An event `DeadLetter`, its `FormAutomationRun` rows `Failed` with `ErrorMessage` starting `Dead-lettered: ` | The drain gave up on purpose (final submits only): the response or its snapshot cannot be read, the response is not Complete, or a step kept failing transiently through the last attempt. `LastError` says which | Fix the cause (usually a grant or a target system), then re-queue it: `UPDATE __mj_BizAppsForms.FormAutomationEvent SET Status = 'Pending', AttemptCount = 0, IsReplay = 1, NextAttemptAt = SYSDATETIMEOFFSET() WHERE ID = '<event id>'`. The replay reopens exactly the `Dead-lettered: ` rows of that event and runs only those steps; steps that already `Succeeded` are never run twice. |
 | An event `Abandoned`, one error line naming the response and its steps, rows `Failed` with `ErrorMessage` starting `Abandoned after the retry limit (partial save): ` | Partial saves never dead-letter: a held partial would hold the response's final behind it. The next save, and the final submit, supersede it | Nothing, unless the OnPartial step matters on its own; it runs again on the next partial save. |
-| An event `Running` long after its save | A drain is mid-run (a long step keeps its lease renewed), or died mid-run. An expired lease is reclaimed by the next sweep (within 30 s of expiry — but if the host that died was itself running the sweep, other hosts skip the sweep until the scheduler's own 10-minute job lock lapses, or that host restarts), and the run continues on the event's open rows; an event reclaimed past its 5th attempt is given up on (`DeadLetter`, or `Abandoned` for a partial) without running again | Nothing, unless it stays `Running` for minutes with no drain alive: then check the scheduler is enabled on some host. |
-| A response's final automations delayed by tens of seconds | A partial save for the same response is retrying, and events of one response run in order — at most ~30 s over its attempts, plus up to 120 s for an attempt that hangs until its lease expires | Nothing; it drains itself. |
+| An event `Running` long after its save | A drain is mid-run (a long step keeps its lease renewed), or died mid-run. An expired lease is reclaimed by the next sweep (within about 15 s of expiry — but if the host that died was itself running the sweep, other hosts skip the sweep until the scheduler's own 10-minute job lock lapses, or that host restarts), and the run continues on the event's open rows; an event reclaimed past its 5th attempt is given up on (`DeadLetter`, or `Abandoned` for a partial) without running again | Nothing, unless it stays `Running` for minutes with no drain alive: then check the scheduler is enabled on some host. |
+| A response's final automations delayed by tens of seconds | A partial save for the same response is retrying, and events of one response run in order — at most ~85 s over its attempts, plus up to 120 s for an attempt that hangs until its lease expires | Nothing; it drains itself. |
 | Legacy-mode on-submit Actions (confirmation email, follow-up task) fired twice | A drain died in the middle of the legacy chain and the event was reclaimed. The four legacy hooks write no run rows, so a re-run fires them again | Configure the form's own steps if a side effect must happen exactly once; those are deduplicated by the event's run rows. |
 
 To see a response's automations: `SELECT ID, [Trigger], Status, AttemptCount, LastError FROM
@@ -286,8 +288,8 @@ costs whoever is working in them a reinstall.
 | Explorer startup log | `Open App client bootstrap: N client packages wired` (N = your `client[]` length) |
 | Either log | zero `InitializeEmbeddedRecords is not a function`, zero `Failed to resolve import` |
 | API startup log | zero `not found in metadata` (a partially-migrated core; see `docs/database-operations.md`) |
-| After a final submit to a form with automations | `SELECT Status FROM __mj_BizAppsForms.FormAutomationEvent WHERE FormResponseID = '<id>'` reads `Complete` within seconds (the post-commit drain), never stays `Pending` past the next 30-second sweep |
-| `MJ: Scheduled Job Runs` for *Forms — Automation Outbox Sweep* | a run every 30 seconds, `Success` true; its `Details` count the events it claimed |
+| After a final submit to a form with automations | `SELECT Status FROM __mj_BizAppsForms.FormAutomationEvent WHERE FormResponseID = '<id>'` reads `Complete` within seconds (the post-commit drain), never stays `Pending` past the next sweep (about 15 s) |
+| `MJ: Scheduled Job Runs` for *Forms — Automation Outbox Sweep* | a run about every 15 seconds (the cron says 30; see the retry window above), `Success` true; its `Details` count the events it claimed |
 
 `Failed to resolve import` is raised at **page load**, not at build — a clean bundle build proves
 nothing about it. When one appears, census every dep the linked packages declare that the Explorer
