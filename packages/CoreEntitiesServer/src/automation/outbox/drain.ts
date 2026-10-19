@@ -18,7 +18,8 @@
  *  - `DeadLetter` — FINAL submits only, when nothing will change (a response that does not exist, a
  *    snapshot that cannot be read), or the event's last attempt would retry. The event's open run
  *    rows are closed `Failed` first, with the `Dead-lettered: ` prefix that lets an operator's
- *    replay (`IsReplay`) reopen exactly those rows;
+ *    replay (`IsReplay`) reopen exactly those rows. It logs one error line, and once it is settled
+ *    the form's owner is notified (`dead-letter-notice.ts`, best-effort);
  *  - `Abandoned` — where a final would dead-letter, a PARTIAL save instead closes its open rows as
  *    abandoned, logs one error line naming the response and the steps, and settles; it must never
  *    hold the response's final behind it (the claim runs one response's events in order).
@@ -37,6 +38,7 @@ import { FormAutomationError } from '../../engines/automation-errors.js';
 import { FormAutomationEngine, type ResponseAutomationReport } from '../../engines/FormAutomationEngine.js';
 import { withIsolatedProvider } from '../../shared/isolated-provider.js';
 import { LEASE_SECONDS, sqlOutboxStore, type ClaimedEvent, type EventSettlement, type OutboxStore } from './claim.js';
+import { sendDeadLetterNotice, stepsClosed, type DeadLetterNoticeSeams } from './dead-letter-notice.js';
 
 /** Attempts per event, the first included; the last one that would retry gives up instead. */
 export const MAX_ATTEMPTS = 5;
@@ -69,6 +71,8 @@ export interface DrainSeams {
   readonly store?: OutboxStore;
   /** The provider isolated instances are made from; defaults to the process provider. */
   readonly source?: IMetadataProvider | null;
+  /** The dead letter's owner notice; defaults to the form-owner read and MJ's `NotificationEngine`. */
+  readonly notice?: DeadLetterNoticeSeams;
 }
 
 /** What the drain should do; `responseId` narrows it to one response (the post-commit drain). */
@@ -84,11 +88,11 @@ export async function drainAutomationOutbox(request: DrainRequest, contextUser: 
   const source = seams.source === undefined ? Metadata.Provider : seams.source;
   const workerId = `${hostname().slice(0, 40)}:${process.pid}:${randomUUID().slice(0, 8)}`;
   if (seams.store) {
-    return drainRounds(request, seams.store, workerId, contextUser, source);
+    return drainRounds(request, seams.store, workerId, contextUser, source, seams.notice);
   }
   return withIsolatedProvider(
     `Forms automation drain (${request.reason})`,
-    (provider) => drainRounds(request, sqlOutboxStore(provider, contextUser), workerId, contextUser, source),
+    (provider) => drainRounds(request, sqlOutboxStore(provider, contextUser), workerId, contextUser, source, seams.notice),
     source,
   );
 }
@@ -105,6 +109,7 @@ async function drainRounds(
   workerId: string,
   contextUser: UserInfo,
   source: IMetadataProvider | null,
+  notice: DeadLetterNoticeSeams | undefined,
 ): Promise<DrainReport> {
   const report: DrainReport = { claimed: 0, completed: 0, retried: 0, deadLettered: 0, abandoned: 0, roundsCapped: false };
   for (let round = 1; round <= MAX_CLAIM_ROUNDS; round++) {
@@ -115,7 +120,7 @@ async function drainRounds(
     report.claimed += batch.length;
     // One response appears at most once per claim (an older open event blocks a newer one), so the
     // batch runs concurrently without two of a response's events racing each other.
-    const settled = await Promise.all(batch.map((event) => runAndSettle(event, store, workerId, contextUser, source)));
+    const settled = await Promise.all(batch.map((event) => runAndSettle(event, store, workerId, contextUser, source, notice)));
     for (const status of settled) {
       tally(report, status);
     }
@@ -140,6 +145,7 @@ async function runAndSettle(
   workerId: string,
   contextUser: UserInfo,
   source: IMetadataProvider | null,
+  notice: DeadLetterNoticeSeams | undefined,
 ): Promise<EventSettlement['status'] | 'unsettled'> {
   try {
     const ran = event.AttemptCount > MAX_ATTEMPTS ? neverSettled(event) : await runEvent(event, store, workerId, contextUser, source);
@@ -149,12 +155,21 @@ async function runAndSettle(
       return 'unsettled';
     }
     const outcome = lastAttemptGuard(ran, event);
-    const settlement = await settlementFor(outcome, event, contextUser, source);
+    const { settlement, closed } = await settlementFor(outcome, event, contextUser, source);
     if (!(await store.Settle(event.ID, workerId, settlement))) {
       LogError(
         `[Forms automation drain] the lease on event ${event.ID} (response ${event.FormResponseID}) was lost before it settled as ${settlement.status}; another drain owns it now.`,
       );
       return 'unsettled';
+    }
+    if (settlement.status === 'DeadLetter') {
+      // Only once the dead letter is written, so a lost lease notifies nobody. Never throws.
+      await sendDeadLetterNotice(
+        { responseId: event.FormResponseID, eventId: event.ID, trigger: event.Trigger, reason: settlement.lastError, stepsClosed: closed },
+        contextUser,
+        source,
+        notice,
+      );
     }
     return settlement.status;
   } catch (err) {
@@ -282,14 +297,20 @@ function lastAttemptGuard(outcome: RunOutcome, event: ClaimedEvent): RunOutcome 
 /**
  * How the event settles. Giving up closes its open run rows first — `DeadLettered` for a final,
  * which a replay may reopen; `Abandoned` for a partial, which settles Abandoned rather than holding
- * its response's final behind a dead letter.
+ * its response's final behind a dead letter. Hands back the steps it closed, which a dead letter's
+ * owner notice names.
  */
-async function settlementFor(outcome: RunOutcome, event: ClaimedEvent, contextUser: UserInfo, source: IMetadataProvider | null): Promise<EventSettlement> {
+async function settlementFor(
+  outcome: RunOutcome,
+  event: ClaimedEvent,
+  contextUser: UserInfo,
+  source: IMetadataProvider | null,
+): Promise<{ settlement: EventSettlement; closed: string[] }> {
   if (outcome.kind === 'complete') {
-    return { status: 'Complete', lastError: null };
+    return { settlement: { status: 'Complete', lastError: null }, closed: [] };
   }
   if (outcome.kind === 'retry') {
-    return { status: 'Pending', retryAfterSeconds: backoffSeconds(event.AttemptCount), lastError: outcome.reason };
+    return { settlement: { status: 'Pending', retryAfterSeconds: backoffSeconds(event.AttemptCount), lastError: outcome.reason }, closed: [] };
   }
   const partial = event.Trigger === 'OnPartial';
   const closed = await closeOpenRuns(event, partial ? 'Abandoned' : 'DeadLettered', outcome.reason, contextUser, source);
@@ -298,18 +319,13 @@ async function settlementFor(outcome: RunOutcome, event: ClaimedEvent, contextUs
     LogError(
       `[Forms automation drain] ${event.Trigger} automations of response ${event.FormResponseID} dead-lettered: ${outcome.reason} ${stepsClosed(closed)}`,
     );
-    return { status: 'DeadLetter', lastError: outcome.reason };
+    return { settlement: { status: 'DeadLetter', lastError: outcome.reason }, closed };
   }
   LogError(
     `[Forms automation drain] partial-save automations of response ${event.FormResponseID} abandoned, not dead-lettered ` +
       `(a dead letter would hold the response's final behind it): ${outcome.reason} ${stepsClosed(closed)}`,
   );
-  return { status: 'Abandoned', lastError: outcome.reason };
-}
-
-/** The close-out's tail for a give-up log line. */
-function stepsClosed(closed: string[]): string {
-  return `Steps closed: ${closed.length > 0 ? closed.join(', ') : 'none'}.`;
+  return { settlement: { status: 'Abandoned', lastError: outcome.reason }, closed };
 }
 
 /** Best-effort, on its own isolated instance: returns the steps closed; a failure is logged and closes none. */

@@ -48,6 +48,7 @@
     "@memberjunction/core-entities": "^6.1.0-edge.6",
     "@memberjunction/generic-database-provider": "^6.1.0-edge.6",
     "@memberjunction/global": "^6.1.0-edge.6",
+    "@memberjunction/notifications": "^6.1.0-edge.6",
     "@memberjunction/scheduling-base-types": "^6.1.0-edge.6",
     "@memberjunction/scheduling-engine": "^6.1.0-edge.6",
     "@memberjunction/sqlserver-dataprovider": "^6.1.0-edge.6"

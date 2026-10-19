@@ -7,8 +7,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
+import type { SendNotificationParams } from '@memberjunction/notifications';
 import { makeFakeProvider } from '../../../testing/index.js';
 import type { ClaimedEvent, EventSettlement, OutboxStore } from '../claim.js';
+import type { DeadLetterNoticeSeams } from '../dead-letter-notice.js';
 
 const engine = vi.hoisted(() => ({
   calls: [] as { request: Record<string, unknown>; provider: unknown; user: unknown }[],
@@ -96,10 +98,26 @@ function source() {
   return { provider: db.provider, instances };
 }
 
+/**
+ * The owner notice's two MJ effects, stood in for on every drain here (its own spec covers what it
+ * does with them): every send is recorded, and `sendThrows` makes the send fail as an engine would.
+ */
+const notices = { sends: [] as { params: SendNotificationParams; user: UserInfo }[], sendThrows: false };
+const notice: DeadLetterNoticeSeams = {
+  findOwner: async () => ({ formName: 'Intake', ownerUserId: 'owner-1' }),
+  send: async (params, user) => {
+    notices.sends.push({ params, user });
+    if (notices.sendThrows) {
+      throw new Error('notification engine down');
+    }
+    return { success: true };
+  },
+};
+
 async function drainOnce(batches: ClaimedEvent[][], opts: { settleResult?: boolean; responseId?: string } = {}) {
   const s = store(batches, opts.settleResult);
   const src = source();
-  const report = await drainAutomationOutbox({ reason: 'spec', responseId: opts.responseId }, SYSTEM, { store: s.outbox, source: src.provider });
+  const report = await drainAutomationOutbox({ reason: 'spec', responseId: opts.responseId }, SYSTEM, { store: s.outbox, source: src.provider, notice });
   return { ...s, ...src, report };
 }
 
@@ -109,6 +127,8 @@ beforeEach(() => {
   engine.next = async () => ({ dispatch: 'configured', results: [], legacy: [], retry: false, stopped: false, stale: false });
   principal.value = { ID: 'principal-1', Name: 'Forms Automation Service' };
   logged.length = 0;
+  notices.sends.length = 0;
+  notices.sendThrows = false;
 });
 
 describe('an event that runs', () => {
@@ -276,6 +296,76 @@ describe('giving up', () => {
 
     expect(engine.closes).toHaveLength(1);
     expect(settled[0].settlement.status).toBe('DeadLetter');
+  });
+});
+
+describe('the owner notice', () => {
+  const failing = async () => ({
+    dispatch: 'configured',
+    results: [{ name: 'Send email', status: 'Failed', retryable: true }],
+    legacy: [],
+    retry: true,
+    stopped: false,
+    stale: false,
+  });
+
+  it('a final dead letter on its last attempt notifies the owner once, after it settled, with the reason and the steps closed', async () => {
+    engine.next = failing;
+
+    const { settled, report } = await drainOnce([[claimed({ AttemptCount: MAX_ATTEMPTS })]]);
+
+    expect(settled.map((x) => x.settlement.status)).toEqual(['DeadLetter']);
+    expect(report.deadLettered).toBe(1);
+    expect(notices.sends).toHaveLength(1);
+    expect(notices.sends[0].user).toBe(SYSTEM);
+    expect(notices.sends[0].params.message).toContain(settled[0].settlement.lastError ?? 'no reason');
+    expect(notices.sends[0].params.message).toContain('step-a, step-b');
+    expect(notices.sends[0].params.resourceConfiguration).toEqual({ FormResponseID: RESPONSE, FormAutomationEventID: EVENT });
+  });
+
+  it('a notice that fails changes nothing: the event still settles DeadLetter and is counted', async () => {
+    engine.next = failing;
+    notices.sendThrows = true;
+
+    const { settled, report } = await drainOnce([[claimed({ AttemptCount: MAX_ATTEMPTS })]]);
+
+    expect(notices.sends).toHaveLength(1);
+    expect(settled.map((x) => x.settlement.status)).toEqual(['DeadLetter']);
+    expect(report.deadLettered).toBe(1);
+    expect(logged.some((l) => l.includes(RESPONSE) && l.includes('notification engine down'))).toBe(true);
+  });
+
+  it('a dead letter whose lease was lost before it settled notifies nobody — the event is the new holder\'s', async () => {
+    engine.next = failing;
+
+    await drainOnce([[claimed({ AttemptCount: MAX_ATTEMPTS })]], { settleResult: false });
+
+    expect(notices.sends).toEqual([]);
+  });
+
+  it('an abandoned partial on its last attempt notifies nobody', async () => {
+    engine.next = failing;
+
+    const { settled } = await drainOnce([[claimed({ Trigger: 'OnPartial', PartialSaveKey: 'k', AttemptCount: MAX_ATTEMPTS })]]);
+
+    expect(settled[0].settlement.status).toBe('Abandoned');
+    expect(notices.sends).toEqual([]);
+  });
+
+  it('a retry notifies nobody', async () => {
+    engine.next = failing;
+
+    const { settled } = await drainOnce([[claimed({ AttemptCount: MAX_ATTEMPTS - 1 })]]);
+
+    expect(settled[0].settlement.status).toBe('Pending');
+    expect(notices.sends).toEqual([]);
+  });
+
+  it('a completed run notifies nobody', async () => {
+    const { settled } = await drainOnce([[claimed()]]);
+
+    expect(settled[0].settlement.status).toBe('Complete');
+    expect(notices.sends).toEqual([]);
   });
 });
 
