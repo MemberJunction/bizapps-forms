@@ -249,6 +249,18 @@ describe('giving up', () => {
     expect(settled[0].settlement).toEqual({ status: 'DeadLetter', lastError: reason });
   });
 
+  it('a final dead letter logs ONE error line naming the response, the trigger and the steps closed', async () => {
+    engine.next = failing;
+
+    await drainOnce([[claimed({ AttemptCount: MAX_ATTEMPTS })]]);
+
+    const lines = logged.filter((l) => l.includes('dead-lettered'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(RESPONSE);
+    expect(lines[0]).toContain('OnComplete');
+    expect(lines[0]).toContain('step-a, step-b');
+  });
+
   it('a retry before the last attempt closes nothing — the open rows are what the next attempt reuses', async () => {
     engine.next = failing;
 
