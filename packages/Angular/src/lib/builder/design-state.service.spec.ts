@@ -81,7 +81,11 @@ class FakeForm {
     formStyles.set(ID, StyleID);
   }
 
-  public async Save(): Promise<boolean> {
+  /** The options the last save was asked with. */
+  public savedWith: { SkipRelatedCollections?: boolean } | undefined;
+
+  public async Save(options?: { SkipRelatedCollections?: boolean }): Promise<boolean> {
+    this.savedWith = options;
     formStyles.set(this.ID, this.StyleID);
     return true;
   }
@@ -202,5 +206,17 @@ describe('DesignStateService.ensureOwnStyle — a per-form style another form al
     expect(style).toBeDefined();
     expect(style?.ID).not.toBe('own');
     expect(logged.some((m) => m.includes('own') && m.includes('form-a'))).toBe(true);
+  });
+});
+
+describe('applying a style is one row\'s save', () => {
+  it('saves the form with SkipRelatedCollections, so its loaded pages and screens never ride along', async () => {
+    // The builder loads its tree through the record's Pages/Screens collections (#303). A plain
+    // Save() on that record would ship any page edit still on its autosave timer as a graph.
+    const form = new FakeForm('form-x', 'X', null);
+
+    await new DesignStateService().applyStyleToForm(asForm(form), 'style-1');
+
+    expect(form.savedWith?.SkipRelatedCollections).toBe(true);
   });
 });

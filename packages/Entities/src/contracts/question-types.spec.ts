@@ -172,7 +172,7 @@ describe('isFormQuestionType', () => {
    * constraint would have to keep accepting it, which is the whole thing being removed.
    *
    * What makes the migration sufficient on its own: the snapshot token is written by
-   * `JSON.stringify` (`publish.service.ts`), so `"type":"Signature"` has exactly one spelling and
+   * `JSON.stringify` (`FormPublishingEngine`), so `"type":"Signature"` has exactly one spelling and
    * a scoped REPLACE cannot miss it.
    */
   it('does not answer to the retired Signature key', () => {

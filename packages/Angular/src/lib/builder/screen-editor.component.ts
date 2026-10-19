@@ -27,11 +27,11 @@ import {
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
 import { RulesPanelComponent } from './rules-panel.component';
-import type { ConditionalSourceQuestion } from './condition-sources';
+import type { ConditionalSourceQuestion } from '@mj-biz-apps/forms-entities/contracts';
 import { ImageFieldComponent } from './image-field.component';
 import { SettingRowComponent } from './setting-row.component';
 import { isOptionalOpen, toggleOptional } from './optional-setting';
-import { parseConditionalRule, serializeConditionalRule } from './json-fields';
+import { editableConditionalRule, serializeConditionalRule } from './json-fields';
 import type { FormSection } from './section-groups';
 
 const SCREEN_EDITOR_CSS = /* css */ `
@@ -344,7 +344,7 @@ export class ScreenEditorComponent {
   }
 
   protected get conditionalRule(): ConditionalRule | undefined {
-    return this.screen ? parseConditionalRule(this.screen.ConditionalRule) : undefined;
+    return this.screen ? editableConditionalRule(this.screen.ConditionalRule) : undefined;
   }
 
   protected setTitle(value: string): void {

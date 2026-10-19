@@ -2,23 +2,27 @@
  * End-to-end smoke test for entity binding.
  *
  * Submits real responses through the real anonymous public path — host page, redeemed session,
- * GraphQL mutation — and then reads the database to check what the binding actually did. Unit
+ * `Forms.SaveResponse` — and then reads the database to check what the binding actually did. Unit
  * tests cover the decisions with a fake gateway; this is the only thing that proves the wiring,
  * the service principal's grants, the SQL the gateway generates, and the ledger all work together
  * against a real SQL Server.
  *
  * The invariants asserted here are the ones whose failure is silent:
- *   - a second submission from the same person UPDATES rather than duplicating
+ *   - a second submission from the same person MATCHES the existing record rather than duplicating
+ *   - an anonymous (unverified) respondent never writes onto a record it matched (#303 §6): anyone
+ *     can type someone else's email, so a match is recorded on the ledger as `Skipped` with the
+ *     matched id, and the record keeps its values. Before #303 this suite asserted the opposite —
+ *     that the repeat submission merged its answers in — which was the hole.
  *   - the identity match is case-insensitive, so SMOKE@… finds smoke@…
- *   - `neverBlank` does not let a blank answer erase a value already on the record
  *   - a different person gets their own record
  *   - the ledger's TargetRecordID actually joins to the row it claims
  *
  * Prerequisites: MJAPI running, and `smoke/seed-binding-smoke.mjs` already run.
  *   set -a && . ./.env && set +a && node smoke/binding-path.mjs
  */
-import { sessionIdFor } from './lib/session.mjs';
+import { randomUUID } from 'node:crypto';
 import { buildAnswers, publishedSnapshotAutomations, resolveFormId, resolveSeededSlug } from './lib/fixture.mjs';
+import { firstSaveError, getRespondentForm, saveResponse } from './lib/operations.mjs';
 import { sql } from './lib/sqlcmd.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
@@ -28,7 +32,8 @@ const BASE = smokeBaseUrl();
 // binding: "all five submissions ran their automation" counts runs (a form with five automations
 // reports 15), and "first submission creates the record" needs the binding to be the FIRST thing
 // that sees the address. On a form that also runs `Forms: Upsert Respondent Person`, that action
-// creates the Person first and the binding correctly reports `Unchanged` — a real outcome, read
+// creates the Person first and the binding correctly reports a match (`Skipped`, matched but not
+// written, since #303) — a real outcome, read
 // as a failure, because the fixture was pointed at a form it was never written for.
 const SEEDED_AUTOMATION_ID = '11111111-2222-4333-8444-555555555002';
 const SLUG = resolveSeededSlug('binding-path.mjs', { automationId: SEEDED_AUTOMATION_ID });
@@ -70,23 +75,6 @@ async function eventually(read, isDone) {
 /** The ledger row for a response, once the detached automation has written it. */
 const ledgerEventually = (responseId) => eventually(() => ledgerFor(responseId), Boolean);
 
-async function gql(token, query, variables) {
-  const res = await fetch(`${BASE}/`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      // Mirrors the widget's per-instance correlator; without it every request shares one
-      // rate-limit bucket. See smoke/lib/session.mjs.
-      'x-session-id': sessionIdFor(token),
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  const body = await res.json();
-  if (body.errors) throw new Error(`GraphQL error: ${JSON.stringify(body.errors).slice(0, 300)}`);
-  return body.data;
-}
-
 /** A fresh anonymous session, exactly as a browser hitting the public link would get one. */
 async function newSession() {
   const html = await (await fetch(`${BASE}/f/${SLUG}`)).text();
@@ -105,22 +93,16 @@ async function submit(token, definition, { email, name }) {
   // first option, which is the whole reason it exists (see smoke/lib/fixture.mjs).
   const answers = buildAnswers(questions, { email, name });
 
-  const data = await gql(token, `
-    mutation S($input: FormSubmissionInputType!) {
-      SubmitFormResponse(input: $input) { success responseId status errors { message } }
-    }`, {
-    input: {
-      distributionSlug: SLUG,
-      formVersionId: definition.formVersionId,
-      partial: false,
-      startedAt: new Date(0).toISOString(),
-      clientMeta: { referrer: '', userAgent: 'binding-smoke' },
-      answers,
-    },
+  const result = await saveResponse(BASE, token, {
+    Slug: SLUG,
+    FormVersionID: definition.formVersionId,
+    ClientResponseID: randomUUID(),
+    StartedAt: new Date(0).toISOString(),
+    ClientMeta: { Referrer: '', UserAgent: 'binding-smoke' },
+    Answers: answers,
   });
-  const r = data?.SubmitFormResponse;
-  if (!r?.success) throw new Error(`submit failed: ${r?.errors?.[0]?.message ?? 'unknown'}`);
-  return r.responseId;
+  if (result.output?.Success !== true) throw new Error(`submit failed: ${firstSaveError(result)}`);
+  return result.output.ResponseID;
 }
 
 /** The ledger row a response produced. */
@@ -149,12 +131,9 @@ async function main() {
   console.log(`Entity-binding smoke test\n  target : ${BASE}\n  slug   : ${SLUG}\n`);
 
   const token = await newSession();
-  const published = await gql(token,
-    'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }', { slug: SLUG });
-  const definition = JSON.parse(published?.PublishedForm?.definitionJSON ?? '{}');
-  // Automations are read from the STORED snapshot, never from `definition` above: the anonymous
-  // PublishedForm projection deliberately empties `automations` before a respondent can see it
-  // (public-form-payload.ts), so asserting on `definition.automations` always reports 0.
+  const { definition } = await getRespondentForm(BASE, token, SLUG);
+  // Automations are read from the STORED snapshot, never from `definition` above: the respondent
+  // projection (`toRespondentDefinition`) carries no automations at all, by design.
   check(publishedSnapshotAutomations(SLUG).length > 0,
     'the stored snapshot carries the automation',
     'run smoke/seed-binding-smoke.mjs first — without it nothing under test actually runs');
@@ -174,12 +153,13 @@ async function main() {
     'a value that does not join means the primary key was serialized in the wrong format');
   check(personById(personId)?.firstName === 'Ada', 'the mapped answer landed on the record');
 
-  // 2. Same person again, different name: updates, never duplicates.
+  // 2. Same person again, different name: it MATCHES the same record, never duplicates — and,
+  //    because an anonymous respondent is unverified, writes nothing onto it (#303 §6).
   const second = await submit(await newSession(), definition, { email: emailA, name: 'Ada Lovelace' });
   const secondLedger = await ledgerEventually(second);
-  check(secondLedger?.outcome === 'Merged', `a repeat submission merges (got ${secondLedger?.outcome})`);
-  check(secondLedger?.recordId === personId, 'it merges into the SAME record, rather than creating a second one');
-  check(personById(personId)?.firstName === 'Ada Lovelace', 'the update actually wrote the new value');
+  check(secondLedger?.outcome === 'Skipped', `an unverified repeat submission is recorded as matched-not-written (got ${secondLedger?.outcome})`);
+  check(secondLedger?.recordId === personId, 'it matches the SAME record, rather than creating a second one');
+  check(personById(personId)?.firstName === 'Ada', 'the matched record keeps its values (an unverified respondent cannot overwrite them)');
 
   // 3. The identity match must be case-insensitive. This is the defect class that has shipped
   //    twice in this codebase; here it would present as a duplicate person per submission.
@@ -189,15 +169,16 @@ async function main() {
     'an UPPERCASE email matches the same person',
     `got ${thirdLedger?.recordId} vs ${personId} — a new record means the identity match is case-sensitive`);
 
-  // 4. A submission that changes nothing must write nothing — no save, so no __mj_UpdatedAt churn
-  //    and no record-change row. (Every question on this form is required, so a genuinely blank
-  //    answer cannot be submitted through the real path; the neverBlank rule itself is covered by
-  //    the unit matrix, and what only a live run can show is the no-op.)
-  const fourth = await submit(await newSession(), definition, { email: emailA, name: 'Ada Lovelace' });
+  // 4. A resubmission of the record's OWN values writes nothing either. Before #303 this reported
+  //    `Unchanged` after a merge plan; an unverified match now stops before the merge plan, so it is
+  //    the same matched-not-written `Skipped` — and must not touch __mj_UpdatedAt.
+  const updatedAtBefore = sql(`SELECT CONVERT(varchar(40), __mj_UpdatedAt, 127) FROM __mj_BizAppsCommon.Person WHERE ID='${personId}';`);
+  const fourth = await submit(await newSession(), definition, { email: emailA, name: 'Ada' });
   const fourthLedger = await ledgerEventually(fourth);
-  check(fourthLedger?.outcome === 'Unchanged',
-    `a resubmission of identical values reports Unchanged (got ${fourthLedger?.outcome})`);
-  check(personById(personId)?.firstName === 'Ada Lovelace', 'the record still holds the right value');
+  check(fourthLedger?.outcome === 'Skipped' && fourthLedger?.recordId === personId,
+    `a resubmission of the record's own values matches and writes nothing (got ${fourthLedger?.outcome})`);
+  check(sql(`SELECT CONVERT(varchar(40), __mj_UpdatedAt, 127) FROM __mj_BizAppsCommon.Person WHERE ID='${personId}';`) === updatedAtBefore,
+    'the record was not saved (its __mj_UpdatedAt did not move)');
 
   // 5. A different person gets their own record.
   const fifth = await submit(await newSession(), definition, { email: emailB, name: 'Grace' });

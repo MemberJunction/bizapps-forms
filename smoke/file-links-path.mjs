@@ -21,8 +21,8 @@
  *   set -a && . ./.env && set +a && node smoke/file-links-path.mjs
  */
 import { randomUUID } from 'node:crypto';
-import { sessionIdFor } from './lib/session.mjs';
-import { buildAnswers, resolveFormId, resolveSlug } from './lib/fixture.mjs';
+import { buildAnswers, publishedSnapshotAutomations, resolveFormId, resolveSlug } from './lib/fixture.mjs';
+import { definitionQuestions, firstSaveError, getRespondentForm, saveResponse } from './lib/operations.mjs';
 import { sql } from './lib/sqlcmd.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
@@ -63,23 +63,6 @@ const pass = (m) => console.log(`  ok    ${m}`);
 const fail = (m, d) => { failures++; console.error(`  FAIL  ${m}${d ? `\n          ${d}` : ''}`); };
 const check = (cond, m, d) => (cond ? pass(m) : fail(m, d));
 const note = (m) => console.log(`  note  ${m}`);
-
-async function gql(token, query, variables) {
-  const res = await fetch(`${BASE}/`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      // Mirrors the widget's per-instance correlator; without it every request shares one
-      // rate-limit bucket. See smoke/lib/session.mjs.
-      'x-session-id': sessionIdFor(token),
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  const body = await res.json();
-  if (body.errors) throw new Error(`GraphQL error: ${JSON.stringify(body.errors).slice(0, 300)}`);
-  return body.data;
-}
 
 /** A fresh anonymous session, exactly as a browser hitting the public link would get one. */
 async function newSession() {
@@ -168,30 +151,25 @@ function attachedFileIds(entityName, recordId) {
   return out ? out.split('\n').map((s) => s.trim()).filter(Boolean).sort() : [];
 }
 
-/** Submit the form, overriding one question with a file answer. Returns the mutation result. */
+/** Submit the form, overriding one question with a file answer. Returns `{ success, message }`. */
 async function submit(token, definition, { responseId, fileId, fileQuestionId, complete, email }) {
   const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
   const target = fileQuestionId ?? questions[0]?.id;
   const answers = buildAnswers(questions, {
     email,
     name: 'Ada',
-    overrides: fileId ? { [target]: { fileId } } : {},
+    overrides: fileId ? { [target]: { FileID: fileId } } : {},
   });
-  const data = await gql(token, `
-    mutation S($input: FormSubmissionInputType!) {
-      SubmitFormResponse(input: $input) { success responseId status errors { message } }
-    }`, {
-    input: {
-      distributionSlug: SLUG,
-      formVersionId: definition.formVersionId,
-      partial: !complete,
-      startedAt: new Date(0).toISOString(),
-      responseId,
-      clientMeta: { referrer: '', userAgent: 'file-links-smoke' },
-      answers,
-    },
+  const result = await saveResponse(BASE, token, {
+    Slug: SLUG,
+    FormVersionID: definition.formVersionId,
+    Mode: complete ? 'final' : 'partial',
+    StartedAt: new Date(0).toISOString(),
+    ClientResponseID: responseId,
+    ClientMeta: { Referrer: '', UserAgent: 'file-links-smoke' },
+    Answers: answers,
   });
-  return data?.SubmitFormResponse;
+  return { success: result.output?.Success, message: firstSaveError(result) };
 }
 
 /** The binding ledger row for a response, if a binding ran. */
@@ -209,10 +187,8 @@ async function main() {
   console.log(`File-attachment smoke test\n  target : ${BASE}\n  slug   : ${SLUG}\n`);
 
   const token = await newSession();
-  const published = await gql(token,
-    'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }', { slug: SLUG });
-  const definition = JSON.parse(published?.PublishedForm?.definitionJSON ?? '{}');
-  const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
+  const { definition } = await getRespondentForm(BASE, token, SLUG);
+  const questions = definitionQuestions(definition);
   const fileQuestion = questions.find((q) => q.type === 'FileUpload' || q.type === 'Doodle');
 
   // One response id for the whole arc — minted by the client, adopted as the FormResponse primary
@@ -226,7 +202,7 @@ async function main() {
   const first = await provisionFile(token, responseId, fileQuestion?.id, 'resume-v1');
   note(first.uploaded ? 'file A came through the real upload endpoint' : 'file A was seeded');
   const partial = await submit(token, definition, { responseId, email, fileId: first.fileId, fileQuestionId: fileQuestion?.id, complete: false });
-  check(partial?.success === true, 'a partial save with a file answer succeeds', partial?.errors?.[0]?.message);
+  check(partial?.success === true, 'a partial save with a file answer succeeds', partial?.message);
   check(
     attachedFileIds(RESPONSE_ENTITY, responseId).join() === first.fileId.toLowerCase(),
     'the uploaded file is attached to the response record',
@@ -245,7 +221,7 @@ async function main() {
   const handAttached = seedHandAttachedFile(RESPONSE_ENTITY, responseId);
   const second = await provisionFile(token, responseId, fileQuestion?.id, 'resume-v2');
   const completed = await submit(token, definition, { responseId, email, fileId: second.fileId, fileQuestionId: fileQuestion?.id, complete: true });
-  check(completed?.success === true, 'the final submit succeeds', completed?.errors?.[0]?.message);
+  check(completed?.success === true, 'the final submit succeeds', completed?.message);
 
   const afterReplace = attachedFileIds(RESPONSE_ENTITY, responseId);
   check(afterReplace.includes(second.fileId.toLowerCase()), 'the replacement file is attached');
@@ -258,7 +234,8 @@ async function main() {
 
   // 4. The binding leg: the same file has to reach the business record, which is the whole point.
   //    Skipped explicitly — never vacuously — when this form has no binding to run.
-  const hasBinding = (definition.automations ?? []).some((a) => a.targetType === 'EntityBinding' && a.isActive !== false);
+  // From the STORED snapshot: the respondent projection carries no automations (#303).
+  const hasBinding = publishedSnapshotAutomations(SLUG).some((a) => a.targetType === 'EntityBinding' && a.isActive !== false);
   if (!hasBinding) {
     note(`"${SLUG}" publishes no active entity binding, so the bound-record leg cannot run here.`);
     note('Run smoke/seed-binding-smoke.mjs, or pass a slug whose form binds to an entity.');
@@ -284,10 +261,12 @@ async function main() {
       check(!onRecord.includes(handAttached.toLowerCase()),
         'reconciling the bound record did not drag the response’s hand-attached file onto it');
 
-      // 5. A SECOND response from the same person binds to the SAME record. Its reconcile is
-      //    scoped to its own uploads, so it must add its file WITHOUT stripping the first
-      //    response's — the property that keeps one respondent's submission from erasing another's
-      //    attachments off a record they share.
+      // 5. A SECOND response from the same person MATCHES the same record — and, because an
+      //    anonymous respondent is unverified (#303 §6), writes nothing onto it: no field, and no
+      //    file. Anyone can type someone else's email, so a match must not let a stranger attach a
+      //    document to that person's record. Before #303 this leg asserted the opposite (the second
+      //    response attached its own file), which was the hole. What still must hold: the first
+      //    response's file stays where it is.
       const token2 = await newSession();
       const responseId2 = randomUUID();
       const third = await provisionFile(token2, responseId2, fileQuestion?.id, 'resume-v3');
@@ -295,18 +274,26 @@ async function main() {
         responseId: responseId2, email, fileId: third.fileId, fileQuestionId: fileQuestion?.id, complete: true,
       });
       check(secondSubmission?.success === true, 'a second response from the same person submits',
-        secondSubmission?.errors?.[0]?.message);
+        secondSubmission?.message);
 
       const bound2 = await eventually(() => bindingTargetFor(responseId2), Boolean);
       check(bound2?.recordId === bound.recordId,
-        'the second response binds to the same record',
+        'the second response matches the same record',
         `got ${bound2?.recordId} vs ${bound.recordId} — the rest of this leg needs one shared record`);
 
-      const shared = await eventually(
-        () => attachedFileIds(bound.entityName, bound.recordId),
-        (ids) => ids.includes(third.fileId.toLowerCase()),
+      // Wait for the automation RUN to finish, not just the ledger row: the bound record's files
+      // are reconciled after the ledger write, so reading on the ledger row alone could pass on a
+      // race for the very attachment this asserts is absent.
+      const runsSettled = await eventually(
+        () => sql(`SELECT COUNT(*) FROM __mj_BizAppsForms.FormAutomationRun
+          WHERE FormResponseID='${responseId2}' AND Status IN ('Pending','Running');`).trim(),
+        (open) => open === '0',
       );
-      check(shared.includes(third.fileId.toLowerCase()), 'the second response attaches its own file');
+      check(runsSettled === '0', 'the second response\'s automation run finished', `${runsSettled} run(s) still open`);
+      const shared = attachedFileIds(bound.entityName, bound.recordId);
+      check(!shared.includes(third.fileId.toLowerCase()),
+        'an unverified match does NOT attach the second response’s file to the matched record',
+        `attached: [${shared.join(', ')}] — a stranger who types someone's email must not add files to their record`);
       check(shared.includes(second.fileId.toLowerCase()),
         'and leaves the FIRST response’s file attached',
         `attached: [${shared.join(', ')}] — one response reconciling must never remove another ` +

@@ -49,8 +49,10 @@
 import { randomUUID } from 'node:crypto';
 import { sessionIdFor } from './lib/session.mjs';
 import { buildAnswers, resolveSlug } from './lib/fixture.mjs';
+import { definitionQuestions, EXECUTE_REMOTE_OPERATION } from './lib/operations.mjs';
+import { smokeBaseUrl } from './lib/target.mjs';
 
-const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
+const BASE = smokeBaseUrl();
 const SLUG = resolveSlug('respondent-errors-path.mjs');
 const GHOST_QUESTION_ID = process.argv[3] || process.env.FORMS_SMOKE_GHOST_QUESTION_ID || '';
 
@@ -221,9 +223,20 @@ function judgeUpload(res) {
   }
 }
 
-const SUBMIT = `mutation S($input: FormSubmissionInputType!) {
-  SubmitFormResponse(input: $input) { success responseId status errors { questionId message } }
-}`;
+/**
+ * The request body for one respondent Remote Operation — the widget's own mutation text — so a
+ * probe below can post it raw and scan every byte that comes back, success or not.
+ */
+const operationBody = (operationKey, input) => ({
+  query: EXECUTE_REMOTE_OPERATION,
+  variables: { operationKey, inputJSON: JSON.stringify(input), invokeMode: 'attached' },
+});
+
+/** The parsed operation output out of a raw probe response, or `undefined` when the op did not run. */
+function operationOutput(res) {
+  const result = JSON.parse(res.text).data?.ExecuteRemoteOperation;
+  return result?.success && result.outputJSON ? JSON.parse(result.outputJSON) : undefined;
+}
 
 async function main() {
   console.log(`Respondent-errors smoke test\n  target : ${BASE}\n  slug   : ${SLUG}\n`);
@@ -248,26 +261,25 @@ async function main() {
   // Scanned like every other response, not merely parsed. This is the one SUCCESSFUL body the suite
   // sees, so it is the only thing that can support the header's claim to check "error or not" — and
   // it is the largest body on the public surface, carrying the whole published definition.
-  const publishedRes = await post(token,
-    { query: 'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }', variables: { slug: SLUG } },
-  );
+  const publishedRes = await post(token, operationBody('Forms.GetRespondentForm', { Slug: SLUG }));
   const publishedLeaks = leaksIn(publishedRes.text);
-  check(publishedLeaks.length === 0, 'the successful PublishedForm response says nothing about the host',
+  check(publishedLeaks.length === 0, 'the successful Forms.GetRespondentForm response says nothing about the host',
     publishedLeaks.length ? `leaked ${publishedLeaks.join(', ')}` : '');
-  const published = JSON.parse(publishedRes.text);
-  const definition = JSON.parse(published.data?.PublishedForm?.definitionJSON ?? '{}');
-  const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
+  const published = operationOutput(publishedRes);
+  const definition = published ? JSON.parse(published.DefinitionJSON) : {};
+  const questions = definitionQuestions(definition);
   check(questions.length > 0 && typeof definition.formVersionId === 'string',
     `the published definition loads (${questions.length} question(s))`,
-    'PublishedForm returned nothing — the probes below would then be testing an unpublished link');
+    'Forms.GetRespondentForm returned nothing — the probes below would then be testing an unpublished link');
 
   // ── (a) Every way to make Apollo itself produce an error. ───────────────────────────────────
-  // The issue's exact reproduction: a field that does not exist on the type.
+  // The issue's exact reproduction: a field that does not exist on the type (selected on the one
+  // mutation the respondent surface uses since #303).
   await probe(token, 'a malformed query (validation error)',
-    { query: '{ SubmitFormResponse { message } }' });
+    { query: 'mutation { ExecuteRemoteOperation { message } }' });
   // A query that does not parse at all.
   await probe(token, 'an unparseable query (parse error)',
-    { query: '{ PublishedForm(' });
+    { query: 'mutation { ExecuteRemoteOperation(' });
   // A request that resolves to an error INSIDE a resolver — the only probe here that reaches one,
   // and so the only one that can carry MJ resolver frames rather than graphql-js validation frames.
   //
@@ -284,13 +296,16 @@ async function main() {
   await probe(token, 'a body with no query (bad request)', {}, { coreResidual: true });
 
   // ── (b) The typed result. Authored refusals must stay authored… ─────────────────────────────
-  await probe(token, 'a submit against a stale version (typed refusal)', {
-    query: SUBMIT,
-    variables: { input: { distributionSlug: SLUG, formVersionId: randomUUID(), answers: [] } },
-  }, { extra: (res) => {
-    const body = JSON.parse(res.text);
-    const message = body.data?.SubmitFormResponse?.errors?.[0]?.message ?? '';
-    check(/unavailable|version/i.test(message), 'the stale-version refusal is the authored sentence',
+  await probe(token, 'a submit against a stale version (typed refusal)',
+    operationBody('Forms.SaveResponse', {
+      Slug: SLUG, FormVersionID: randomUUID(), Mode: 'final', ClientResponseID: randomUUID(), Answers: [],
+    }), { extra: (res) => {
+    const message = operationOutput(res)?.Errors?.[0]?.Message ?? '';
+    // EQUALITY. Since #303 a closed, archived, stale or unreadable link all answer this ONE
+    // sentence (`FORM_UNAVAILABLE_MESSAGE` in FormSubmissionEngine.ts), so the reason goes to the
+    // server log and never to a caller probing the link. Kept as a literal: a .mjs smoke cannot
+    // import the TypeScript constant.
+    check(message === 'This form is not available.', 'the stale-version refusal is the authored sentence',
       `got: ${message || res.text.slice(0, 200)}`);
   } });
 
@@ -310,20 +325,16 @@ async function main() {
       questions.filter((q) => q.isRequired && q.id !== GHOST_QUESTION_ID),
       { email: `errors-smoke-${Date.now()}@example.com`, name: 'Errors Smoke' },
     );
-    await probe(token, 'a submit whose answer row the database refuses (FK violation)', {
-      query: SUBMIT,
-      variables: {
-        input: {
-          distributionSlug: SLUG,
-          formVersionId: definition.formVersionId,
-          responseId: randomUUID(),
-          answers: [...requiredAnswers, { questionId: GHOST_QUESTION_ID, textValue: 'ghost' }],
-        },
-      },
-    }, { extra: (res) => {
-      const body = JSON.parse(res.text);
-      const result = body.data?.SubmitFormResponse;
-      check(result && result.success === false, 'the refused save reports success:false, not a GraphQL error',
+    await probe(token, 'a submit whose answer row the database refuses (FK violation)',
+      operationBody('Forms.SaveResponse', {
+        Slug: SLUG,
+        FormVersionID: definition.formVersionId,
+        Mode: 'final',
+        ClientResponseID: randomUUID(),
+        Answers: [...requiredAnswers, { QuestionID: GHOST_QUESTION_ID, TextValue: 'ghost' }],
+      }), { extra: (res) => {
+      const result = operationOutput(res);
+      check(result && result.Success === false, 'the refused save reports Success:false, not a GraphQL error',
         res.text.slice(0, 200));
       // EQUALITY, not a loose match. `/could not be saved|try again/` also matches three OTHER
       // authored refusals that never reach persistence — the rate limiter's "Too many submissions.
@@ -335,7 +346,7 @@ async function main() {
       // TypeScript constant; it is asserted against `SAVE_FAILED_MESSAGE` in
       // `persistence-failure-message.spec.ts`, which fails if the two ever drift.
       const SAVE_FAILED = 'Your response could not be saved. Please try again.';
-      const message = result?.errors?.[0]?.message ?? '';
+      const message = result?.Errors?.[0]?.Message ?? '';
       check(message === SAVE_FAILED, 'the refused save shows the authored sentence',
         `got: ${message || res.text.slice(0, 200)}\n          ` +
           'Anything other than that exact sentence means persistence was never reached and the FK ' +

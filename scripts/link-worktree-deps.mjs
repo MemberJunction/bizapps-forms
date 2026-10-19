@@ -71,6 +71,10 @@ if (!existsSync(join(MAIN, 'node_modules'))) {
 /** Worktree package directory names, keyed by the npm name they publish under. */
 const LOCAL_PACKAGES = new Map([
   ['forms-entities', 'Entities'],
+  // Was missing even though forms-server already depended on it before #303, so a worktree's Server
+  // resolved the MAIN checkout's entity subclasses. #303 widened the gap: forms-actions depends on it
+  // too, for the helpers it now imports.
+  ['forms-core-entities-server', 'CoreEntitiesServer'],
   ['forms-actions', 'Actions'],
   ['forms-server', 'Server'],
   ['forms-ng', 'Angular'],

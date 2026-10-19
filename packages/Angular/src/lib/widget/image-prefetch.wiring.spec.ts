@@ -40,7 +40,7 @@ describe('prefetch lifecycle — source smoke', () => {
   it('load() cancels the previous queue before anything else can start one', () => {
     const load = body(form, 'private async load(): Promise<void>');
     expect(load).toContain('this.cancelPrefetch()');
-    expect(load.indexOf('this.cancelPrefetch()')).toBeLessThan(load.indexOf('this.planPrefetch(def, opening, gated)'));
+    expect(load.indexOf('this.cancelPrefetch()')).toBeLessThan(load.indexOf('this.planPrefetch(form, opening, gated)'));
   });
 
   it('ngOnDestroy cancels the queue', () => {
@@ -55,7 +55,7 @@ describe('prefetch lifecycle — source smoke', () => {
   });
 
   it('plans nothing unless intake is still ahead (welcome or ready)', () => {
-    const plan = body(form, 'private planPrefetch(def: PublishedFormDefinition, opening: WidgetPhase, gated: boolean): void');
+    const plan = body(form, 'private planPrefetch(form: WidgetForm, opening: WidgetPhase, gated: boolean): void');
     expect(plan).toContain(`opening !== 'welcome' && opening !== 'ready'`);
     expect(plan.indexOf(`opening !== 'welcome' && opening !== 'ready'`)).toBeLessThan(
       plan.indexOf('this.schedulePrefetchWhenIdle()'),
@@ -101,7 +101,8 @@ describe('welcome gate wiring — source smoke (#291)', () => {
   });
   it('the gate is current only for this load and a live widget, and never overrides an author command', () => {
     const hold = body(form, 'private holdForWelcomeImages(welcomeImage: string, generation: number): void');
-    expect(hold).toContain('!this.destroyed && generation === this.loadGeneration');
+    expect(hold).toContain('isCurrent: () => this.isCurrentLoad(generation)');
+    expect(body(form, 'private isCurrentLoad(generation: number): boolean')).toContain('!this.destroyed && generation === this.loadGeneration');
     expect(hold).toContain("if (this.phase() === 'loading') this.phase.set('welcome')");
     expect(hold).toContain('imagesSettled: () => this.startPrefetch()');
   });

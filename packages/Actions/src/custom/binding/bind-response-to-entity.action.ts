@@ -20,12 +20,17 @@ import {
   parseMergePolicy,
   type mjBizAppsFormsFormEntityBindingEntity,
 } from '@mj-biz-apps/forms-entities';
-import { loadFormResponseContext } from '../shared/form-response-context';
-import { resolveActionProvider } from '../shared/action-provider';
+import {
+  bindingFailed,
+  executeBinding,
+  loadFormResponseContext,
+  MJBindingGateway,
+  parseBindingConfig,
+  readPriorBindingOutcome,
+  recordBindingLedgerRow,
+  resolveActionProvider,
+} from '@mj-biz-apps/forms-core-entities-server';
 import { getStringParam, setOutputParam } from '../shared/action-params';
-import { bindingFailed, executeBinding, parseBindingConfig } from './binding-executor';
-import { readPriorBindingOutcome, recordBindingLedgerRow } from './binding-ledger';
-import { MJBindingGateway } from './mj-binding-gateway';
 
 const BINDING_ENTITY = 'MJ_BizApps_Forms: Form Entity Bindings';
 
@@ -89,6 +94,10 @@ export class BindResponseToEntityAction extends BaseAction {
         // applies; invoked deliberately by a privileged caller — an approval hook that has already
         // decided this response should be written — the caller's own grants are the constraint.
         allowedEntities: null,
+        // Never verified, whoever invokes this: a human approving a response approves its CONTENT,
+        // not that the person who typed an email owns the record it matches. Until a verified
+        // recipient session exists (#137) a match is recorded on the ledger and never written.
+        respondentVerified: false,
       });
 
       if (bindingFailed(result)) {

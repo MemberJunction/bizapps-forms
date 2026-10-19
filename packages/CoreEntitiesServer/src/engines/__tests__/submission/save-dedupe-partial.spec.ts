@@ -1,0 +1,638 @@
+/**
+ * Pipeline tests for the Phase-1 gaps this change closes:
+ *   - Task 1: FINAL-submit dedupe (existing Complete row short-circuits; lookup error fails closed).
+ *   - Task 4: partial create / idempotent partial update / promote-to-complete, and that
+ *             hooks + quota + count do NOT fire on a partial.
+ */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { saveThroughEngine, recordingQueue, type EngineSaveContext, type EngineSaveSubmission } from './harness.js';
+import { FormsRateLimiter } from '../../../submission/rate-limit.js';
+import { resetPublicSubmitConfigForTests } from '../../../submission/config.js';
+import {
+  makeContextUser,
+  makeDefinition,
+  makeDistribution,
+  makeFakeProvider,
+  makeVersion,
+  respondentPermissions,
+  type ExistingResponseRow,
+  type FakeProvider,
+} from '../../../testing/index.js';
+
+const FORM_RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
+const FORM_RESPONSE_ANSWER_ENTITY = 'MJ_BizApps_Forms: Form Response Answers';
+const SESSION = 'sess-abc';
+
+function validSubmission(overrides?: Partial<EngineSaveSubmission>): EngineSaveSubmission {
+  return {
+    distributionSlug: 'public-1',
+    formVersionId: 'ver-1',
+    answers: [{ questionId: 'q-name', textValue: 'Ada Lovelace' }],
+    ...overrides,
+  };
+}
+
+interface BuildOptions {
+  definition?: ReturnType<typeof makeDefinition>;
+  existingResponses?: ExistingResponseRow[];
+  concurrentlyCreated?: ExistingResponseRow[];
+  failRunViewFor?: string;
+  queue?: EngineSaveContext['queue'];
+  /** The answers the existing rows already stored (what a sealed repeat's ending is judged on). */
+  existingAnswers?: Parameters<typeof makeFakeProvider>[0]['existingAnswers'];
+}
+
+function build(options: BuildOptions = {}): { ctx: EngineSaveContext; fake: FakeProvider } {
+  const definition = options.definition ?? makeDefinition();
+  const fake = makeFakeProvider({
+    distribution: makeDistribution(),
+    version: makeVersion(definition),
+    createPermissions: respondentPermissions(),
+    existingResponses: options.existingResponses,
+    concurrentlyCreated: options.concurrentlyCreated,
+    failRunViewFor: options.failRunViewFor,
+    existingAnswers: options.existingAnswers,
+  });
+  const ctx: EngineSaveContext = {
+    provider: fake.provider,
+    contextUser: makeContextUser(),
+    elevatedUser: makeContextUser(),
+    sessionId: SESSION,
+    queue: options.queue,
+  };
+  return { ctx, fake };
+}
+
+function partialRow(): ExistingResponseRow {
+  return { ID: 'resp-partial-1', Status: 'Partial', FormVersionID: 'ver-1', AnonymousSessionID: SESSION };
+}
+
+function completeRow(): ExistingResponseRow {
+  return { ID: 'resp-complete-1', Status: 'Complete', FormVersionID: 'ver-1', AnonymousSessionID: SESSION };
+}
+
+beforeEach(() => {
+  FormsRateLimiter.Instance.resetForTests();
+  resetPublicSubmitConfigForTests();
+  delete process.env.FORMS_TURNSTILE_SECRET;
+});
+
+describe('dedupe (Task 1)', () => {
+  it('short-circuits a duplicate final submit to the EXISTING response id without a second row', async () => {
+    const fireHooks = recordingQueue();
+    const { ctx, fake } = build({ existingResponses: [completeRow()], queue: fireHooks });
+
+    const result = await saveThroughEngine(ctx, validSubmission());
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Complete');
+    expect(result.responseId).toBe('resp-complete-1');
+    // No new response/answer rows were written, and hooks did not re-fire.
+    expect(fake.saved).toHaveLength(0);
+    expect(fireHooks.published).toHaveLength(0);
+  });
+
+  it('FAILS CLOSED when the dedupe lookup query errors (never creates a duplicate)', async () => {
+    const { ctx, fake } = build({ failRunViewFor: FORM_RESPONSE_ENTITY });
+
+    const result = await saveThroughEngine(ctx, validSubmission());
+
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/could not verify/i);
+    expect(fake.saved).toHaveLength(0);
+  });
+});
+
+describe('partial semantics (Task 4)', () => {
+  it('creates a Partial row and does NOT fire hooks or count', async () => {
+    const fireHooks = recordingQueue();
+    const { ctx, fake } = build({ queue: fireHooks });
+
+    const result = await saveThroughEngine(ctx, validSubmission({ partial: true }));
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Partial');
+    expect(result.responseId).toBeTruthy();
+    expect(fireHooks.published).toHaveLength(0);
+    // A response row was saved; no quota slot was taken (the count is the atomic UPDATE now).
+    const savedNames = fake.saved.map((r) => r.entityName);
+    expect(savedNames).toContain(FORM_RESPONSE_ENTITY);
+    expect(fake.distribution?.ResponseCount).toBe(0);
+  });
+
+  it('updates the SAME Partial row on a re-autosave (idempotent — targets the existing id)', async () => {
+    const { ctx, fake } = build({ existingResponses: [partialRow()] });
+
+    const result = await saveThroughEngine(ctx, validSubmission({ partial: true }));
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Partial');
+    // The persisted response carries the EXISTING partial id (updated in place, not a new row).
+    expect(result.responseId).toBe('resp-partial-1');
+    const savedResponse = fake.saved.find((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(savedResponse?.values.Status).toBe('Partial');
+  });
+
+  it('promotes an existing Partial row to Complete on final submit (no second row) + fires hooks/count', async () => {
+    const fireHooks = recordingQueue();
+    const { ctx, fake } = build({ existingResponses: [partialRow()], queue: fireHooks });
+
+    const result = await saveThroughEngine(ctx, validSubmission({ partial: false }));
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Complete');
+    expect(result.responseId).toBe('resp-partial-1');
+    const savedResponse = fake.saved.find((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(savedResponse?.values.Status).toBe('Complete');
+    expect(savedResponse?.values.SubmittedAt).toBeInstanceOf(Date);
+    // Promotion takes one quota slot + queues the automations once.
+    expect(fake.distribution?.ResponseCount).toBe(1);
+    expect(fireHooks.published).toHaveLength(1);
+  });
+
+  it('re-inserts answers on an upsert (answers written for the promoted row)', async () => {
+    const fireHooks = recordingQueue();
+    const { ctx, fake } = build({ existingResponses: [partialRow()], queue: fireHooks });
+
+    await saveThroughEngine(ctx, validSubmission({ partial: false }));
+
+    const answerSaves = fake.saved.filter((r) => r.entityName === FORM_RESPONSE_ANSWER_ENTITY);
+    expect(answerSaves).toHaveLength(1);
+    expect(answerSaves[0].values.ResponseID).toBe('resp-partial-1');
+  });
+});
+
+// These cover which row the LOOKUPS propose for a client-supplied responseId. Whether the caller
+// may then write to it is a separate decision made at persistence — `session-ownership.spec.ts`.
+describe('client-supplied responseId lookup (autosave seam)', () => {
+  it('adopts a client responseId that belongs to THIS session (threads the same partial)', async () => {
+    // Row owned by the current session; client sends its id explicitly as the autosave target.
+    const { ctx, fake } = build({ existingResponses: [partialRow()] });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ partial: true, clientResponseId: 'resp-partial-1' }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.responseId).toBe('resp-partial-1');
+    // Updated in place — the persisted response carries the client-supplied id, not a new one.
+    const savedResponse = fake.saved.find((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(savedResponse?.values.Status).toBe('Partial');
+  });
+
+  it("IGNORES a client responseId owned by ANOTHER session (cannot hijack a foreign partial)", async () => {
+    // The only stored Partial belongs to a DIFFERENT anonymous session. The current session
+    // supplies that foreign id as its autosave hint — the lookup must not resolve it, and NO
+    // existing row is adopted (a fresh row is created instead).
+    //
+    // NOTE ON WHAT THIS DOES *NOT* COVER. `resp-foreign-1` is not a UUID, so persistence never
+    // adopts it as a primary key and the insert cannot collide with the foreign row. That is why
+    // this test passed throughout issue #78: with a real uuid the same request took over the row
+    // through the duplicate-key recovery. The takeover family is covered in
+    // `session-ownership.spec.ts`, which uses uuids for exactly that reason.
+    const foreignRow: ExistingResponseRow = {
+      ID: 'resp-foreign-1',
+      Status: 'Partial',
+      FormVersionID: 'ver-1',
+      AnonymousSessionID: 'sess-someone-else',
+    };
+    const { ctx, fake } = build({ existingResponses: [foreignRow] });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ partial: true, clientResponseId: 'resp-foreign-1' }),
+    );
+
+    expect(result.success).toBe(true);
+    // The foreign row was NOT adopted: a brand-new response id was minted for this session.
+    expect(result.responseId).not.toBe('resp-foreign-1');
+    const savedResponse = fake.saved.find((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(savedResponse).toBeDefined();
+    // And the foreign row was never updated (its id never appears as a persisted target).
+    expect(fake.saved.some((r) => r.values.ID === 'resp-foreign-1')).toBe(false);
+  });
+
+  it('falls back to the session-key lookup when the client responseId matches no owned row', async () => {
+    // Current session DOES own a partial, but the client sends a stale/unknown id. The guard finds
+    // no owned row for that id, then the session-key fallback still resolves the real partial.
+    const { ctx } = build({ existingResponses: [partialRow()] });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ partial: true, clientResponseId: 'resp-does-not-exist' }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.responseId).toBe('resp-partial-1');
+  });
+});
+
+const CLIENT_ID = '11111111-2222-4333-8444-555555555555';
+
+/** Build a pipeline ctx with a BLANK session — the routine public-submit case. */
+function buildBlankSession(options: BuildOptions = {}): { ctx: EngineSaveContext; fake: FakeProvider } {
+  const { ctx, fake } = build(options);
+  return { ctx: { ...ctx, sessionId: '' }, fake };
+}
+
+/** A stored Partial row created by the widget under a blank session (client id in SourceMetadata). */
+function clientPartialRow(): ExistingResponseRow {
+  return {
+    ID: CLIENT_ID,
+    Status: 'Partial',
+    FormVersionID: 'ver-1',
+    AnonymousSessionID: '',
+    SourceMetadata: JSON.stringify({ clientResponseId: CLIENT_ID }),
+  };
+}
+
+describe('client-id upsert idempotency with a BLANK session (the core bug)', () => {
+  it('CREATE: first partial adopts the client id as the FormResponse primary key', async () => {
+    const { ctx, fake } = buildBlankSession();
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ partial: true, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Partial');
+    expect(result.responseId).toBe(CLIENT_ID);
+    const savedResponse = fake.saved.find((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(savedResponse?.values.ID).toBe(CLIENT_ID);
+    // The client id is persisted into SourceMetadata for later id-proof adoption.
+    expect(String(savedResponse?.values.SourceMetadata)).toContain(CLIENT_ID);
+  });
+
+  it('UPDATE: repeated partials with the same client id upsert ONE row (no duplicates)', async () => {
+    // The row from the first save already exists (blank session, client id in SourceMetadata).
+    const { ctx, fake } = buildBlankSession({ existingResponses: [clientPartialRow()] });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ partial: true, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Partial');
+    // Adopted by id (not session), updated in place — still the same single row.
+    expect(result.responseId).toBe(CLIENT_ID);
+    const responseSaves = fake.saved.filter((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(responseSaves).toHaveLength(1);
+    expect(responseSaves[0].values.Status).toBe('Partial');
+  });
+
+  it('PROMOTE: final submit with the same client id promotes the Partial to Complete in place', async () => {
+    const fireHooks = recordingQueue();
+    const { ctx, fake } = buildBlankSession({ existingResponses: [clientPartialRow()], queue: fireHooks });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ partial: false, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Complete');
+    expect(result.responseId).toBe(CLIENT_ID);
+    const savedResponse = fake.saved.find((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(savedResponse?.values.Status).toBe('Complete');
+    expect(savedResponse?.values.SubmittedAt).toBeInstanceOf(Date);
+    expect(fireHooks.published).toHaveLength(1);
+  });
+
+  it('idempotent repeat FINAL submit returns the SAME id without a second Complete row', async () => {
+    // Row already Complete under this client id (a re-fired submit / retry).
+    const completeByClientId: ExistingResponseRow = {
+      ID: CLIENT_ID,
+      Status: 'Complete',
+      FormVersionID: 'ver-1',
+      AnonymousSessionID: '',
+      SourceMetadata: JSON.stringify({ clientResponseId: CLIENT_ID }),
+    };
+    const fireHooks = recordingQueue();
+    const { ctx, fake } = buildBlankSession({ existingResponses: [completeByClientId], queue: fireHooks });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ partial: false, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Complete');
+    expect(result.responseId).toBe(CLIENT_ID);
+    // No new rows written, hooks not re-fired.
+    expect(fake.saved).toHaveLength(0);
+    expect(fireHooks.published).toHaveLength(0);
+  });
+
+  it('does NOT adopt a client id whose SourceMetadata proof is absent (guessed PK)', async () => {
+    // A Partial row exists at the guessed id, but WITHOUT the client-id proof in SourceMetadata.
+    const noProofRow: ExistingResponseRow = {
+      ID: CLIENT_ID,
+      Status: 'Partial',
+      FormVersionID: 'ver-1',
+      AnonymousSessionID: '',
+      SourceMetadata: JSON.stringify({ distributionId: 'dist-1' }),
+    };
+    const { ctx, fake } = buildBlankSession({ existingResponses: [noProofRow] });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ partial: true, clientResponseId: CLIENT_ID }),
+    );
+
+    // The proof lookup misses, so no candidate is proposed and persistence CREATEs — which
+    // collides on the primary key it just adopted and recovers onto the row already there. One
+    // save either way, which is what this asserts. (The earlier comment here claimed a "fresh
+    // row" was created instead; there is only ever one row at a given client id, and the
+    // unproven row is reachable precisely because it has no owner — see session-ownership.spec.)
+    expect(result.success).toBe(true);
+    const responseSaves = fake.saved.filter((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(responseSaves).toHaveLength(1);
+  });
+});
+
+describe('concurrent duplicate-key recovery (the PK-violation race)', () => {
+  /** A row a concurrent request committed AFTER our SELECTs ran — invisible to RunView, collides on insert. */
+  function concurrentRow(status: 'Complete' | 'Partial'): ExistingResponseRow {
+    return {
+      ID: CLIENT_ID,
+      Status: status,
+      FormVersionID: 'ver-1',
+      AnonymousSessionID: '',
+      SourceMetadata: JSON.stringify({ clientResponseId: CLIENT_ID }),
+    };
+  }
+
+  it('final submit collides with a concurrent Partial: recovers by promoting it (one row, counted once, hooks once)', async () => {
+    const fireHooks = recordingQueue();
+    const { ctx, fake } = buildBlankSession({ concurrentlyCreated: [concurrentRow('Partial')], queue: fireHooks });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ partial: false, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Complete');
+    expect(result.responseId).toBe(CLIENT_ID);
+    // Only the recovery UPDATE persisted — no duplicate row, and it is Complete.
+    const responseSaves = fake.saved.filter((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(responseSaves).toHaveLength(1);
+    expect(responseSaves[0].values.Status).toBe('Complete');
+    // Counted once (promotion) and hooks fired once.
+    expect(fake.distribution?.ResponseCount).toBe(1);
+    expect(fireHooks.published).toHaveLength(1);
+  });
+
+  it('final submit collides with a row a concurrent request already Completed: idempotent no-op (no row/count/hooks)', async () => {
+    const fireHooks = recordingQueue();
+    const { ctx, fake } = buildBlankSession({ concurrentlyCreated: [concurrentRow('Complete')], queue: fireHooks });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ partial: false, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Complete');
+    expect(result.responseId).toBe(CLIENT_ID);
+    // Nothing written: no duplicate response, no answers, no count — and hooks did NOT re-fire.
+    expect(fake.saved).toHaveLength(0);
+    expect(fireHooks.published).toHaveLength(0);
+  });
+
+  it('a late partial autosave collides with an already-Completed row: never downgrades it to Partial', async () => {
+    const { ctx, fake } = buildBlankSession({ concurrentlyCreated: [concurrentRow('Complete')] });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ partial: true, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    // Reports the terminal status, and leaves the Complete row untouched (no Partial overwrite).
+    expect(result.status).toBe('Complete');
+    expect(result.responseId).toBe(CLIENT_ID);
+    expect(fake.saved).toHaveLength(0);
+  });
+});
+
+describe('submission shape validation (loud failure, not a throw)', () => {
+  it('returns a clear error result when distributionSlug is missing', async () => {
+    const { ctx } = build();
+    const result = await saveThroughEngine(ctx, validSubmission({ distributionSlug: '' }));
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/distributionSlug/i);
+  });
+
+  it('returns a clear error result when formVersionId is missing', async () => {
+    const { ctx } = build();
+    const result = await saveThroughEngine(ctx, validSubmission({ formVersionId: '' }));
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/formVersionId/i);
+  });
+
+  it('LOGS why a submit was refused, not just how long it took', async () => {
+    // OBSERVED IN PRODUCTION. A refused submit emitted only the timing line — the refusal
+    // reason was never written anywhere. Five refusals in one session could only be diagnosed
+    // by noticing which stage was LAST in the breakdown and reading the pipeline source to see
+    // which gate returns before its own mark. The respondent is told what happened; the
+    // operator, who is the one who can fix it, is told nothing.
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    });
+    try {
+      const { ctx } = build();
+      const result = await saveThroughEngine(ctx, validSubmission({ formVersionId: '' }));
+      expect(result.success).toBe(false);
+
+      const line = logged.find((l) => l.includes('[Forms] submit'));
+      expect(line, 'the submit should still log a line').toBeDefined();
+      expect(line).toMatch(/refused/i);
+      expect(line).toMatch(/formVersionId/i);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('returns a clear error result when an answer is missing its question id', async () => {
+    const { ctx } = build();
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ answers: [{ questionId: '', textValue: 'x' }] }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/question id/i);
+  });
+});
+
+describe('an idempotent resubmit lands on the SAME ending the first submit did', () => {
+  /** A form whose thank-you page depends on how the respondent answered. */
+  const conditionalEndings = () =>
+    makeDefinition({
+      endScreens: [
+        {
+          id: 'end-vip',
+          screenType: 'Ending',
+          title: 'VIP',
+          displayOrder: 0,
+          body: 'A concierge will call you.',
+          conditionalRule: {
+            show: { all: [{ questionId: 'q-name', op: 'equals', value: 'Ada Lovelace' }] },
+          },
+        },
+        { id: 'end-default', screenType: 'Ending', title: 'Thanks', displayOrder: 1, isDefault: true },
+      ],
+    });
+
+  it('resolves the conditional ending on a retry of an already-Complete response', async () => {
+    // A retry is the case this matters in: the first submit SUCCEEDED and its network response was
+    // lost, so the respondent sees only what the retry returns. Resolving with no answers gave
+    // them the default ending — a different thank-you page, or no redirect at all, for a response
+    // the server had already accepted and routed correctly.
+    const { ctx } = build({
+      definition: conditionalEndings(),
+      existingResponses: [
+        {
+          ID: 'resp-1',
+          Status: 'Complete',
+          FormVersionID: 'ver-1',
+          AnonymousSessionID: SESSION,
+        },
+      ],
+      existingAnswers: [{ ID: 'ans-1', QuestionID: 'q-name', TextValue: 'Ada Lovelace' }],
+    });
+
+    const result = await saveThroughEngine(ctx, validSubmission());
+
+    expect(result.success).toBe(true);
+    expect(result.responseId).toBe('resp-1');
+    expect(result.confirmationMessage).toBe('VIP\n\nA concierge will call you.');
+  });
+
+  it('still falls back to the default ending when the answers match no condition', async () => {
+    const { ctx } = build({
+      definition: conditionalEndings(),
+      existingResponses: [
+        {
+          ID: 'resp-1',
+          Status: 'Complete',
+          FormVersionID: 'ver-1',
+          AnonymousSessionID: SESSION,
+        },
+      ],
+      existingAnswers: [{ ID: 'ans-1', QuestionID: 'q-name', TextValue: 'Someone Else' }],
+    });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ answers: [{ questionId: 'q-name', textValue: 'Someone Else' }] }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.confirmationMessage).toBe('Thanks');
+  });
+
+  // #302: after one real completion, a session could keep sending finals with any answers and read
+  // back the ending — a gated redirect included — that THOSE answers would earn, without validation,
+  // quota or a write. The repeat is answered from what the response STORED.
+  it('answers a repeat with DIFFERENT answers from the stored ones — the new answers earn nothing', async () => {
+    const { ctx, fake } = build({
+      definition: conditionalEndings(),
+      existingResponses: [{ ID: 'resp-1', Status: 'Complete', FormVersionID: 'ver-1', AnonymousSessionID: SESSION }],
+      existingAnswers: [{ ID: 'ans-1', QuestionID: 'q-name', TextValue: 'Someone Else' }],
+    });
+
+    const result = await saveThroughEngine(ctx, validSubmission({ answers: [{ questionId: 'q-name', textValue: 'Ada Lovelace' }] }));
+
+    expect(result.success).toBe(true);
+    expect(result.responseId).toBe('resp-1');
+    expect(result.confirmationMessage).toBe('Thanks');
+    expect(fake.saved).toEqual([]);
+  });
+
+  it('never hands a repeat a gated redirect its stored answers did not earn', async () => {
+    const gated = makeDefinition({
+      endScreens: [
+        {
+          id: 'end-booking',
+          screenType: 'Ending',
+          title: 'Book your call',
+          displayOrder: 0,
+          redirectURL: 'https://secret.example/booking-link',
+          conditionalRule: { show: { all: [{ questionId: 'q-name', op: 'equals', value: 'Ada Lovelace' }] } },
+        },
+        { id: 'end-default', screenType: 'Ending', title: 'Thanks', displayOrder: 1, isDefault: true },
+      ],
+    });
+    const { ctx } = build({
+      definition: gated,
+      existingResponses: [{ ID: 'resp-1', Status: 'Complete', FormVersionID: 'ver-1', AnonymousSessionID: SESSION }],
+      existingAnswers: [{ ID: 'ans-1', QuestionID: 'q-name', TextValue: 'Someone Else' }],
+    });
+
+    const result = await saveThroughEngine(ctx, validSubmission({ answers: [{ questionId: 'q-name', textValue: 'Ada Lovelace' }] }));
+
+    expect(result.redirectUrl).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain('secret.example');
+  });
+
+  // The same probe through the two doors the final-mode short-circuit does not guard: an AUTOSAVE
+  // naming the sealed row's id (no captcha, no required-field check), and a final that raced the
+  // seal and met the row at the primary key. Both reach the duplicate-key recovery, which answers
+  // `deduped` against the sealed row — and must answer it with the row's ending, not the probe's.
+  function gatedEndings(): ReturnType<typeof makeDefinition> {
+    return makeDefinition({
+      endScreens: [
+        {
+          id: 'end-booking',
+          screenType: 'Ending',
+          title: 'Book your call',
+          displayOrder: 0,
+          redirectURL: 'https://secret.example/booking-link',
+          conditionalRule: { show: { all: [{ questionId: 'q-name', op: 'equals', value: 'Ada Lovelace' }] } },
+        },
+        { id: 'end-default', screenType: 'Ending', title: 'Thanks', displayOrder: 1, isDefault: true },
+      ],
+    });
+  }
+  const SEALED_ID = '77777777-2222-4333-8444-555555555555';
+
+  it('answers an autosave naming a sealed row with the ending the row stored, never the probe’s', async () => {
+    const { ctx, fake } = build({
+      definition: gatedEndings(),
+      existingResponses: [{ ID: SEALED_ID, Status: 'Complete', FormVersionID: 'ver-1', AnonymousSessionID: SESSION }],
+      existingAnswers: [{ ID: 'ans-1', QuestionID: 'q-name', TextValue: 'Someone Else' }],
+    });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ partial: true, clientResponseId: SEALED_ID, answers: [{ questionId: 'q-name', textValue: 'Ada Lovelace' }] }),
+    );
+
+    expect(result.status).toBe('Complete');
+    expect(JSON.stringify(result)).not.toContain('secret.example');
+    expect(result.confirmationMessage).toBe('Thanks');
+    expect(fake.saved.filter((s) => s.entityName === FORM_RESPONSE_ANSWER_ENTITY)).toEqual([]);
+  });
+
+  it('answers a final that met the sealed row at the primary key with the row’s stored ending', async () => {
+    const { ctx } = build({
+      definition: gatedEndings(),
+      concurrentlyCreated: [{ ID: SEALED_ID, Status: 'Complete', FormVersionID: 'ver-1', AnonymousSessionID: SESSION }],
+      existingAnswers: [{ ID: 'ans-1', QuestionID: 'q-name', TextValue: 'Someone Else' }],
+    });
+
+    const result = await saveThroughEngine(
+      ctx,
+      validSubmission({ clientResponseId: SEALED_ID, answers: [{ questionId: 'q-name', textValue: 'Ada Lovelace' }] }),
+    );
+
+    expect(result.status).toBe('Complete');
+    expect(JSON.stringify(result)).not.toContain('secret.example');
+    expect(result.confirmationMessage).toBe('Thanks');
+  });
+});

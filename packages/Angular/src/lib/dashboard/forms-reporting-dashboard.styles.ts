@@ -157,9 +157,23 @@ export const FORMS_REPORTING_CSS = /* css */ `
   padding: var(--mjf-stack) var(--mjf-gutter);
 }
 
-.rp-mock { align-self: flex-start; }
-
 .rp-alert { align-items: center; }
+
+/* An informational note (a capped summary, a partial export): the warning palette the response
+   detail uses for its "incomplete, not empty" notes, because that is what each of these says. */
+.rp-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mjf-gap-sm);
+  margin: 0;
+  padding: 12px 16px;
+  font-size: var(--mjf-meta);
+  line-height: 1.5;
+  border: 1px solid var(--mj-status-warning-border);
+  border-radius: var(--mjf-radius-sm);
+  background: var(--mj-status-warning-bg);
+  color: var(--mj-status-warning-text);
+}
 .rp-alert-close {
   flex: none;
   padding: 4px;

@@ -1,31 +1,32 @@
 /**
- * Forms home data service.
+ * Forms home's data seam: the grid, the lifecycle verbs, and the three ways to start a form.
  *
- * Read path: pure `RunViews` (`ResultType: 'simple'`) — the grid of forms with
- * their category and response counts (FORMS_BUILD_PLAN §8.1: no new infra).
- *
- * Authoring path: resolves a Forms authoring/template Action by name and runs it
- * server-side via `GraphQLActionClient`, returning the new `FormID` so the
- * dashboard can open the created form in the WP-D builder. No Forms entity is
- * mutated client-side, so this stays independent of generated Forms types.
+ * Nothing here decides anything about a form. The grid is `../shared/form-catalog`; archive,
+ * restore and "start from a saved template" are Remote Operations (`Forms.ArchiveForm`,
+ * `Forms.RestoreForm`, `Forms.CreateFormFromTemplate`) whose rules live on the server, where an
+ * Action or an agent gets the same answer (spec #303 §9); the brief and starter-template routes
+ * stay Actions. What this adds is the one shape each surface wants back, so the dashboard reads
+ * outcomes rather than three result conventions.
  */
 import { Injectable } from '@angular/core';
-import { LogError, Metadata, RunView, type RunViewResult } from '@memberjunction/core';
-import type { MJActionEntityType } from '@memberjunction/core-entities';
-import { quoteSqlString } from '@mj-biz-apps/forms-entities';
-import type { mjBizAppsFormsFormEntity } from '@mj-biz-apps/forms-entities';
-import type { ActionParam, ActionResult } from '@memberjunction/actions-base';
-import { GraphQLActionClient, GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
-
+import type { ActionParam } from '@memberjunction/actions-base';
 import {
-  HOME_ENTITY,
-  type FormStatus,
-  type FormCategorySimpleRecord,
-  type FormSimpleRecord,
-  type FormSummaryRow,
-} from './home-models';
+  FormsArchiveFormOperation,
+  FormsCreateFormFromTemplateOperation,
+  FormsRestoreFormOperation,
+  type FormsCreateFormFromTemplateOutput,
+  type FormsFormLifecycleOutput,
+} from '@mj-biz-apps/forms-entities';
+import { readFormListing } from '../shared/form-catalog';
+import { runActionByName } from '../shared/authoring-actions';
+import { runOperation, type OperationOutcome } from '../shared/remote-operation';
+import { FORMS_ENTITY } from '../shared/entity-names';
+
+import type { FormSummaryRow } from './home-models';
 import { buildFormRows, readFormIdFromResult } from './home-aggregations';
-import { loadCompleteResponseCounts } from '../shared/complete-response-counts';
+
+/** What archiving or restoring writes: the form, and the share links archiving closes. */
+const LIFECYCLE_WRITES = [FORMS_ENTITY.Form, FORMS_ENTITY.FormDistribution];
 
 /** Outcome of running an authoring/template action. */
 export interface AuthoringResult {
@@ -36,128 +37,56 @@ export interface AuthoringResult {
 
 @Injectable()
 export class FormsHomeService {
-  private readonly rv = new RunView();
-
-  /**
-   * Loads the Forms grid: forms + categories in one batch, then their Complete response
-   * counts (the ids are needed first). What "a response" means lives in
-   * `../shared/complete-response-counts`.
-   */
+  /** The Forms grid: every working form with its category and Complete-response count. */
   public async loadForms(): Promise<FormSummaryRow[]> {
-    const [formsRes, catsRes] = (await this.rv.RunViews([
-      {
-        EntityName: HOME_ENTITY.forms,
-        // Templates are Form rows too (see form-clone.service.ts for why). They are offered in
-        // the gallery, never listed here — a template in the forms list reads as a form somebody
-        // forgot to finish, and its response count would always be zero.
-        ExtraFilter: 'IsTemplate = 0',
-        ResultType: 'simple',
-        Fields: ['ID', 'Name', 'Status', 'CategoryID', '__mj_UpdatedAt'],
-        OrderBy: 'Name',
-      },
-      {
-        EntityName: HOME_ENTITY.categories,
-        ResultType: 'simple',
-        Fields: ['ID', 'Name'],
-      },
-    ])) as [RunViewResult<FormSimpleRecord>, RunViewResult<FormCategorySimpleRecord>];
-
-    if (!formsRes.Success) {
-      // This message is the DETAIL of the home alert, which already leads with "Failed to load
-      // forms" (see failureMessage in ../shared) — so the fallback states a reason, not the
-      // headline again.
-      throw new Error(formsRes.ErrorMessage || 'the Forms view reported a failure with no error message');
-    }
-    // Categories and counts are enrichment-only: the grid still loads without them.
-    const cats = catsRes.Success ? catsRes.Results : [];
-    const counts = await this.loadCountsOrNull(formsRes.Results.map((f) => f.ID));
-    return buildFormRows(formsRes.Results, cats, counts);
-  }
-
-  private async loadCountsOrNull(formIds: readonly string[]): Promise<Map<string, number> | null> {
-    try {
-      return await loadCompleteResponseCounts(this.rv, formIds);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      LogError(`Counting Complete responses for ${formIds.length} forms on Forms home failed: ${reason}`);
-      return null;
-    }
+    const listing = await readFormListing();
+    return buildFormRows(listing.forms, listing.categories, listing.counts);
   }
 
   /**
-   * Moves a form between lifecycle states — the archive/restore path behind the list's
-   * row actions.
-   *
-   * This is how "delete a form" is offered, and the reason it is not a delete: every
-   * child table (FormVersion, FormPage, FormQuestion, FormDistribution, FormResponse,
-   * FormUpload, FormAutomation, FormEntityBinding) holds a plain FK to `Form(ID)` with no
-   * `ON DELETE CASCADE`, so removing a row would fail for any form that has ever been
-   * edited — and would destroy submitted responses for one that succeeded. `Closed`
-   * already means "no longer accepting responses", which is the honest version of what an
-   * author wants when they reach for delete, and it is reversible.
+   * Archive a form (`Closed`), closing every Active share link in the same transaction — the
+   * offered stand-in for "delete", because a form that collected responses must keep them.
    */
-  public async setStatus(formId: string, status: FormStatus): Promise<string | null> {
-    const md = new Metadata();
-    const form = await md.GetEntityObject<mjBizAppsFormsFormEntity>(HOME_ENTITY.forms);
-    // The returned text is the DETAIL of Forms home's alert, which already leads with "Could not
-    // archive/restore this form" (see failureMessage in ../shared) — so it states a reason, not a
-    // second headline. The log line carries the context the reason leaves out.
-    if (!(await form.Load(formId))) {
-      const message = `form ${formId} could not be loaded`;
-      LogError(`setStatus(${formId}, ${status}) failed: ${message}`);
-      return message;
-    }
-    form.Status = status;
-    if (await form.Save()) {
-      return null;
-    }
-    const message =
-      form.LatestResult?.CompleteMessage ?? 'the save reported a failure with no error message';
-    LogError(`setStatus(${formId}, ${status}) failed: ${message}`);
-    return message;
+  public archive(formId: string): Promise<OperationOutcome<FormsFormLifecycleOutput>> {
+    return runOperation(new FormsArchiveFormOperation(), { FormID: formId }, `archiving form ${formId}`, LIFECYCLE_WRITES);
   }
 
   /**
-   * Runs an authoring/template Action by name with the given input params and
-   * returns the created form id from the action's output params.
+   * Restore an archived form: back to `Published` when it has a published version, else `Draft`.
+   * Its share links stay closed until someone reopens them, so restoring never silently puts a
+   * public link back in front of respondents.
    */
-  public async runAuthoringAction(
-    actionName: string,
-    inputs: ActionParam[],
-  ): Promise<AuthoringResult> {
-    const actionId = await this.resolveActionId(actionName);
-    if (!actionId) {
-      return { success: false, formId: null, message: `Action '${actionName}' is not installed.` };
+  public restore(formId: string): Promise<OperationOutcome<FormsFormLifecycleOutput>> {
+    return runOperation(new FormsRestoreFormOperation(), { FormID: formId }, `restoring form ${formId}`, LIFECYCLE_WRITES);
+  }
+
+  /** A new Draft form copied from a SAVED template, named `name`. */
+  public createFromTemplate(
+    templateFormId: string,
+    name: string,
+  ): Promise<OperationOutcome<FormsCreateFormFromTemplateOutput>> {
+    return runOperation(
+      new FormsCreateFormFromTemplateOperation(),
+      { TemplateFormID: templateFormId, Name: name },
+      `creating a form from template ${templateFormId}`,
+      [FORMS_ENTITY.Form],
+    );
+  }
+
+  /** Run an authoring/template Action by name and report the form it created. */
+  public async runAuthoringAction(actionName: string, inputs: ActionParam[]): Promise<AuthoringResult> {
+    const run = await runActionByName(actionName, inputs);
+    if (!run.ok) {
+      return { success: false, formId: null, message: run.message };
     }
-    const client = new GraphQLActionClient(GraphQLDataProvider.Instance);
-    const result: ActionResult = await client.RunAction(actionId, inputs);
-    if (!result.Success) {
+    if (!run.result.Success) {
       return {
         success: false,
         formId: null,
         // A reason, not a headline: Forms home prefixes it with "The authoring action failed".
-        message: result.Message || 'the action reported a failure with no error message',
+        message: run.result.Message || 'the action reported a failure with no error message',
       };
     }
-    return {
-      success: true,
-      formId: readFormIdFromResult(result),
-      message: result.Message || 'Form created.',
-    };
-  }
-
-  /** Looks up the Action record id by its registered name. */
-  private async resolveActionId(actionName: string): Promise<string | null> {
-    const res = (await this.rv.RunView({
-      EntityName: HOME_ENTITY.actions,
-      ResultType: 'simple',
-      Fields: ['ID', 'Name'],
-      ExtraFilter: `Name=${quoteSqlString(actionName)}`,
-      MaxRows: 1,
-    })) as RunViewResult<MJActionEntityType>;
-    if (!res.Success || res.Results.length === 0) {
-      return null;
-    }
-    return res.Results[0].ID ?? null;
+    return { success: true, formId: readFormIdFromResult(run.result), message: run.result.Message || 'Form created.' };
   }
 }

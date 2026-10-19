@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
 import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../../shared';
 import { percent } from '../reporting-view-model';
-import type { OpenTextInsight } from '../services/open-text-insights';
+import type { OpenTextInsight } from '../models/reporting.model';
 
 /**
  * "What they wrote" — written questions summarised, never quoted.

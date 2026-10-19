@@ -254,6 +254,91 @@ our migrations left unsaid.
 
 ---
 
+## 4a. What #303 changed in the database
+
+**Three migrations**, and nothing else:
+
+| Migration | What it does |
+|---|---|
+| `V202610172100__v0.16.x__Form_Automation_Event_Outbox.sql` | Creates `FormAutomationEvent`, the on-submit automation outbox: one row per run a save owes, written in the save's own transaction and claimed by the automation drain (`Status` Pending → Running → Complete / DeadLetter / Abandoned, `AttemptCount`, `NextAttemptAt`, the lease columns `LockedBy` / `LockedUntil`, `IsReplay`, `LastError`). A filtered unique index allows one `OnComplete` event per response. Adds nullable `FormAutomationRun.FormAutomationEventID` (FK), the event whose run ran the step — the run's identity for at-least-once delivery: a re-run re-runs only the steps with no terminal run carrying that id. Carries its CodeGen output, with the entity row seeded in the same file (shipped id `0DBA2EE2-89F7-4120-BD1B-7AA3672B7DEF`) and every later reference resolved by natural key. |
+| `V202610172101__v0.16.x__Field_Form_Sections.sql` | Metadata only: sets `GeneratedFormSection = 'Category'` (and a `Category` where one was missing) on five EntityField rows earlier migrations inserted as `'Details'` — two on FormDistribution, two on FormResponse, one on FormAutomationRun (`FormAutomationEventID`) — so a host's Explorer files them in their category panels instead of a stray "Details" panel. |
+| `V202610172102__v0.16.x__Retire_Respondent_Form_Version_Read.sql` | Core rows only: deletes the `Form Respondent` role's Read grant on Form Versions (matched by role name + entity name, every duplicate) and its `MJ Forms: Respondent Own Form Versions` row-level-security filter, unless another permission row still names that filter. With the grant, any holder of a public link could read the raw `DefinitionSnapshot` — answer key, ending redirects, knockout conditions — through the generated `mjBizAppsFormsFormVersion` resolver (#302); the server now reads the published version as the system user. Idempotent; THROW 51115 if the grant survives. |
+
+All three are timestamped after `V202610171645` (#310, `SaveReturnMode = datestamps_only` on Form
+Automation Runs and Form Response Answers), because the outbox file redefines
+`spCreate`/`spUpdateFormAutomationRun` to add `@FormAutomationEventID`. Whichever file defines a
+procedure last is what a host keeps, so the outbox file carries #310's datestamps-only result
+`SELECT`s as well; its header (edit 4) says why that merge is by hand.
+
+None sets **`READ_COMMITTED_SNAPSHOT`**, which a host needs — that is a host step, in
+[`docs/local-host.md` §5](local-host.md#5-host-requirements-since-303-the-automation-outbox-and-read_committed_snapshot).
+
+**Everything else is metadata**, declared under `metadata/` and shipped at release in the one
+consolidated `Metadata_Sync` (see `migrations/README.md`): the 19 `Forms.*` Remote Operations and
+their category, the three reporting queries, the automation outbox sweep's Scheduled Job Type and
+Scheduled Job, the four builder `RelatedRecordCollection`s, and the
+`forms` / `forms:read` / `forms:write` API scopes. So until that release migration exists,
+`npm run check:release-seed` reports these records as unseeded — expected, and release work, not a
+defect of the branch. What a host built from migrations alone (the clean room above) does without
+them, so nobody mistakes it for a code defect:
+
+- The operations still run: with no `MJ: Remote Operations` row, MJ governs an operation by its
+  code registration alone (`RemoteOperationEngineBase.IsInvokable`).
+- With no Scheduled Job row, nothing sweeps the outbox: first attempts still run from the submitting
+  process after commit, but a retry or an event a stopped process left `Running` waits until a host
+  runs the sweep. Responses are accepted either way.
+- With no reporting queries, `Forms.GetResponseSummary` cannot build the dashboard.
+- With no `RelatedRecordCollection` rows, the builder's structural edits (add, delete, reorder)
+  have no collections to save through.
+- With no `forms:*` API scopes, an API key cannot be granted access to the operations.
+
+**CodeGen gained an output.** `mj.config.cjs` `output` has `{ type: 'RemoteOperations' }`, which
+emits `packages/Entities/src/generated/remote_operations.ts` (one `Forms*Operation` class per
+`MJ: Remote Operations` row, with its I/O types read verbatim from
+`metadata/remote-operations/types/*.ts`). It reads the pushed rows, so a regeneration needs a database
+the metadata was pushed to.
+
+**Building a #303 sandbox.** Build it with the clean-room chain above at the pinned MJ tag
+(`-t v6.1.5`), never by migrating an older room upward past a tag it was not built at.
+`check:host-truth` derives its core tag from the highest `mjVersionRange` floor among this app,
+bizapps-common and bizapps-tasks (a room holding all three can sit no lower); pass
+`--core-tag v6.1.5` to build at the pin. Moving #303's automations onto MJ's Work Queue once a 6.2 LTS ships is a separate,
+later change: the outbox stays the record of what a save owes, and the queue would only wake the
+drain.
+
+### Release checklist: guarantees only an opt-in spec proves
+
+CI never sets `FORMS_INTEGRATION_DB`, so the specs below are skipped on every pull request, and a
+regression in what they prove **merges green**. Each is a claim about what SQL Server does — a lock,
+a rollback, a collation — that no fake provider can hold. Run all of them against a sandbox built
+at the release's MJ tag before cutting the release, and record the result in the release PR:
+
+```bash
+cd packages/CoreEntitiesServer
+FORMS_INTEGRATION_DB=1 npx vitest run \
+  src/engines/__tests__/FormSubmissionEngine.integration.spec.ts \
+  src/entities/__tests__/form-structure-graph.integration.spec.ts \
+  src/reporting/__tests__/FormReportingEngine.integration.spec.ts \
+  src/engines/__tests__/FormAuthoringEngine.integration.spec.ts
+```
+
+| # | Guarantee | Where it is proven |
+|---|---|---|
+| 1 | **DW9** — concurrent final saves never exceed `MaxResponses`; the refusal comes from the conditional slot `UPDATE` | `FormSubmissionEngine.integration.spec.ts`, both DW9 cases |
+| 2 | **DW10** — a final save commits the response and its `FormAutomationEvent` together, or neither | `FormSubmissionEngine.integration.spec.ts`, both DW10 cases |
+| 3 | **Draft promotion is serialised** — two concurrent finals promoting one draft take one slot and queue one event | `FormSubmissionEngine.integration.spec.ts`, "promoting ONE draft" |
+| 4 | **Key-only structural saves** — a builder structural edit sends none of the form's columns, so a rename or an archive committed meanwhile survives it | `form-structure-graph.integration.spec.ts`, the rename / archive / page-title cases |
+| 5 | **Binary value grouping** — the reporting queries count a choice value by its exact text (`G` and `"g "` are not option `g`) | `FormReportingEngine.integration.spec.ts`, "counts choice values by their exact text" |
+| 6 | **The outbox claim** — two drains claiming at once take disjoint events; a retried event waits for its `NextAttemptAt`; only the lease holder settles; an event never overtakes an older open one of its response | `FormSubmissionEngine.integration.spec.ts`, "the automation outbox claim on SQL Server" |
+
+Also there, not one of the six but in the same class: a stale builder save after a submission
+leaves `ResponseCount` where the slot `UPDATE` put it (final review I2), and clone / create-from-
+template / publish-immediately roll back whole (`FormAuthoringEngine.integration.spec.ts`). The
+durable fix is a scheduled CI job against a container database; until one exists, this list is the
+only thing standing between those claims and a silent regression.
+
+---
+
 ## 5. Upgrading the MJ version
 
 The runbook is [`.claude/skills/mj-upgrade/SKILL.md`](../.claude/skills/mj-upgrade/SKILL.md); it is

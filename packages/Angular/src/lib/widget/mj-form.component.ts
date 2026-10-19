@@ -1,7 +1,16 @@
 /**
- * Root of the `<mj-form>` custom element. Loads the published form via the S1 API,
- * builds the shared {@link FormRuntime}, themes the host from the form's style tokens,
- * picks the render mode, and handles submit / partial-save.
+ * Root of the `<mj-form>` custom element. Loads the form via the S1 API
+ * (`Forms.GetRespondentForm`), builds the shared {@link FormRuntime}, themes the host from the
+ * form's style tokens, picks the render mode, and handles submit / partial-save
+ * (`Forms.SaveResponse`).
+ *
+ * WHO ENDS THE FORM (#303). The live widget holds the respondent projection, which carries no
+ * scoring, no ending screens and no knockout or score conditions (#302), so it cannot judge a
+ * knockout or pick an ending, and never tries: every save's result says whether the form ended
+ * (`Outcome`) and on which screen (`Ending`). The builder's Preview hands in the author's FULL
+ * draft instead, sends nothing anywhere, and resolves locally through the same contracts function
+ * the server uses (`resolveResponseOutcome`) — one code path for both (DW13 / #75). Which of the two
+ * this widget is doing is the `kind` of the {@link WidgetForm} it holds, decided once, at load.
  *
  * It is a normal standalone Angular component; {@link registerMjFormElement} wraps it
  * as a browser custom element. No Explorer shell, no MJ global provider — everything
@@ -21,33 +30,44 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import type { FormsSaveResponseInput, FormsSaveResponseOutput } from '@mj-biz-apps/forms-entities';
 import {
   CAPTCHA_NOT_CONFIGURED_MESSAGE,
-  computeScore,
+  collectLaterImageUrls,
   endingMessage,
   endingRedirectUrl,
   endsWithoutSubmit,
   NOTHING_TO_SUBMIT_MESSAGE,
-  resolveFormOutcome,
+  resolveDefinitionForRender,
+  resolveRespondentDefinitionForRender,
+  resolveResponseOutcome,
+  resolveStyleTokensForRender,
   SCREENED_OUT_MESSAGE,
+  type FormAnswerInput,
   type FormOutcome,
-  type FormSubmissionInput,
-  type FormSubmissionResult,
   type FormStyleTokens,
   type PublishedFormDefinition,
   type PublishedFormScreen,
   type ResumeSnapshot,
 } from '@mj-biz-apps/forms-entities/contracts';
 
-import { FORMS_API_SERVICE, SessionExpiredError } from './api/forms-api.interface';
+import {
+  FORM_UNAVAILABLE_MESSAGE,
+  FORMS_API_SERVICE,
+  FormUnavailableError,
+  SessionExpiredError,
+} from './api/forms-api.interface';
+import { toSaveResponseInput, toWireAnswer } from './api/submission-mapping';
+import { endingScreenFrom } from './core/server-ending';
+import { failureDetail } from './core/failure-detail';
+import { fullForm, projectionForm, type WidgetForm, type WidgetRenderDefinition } from './core/widget-form';
 import { FORMS_API_CONFIG } from './api/forms-api.config';
 import { submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
-import { collectLaterImageUrls, resolveDefinitionForRender, resolveStyleTokensForRender } from './core/asset-ref';
 import { gateWelcomeScreen } from './core/welcome-gate';
 import { prefetchImages, type PrefetchHandle } from './core/image-prefetch';
 import { FormRuntime } from './core/form-runtime';
-import { AutosaveController, type AutosaveStatus } from './core/autosave-controller';
+import { AutosaveController, NOTHING_TO_SAVE, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
 import { FormUploadStore } from './core/upload-store';
 import { passedSubmitPoints } from './core/partial-submit-point';
@@ -93,9 +113,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
   public readonly distributionSlug = input<string>('', { alias: 'slug' });
 
   /**
-   * Pre-built definition to render directly, bypassing the API fetch. Used by the
+   * The author's full draft definition to render directly, bypassing the API. Used by the
    * builder's WYSIWYG Preview to render the unpublished draft (fillable, themed) with no
-   * publish/DB round-trip. When set, {@link load} skips `loadPublishedForm`.
+   * publish/DB round-trip. When set, {@link load} skips `loadRespondentForm`, and the widget
+   * becomes a `full` form: it resolves endings locally and sends nothing — no autosave, no submit.
    */
   public readonly definitionInput = input<PublishedFormDefinition | null>(null, { alias: 'definition' });
 
@@ -122,12 +143,24 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   protected readonly isHeroPhase = computed(() => this.phase() === 'welcome' || this.phase() === 'done');
   protected readonly errorText = signal<string>('');
-  protected readonly definition = signal<PublishedFormDefinition | null>(null);
+  /** What this widget holds: the live projection, or the author's full draft (see the class header). */
+  private readonly form = signal<WidgetForm | null>(null);
+  /** What every surface renders, whichever kind of form it is. */
+  protected readonly definition = computed<WidgetRenderDefinition | null>(() => this.form()?.render ?? null);
   protected readonly runtime = signal<FormRuntime | null>(null);
-  protected readonly result = signal<FormSubmissionResult | null>(null);
+  /** The result the confirmation reads: the submit's, a knockout's seal, or a resumed sealed row's. */
+  protected readonly result = signal<FormsSaveResponseOutput | null>(null);
 
   /** Subtle, non-blocking autosave indicator. */
   protected readonly autosaveStatus = signal<AutosaveStatus>('idle');
+
+  /**
+   * True once the answers the respondent COMMITTED could not be saved after every automatic retry —
+   * so the server has not yet judged them (a knockout among them included). Shown as a notice, not a
+   * blocker: the respondent keeps going, the next edit tries again, and the final submit is judged by
+   * the server regardless (fix round 1, Minor 4). Cleared by the next save that lands.
+   */
+  protected readonly saveNotice = signal(false);
 
   /**
    * True when this widget mounted onto a draft the server handed back (#138).
@@ -158,12 +191,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
   public readonly resumeNotice = input<string>('', { alias: 'resume-notice' });
 
   /**
-   * The ending screen this response resolved to, set once at submit time.
+   * The ending screen this response landed on, set once when the form ends.
    *
-   * Captured rather than recomputed on every render, because it is resolved from the answers
-   * AS SUBMITTED. Recomputing would re-read a runtime the respondent can no longer edit but
-   * which a stray autosave or a re-render could still perturb, and a thank-you page that
-   * changes after it is shown is a genuinely disorienting thing to ship.
+   * Live: the screen the SERVER chose and returned (`Ending`). Preview: resolved locally from the
+   * answers as submitted. Captured rather than recomputed on every render either way: a thank-you
+   * page that changes after it is shown is a genuinely disorienting thing to ship.
    */
   private readonly endingScreen = signal<PublishedFormScreen | undefined>(undefined);
 
@@ -342,6 +374,32 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * per autosave would leave a row (plus an audit row) every few seconds of typing.
    */
   private partialAnnounced = false;
+  /**
+   * The answers as they stood at the respondent's last COMMIT (blur / advance), as a payload key —
+   * or `undefined` before the first commit, or while the draft is held.
+   *
+   * The server judges knockouts on every partial save, keystroke autosaves included, and a keystroke
+   * save carries half-typed values (`1` on its way to `18`). So a save's `ended` is acted on only when
+   * the answers it carried are exactly the committed ones: a verdict on finished answers. A keystroke
+   * save that comes back `ended` is remembered ({@link lastAcknowledged}) and acted on if the
+   * respondent then commits those same answers.
+   */
+  private committedAnswers: string | undefined;
+  /**
+   * The last save the server ACCEPTED, with the payload key it carried — so a commit whose answers
+   * the server already judged reuses that verdict rather than sending them again. Tabbing through a
+   * scroll form commits on every blur; without this each one would be another request against the
+   * respondent's autosave budget.
+   */
+  private lastAcknowledged: { readonly answersKey: string; readonly result: FormsSaveResponseOutput } | undefined;
+  /**
+   * The payload key of the answers the form OPENED with — empty on a first sitting, the stored draft
+   * on a resume — which the server already holds (or has nothing of). Until a save is accepted, a save
+   * of exactly these answers has nothing to send (fix round 1): a blur on an untouched field must
+   * not write an empty Partial row, which counts against the per-version draft ceiling and makes the
+   * page mint a device invite.
+   */
+  private loadedAnswers: string | undefined;
 
   public async ngOnInit(): Promise<void> {
     await this.load();
@@ -366,53 +424,97 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.resumed.set(false);
     this.resumeDropped.set([]);
     this.partialAnnounced = false;
+    this.committedAnswers = undefined;
+    this.lastAcknowledged = undefined;
+    this.loadedAnswers = undefined;
+    this.saveNotice.set(false);
     try {
-      const loaded = this.definitionInput()
-        ? { definition: this.definitionInput() as PublishedFormDefinition }
-        : await this.api.loadPublishedForm(this.distributionSlug());
-      if (!loaded) {
-        this.fail('This form is not available.');
+      const { form, resume } = await this.loadForm();
+      // The await is where the widget can move on: destroyed by its host, or reloaded by "Try
+      // again". A load resuming after either builds nothing — no runtime, no autosave controller
+      // that nothing would dispose, no overwrite of the newer load's form and response identity.
+      if (!this.isCurrentLoad(generation)) {
         return;
       }
-      // Resolve `/forms/asset/<id>` (and any legacy absolute upload-time host, #270) against
-      // THIS widget's own API origin — the one host guaranteed to be reachable from this
-      // browser and to serve these bytes. `MJAPI_PUBLIC_URL` at upload time was not: a form
-      // authored on localhost, a domain change, or a second API instance all left published
-      // forms pointing respondents at a host they cannot reach.
-      const def = resolveDefinitionForRender(loaded.definition, this.config.graphqlUrl);
+      const def = form.render;
       applyStyleTokens(this.hostRef.nativeElement, def.styleTokens);
-      this.definition.set(def);
-      const runtime = new FormRuntime(def);
+      this.form.set(form);
+      const runtime = new FormRuntime(form);
       this.runtime.set(runtime);
       // File answers are committed by the store, not by a view event — see `FormUploadStore.succeed`.
       this.uploads.connect(runtime);
       this.autosave?.dispose();
-      this.autosave = new AutosaveController(
-        () => this.savePartial(),
-        (status) => this.autosaveStatus.set(status),
-      );
+      // Preview never autosaves: the draft it renders is the author's, and nothing about it may be
+      // sent to the respondent API. Every autosave entry point no-ops on a null controller.
+      this.autosave =
+        form.kind === 'projection'
+          ? new AutosaveController(
+              () => this.savePartial(),
+              (status) => this.autosaveStatus.set(status),
+              undefined,
+              undefined,
+              { onRetriesSpent: () => this.noticeUnsavedCommit() },
+            )
+          : null;
       this.endingScreen.set(undefined);
+      this.result.set(null);
       this.logoBroken.set(false);
       this.bankedSubmitPoints = new Set<string>();
       this.endingEarly = false;
-      const opening = this.adoptResume(loaded.resume, def, runtime) ?? initialPhaseFor(def);
+      const opening = this.adoptResume(resume, def, runtime) ?? initialPhaseFor(def);
+      // After the resume prefill, so a resumed draft's own answers count as already on the server.
+      this.loadedAnswers = this.draftKeyNow();
       const welcomeImage = opening === 'welcome' ? def.welcomeScreen?.mediaURL?.trim() : undefined;
       const gated = !!welcomeImage;
       // Plan before holding: prefetchUrls must be set before anything can start the queue.
-      this.planPrefetch(def, opening, gated);
+      this.planPrefetch(form, opening, gated);
       if (welcomeImage) {
         this.holdForWelcomeImages(welcomeImage, generation); // phase stays 'loading' until the gate reveals
       } else {
         this.phase.set(opening);
       }
     } catch (err) {
+      if (!this.isCurrentLoad(generation)) {
+        return;
+      }
       // A load can meet an expired session too — the error page's "Try again" re-fetches with
       // the same token, and after eight hours that is a 401 with a retry button that loops.
       if (this.endSessionIfExpired(err)) {
         return;
       }
+      if (err instanceof FormUnavailableError) {
+        // One sentence for every reason (a prober must not tell a closed link from a foreign one);
+        // the reason is for whoever opens the console.
+        console.warn(`[mj-form] ${err.reason}`);
+        this.fail(FORM_UNAVAILABLE_MESSAGE);
+        return;
+      }
       this.fail(err instanceof Error ? err.message : 'Failed to load the form.');
     }
+  }
+
+  /** Whether the load numbered `generation` is still the one this widget is showing. */
+  private isCurrentLoad(generation: number): boolean {
+    return !this.destroyed && generation === this.loadGeneration;
+  }
+
+  /**
+   * The form to render, of the right KIND, with its asset references resolved against THIS widget's
+   * own API origin — the one host guaranteed to be reachable from this browser and to serve these
+   * bytes. `MJAPI_PUBLIC_URL` at upload time was not: a form authored on localhost, a domain change,
+   * or a second API instance all left published forms pointing respondents at a host they cannot
+   * reach (#270).
+   */
+  private async loadForm(): Promise<{ form: WidgetForm; resume?: ResumeSnapshot }> {
+    const authored = this.definitionInput();
+    if (authored) {
+      return { form: fullForm(resolveDefinitionForRender(authored, this.config.graphqlUrl)) };
+    }
+    const served = await this.api.loadRespondentForm(this.distributionSlug());
+    return {
+      form: projectionForm(resolveRespondentDefinitionForRender(served.definition, this.config.graphqlUrl)),
+      resume: served.resume,
+    };
   }
 
   /**
@@ -431,7 +533,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   private adoptResume(
     resume: ResumeSnapshot | undefined,
-    definition: PublishedFormDefinition,
+    definition: WidgetRenderDefinition,
     runtime: FormRuntime,
   ): WidgetPhase | undefined {
     if (!resume) {
@@ -447,7 +549,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
       // The confirmation path reads the RESULT, so a resumed sealed row hands it the same shape a
       // submit would have — which is how a `Disqualified` draft gets the screened-out copy rather
       // than a thank-you it never earned.
-      this.result.set({ success: true, responseId: resume.responseId, status: resume.status });
+      this.result.set({ Success: true, ResponseID: resume.responseId, Status: resume.status, Outcome: 'ended', Errors: [] });
     } else {
       // Its answers are already on the server. Saying `saved` rather than `idle` stops the
       // indicator claiming unsaved work the moment the respondent touches anything.
@@ -476,11 +578,16 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * arriving mid-submit is ignored — the in-flight result would overwrite it a moment later.
    */
   public showScreen(selection: ShownScreen): void {
-    const def = this.definition();
-    if (!def || this.phase() === 'submitting') {
+    const form = this.form();
+    if (!form || this.phase() === 'submitting') {
       return;
     }
-    const target = resolveShownScreen(def, selection);
+    // Only an author's full draft has ending screens to jump to; the live projection holds none
+    // (#302), so there only the welcome screen, the questions and the built-in confirmation exist.
+    const target = resolveShownScreen(
+      { welcomeScreen: form.render.welcomeScreen, endScreens: form.kind === 'full' ? form.definition.endScreens : [] },
+      selection,
+    );
     if (!target) {
       return;
     }
@@ -514,7 +621,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.waitingForWelcomeImage.set(true);
     const logo = this.logoUrl();
     gateWelcomeScreen(logo ? [welcomeImage, logo] : [welcomeImage], {
-      isCurrent: () => !this.destroyed && generation === this.loadGeneration,
+      isCurrent: () => this.isCurrentLoad(generation),
       reveal: (failed) => {
         // The gate already saw this logo fail; rendering it would request it again and drop the bar
         // a round trip later, moving the screen just shown. Only the logo the gate loaded: a preview
@@ -536,11 +643,16 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * failed or expired load on `error`/`expired`): the respondent can never see an option or an
    * ending image there, so downloading up to 12 of them would only compete with what is on screen.
    */
-  private planPrefetch(def: PublishedFormDefinition, opening: WidgetPhase, gated: boolean): void {
+  private planPrefetch(form: WidgetForm, opening: WidgetPhase, gated: boolean): void {
     if (opening !== 'welcome' && opening !== 'ready') {
       return;
     }
-    this.prefetchUrls = collectLaterImageUrls(def);
+    // The live form's ending images are unknown until the server picks the ending, so only the
+    // author's full draft prefetches them.
+    this.prefetchUrls = collectLaterImageUrls({
+      pages: form.render.pages,
+      endScreens: form.kind === 'full' ? form.definition.endScreens : [],
+    });
     if (gated) {
       return; // the welcome gate's imagesSettled starts it
     }
@@ -603,9 +715,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * A ONE-WAY transition driven by their own action, deliberately, rather than a view-level
    * suppression of the sentence. Suppressing it in the view would also blank the SERVER's copy of
    * the same message whenever the two predicates disagree — the client settles visibility to a
-   * fixed point while the server makes a single pass, and `settledAnswers` says in so many words
-   * that the two can differ — and the server's refusal is the one that exists to catch what the
-   * client missed, so the respondent would be left with a failed submit and nothing on screen. It
+   * fixed point and the server re-settles from the payload, and on a form whose rules do not settle
+   * the two can differ (`FormRuntime.rulesSettle`) — and the server's refusal is the one that
+   * exists to catch what the client missed, so the respondent would be left with a failed submit and nothing on screen. It
    * would also re-mount the `role="alert"` node every time the condition came back, re-announcing
    * mid-edit with no submit attempt in between. Cleared once, it stays cleared until something
    * raises it again.
@@ -619,79 +731,154 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /**
    * The respondent has FINISHED with a question — they left it, or advanced past it.
    *
-   * Knockout rules are judged here and nowhere else. They used to ride `onProgress`, which in
-   * scroll mode arrives on every keystroke, so a rule like `age lessThan 18` disqualified an
+   * Knockouts are judged on a finished answer and nowhere else. They used to ride `onProgress`,
+   * which in scroll mode arrives on every keystroke, so a rule like `age lessThan 18` disqualified an
    * eligible respondent the instant they typed the `1` of `18` — and irreversibly, because
-   * {@link endEarly} latches, seals the row and leaves intake. A rule that ends the
-   * form has to be judged on a finished answer; autosave keeps riding every change, because
-   * saving a half-typed value costs nothing and is undone by the next save.
+   * {@link endEarly} latches, seals the row and leaves intake. Autosave keeps riding every change,
+   * because saving a half-typed value costs nothing and is undone by the next save.
    *
-   * This is only about when the client NOTICES. The server re-evaluates the same shared rule on
-   * the save regardless, so a client that never fired this is still disqualified.
+   * Live, the widget cannot judge a knockout at all — the projection has none (#302) — so a commit
+   * asks the SERVER: it records the answers as committed and has them saved now, and a save whose
+   * answers are exactly those and whose result is `ended` ends the form ({@link actOnVerdict}).
+   * Preview holds every rule, so it judges locally through the same contracts function.
    */
   protected onCommit(): void {
     if (this.endingEarly || this.phase() !== 'ready') {
       return;
     }
     this.clearNothingToSubmitIfAnswered();
-    const outcome = this.outcomeForAnswers();
-    // Not every finished flow is the widget's to send. `endsWithoutSubmit` is where that line is
-    // drawn and why: a screening is done TO the respondent, so it seals itself, and everything
-    // else waits for them to press Submit. Reading `endedEarly` here instead made a
-    // `Go to -> Submit` fire on a BLUR — click out of a text box and the response was gone.
+    const form = this.form();
+    if (form?.kind === 'full') {
+      this.judgePreviewCommit(form);
+      return;
+    }
+    void this.judgeCommittedAnswers();
+  }
+
+  /**
+   * Preview's half of {@link onCommit}: the author's draft has every rule, nothing is sent, and the
+   * verdict comes from {@link previewOutcome}. Not every finished flow ends here: `endsWithoutSubmit`
+   * draws that line — a screening is done TO the respondent, so it ends itself, and everything else
+   * waits for Submit (reading `endedEarly` instead made a `Go to -> Submit` fire on a BLUR).
+   */
+  private judgePreviewCommit(form: Extract<WidgetForm, { kind: 'full' }>): void {
+    const outcome = this.previewOutcome(form);
     if (outcome && endsWithoutSubmit(outcome)) {
-      void this.endEarly(outcome);
+      void this.endEarly({ screen: outcome.screen, redirectUrl: outcome.screen?.redirectURL?.trim() || undefined });
     }
   }
 
   /**
-   * The verdict these answers have already reached.
+   * The live half of {@link onCommit}: mark the current answers as committed and get the server's
+   * verdict on exactly them.
    *
-   * A pure query — it decides, it does not act. {@link endEarly} is the command half, and keeping
-   * them apart is what lets the command be awaited without the decision being re-made every time
-   * control comes back.
+   * When the last ACCEPTED save already carried these answers, its verdict is the answer and nothing
+   * is sent. Otherwise the save runs now, through the autosave controller so it never overlaps
+   * another save on the same response id; {@link savePartial} acts on its verdict.
    *
-   * The ONE place this component resolves an outcome, read by both paths a finished form can
-   * take: sealed by a screening, or submitted by the respondent. They used to be two calls to two
-   * different resolvers — this one, and `resolveEndingScreen` on the submit path, which resolves
-   * by CONDITION and knows nothing about a jump's named target. So a rule saying "Go to -> Thanks
-   * for applying" showed that screen when it sealed itself and a different one when the
-   * respondent pressed Submit.
-   *
-   * No phase guard: WHEN it is fair to ask is the caller's business, and the submit path asks
-   * after the phase has already left `ready`.
+   * A refused or failed save leaves the commit standing, so the controller's capped retries (and any
+   * later save of the same answers) still deliver its verdict — a knockout is never silently skipped
+   * because a draft ceiling or the autosave rate limit refused one request. If every retry fails, the
+   * final submit is judged by the server as well: it seals a knockout `Disqualified` and returns its
+   * screen.
    */
-  private outcomeForAnswers(): FormOutcome | undefined {
-    const def = this.definition();
-    const rt = this.runtime();
-    if (!def || !rt) {
-      return undefined;
+  private async judgeCommittedAnswers(): Promise<void> {
+    const key = this.draftKeyNow();
+    this.committedAnswers = key;
+    if (key === undefined) {
+      return; // held: nothing can be sent until the unstorable answer is fixed
     }
-    // `visibleAnswers()`, not the raw map — the set this widget will SEND, which is the set the
-    // server judges. The score already folded over the visible questions while the conditions were
-    // read from the raw map, so the two halves of this one expression disagreed: a knockout could
-    // fire here on an answer to a question the respondent had since hidden, be omitted from the
-    // payload, and leave the server writing `Complete` — SubmittedAt stamped, quota counted, every
-    // on-submit automation fired — while the respondent was shown the knockout screen.
-    // The server's view — the answers it will receive AND the question set it will derive from
-    // them. Using the rendered question list here instead was the divergence: an orphaned question
-    // stays "visible" on the client when the rule that reveals it reads an answer that is no
-    // longer being sent.
-    const sent = rt.transmittedView();
-    return resolveFormOutcome(def.pages, def.endScreens ?? [], sent.answers, {
-      score: computeScore(sent.questions, sent.answers),
+    if (key === this.judgedAnswers()) {
+      // Nothing new: the server already judged exactly these answers (or holds them, untouched).
+      // `savePartial` makes the same check, deliberately twice: there it covers every save the
+      // controller runs (debounce, checkpoint, retry); here it keeps a no-op commit from going through
+      // the controller at all, which would flash "Saving…" for a request never made.
+      if (this.lastAcknowledged) {
+        this.actOnVerdict(this.lastAcknowledged.result, key);
+      }
+      return;
+    }
+    await this.autosave?.flushNow();
+  }
+
+  /** The answers the server already has: the last accepted save's, or — before one — those the form opened with. */
+  private judgedAnswers(): string | undefined {
+    return this.lastAcknowledged?.answersKey ?? this.loadedAnswers;
+  }
+
+  /**
+   * The autosave spent its retries. Say so when what it failed to save is a COMMIT the server has not
+   * judged — the case where a knockout could be waiting unseen. Not otherwise: a keystroke draft
+   * the next edit re-saves is not worth interrupting anyone for.
+   */
+  private noticeUnsavedCommit(): void {
+    if (this.committedAnswers !== undefined && this.committedAnswers !== this.lastAcknowledged?.answersKey) {
+      this.saveNotice.set(true);
+    }
+  }
+
+  /**
+   * The payload key of the draft an autosave would send right now, or `undefined` while it is held
+   * (an unstorable answer a rule may read — see `FormRuntime.buildDraftInputs`).
+   */
+  private draftKeyNow(): string | undefined {
+    const draft = this.runtime()?.buildDraftInputs();
+    return draft && !draft.held ? answersKey(draft.answers.map(toWireAnswer)) : undefined;
+  }
+
+  /**
+   * End the form when a save of the COMMITTED answers came back `ended` — a knockout, judged by the
+   * server on finished answers. A save of any other answers set (a keystroke autosave, or answers
+   * edited since the commit) is not a verdict the widget acts on.
+   *
+   * Scheduled, never awaited, from inside a save: {@link endEarly} first quiesces the autosave, and
+   * the save that delivered this verdict is still the controller's in-flight save until it returns.
+   */
+  private actOnVerdict(result: FormsSaveResponseOutput, sentKey: string): void {
+    if (result.Outcome !== 'ended' || sentKey !== this.committedAnswers || this.endingEarly) {
+      return;
+    }
+    void this.endEarly({
+      screen: result.Ending ? endingScreenFrom(result.Ending, this.config.graphqlUrl) : undefined,
+      redirectUrl: result.RedirectURL,
+      result,
     });
   }
 
   /**
-   * End the form on a knockout (C3) — the whole point of a disqualification is that an
+   * The verdict the author's draft has reached, for Preview only — the live widget asks the server.
+   *
+   * A pure query — it decides, it does not act. {@link endEarly} is the command half.
+   *
+   * Over the SETTLED answers, not the raw map: `resolveResponseOutcome` settles visibility, scores
+   * the settled questions and resolves over the settled answers, exactly as the server does on every
+   * save (DW13 / #75), so Preview lands where a respondent would.
+   */
+  private previewOutcome(form: Extract<WidgetForm, { kind: 'full' }>): FormOutcome | undefined {
+    const rt = this.runtime();
+    if (!rt) {
+      return undefined;
+    }
+    const resolved = resolveResponseOutcome(form.definition, rt.currentAnswers());
+    if (!resolved.visibility.settled) {
+      // Not fatal — the last derivation is still a usable verdict — but the server, settling the
+      // payload, may reach a different one, and nothing on screen would say why.
+      console.warn(
+        `[mj-form] form version ${form.definition.formVersionId}: visibility did not settle; this form's show ` +
+          'rules depend on each other in a way that has no stable answer, so the server may judge ' +
+          'this response differently from what is on screen.',
+      );
+    }
+    return resolved.outcome;
+  }
+
+  /**
+   * End the form early — a knockout (C3): the whole point of a disqualification is that an
    * ineligible respondent does not fill the rest in first.
    *
-   * THE ORDER HERE IS THE FEATURE. This client-side verdict is a courtesy; the enforcement is
-   * the server re-evaluating the same shared rule on the save below and writing
-   * `Status = 'Disqualified'`. That makes this one save the only thing standing between a
-   * knockout and a response row that still claims to be an abandoned `Partial` — and it can be
-   * lost two ways that both pass a hand test:
+   * THE ORDER HERE IS THE FEATURE. Live, the partial save that delivered the verdict leaves the row a
+   * `Partial` draft (a seal is permanent, and only a finished submission seals); the final submit
+   * below is what records it `Disqualified`. It can be lost two ways that both pass a hand test:
    *
    *   - `savePartial()` no-ops unless the phase is still 'ready', and `flushNow()` yields
    *     before issuing its write whenever a save is already in flight. Firing it unawaited and
@@ -700,103 +887,113 @@ export class MjFormComponent implements OnInit, OnDestroy {
    *   - `window.location.assign` aborts requests still on the wire, so navigating first
    *     cancels it.
    *
-   * So: bank while intake still permits it, await that, and only then show the screen and
+   * So: seal while intake still permits it, await that, and only then show the screen and
    * follow the redirect — the same order {@link applySubmitResult} uses on the submit path.
    * The respondent waits one round trip before the screen appears, which is the correct trade:
    * the alternative is telling them they are screened out while quietly recording nothing.
    *
-   * Fail-soft like every autosave — `flushNow()` never throws — so a failed bank still shows
-   * the screen rather than stranding the respondent mid-form.
+   * Fail-soft like every autosave, so a failed seal still shows the screen rather than stranding the
+   * respondent mid-form. Preview records nothing: {@link sealEarlyEnd} sends nothing for a full form.
    */
-  private async endEarly(outcome: FormOutcome): Promise<void> {
+  private async endEarly(ending: EarlyEnding): Promise<void> {
     this.endingEarly = true;
     // Quiesce the autosave before writing, so two requests never carry the same
     // `clientResponseId` — the primary-key collision the submit path guards the same way.
     await this.autosave?.settle();
-    await this.sealEarlyEnd();
+    const sealed = await this.sealEarlyEnd();
     // Both awaits above can END THE FILL for a different reason: either writes through
     // `savePartial`, which answers a lapsed session by setting the terminal `expired` phase. This
     // method's ending is not the one that then applies. Without this re-read the unconditional
     // `phase.set('done')` below tore the notice back down, un-inerted the form, and showed a
     // knockout screen — with a redirect, if the screen carried one — for an outcome the server
-    // refused and never recorded. The write below predates the `expired` phase and was correct
-    // when `done` was the only terminal state; it is this feature that gave it something to clobber.
+    // refused and never recorded.
     if (this.phase() === 'expired') {
       return;
     }
-    // Disqualifying or not, the client does the SAME thing here: seal a completion and show the
-    // screen. Which status gets written is the server's call, from the same shared outcome — an
-    // ending jump to an unflagged screen is an ordinary completion (quota counts it, automations
-    // fire) and only the screen differs. Deciding that twice, once per side, is how a respondent
-    // ends up looking at a knockout screen while the row says `Complete`.
-    this.endingScreen.set(outcome.screen);
+    // The seal's own result wins when it landed: the server answers it from the row it sealed. Its
+    // absence (an unsolved captcha, a refusal) leaves the verdict that ended the form.
+    const shown = sealed
+      ? {
+          screen: sealed.Ending ? endingScreenFrom(sealed.Ending, this.config.graphqlUrl) : ending.screen,
+          redirectUrl: sealed.RedirectURL ?? ending.redirectUrl,
+          result: sealed,
+        }
+      : ending;
+    if (shown.result) {
+      this.result.set(shown.result);
+    }
+    this.endingScreen.set(shown.screen);
     this.phase.set('done');
-    const redirectUrl = outcome.screen?.redirectURL?.trim();
-    if (redirectUrl) {
-      this.redirect(redirectUrl);
+    if (sealed) {
+      this.emitHostEvent('mjf-submitted', { responseId: sealed.ResponseID });
+    }
+    if (shown.redirectUrl) {
+      this.redirect(shown.redirectUrl);
     }
   }
 
   /**
-   * Record the knockout: ONE finished submission, sent before the form leaves intake.
+   * Record the knockout: ONE finished submission, sent before the form leaves intake. Resolves with
+   * the server's result when it accepted it; `undefined` when nothing was recorded as sealed.
    *
-   * A finished submission, not an autosave, because only a completion seals a knockout
-   * server-side — a partial deliberately does not, since the rule would otherwise be judged on
-   * whatever half-typed value the debounce happened to catch. For this respondent the form IS
-   * over, so a completion is also the honest description of it.
+   * A finished submission, not an autosave, because only a completion seals a knockout server-side
+   * — a partial deliberately does not, since an autosave carries half-typed values and a seal is
+   * permanent. For this respondent the form IS over, so a completion is the honest description.
    *
    * Fail-soft, like every other background write here. A captcha-gated form whose challenge is
-   * unsolved lands in the catch — the server refuses a completion without a token — and the row
-   * keeps whatever its last autosave left. Showing the respondent their screen anyway is the
-   * better half of that trade; stranding them mid-form to protect a record is not.
+   * unsolved never sends it — the server refuses a completion without a token — and the row keeps
+   * its last draft. Showing the respondent their screen anyway is the better half of that trade;
+   * stranding them mid-form to protect a record is not.
    */
-  private async sealEarlyEnd(): Promise<void> {
-    const def = this.definition();
+  private async sealEarlyEnd(): Promise<FormsSaveResponseOutput | undefined> {
+    const form = this.form();
     const rt = this.runtime();
-    if (!def || !rt) {
-      return;
+    if (!form || !rt || form.kind === 'full') {
+      return undefined;
     }
     // Don't send a completion the server is certain to refuse. The captcha gate applies to every
     // completion, and a knockout can fire long before the challenge is solved — `onSubmit` makes
     // this same check, and skipping it here meant a captcha-gated form could never record one.
-    if (this.submitAllowed() && (await this.trySeal(def, rt))) {
-      return;
+    const sealed = this.submitAllowed() ? await this.trySeal(form, rt) : undefined;
+    if (sealed) {
+      return sealed;
     }
     // The seal did not land. Bank what exists as a draft so the knockout ANSWER survives even
     // though its status did not — `settle()` above cancelled the pending debounce without firing
     // it, and nothing else will write: the latch is set and every other entry point returns early.
     await this.autosave?.flushNow();
+    return undefined;
   }
 
   /**
-   * One attempt at the terminal write. True when the server accepted it.
+   * One attempt at the terminal write: the server's result when it accepted it, else `undefined`.
    *
-   * `submitResponse` RESOLVES with `success: false` for anything the pipeline refuses — a
-   * captcha, the row ceiling, a rate limit — and throws only on a transport failure. A bare
-   * `try/catch` therefore treated every refusal as a successful seal, silently, which is the
-   * worst of the three possible outcomes: no record, and nothing anywhere saying so.
+   * `saveResponse` RESOLVES with `Success: false` for anything the server refuses — a captcha, the
+   * row ceiling, a rate limit — and throws only when the call itself fails. A bare `try/catch`
+   * therefore treated every refusal as a successful seal, silently, which is the worst of the three
+   * possible outcomes: no record, and nothing anywhere saying so.
    */
-  private async trySeal(def: PublishedFormDefinition, rt: FormRuntime): Promise<boolean> {
+  private async trySeal(form: WidgetForm, rt: FormRuntime): Promise<FormsSaveResponseOutput | undefined> {
     try {
-      const res = await this.api.submitResponse(this.buildSubmission(def, rt, false), this.responseTarget());
-      if (res.success) {
-        if (res.responseId) {
-          this.responseId = res.responseId;
+      const res = await this.api.saveResponse(this.buildSubmission(form, rt, false));
+      if (res.Success) {
+        if (res.ResponseID) {
+          this.responseId = res.ResponseID;
         }
-        return true;
+        return res;
       }
-      const why = (res.errors ?? []).map((e) => e.message).join(' ').trim();
+      const why = res.Errors.map((e) => e.Message).join(' ').trim();
       console.warn(`[mj-form] the disqualification could not be recorded: ${why || 'refused'}`);
-      return false;
+      return undefined;
     } catch (err) {
-      // A fourth request that can DISCOVER an expiry, and the first one to do so on a choice
-      // knockout: `endEarly` calls `settle()` beforehand, which cancels the pending debounce
-      // without firing it, so no autosave is in flight when this is sent. Routed through the same
-      // single decision as the other three rather than swallowed here — the log line below stays
-      // for every other refusal, which really is fail-soft background work.
+      // A request that can DISCOVER an expiry, and the first one to do so on a choice knockout:
+      // `endEarly` calls `settle()` beforehand, which cancels the pending debounce without firing
+      // it, so no autosave is in flight when this is sent. Routed through the same single decision
+      // as the other requests rather than swallowed here — the log line below stays for every other
+      // refusal, which really is fail-soft background work.
       this.endSessionIfExpired(err);
-      console.warn(`[mj-form] the disqualification could not be recorded: ${String(err)}`);
-      return false;
+      console.warn(`[mj-form] the disqualification could not be recorded: ${failureDetail(err)}`);
+      return undefined;
     }
   }
 
@@ -830,9 +1027,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
   }
 
   protected async onSubmit(): Promise<void> {
-    const def = this.definition();
+    const form = this.form();
     const rt = this.runtime();
-    if (!def || !rt) {
+    if (!form || !rt) {
       return;
     }
     // Double-submit guard: ignore re-entrant submits while one is in flight or already
@@ -878,12 +1075,18 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // the pending debounce too, and is fail-soft.
     this.phase.set('submitting');
     this.errorText.set('');
+    if (form.kind === 'full') {
+      // Preview sends nothing: the author's draft is resolved here, locally, by the same contracts
+      // function the server runs on a live submit (DW13 / #75).
+      this.applyPreviewSubmit(form);
+      return;
+    }
     await this.autosave?.settle();
-    const input = this.buildSubmission(def, rt, false);
+    const input = this.buildSubmission(form, rt, false);
     const startedAt = Date.now();
     this.startSubmitTicker();
     try {
-      const res = await this.api.submitResponse(input, this.responseTarget());
+      const res = await this.api.saveResponse(input);
       this.logSubmitTiming(startedAt, true);
       this.applySubmitResult(res);
     } catch (err) {
@@ -894,6 +1097,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
       if (this.endSessionIfExpired(err)) {
         return;
       }
+      // The banner shows the fixed sentence; the cause goes to whoever opens the console.
+      console.warn(`[mj-form] the response could not be submitted: ${failureDetail(err)}`);
       this.phase.set('ready');
       const message = err instanceof Error ? err.message : 'Submission failed. Please try again.';
       this.errorText.set(message);
@@ -966,14 +1171,15 @@ export class MjFormComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Fold the server result into the widget phase. On success we reach the 'done'
-   * confirmation for BOTH render modes and ONLY redirect when a redirect URL is actually
-   * set; on failure we return to 'ready' with a clear message.
+   * Fold the server's submit result into the widget phase. On success we reach the 'done'
+   * confirmation for BOTH render modes, show the ending the SERVER chose, and ONLY redirect when the
+   * result carries a redirect URL; on failure we return to 'ready' with the refusal shown — under the
+   * fields it names (`QuestionID`), and in the banner.
    */
-  private applySubmitResult(res: FormSubmissionResult): void {
+  private applySubmitResult(res: FormsSaveResponseOutput): void {
     this.result.set(res);
-    if (res.success && res.responseId) {
-      this.responseId = res.responseId;
+    if (res.Success && res.ResponseID) {
+      this.responseId = res.ResponseID;
     }
     const outcome = outcomeForResult(res);
     this.phase.set(outcome.phase);
@@ -982,65 +1188,68 @@ export class MjFormComponent implements OnInit, OnDestroy {
       // link on this browser afterwards must show a FRESH form — the response is finished, and a
       // multi-use link is meant to be fillable again. The sealed answers stay reachable only
       // through a link the respondent was sent.
-      this.emitHostEvent('mjf-submitted', { responseId: res.responseId });
+      this.emitHostEvent('mjf-submitted', { responseId: res.ResponseID });
     }
-    if (!res.success) {
-      const message = (res.errors ?? []).map((e) => e.message).join(' ').trim();
-      if (message) {
-        this.errorText.set(message);
-        this.handlePossibleTurnstileFailure(message);
-      }
+    if (!res.Success) {
+      this.showRefusal(res);
       return;
     }
-    if (res.status === 'Disqualified') {
-      // The SERVER screened this respondent out on a rule the client had not reached: the last
-      // question before Submit, a client that never fired a commit, or a caller with no widget at
-      // all. Do not re-resolve the ending — `resolveEndingScreen` deliberately excludes knockout
-      // screens, so it would pick one written for someone who QUALIFIED, and `endingRedirect`
-      // would then fall back to that screen's URL and send a screened-out respondent to the
-      // qualified destination. The server sent the knockout's own copy and redirect; they are the
-      // only correct answer here, and `confirmationMessage()` already prefers the echoed one.
-      this.endingScreen.set(undefined);
-      if (res.redirectUrl) {
-        this.redirect(res.redirectUrl);
-      }
-      return;
-    }
-    this.resolveEnding();
+    // The server resolved the ending — a knockout's own screen and redirect, a score band, the
+    // default — from the full snapshot the respondent never receives. There is nothing to re-resolve
+    // here, and nothing to resolve it from.
+    this.endingScreen.set(res.Ending ? endingScreenFrom(res.Ending, this.config.graphqlUrl) : undefined);
     // Success always reaches 'done' (both render modes). Redirect ONLY when a URL is set, and
     // only after 'done' — so a blocked/slow navigation still shows the confirmation.
-    const url = this.endingRedirect(res);
+    if (outcome.redirect && res.RedirectURL) {
+      this.redirect(res.RedirectURL);
+    }
+  }
+
+  /**
+   * A refused submit, shown: each error that names a question goes under that question (the server's
+   * text no longer names it — "This question is required." in a banner says nothing about which), and
+   * the banner lists every message, prefixed with its question's prompt, so a one-question form whose
+   * refused field is screens behind still says what to fix.
+   */
+  private showRefusal(res: FormsSaveResponseOutput): void {
+    const fieldErrors = res.Errors.flatMap((e) => (e.QuestionID ? [{ questionId: e.QuestionID, message: e.Message }] : []));
+    this.runtime()?.showServerErrors(fieldErrors);
+    const prompts = new Map((this.definition()?.pages ?? []).flatMap((page) => page.questions.map((q) => [q.id, q.prompt] as const)));
+    const message = res.Errors.map((e) => {
+      const prompt = e.QuestionID ? prompts.get(e.QuestionID)?.trim() : undefined;
+      return prompt ? `${prompt}: ${e.Message}` : e.Message;
+    })
+      .join(' ')
+      .trim();
+    if (message) {
+      this.errorText.set(message);
+      this.handlePossibleTurnstileFailure(message);
+    }
+  }
+
+  /**
+   * Preview's submit: resolve the author's draft locally and land where a respondent would.
+   *
+   * Through {@link previewOutcome}, which reads the settled answers AND honours a `Go to` that named a
+   * screen. The redirect is the resolved ending's own URL, else the form-wide one — what lets an author
+   * send qualified respondents to a booking page and everyone else to a thank-you — and it is followed
+   * exactly as the live widget follows the server's, as Preview always has.
+   */
+  private applyPreviewSubmit(form: Extract<WidgetForm, { kind: 'full' }>): void {
+    const outcome = this.previewOutcome(form);
+    this.result.set({
+      Success: true,
+      ResponseID: null,
+      Status: outcome?.disqualified ? 'Disqualified' : 'Complete',
+      Outcome: 'ended',
+      Errors: [],
+    });
+    this.endingScreen.set(outcome?.screen);
+    this.phase.set('done');
+    const url = endingRedirectUrl(outcome?.screen, form.definition.settings);
     if (url) {
       this.redirect(url);
     }
-  }
-
-  /**
-   * Pick the ending screen for the answers as submitted.
-   *
-   * Through {@link outcomeForAnswers}, which reads the payload the server will judge AND honours
-   * a `Go to` that named a screen. It used to call `resolveEndingScreen` directly — condition
-   * banding only — so a terminal jump's destination was simply lost on the manual-submit path:
-   * the same rule showed one screen when it sealed itself and another when the respondent
-   * pressed Submit.
-   */
-  private resolveEnding(): void {
-    this.endingScreen.set(this.outcomeForAnswers()?.screen);
-  }
-
-  /**
-   * Where to send the respondent, or `undefined` to show a screen.
-   *
-   * The SERVER's echoed `redirectUrl` still wins: it is the only party that knows about a
-   * redirect the snapshot does not carry, and `outcomeForResult` already gates it on success.
-   * Below that, the resolved ending's own URL beats the form-wide one — which is what lets an
-   * author send qualified respondents to a booking page and everyone else to a thank-you.
-   */
-  private endingRedirect(res: FormSubmissionResult): string | undefined {
-    if (outcomeForResult(res).redirect && res.redirectUrl) {
-      return res.redirectUrl;
-    }
-    return endingRedirectUrl(this.endingScreen(), this.definition()?.settings ?? {});
   }
 
   /** Called by the challenge when the respondent solves it — holds the single-use token. */
@@ -1085,14 +1294,17 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /**
    * Save the current answers as a Partial response (server upserts, runs no hooks/quota).
    * Reuses the returned {@link responseId} so subsequent autosaves update the same record.
-   * Throws on failure — a transport error, OR a server REFUSAL (`res.success === false`, e.g. the
+   * Throws on failure — a transport error, OR a server REFUSAL (`Success === false`, e.g. the
    * autosave rate-limit bucket) — so the {@link AutosaveController} records `'error'` (never
    * `'saved'` for a save the server threw away) and retries it on its own capped backoff.
+   *
+   * An accepted save is also a VERDICT: the server judged knockouts on these answers. It is
+   * remembered, and acted on when the answers are the committed ones ({@link actOnVerdict}).
    */
-  private async savePartial(): Promise<string | undefined> {
-    const def = this.definition();
+  private async savePartial(): Promise<string | undefined | typeof NOTHING_TO_SAVE> {
+    const form = this.form();
     const rt = this.runtime();
-    if (!def || !rt) {
+    if (!form || !rt) {
       return undefined;
     }
     // Never autosave once the respondent has moved past editing — a partial landing after
@@ -1102,9 +1314,22 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (this.phase() !== 'ready') {
       return this.responseTarget();
     }
-    let res: FormSubmissionResult;
+    let sentKey = '';
+    let res: FormsSaveResponseOutput;
     try {
-      res = await this.api.submitResponse(this.buildSubmission(def, rt, true), this.responseTarget());
+      // Built as the request's argument, so a HELD draft throws before any request is made.
+      const input = this.buildSubmission(form, rt, true);
+      sentKey = answersKey(input.Answers);
+      // Nothing new to send (fix round 1): the server already holds exactly these answers — an
+      // untouched form, an edit undone before the debounce fired, or a save of the same answers that
+      // already came back (a commit flushed behind an in-flight save that ENDED the form, Minor 3).
+      if (sentKey === this.judgedAnswers()) {
+        if (this.lastAcknowledged) {
+          this.actOnVerdict(this.lastAcknowledged.result, sentKey);
+        }
+        return NOTHING_TO_SAVE;
+      }
+      res = await this.api.saveResponse(input);
     } catch (err) {
       // The autosave is the request most likely to DISCOVER an expiry: it fires on every edit,
       // long before the respondent reaches Submit. Left to the controller alone the failure is
@@ -1115,18 +1340,19 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.endSessionIfExpired(err);
       throw err;
     }
-    if (!res.success) {
+    if (!res.Success) {
       // A logical refusal — the rate-limit bucket, most commonly — is NOT the same as "saved".
       // Left to return normally here, the controller had no way to tell it apart from a real
       // save and reported 'saved' for progress the server had just thrown away.
-      throw new Error(`Autosave refused: ${res.errors?.[0]?.message ?? 'no reason given'}`);
+      throw new Error(`Autosave refused for response ${this.responseTarget()}: ${res.Errors[0]?.Message ?? 'no reason given'}`);
     }
-    // `res.success` is already guaranteed true here — the `!res.success` branch above throws
-    // before this line, so a refusal never reaches it.
-    if (res.responseId) {
-      this.responseId = res.responseId;
-      this.announceFirstPartial(res.responseId);
+    if (res.ResponseID) {
+      this.responseId = res.ResponseID;
+      this.announceFirstPartial(res.ResponseID);
     }
+    this.lastAcknowledged = { answersKey: sentKey, result: res };
+    this.saveNotice.set(false);
+    this.actOnVerdict(res, sentKey);
     return this.responseTarget();
   }
 
@@ -1184,27 +1410,47 @@ export class MjFormComponent implements OnInit, OnDestroy {
     return this.clientResponseId || this.responseId || generateClientResponseId();
   }
 
-  /** Build a submission payload for either a partial autosave or the final submit. */
-  private buildSubmission(
-    def: PublishedFormDefinition,
-    rt: FormRuntime,
-    partial: boolean,
-  ): FormSubmissionInput {
-    return {
+  /** Build the `Forms.SaveResponse` input for either a partial autosave or the final submit. */
+  private buildSubmission(form: WidgetForm, rt: FormRuntime, partial: boolean): FormsSaveResponseInput {
+    return toSaveResponseInput({
       distributionSlug: this.distributionSlug(),
-      formVersionId: def.formVersionId,
-      partial,
+      // The projection's own version, which the transport checked equals the version it was served as.
+      formVersionId: form.render.formVersionId,
+      mode: partial ? 'partial' : 'final',
+      clientResponseId: this.responseTarget(),
       startedAt: this.startedAt,
       // Only the final submit carries a captcha token; partial autosaves run no captcha
-      // check server-side (see submit-pipeline), so we never spend the single-use token
-      // on an autosave.
+      // check server-side, so we never spend the single-use token on an autosave.
       turnstileToken: partial ? undefined : this.turnstileToken() ?? undefined,
       clientMeta: {
         referrer: typeof document !== 'undefined' ? document.referrer : undefined,
         userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
       },
-      answers: rt.buildAnswerInputs(),
-    };
+      // An autosave leaves out a field the server cannot store as a draft, so one bad field never
+      // stops the rest of the draft saving — unless a rule may read it (`draftAnswers`); a final
+      // submit carries everything.
+      answers: partial ? this.draftAnswers(rt) : rt.buildAnswerInputs(),
+    });
+  }
+
+  /**
+   * The autosave's answers — or a throw when the draft is HELD: a field the server cannot store is
+   * one a rule may read, so leaving it out would change what the server decides for other questions
+   * (#303 Task 8 fix round 4; see `FormRuntime.buildDraftInputs`).
+   *
+   * A throw, not an empty payload: it is raised while the request's argument is being built, so no
+   * request is made and no saved row is touched, and the {@link AutosaveController} records `'error'`
+   * — never `'saved'` — and retries on its capped backoff, each retry re-checking for free.
+   */
+  private draftAnswers(rt: FormRuntime): FormAnswerInput[] {
+    const draft = rt.buildDraftInputs();
+    if (draft.held) {
+      throw new Error(
+        `Autosave held for response ${this.responseTarget()}: question(s) ${draft.unstorable.join(', ')} cannot be saved ` +
+          'as entered and a rule may read them, so nothing was sent; the answers stay in this browser until they are fixed.',
+      );
+    }
+    return draft.answers;
   }
 
   /**
@@ -1213,7 +1459,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * Read from the RESULT, not from the client's own verdict, because the server sees knockouts the
    * client never evaluated — a rule on the last question before Submit, or a caller with no widget.
    */
-  protected readonly screenedOut = computed(() => this.result()?.status === 'Disqualified');
+  protected readonly screenedOut = computed(() => {
+    const result = this.result();
+    // A sealed screening, or a knockout the server ended on whose seal did not land (the row is
+    // still a draft, but the respondent was screened out all the same).
+    return result?.Status === 'Disqualified' || result?.Ending?.IsDisqualification === true;
+  });
 
   /**
    * The confirmation message for a form with no ending screen.
@@ -1222,7 +1473,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * overrode it (a quota message, say) knows something the snapshot does not.
    */
   protected confirmationMessage(): string {
-    const echoed = this.result()?.confirmationMessage;
+    const echoed = this.result()?.ConfirmationMessage;
     if (echoed) {
       return echoed;
     }
@@ -1234,7 +1485,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (this.screenedOut()) {
       return SCREENED_OUT_MESSAGE;
     }
-    return endingMessage(undefined, this.definition()?.settings ?? {});
+    return endingMessage(undefined, { confirmationMessage: this.definition()?.confirmationMessage });
   }
 
   protected retry(): void {
@@ -1305,4 +1556,23 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
     window.location.assign(url);
   }
+}
+
+/** How a form ended early, and what to show for it. */
+interface EarlyEnding {
+  /** The ending screen; `undefined` shows the built-in confirmation copy. */
+  readonly screen: PublishedFormScreen | undefined;
+  /** Where to send the respondent instead; `undefined` to stay on the screen. */
+  readonly redirectUrl: string | undefined;
+  /** The server result that ended it, live only; Preview has none. */
+  readonly result?: FormsSaveResponseOutput;
+}
+
+/**
+ * A key for an answers payload, equal exactly when two payloads carry the same answers in the same
+ * order — which they do when built from the same runtime state, because the payload walks the
+ * settled questions in document order.
+ */
+function answersKey(answers: FormsSaveResponseInput['Answers']): string {
+  return JSON.stringify(answers);
 }

@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest';
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
 import { FormRuntime } from './form-runtime';
+import { fullForm } from './widget-form';
+
+/** A runtime over an author's full definition — the kind every case here was written against. */
+const runtimeFor = (definition: PublishedFormDefinition): FormRuntime => new FormRuntime(fullForm(definition));
 import { FormUploadStore, IDLE_UPLOAD } from './upload-store';
 
 const fileNamed = (name: string): File => new File(['x'], name);
@@ -37,7 +41,7 @@ function uploadForm(): PublishedFormDefinition {
  * "no answer" means.
  */
 function connectedStore(): { store: FormUploadStore; runtime: FormRuntime } {
-  const runtime = new FormRuntime(uploadForm());
+  const runtime = runtimeFor(uploadForm());
   const store = new FormUploadStore();
   store.connect(runtime);
   return { store, runtime };
@@ -102,7 +106,7 @@ describe('FormUploadStore — the answer, not just the confirmation', () => {
     const { store, runtime } = connectedStore();
     store.succeed(store.begin('q-resume', fileNamed('resume.pdf')), 'file-resume');
 
-    store.connect(new FormRuntime(uploadForm()));
+    store.connect(runtimeFor(uploadForm()));
 
     // A reload mints a new response id; a confirmation carried across would name a file that
     // response never had.

@@ -1,0 +1,44 @@
+[
+  {
+    "_comments": [
+      "THE AUTOMATION OUTBOX SWEEP. MJ's SchedulingEngine is the mechanism — no external cron.",
+      "",
+      "  · CronExpression `*/30 * * * * *` — SIX fields, seconds first: every 30 seconds. A first",
+      "    attempt does not wait for it (the submitting process drains its own events after commit);",
+      "    the sweep runs retries once their backoff has passed and recovers events a dead process",
+      "    left Running once their 120-second lease expires.",
+      "",
+      "  · ConcurrencyMode Skip — overlapping sweeps would only contend for the same claims. The",
+      "    claim itself is atomic, so this is economy, not correctness.",
+      "",
+      "  · MissedRunPolicy RunOnce — one sweep drains everything due; replaying missed ticks would not.",
+      "",
+      "  · No MaxRuntimeMinutes: in scheduling-engine 6.1.5 it only EXTENDS the engine's 10-minute job",
+      "    lease, never shortens it, so a smaller value is a no-op. A host that dies mid-sweep therefore",
+      "    holds the job lock for up to 10 minutes (other hosts Skip meanwhile; a restarted host clears",
+      "    its own lock at startup). Nothing is lost — the events wait, they are not dropped.",
+      "",
+      "OwnerUserID and NotifyUserID are left NULL: naming a person here would seed one deployment's",
+      "staff into another's database. Configuration is empty: the driver takes none. No sync block."
+    ],
+    "fields": {
+      "Name": "Forms — Automation Outbox Sweep (every 30 s)",
+      "Description": "Runs MJ Forms on-submit automations that are due: retries after their backoff, and events a stopped process left behind. First attempts run in the submitting process right after commit and do not wait for this sweep.",
+      "JobTypeID": "@lookup:MJ: Scheduled Job Types.DriverClass=FormsAutomationDrainDriver",
+      "CronExpression": "*/30 * * * * *",
+      "Timezone": "UTC",
+      "Status": "Active",
+      "ConcurrencyMode": "Skip",
+      "MissedRunPolicy": "RunOnce",
+      "RunImmediatelyIfNeverRun": true,
+      "NotifyOnSuccess": false,
+      "NotifyOnFailure": false,
+      "NotifyViaEmail": false,
+      "NotifyViaInApp": false,
+      "Configuration": {}
+    },
+    "primaryKey": {
+      "ID": "918925E8-CB7C-43AF-A743-A5AB3998E106"
+    }
+  }
+]

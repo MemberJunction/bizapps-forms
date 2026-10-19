@@ -28,7 +28,7 @@ import {
   type OperatorChoice,
   type ValueEditorKind,
   staleSourceLabel,
-} from './condition-sources';
+} from '@mj-biz-apps/forms-entities/contracts';
 
 const CONDITIONAL_EDITOR_CSS = /* css */ `
 .cre { display: flex; flex-direction: column; gap: var(--mjf-gap); }

@@ -2,7 +2,7 @@
   {
     "fields": {
       "Name": "Forms: Generate Form From Brief",
-      "Description": "AI form authoring — turns a natural-language brief (for example 'a 5-question event RSVP with dietary restrictions and a +1 count') into a draft Form with pages, questions, and options, using the highest-power Claude model with a zod-validated blueprint.",
+      "Description": "AI form authoring — turns a natural-language brief (for example 'a 5-question event RSVP with dietary restrictions and a +1 count') into a draft Form with pages, questions, and options (or, with PublishImmediately, a published one), using the highest-power Claude model with a zod-validated blueprint.",
       "DriverClass": "Forms: Generate Form From Brief",
       "Type": "Custom",
       "CategoryID": "@lookup:MJ: Action Categories.Name=Forms",
@@ -82,6 +82,20 @@
             "lastModified": "2026-09-12T03:02:33.936Z",
             "checksum": "d1e80bdb157b5f024b7a4c5109528732830ccea126cb1f1654c4e960b0f23665"
           }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "PublishImmediately",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Publish the form as soon as it is built, in the same transaction: the caller gets a published form (version 1) or, if the publish is refused, no form at all. Default false leaves a draft. Must be true or false; any other value is refused."
+          },
+          "primaryKey": {
+            "ID": "6BE06A2B-6244-488C-A046-5ECE3094D3EA"
+          }
         }
       ]
     },
@@ -96,7 +110,7 @@
   {
     "fields": {
       "Name": "Forms: Create Form From Template",
-      "Description": "No-AI authoring — instantiates a starter-gallery template (Contact, RSVP, NPS/feedback, Lead capture, Application) into a draft Form.",
+      "Description": "No-AI authoring — instantiates a starter-gallery template (Contact, RSVP, NPS/feedback, Lead capture, Application) into a draft Form (or, with PublishImmediately, a published one).",
       "DriverClass": "Forms: Create Form From Template",
       "Type": "Custom",
       "CategoryID": "@lookup:MJ: Action Categories.Name=Forms",
@@ -175,6 +189,20 @@
           "sync": {
             "lastModified": "2026-09-12T03:02:33.964Z",
             "checksum": "d1e80bdb157b5f024b7a4c5109528732830ccea126cb1f1654c4e960b0f23665"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "PublishImmediately",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Publish the form as soon as it is built, in the same transaction: the caller gets a published form (version 1) or, if the publish is refused, no form at all. Default false leaves a draft. Must be true or false; any other value is refused."
+          },
+          "primaryKey": {
+            "ID": "915294F3-4365-44E8-B277-5DB62B4DE19D"
           }
         }
       ]

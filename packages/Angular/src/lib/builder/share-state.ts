@@ -11,8 +11,9 @@
  * kind of UI defect — one that is confidently wrong.
  *
  * So this computes the EFFECTIVE state, from the same facts and in the same order the
- * server gates on: {@link redeemUrl}'s guard in `redeem.service.ts`, the submit guard in
- * `definition-loader.service.ts`, and the quota check in `quota.service.ts`. When those
+ * server gates on: {@link redeemUrl}'s guard in forms-server `redeem.service.ts`, the submit guard
+ * in forms-core-entities-server `submission/published-link.ts`, and its quota check in
+ * `submission/quota.ts`. When those
  * gates change, this changes with them — that coupling is the point, and it is why the
  * kinds map one-to-one onto reasons a submission is refused rather than onto column
  * values.
@@ -21,7 +22,7 @@
  * so it does not drag a locale and a timezone into every assertion — the component holds
  * `OpenAt` / `CloseAt` already and renders them with the `date` pipe.
  */
-import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
+import { isOpenToResponses, type mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 
 import { toDate } from '../shared';
 
@@ -156,29 +157,6 @@ const STATES: Record<ShareStateKind, Omit<ShareState, 'kind'>> = {
     fix: null,
   },
 };
-
-/**
- * Is this link open to responses — the thing the Distribute tab's switch is labelled with?
- *
- * ONE definition, exported, because there were three and two disagreed with the server.
- * "Open to responses" is `Status='Active'` AND `IsActive`: that is the pair
- * `decideProvisioning` requires before it warrants a credential, and the pair
- * `DistributionService.openForResponses` writes. Reading either half alone answers a
- * different question while wearing the same label.
- *
- * The cost of the duplicate was not theoretical. The switch rendered its on/off state from
- * `Status` alone, so a row at `Status='Active', IsActive=0` — the exact shape
- * `openForResponses` exists to repair — drew the switch ON next to a "Paused" badge, and its
- * click handler, reading the same half-predicate, concluded the link was already open and
- * CLOSED it. A control that misreports its state and then does the opposite of what it offers.
- *
- * Kept here rather than on the component because {@link stateKind} needs the same sentence
- * for its `paused` branch, and a predicate the badge and the control derive separately is a
- * predicate they can drift apart on.
- */
-export function isOpenToResponses(facts: Pick<ShareLinkFacts, 'Status' | 'IsActive'>): boolean {
-  return facts.IsActive && facts.Status === 'Active';
-}
 
 /**
  * Does this link's record still advertise an access token it is no longer entitled to?

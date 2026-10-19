@@ -5,6 +5,100 @@ import { z } from "zod";
      
  
 /**
+ * zod schema definition for the entity MJ_BizApps_Forms: Form Automation Events
+ */
+export const mjBizAppsFormsFormAutomationEventSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    FormResponseID: z.string().describe(`
+        * * Field Name: FormResponseID
+        * * Display Name: Form Response
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Responses (vwFormResponses.ID)
+        * * Description: The response whose save owes this run`),
+    Trigger: z.union([z.literal('OnComplete'), z.literal('OnPartial')]).describe(`
+        * * Field Name: Trigger
+        * * Display Name: Trigger
+        * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * OnComplete
+    *   * OnPartial
+        * * Description: Which save this event announces, and so which steps it runs: OnComplete (the final submit) or OnPartial (a partial save)`),
+    PartialSaveKey: z.string().nullable().describe(`
+        * * Field Name: PartialSaveKey
+        * * Display Name: Partial Save Key
+        * * SQL Data Type: nvarchar(64)
+        * * Description: OnPartial only: a hash of the answers the partial save stored, so an autosave that changed nothing since the previous partial event queues no second run`),
+    Status: z.union([z.literal('Abandoned'), z.literal('Complete'), z.literal('DeadLetter'), z.literal('Pending'), z.literal('Running')]).describe(`
+        * * Field Name: Status
+        * * Display Name: Status
+        * * SQL Data Type: nvarchar(20)
+        * * Default Value: Pending
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Abandoned
+    *   * Complete
+    *   * DeadLetter
+    *   * Pending
+    *   * Running
+        * * Description: Pending (waiting for a drain), Running (claimed under a lease), Complete, DeadLetter (a final submit that cannot succeed; an operator may re-queue it) or Abandoned (a partial save that cannot; never blocks the final)`),
+    AttemptCount: z.number().describe(`
+        * * Field Name: AttemptCount
+        * * Display Name: Attempt Count
+        * * SQL Data Type: int
+        * * Default Value: 0
+        * * Description: How many times a drain has claimed this event; the drain gives up after its attempt cap`),
+    NextAttemptAt: z.date().describe(`
+        * * Field Name: NextAttemptAt
+        * * Display Name: Next Attempt At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: sysdatetimeoffset()
+        * * Description: The earliest time a drain may claim this Pending event: the save time, then later after each retryable failure (exponential backoff)`),
+    LockedBy: z.string().nullable().describe(`
+        * * Field Name: LockedBy
+        * * Display Name: Locked By
+        * * SQL Data Type: nvarchar(100)
+        * * Description: The drain that holds the current lease; settling the event is refused to any other drain`),
+    LockedUntil: z.date().nullable().describe(`
+        * * Field Name: LockedUntil
+        * * Display Name: Locked Until
+        * * SQL Data Type: datetimeoffset
+        * * Description: When the current lease expires; a Running event past it is reclaimed by the next drain`),
+    IsReplay: z.boolean().describe(`
+        * * Field Name: IsReplay
+        * * Display Name: Is Replay
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: Set by an operator who re-queues a DeadLetter event, so its next run reopens the steps dead-lettering closed; cleared when the run settles`),
+    LastError: z.string().nullable().describe(`
+        * * Field Name: LastError
+        * * Display Name: Last Error
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: Why the last attempt did not complete, as a fixed sentence; provider detail goes to the server log only`),
+    CompletedAt: z.date().nullable().describe(`
+        * * Field Name: CompletedAt
+        * * Display Name: Completed At
+        * * SQL Data Type: datetimeoffset
+        * * Description: When the event reached Complete, DeadLetter or Abandoned`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsFormsFormAutomationEventEntityType = z.infer<typeof mjBizAppsFormsFormAutomationEventSchema>;
+
+/**
  * zod schema definition for the entity MJ_BizApps_Forms: Form Automation Runs
  */
 export const mjBizAppsFormsFormAutomationRunSchema = z.object({
@@ -84,6 +178,12 @@ export const mjBizAppsFormsFormAutomationRunSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    FormAutomationEventID: z.string().nullable().describe(`
+        * * Field Name: FormAutomationEventID
+        * * Display Name: Automation Event
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Automation Events (vwFormAutomationEvents.ID)
+        * * Description: The outbox event whose drain ran this step: the run's identity for at-least-once delivery. A re-run of the same event re-runs only the steps with no terminal run carrying it, and reuses a step's open row. NULL on runs written before this column`),
     FormAutomation: z.string().describe(`
         * * Field Name: FormAutomation
         * * Display Name: Form Automation Name
@@ -326,7 +426,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Default Value: newsequentialid()`),
     FormID: z.string().describe(`
         * * Field Name: FormID
-        * * Display Name: Form ID
+        * * Display Name: Form
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)`),
     Name: z.string().describe(`
@@ -385,7 +485,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Description: Running count of responses received through this distribution`),
     MagicLinkInviteID: z.string().nullable().describe(`
         * * Field Name: MagicLinkInviteID
-        * * Display Name: Magic Link Invite ID
+        * * Display Name: Magic Link Invite
         * * SQL Data Type: uniqueidentifier
         * * Description: ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.`),
     CaptchaRequired: z.boolean().describe(`
@@ -428,7 +528,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Description: JSON array of the browser ORIGINS permitted to embed this distribution and call the public form API with its link — e.g. ["https://careers.acme.com","https://acme.com:8443"]. Values are full origins exactly as a browser sends them (scheme, host, optional port), matched EXACTLY after case-normalising scheme and host. No wildcards and no subdomain implication: "acme.com" does not admit "https://careers.acme.com", and an author needing three subdomains names three origins — a pattern is refused at authoring time rather than accepted and ignored. Plain http is accepted only for loopback hosts, so a local harness is authorable without a proxy. NULL or an empty array (the default, and every distribution until an author sets one) means UNRESTRICTED, so no existing embed changes behaviour. Once ANY origin is authored the distribution is fail-closed: the respondent host page is served with a Content-Security-Policy frame-ancestors directive naming exactly these origins, and a public API call whose Origin is neither this API's own origin nor one of them is refused. An authored value that parses to nothing usable is a refusal of everything, never a fall back to unrestricted. Defense in depth behind the magic link, not a replacement for it: it bounds where a leaked multi-use link can be replayed. The array container differs deliberately from the keyed object bizapps-caliber uses for Step.AllowedOrigins, which is keyed only because Caliber steps inherit and must tombstone an inherited origin; a Forms distribution is a leaf and inherits from nothing. The per-entry grammar is identical.`),
     Form: z.string().describe(`
         * * Field Name: Form
-        * * Display Name: Form
+        * * Display Name: Form Name
         * * SQL Data Type: nvarchar(255)`),
 });
 
@@ -967,7 +1067,7 @@ export const mjBizAppsFormsFormResponseSchema = z.object({
         * * Description: The distribution this response was submitted through, stamped once when the row is created and never rewritten. A resume session is scoped to one FormResponse, and it must still be able to load the definition of the link it came through — so the row-level-security filter that permits that read needs a real column to name. Putting it on JSON_VALUE(SourceMetadata) instead would make a free-form JSON blob the authorization key. NULL on rows created before resume shipped; those rows are not resumable by either channel.`),
     Form: z.string().describe(`
         * * Field Name: Form
-        * * Display Name: Form
+        * * Display Name: Form Name
         * * SQL Data Type: nvarchar(255)`),
     RespondentPerson: z.string().nullable().describe(`
         * * Field Name: RespondentPerson
@@ -992,7 +1092,7 @@ export const mjBizAppsFormsFormScreenSchema = z.object({
         * * Default Value: newsequentialid()`),
     FormID: z.string().describe(`
         * * Field Name: FormID
-        * * Display Name: Form
+        * * Display Name: Form ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)`),
     ScreenType: z.union([z.literal('Ending'), z.literal('Welcome')]).describe(`
@@ -1069,7 +1169,7 @@ export const mjBizAppsFormsFormScreenSchema = z.object({
         * * Description: Ending only: this screen is a disqualification — its ConditionalRule is evaluated while the respondent answers, and a match ends the form immediately with FormResponse.Status = Disqualified. The flag alone never fires; the rule arms it`),
     Form: z.string().describe(`
         * * Field Name: Form
-        * * Display Name: Form Name
+        * * Display Name: Form
         * * SQL Data Type: nvarchar(255)`),
 });
 
@@ -1407,6 +1507,230 @@ export type mjBizAppsFormsFormEntityType = z.infer<typeof mjBizAppsFormsFormSche
  
 
 /**
+ * MJ_BizApps_Forms: Form Automation Events - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsForms
+ * * Base Table: FormAutomationEvent
+ * * Base View: vwFormAutomationEvents
+ * * @description The on-submit automation outbox: one row per run a response save owes (one per final submit, one per partial save of a version with OnPartial steps), written in the save's own transaction and claimed by the automation drain after commit
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Automation Events')
+export class mjBizAppsFormsFormAutomationEventEntity extends BaseEntity<mjBizAppsFormsFormAutomationEventEntityType> {
+    /**
+    * Loads the MJ_BizApps_Forms: Form Automation Events record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Automation Events record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsFormsFormAutomationEventEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: FormResponseID
+    * * Display Name: Form Response
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Responses (vwFormResponses.ID)
+    * * Description: The response whose save owes this run
+    */
+    get FormResponseID(): string {
+        return this.Get('FormResponseID');
+    }
+    set FormResponseID(value: string) {
+        this.Set('FormResponseID', value);
+    }
+
+    /**
+    * * Field Name: Trigger
+    * * Display Name: Trigger
+    * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * OnComplete
+    *   * OnPartial
+    * * Description: Which save this event announces, and so which steps it runs: OnComplete (the final submit) or OnPartial (a partial save)
+    */
+    get Trigger(): 'OnComplete' | 'OnPartial' {
+        return this.Get('Trigger');
+    }
+    set Trigger(value: 'OnComplete' | 'OnPartial') {
+        this.Set('Trigger', value);
+    }
+
+    /**
+    * * Field Name: PartialSaveKey
+    * * Display Name: Partial Save Key
+    * * SQL Data Type: nvarchar(64)
+    * * Description: OnPartial only: a hash of the answers the partial save stored, so an autosave that changed nothing since the previous partial event queues no second run
+    */
+    get PartialSaveKey(): string | null {
+        return this.Get('PartialSaveKey');
+    }
+    set PartialSaveKey(value: string | null) {
+        this.Set('PartialSaveKey', value);
+    }
+
+    /**
+    * * Field Name: Status
+    * * Display Name: Status
+    * * SQL Data Type: nvarchar(20)
+    * * Default Value: Pending
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Abandoned
+    *   * Complete
+    *   * DeadLetter
+    *   * Pending
+    *   * Running
+    * * Description: Pending (waiting for a drain), Running (claimed under a lease), Complete, DeadLetter (a final submit that cannot succeed; an operator may re-queue it) or Abandoned (a partial save that cannot; never blocks the final)
+    */
+    get Status(): 'Abandoned' | 'Complete' | 'DeadLetter' | 'Pending' | 'Running' {
+        return this.Get('Status');
+    }
+    set Status(value: 'Abandoned' | 'Complete' | 'DeadLetter' | 'Pending' | 'Running') {
+        this.Set('Status', value);
+    }
+
+    /**
+    * * Field Name: AttemptCount
+    * * Display Name: Attempt Count
+    * * SQL Data Type: int
+    * * Default Value: 0
+    * * Description: How many times a drain has claimed this event; the drain gives up after its attempt cap
+    */
+    get AttemptCount(): number {
+        return this.Get('AttemptCount');
+    }
+    set AttemptCount(value: number) {
+        this.Set('AttemptCount', value);
+    }
+
+    /**
+    * * Field Name: NextAttemptAt
+    * * Display Name: Next Attempt At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: sysdatetimeoffset()
+    * * Description: The earliest time a drain may claim this Pending event: the save time, then later after each retryable failure (exponential backoff)
+    */
+    get NextAttemptAt(): Date {
+        return this.Get('NextAttemptAt');
+    }
+    set NextAttemptAt(value: Date) {
+        this.Set('NextAttemptAt', value);
+    }
+
+    /**
+    * * Field Name: LockedBy
+    * * Display Name: Locked By
+    * * SQL Data Type: nvarchar(100)
+    * * Description: The drain that holds the current lease; settling the event is refused to any other drain
+    */
+    get LockedBy(): string | null {
+        return this.Get('LockedBy');
+    }
+    set LockedBy(value: string | null) {
+        this.Set('LockedBy', value);
+    }
+
+    /**
+    * * Field Name: LockedUntil
+    * * Display Name: Locked Until
+    * * SQL Data Type: datetimeoffset
+    * * Description: When the current lease expires; a Running event past it is reclaimed by the next drain
+    */
+    get LockedUntil(): Date | null {
+        return this.Get('LockedUntil');
+    }
+    set LockedUntil(value: Date | null) {
+        this.Set('LockedUntil', value);
+    }
+
+    /**
+    * * Field Name: IsReplay
+    * * Display Name: Is Replay
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: Set by an operator who re-queues a DeadLetter event, so its next run reopens the steps dead-lettering closed; cleared when the run settles
+    */
+    get IsReplay(): boolean {
+        return this.Get('IsReplay');
+    }
+    set IsReplay(value: boolean) {
+        this.Set('IsReplay', value);
+    }
+
+    /**
+    * * Field Name: LastError
+    * * Display Name: Last Error
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: Why the last attempt did not complete, as a fixed sentence; provider detail goes to the server log only
+    */
+    get LastError(): string | null {
+        return this.Get('LastError');
+    }
+    set LastError(value: string | null) {
+        this.Set('LastError', value);
+    }
+
+    /**
+    * * Field Name: CompletedAt
+    * * Display Name: Completed At
+    * * SQL Data Type: datetimeoffset
+    * * Description: When the event reached Complete, DeadLetter or Abandoned
+    */
+    get CompletedAt(): Date | null {
+        return this.Get('CompletedAt');
+    }
+    set CompletedAt(value: Date | null) {
+        this.Set('CompletedAt', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+}
+
+
+/**
  * MJ_BizApps_Forms: Form Automation Runs - strongly typed entity sub-class
  * * Schema: __mj_BizAppsForms
  * * Base Table: FormAutomationRun
@@ -1608,6 +1932,20 @@ export class mjBizAppsFormsFormAutomationRunEntity extends BaseEntity<mjBizAppsF
     */
     get __mj_UpdatedAt(): Date {
         return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: FormAutomationEventID
+    * * Display Name: Automation Event
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Automation Events (vwFormAutomationEvents.ID)
+    * * Description: The outbox event whose drain ran this step: the run's identity for at-least-once delivery. A re-run of the same event re-runs only the steps with no terminal run carrying it, and reuses a step's open row. NULL on runs written before this column
+    */
+    get FormAutomationEventID(): string | null {
+        return this.Get('FormAutomationEventID');
+    }
+    set FormAutomationEventID(value: string | null) {
+        this.Set('FormAutomationEventID', value);
     }
 
     /**
@@ -2263,7 +2601,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: FormID
-    * * Display Name: Form ID
+    * * Display Name: Form
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
     */
@@ -2394,7 +2732,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: MagicLinkInviteID
-    * * Display Name: Magic Link Invite ID
+    * * Display Name: Magic Link Invite
     * * SQL Data Type: uniqueidentifier
     * * Description: ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.
     */
@@ -2495,7 +2833,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: Form
-    * * Display Name: Form
+    * * Display Name: Form Name
     * * SQL Data Type: nvarchar(255)
     */
     get Form(): string {
@@ -2881,6 +3219,27 @@ export class mjBizAppsFormsFormEntityBindingEntity extends BaseEntity<mjBizAppsF
  */
 @RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Pages')
 export class mjBizAppsFormsFormPageEntity extends BaseEntity<mjBizAppsFormsFormPageEntityType> {
+
+  /**
+  * Related records: MJ_BizApps_Forms: Form Questions
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Forms: Form Pages record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Forms: Form Pages → MJ_BizApps_Forms: Form Questions' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Questions = this.DeclareRelatedRecords<mjBizAppsFormsFormQuestionEntity>({
+      Name: 'Questions',
+        RelatedEntity: 'MJ_BizApps_Forms: Form Questions',
+        RelatedEntityJoinField: 'PageID',
+        OrderBy: 'DisplayOrder ASC',
+        Load: 'immediate',
+        OnRemove: 'delete',
+        Source: 'database',
+        ReadOnly: false,
+        Sequence: { Field: 'DisplayOrder', From: 0 },
+  });
+
     /**
     * Loads the MJ_BizApps_Forms: Form Pages record from the database
     * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Pages record.
@@ -3197,6 +3556,27 @@ export class mjBizAppsFormsFormQuestionOptionEntity extends BaseEntity<mjBizApps
  */
 @RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Questions')
 export class mjBizAppsFormsFormQuestionEntity extends BaseEntity<mjBizAppsFormsFormQuestionEntityType> {
+
+  /**
+  * Related records: MJ_BizApps_Forms: Form Question Options
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Forms: Form Questions record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Forms: Form Questions → MJ_BizApps_Forms: Form Question Options' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Options = this.DeclareRelatedRecords<mjBizAppsFormsFormQuestionOptionEntity>({
+      Name: 'Options',
+        RelatedEntity: 'MJ_BizApps_Forms: Form Question Options',
+        RelatedEntityJoinField: 'QuestionID',
+        OrderBy: 'DisplayOrder ASC',
+        Load: 'immediate',
+        OnRemove: 'delete',
+        Source: 'database',
+        ReadOnly: false,
+        Sequence: { Field: 'DisplayOrder', From: 0 },
+  });
+
     /**
     * Loads the MJ_BizApps_Forms: Form Questions record from the database
     * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Questions record.
@@ -3832,7 +4212,7 @@ export class mjBizAppsFormsFormResponseEntity extends BaseEntity<mjBizAppsFormsF
 
     /**
     * * Field Name: Form
-    * * Display Name: Form
+    * * Display Name: Form Name
     * * SQL Data Type: nvarchar(255)
     */
     get Form(): string {
@@ -3904,7 +4284,7 @@ export class mjBizAppsFormsFormScreenEntity extends BaseEntity<mjBizAppsFormsFor
 
     /**
     * * Field Name: FormID
-    * * Display Name: Form
+    * * Display Name: Form ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
     */
@@ -4087,7 +4467,7 @@ export class mjBizAppsFormsFormScreenEntity extends BaseEntity<mjBizAppsFormsFor
 
     /**
     * * Field Name: Form
-    * * Display Name: Form Name
+    * * Display Name: Form
     * * SQL Data Type: nvarchar(255)
     */
     get Form(): string {
@@ -4679,6 +5059,47 @@ export class mjBizAppsFormsFormVersionEntity extends BaseEntity<mjBizAppsFormsFo
  */
 @RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Forms')
 export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntityType> {
+
+  /**
+  * Related records: MJ_BizApps_Forms: Form Pages
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Forms: Forms record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Forms: Forms → MJ_BizApps_Forms: Form Pages' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Pages = this.DeclareRelatedRecords<mjBizAppsFormsFormPageEntity>({
+      Name: 'Pages',
+        RelatedEntity: 'MJ_BizApps_Forms: Form Pages',
+        RelatedEntityJoinField: 'FormID',
+        OrderBy: 'DisplayOrder ASC',
+        Load: 'immediate',
+        OnRemove: 'delete',
+        Source: 'database',
+        ReadOnly: false,
+        Sequence: { Field: 'DisplayOrder', From: 0 },
+  });
+
+
+  /**
+  * Related records: MJ_BizApps_Forms: Form Screens
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Forms: Forms record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Forms: Forms → MJ_BizApps_Forms: Form Screens' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Screens = this.DeclareRelatedRecords<mjBizAppsFormsFormScreenEntity>({
+      Name: 'Screens',
+        RelatedEntity: 'MJ_BizApps_Forms: Form Screens',
+        RelatedEntityJoinField: 'FormID',
+        OrderBy: 'DisplayOrder ASC',
+        Load: 'immediate',
+        OnRemove: 'delete',
+        Source: 'database',
+        ReadOnly: false,
+  });
+
     /**
     * Loads the MJ_BizApps_Forms: Forms record from the database
     * @param ID: string - primary key value to load the MJ_BizApps_Forms: Forms record.
@@ -4694,38 +5115,6 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
         const compositeKey: CompositeKey = new CompositeKey();
         compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
         return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
-    }
-
-    /**
-    * Validate() method override for MJ_BizApps_Forms: Forms entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * Table-Level: Templates cannot have a 'Published' status. This ensures that master templates are not accidentally published as active, live forms.
-    * @public
-    * @method
-    * @override
-    */
-    public override Validate(): ValidationResult {
-        const result = super.Validate();
-        this.ValidateTemplateNotPublished(result);
-        result.Success = result.Success && (result.Errors.length === 0);
-
-        return result;
-    }
-
-    /**
-    * Templates cannot have a 'Published' status. This ensures that master templates are not accidentally published as active, live forms.
-    * @param result - the ValidationResult object to add any errors or warnings to
-    * @public
-    * @method
-    */
-    public ValidateTemplateNotPublished(result: ValidationResult) {
-    	if (this.IsTemplate && this.Status === "Published") {
-    		result.Errors.push(new ValidationErrorInfo(
-    			"Status",
-    			"A template cannot be published. Please change the status or disable the template option.",
-    			this.Status,
-    			ValidationErrorType.Failure
-    		));
-    	}
     }
 
     /**
