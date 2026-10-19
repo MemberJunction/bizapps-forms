@@ -35,6 +35,7 @@ import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../../shared/entity-names.js';
 import { AFFECTED_ROWS_ALIAS, affectedRows } from '../../shared/affected-rows.js';
+import { isGuid } from '../../shared/guid.js';
 import type { ResponseSubmittedTrigger } from './response-submitted-event.js';
 
 /** How many events one claim takes. The drain runs a batch concurrently, so this bounds the load. */
@@ -160,8 +161,9 @@ async function settleEvent(
  * already NULL on a settled event. `false` when the event is not dead-lettered.
  */
 export async function replayDeadLetteredEvent(provider: DatabaseProviderBase, eventId: string, contextUser: UserInfo): Promise<boolean> {
-  if (eventId.length === 0) {
-    throw new Error('Replaying an automation event needs an event id; got an empty one.');
+  // The id goes into the WHERE: SQL Server fails converting a non-GUID to uniqueidentifier.
+  if (!isGuid(eventId)) {
+    throw new Error(`Replaying an automation event needs an event id; got ${JSON.stringify(eventId)}.`);
   }
   const q = (name: string): string => provider.QuoteIdentifier(name);
   const pg = provider.PlatformKey === 'postgresql';

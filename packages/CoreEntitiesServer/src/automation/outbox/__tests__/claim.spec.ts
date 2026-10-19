@@ -9,6 +9,7 @@ import { makeContextUser, makeFakeProvider } from '../../../testing/index.js';
 import { LEASE_SECONDS, replayDeadLetteredEvent, sqlOutboxStore } from '../claim.js';
 
 const RESPONSE = '11111111-1111-4111-8111-111111111111';
+const EVENT = '22222222-2222-4222-8222-222222222222';
 
 function world(platform: 'sqlserver' | 'postgresql' = 'sqlserver', rows: Record<string, unknown>[] = []) {
   const db = makeFakeProvider({ platform, sql: [{ match: /UPDATE/, rows }] });
@@ -142,7 +143,7 @@ describe('the replay', () => {
   it('re-queues only a DeadLetter event, as a fresh replay due now (SQL Server)', async () => {
     const { db } = world('sqlserver', [{ AffectedRows: 1 }]);
 
-    expect(await replayDeadLetteredEvent(db.provider, 'E1', ctx)).toBe(true);
+    expect(await replayDeadLetteredEvent(db.provider, EVENT, ctx)).toBe(true);
 
     const sql = db.statements[0].sql;
     expect(sql).toContain("[Status] = 'Pending'");
@@ -152,36 +153,44 @@ describe('the replay', () => {
     expect(sql).toContain('[LastError] = NULL');
     expect(sql).toContain('[CompletedAt] = NULL');
     expect(sql).toContain('[__mj_UpdatedAt] = SYSDATETIMEOFFSET()');
-    expect(sql).toContain("WHERE [ID] = 'E1' AND [Status] = 'DeadLetter'");
+    expect(sql).toContain(`WHERE [ID] = '${EVENT}' AND [Status] = 'DeadLetter'`);
   });
 
   it('writes the same on PostgreSQL with true and now()', async () => {
     const { db } = world('postgresql', [{ AffectedRows: 1 }]);
 
-    await replayDeadLetteredEvent(db.provider, 'E1', ctx);
+    await replayDeadLetteredEvent(db.provider, EVENT, ctx);
 
     const sql = db.statements[0].sql;
     expect(sql).toContain('"IsReplay" = true');
     expect(sql).toContain('"NextAttemptAt" = now()');
-    expect(sql).toContain(`WHERE "ID" = 'E1' AND "Status" = 'DeadLetter'`);
+    expect(sql).toContain(`WHERE "ID" = '${EVENT}' AND "Status" = 'DeadLetter'`);
   });
 
   it('reports an event that is not dead-lettered as false', async () => {
     const { db } = world('sqlserver', [{ AffectedRows: 0 }]);
 
-    expect(await replayDeadLetteredEvent(db.provider, 'E1', ctx)).toBe(false);
+    expect(await replayDeadLetteredEvent(db.provider, EVENT, ctx)).toBe(false);
   });
 
   it('throws, naming the event, when the database reports no readable count', async () => {
     const { db } = world('sqlserver', []);
 
-    await expect(replayDeadLetteredEvent(db.provider, 'E1', ctx)).rejects.toThrow(/E1/);
+    await expect(replayDeadLetteredEvent(db.provider, EVENT, ctx)).rejects.toThrow(EVENT);
   });
 
   it('refuses an empty event id, before any SQL', async () => {
     const { db } = world();
 
     await expect(replayDeadLetteredEvent(db.provider, '', ctx)).rejects.toThrow(/event id/);
+    expect(db.statements).toHaveLength(0);
+  });
+
+  // SQL Server fails converting a non-GUID to uniqueidentifier, so the id is checked before it reaches SQL.
+  it.each(['not-a-guid', ' '])('refuses the non-GUID event id %j, naming it, before any SQL', async (eventId) => {
+    const { db } = world();
+
+    await expect(replayDeadLetteredEvent(db.provider, eventId, ctx)).rejects.toThrow(`"${eventId}"`);
     expect(db.statements).toHaveLength(0);
   });
 });
