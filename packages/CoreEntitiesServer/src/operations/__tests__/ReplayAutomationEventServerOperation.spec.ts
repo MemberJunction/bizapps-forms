@@ -213,6 +213,20 @@ describe('Forms.ReplayAutomationEvent', () => {
     expect(drain).not.toHaveBeenCalled();
   });
 
+  it('refuses an event id that is not a GUID as bad input, before reading or writing anything', async () => {
+    const db = world();
+
+    const result = await run(db, { FormAutomationEventID: 'not-a-guid' });
+
+    // SQL Server fails to convert it to a uniqueidentifier, which the read would report as a server fault.
+    expect(result.Success).toBe(false);
+    expect(result.ErrorMessage).toMatch(/^Forms\.ReplayAutomationEvent: FormAutomationEventID must be an automation event ID/);
+    expect(db.viewCalls.filter((call) => call.params.EntityName === AUTOMATION_EVENTS)).toEqual([]);
+    expect(replay).not.toHaveBeenCalled();
+    expect(drain).not.toHaveBeenCalled();
+    expect(LogError).not.toHaveBeenCalled();
+  });
+
   it('refuses an anonymous magic-link session at Authorize', async () => {
     const db = world();
     const anonymous = { ...AUTHOR, IsMagicLinkAnonymous: true } as unknown as UserInfo;

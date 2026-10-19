@@ -23,6 +23,7 @@ import { FormAutomationError } from '../engines/automation-errors.js';
 import { runEngineCall } from '../engines/engine-guards.js';
 import { requireDatabaseProvider } from '../shared/database-provider.js';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
+import { isGuid } from '../shared/guid.js';
 import { authorizeFormAuthoring } from './form-authoring-authorization.js';
 import { requireTextInput } from './operation-input.js';
 
@@ -38,6 +39,11 @@ export class ReplayAutomationEventServerOperation extends FormsReplayAutomationE
     user: UserInfo,
   ): Promise<FormsReplayAutomationEventOutput> {
     const eventId = requireTextInput(input?.FormAutomationEventID, 'FormAutomationEventID', this.OperationKey);
+    // The id goes into a SQL filter: SQL Server's failed uniqueidentifier conversion would read as a
+    // server fault, so bad input is refused here as bad input.
+    if (!isGuid(eventId)) {
+      throw new Error(`${this.OperationKey}: FormAutomationEventID must be an automation event ID.`);
+    }
     const database = requireDatabaseProvider(provider, this.OperationKey);
     // runEngineCall logs a refusal as a status and a fault as an error, once, with who asked.
     return runEngineCall(database, `[Forms] automation event ${eventId} was not replayed (user ${user.ID})`, async () => {
