@@ -163,6 +163,19 @@ describe('Forms.ReplayAutomationEvent', () => {
     expect(drain).not.toHaveBeenCalled();
   });
 
+  it('keeps database text out of the author-facing message when the re-queue write throws, logging it instead', async () => {
+    const db = world();
+    replay.mockRejectedValue(new Error('deadlock victim on FormAutomationEvent'));
+
+    const result = await run(db, { FormAutomationEventID: EVENT });
+
+    expect(result.Success).toBe(false);
+    expect(result.ErrorMessage).toContain(EVENT);
+    expect(result.ErrorMessage).not.toContain('deadlock victim');
+    expect(LogError).toHaveBeenCalledWith(expect.stringContaining('deadlock victim'));
+    expect(drain).not.toHaveBeenCalled();
+  });
+
   it('refuses an event that is no longer dead-lettered, naming it, and drains nothing', async () => {
     const db = world({}, 'Complete');
     replay.mockResolvedValue(false);

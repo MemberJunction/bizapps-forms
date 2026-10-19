@@ -42,7 +42,7 @@ export class ReplayAutomationEventServerOperation extends FormsReplayAutomationE
     // runEngineCall logs a refusal as a status and a fault as an error, once, with who asked.
     return runEngineCall(database, `[Forms] automation event ${eventId} was not replayed (user ${user.ID})`, async () => {
       const event = await readEvent(database, eventId, user);
-      if (!(await replayDeadLetteredEvent(database, eventId, user))) {
+      if (!(await requeueEvent(database, eventId, user))) {
         // Read as DeadLetter yet the fenced UPDATE changed nothing: a concurrent replay won between the two.
         const reason =
           event.Status === 'DeadLetter'
@@ -86,6 +86,21 @@ async function readEvent(database: DatabaseProviderBase, eventId: string, user: 
     throw new FormAutomationError(`Automation event ${eventId} was not found.`);
   }
   return row;
+}
+
+/**
+ * The fenced re-queue write; `false` when it changed nothing. A throw is driver text (a deadlock, a
+ * lost connection), which goes to the log only, as in {@link readEvent}.
+ */
+async function requeueEvent(database: DatabaseProviderBase, eventId: string, user: UserInfo): Promise<boolean> {
+  try {
+    return await replayDeadLetteredEvent(database, eventId, user);
+  } catch (err) {
+    throw new FormAutomationError(`Automation event ${eventId} could not be re-queued, so it was not replayed; the server log has the detail.`, {
+      fault: true,
+      logDetail: `re-queueing event ${eventId}: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
 }
 
 /**
