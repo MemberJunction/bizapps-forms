@@ -299,10 +299,10 @@ emits `packages/Entities/src/generated/remote_operations.ts` (one `Forms*Operati
 the metadata was pushed to.
 
 **Building a #303 sandbox.** Build it with the clean-room chain above at the pinned MJ tag
-(`-t v6.1.5`), never by migrating an older room upward past a tag it was not built at.
+(`-t v6.1.6`), never by migrating an older room upward past a tag it was not built at.
 `check:host-truth` derives its core tag from the highest `mjVersionRange` floor among this app,
 bizapps-common and bizapps-tasks (a room holding all three can sit no lower); pass
-`--core-tag v6.1.5` to build at the pin. Moving #303's automations onto MJ's Work Queue once a 6.2 LTS ships is a separate,
+`--core-tag v6.1.6` to build at the pin. Moving #303's automations onto MJ's Work Queue once a 6.2 LTS ships is a separate,
 later change: the outbox stays the record of what a save owes, and the queue would only wake the
 drain.
 

@@ -8,7 +8,7 @@
 
 Forms' domain logic moves out of the browser into server engines, exposed as 19 typed Remote
 Operations (`Forms.*`), and on-submit automations run from a transactional outbox the save writes in
-its own transaction (#303). Runs on the MJ 6.1 LTS line (6.1.5). Ships three migrations and new
+its own transaction (#303). Runs on the MJ 6.1 LTS line (6.1.6). Ships three migrations and new
 metadata, so this is a `minor`. Closes #302, #75 and #103.
 
 ### What a host must do
@@ -30,9 +30,10 @@ metadata, so this is a `minor`. Closes #302, #75 and #103.
   as the system user. Its other grants are unchanged, and its Description now says so.
 - Until a host has this release's consolidated `Metadata_Sync`, it has no sweep job: first attempts
   still run, retries wait. Responses are accepted either way.
-- **Authoring from a starter template and "Author with AI" keep working for non-Owners on MJ 6.2.**
-  MJ 6.2's `RunAction` refuses a non-Owner any action that has no `MJ: Action Authorizations` link and
-  does not authorize its caller itself (6.1.5 ignores the marker below, so nothing changes there). `Forms: Create Form From Template` and `Forms: Generate Form
+- **Authoring from a starter template and "Author with AI" keep working for non-Owners on MJ 6.1.6
+  and 6.2.** From 6.1.6 (and on 6.2), MJ's `RunAction` refuses a non-Owner any action that has no
+  `MJ: Action Authorizations` link and does not authorize its caller itself; 6.1.5 and earlier ignore
+  the marker below, so nothing changes there. `Forms: Create Form From Template` and `Forms: Generate Form
   From Brief` now declare `AuthorizesCaller` (MJ core's convention for client-called actions): each
   already refuses a caller who may not author forms, and that check stays the one authoring
   decision. Nothing to grant. Do not add an Action Authorization for either: any such row replaces

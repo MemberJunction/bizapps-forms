@@ -742,6 +742,17 @@ native entities. This is the reporting differentiator no incumbent has.
 
 ## 12. Progress Log
 
+- **2026-10-19 — MJ 6.1.5 → 6.1.6 (lts-6.1).** Host-tracking pins only (16, root + `apps/MJAPI`);
+  the `packages/*` peers and `mjVersionRange` stay at `^6.1.0-edge.6`, which already admits 6.1.6.
+  The lockfile again kept 380 `packages/*` blocks on the old MJ; `drop-stale-mj-lock.py` cleared
+  them, leaving one MJ version and no non-MJ package moved. 6.1.6 ships no new core migration (top
+  stays `V202610061630`), no `@angular/*` or `ng-auth-services` peer change, and a CodeGen change that
+  only re-quotes resolver descriptions, so nothing was regenerated. `check:host-truth --core-tag
+  v6.1.6` converged. The change that matters is the security C1–C10 backport: `RunAction` now
+  authorizes per action and refuses magic-link sessions, and client `RunView` filters are screened.
+  Forms was already compliant (see the `mj-upgrade` skill), and `smoke:respondent` passed 14/14 on
+  6.1.6. The changeset's claim that "6.1.5 ignores" `AuthorizesCaller` was corrected to name 6.1.6.
+
 - **2026-10-17 — PR #306: #303 rebuilt on MJ 6.1.5 LTS, plus @rkihm-bc's review of it.** #304's
   server-engine move now ships on the LTS line: the MJ 6.2 Work Queue is replaced by a transactional
   `FormAutomationEvent` outbox (claim/settle/renew in `automation/outbox/`, a post-commit drain and a
