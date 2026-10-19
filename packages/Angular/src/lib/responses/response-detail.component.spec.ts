@@ -121,6 +121,14 @@ describe('a dead-lettered automation event', () => {
     expect(block).toContain('<mjf-icon name="rotate-right" [spin]="RetryingEventId === e.eventId" />');
   });
 
+  it('says how many attempts it gave up after, in the singular for one', () => {
+    const c = construct(detail([event()]));
+
+    expect(c.GaveUpTitle(event({ attemptCount: 1 }))).toBe('These automations gave up after 1 attempt');
+    expect(c.GaveUpTitle(event({ attemptCount: 5 }))).toBe('These automations gave up after 5 attempts');
+    expect(deadLetterBlock()).toContain('[title]="GaveUpTitle(e)"');
+  });
+
   it('draws its icons with mjf-icon, not a font', () => {
     const block = deadLetterBlock();
     expect(block).toContain('<mjf-icon name="triangle-exclamation" />');

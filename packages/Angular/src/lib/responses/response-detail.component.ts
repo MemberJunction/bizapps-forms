@@ -188,7 +188,7 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
                this whole list. -->
           @for (e of DeadLetters; track e.eventId) {
             <div class="run run--dead">
-              <span class="mjf-badge mjf-badge--danger" title="These automations gave up after {{ e.attemptCount }} attempts">
+              <span class="mjf-badge mjf-badge--danger" [title]="GaveUpTitle(e)">
                 <mjf-icon name="triangle-exclamation" /> Automations failed
               </span>
               <button
@@ -474,6 +474,11 @@ export class FormsResponseDetailComponent implements AfterViewInit {
    */
   public get DeadLetters(): ResponseAutomationEventView[] {
     return this.Detail.automationEvents.filter((e) => e.status === 'DeadLetter');
+  }
+
+  /** The dead-letter badge's tooltip. One attempt is possible: a refusal no retry can fix gives up on the first. */
+  public GaveUpTitle(e: ResponseAutomationEventView): string {
+    return `These automations gave up after ${e.attemptCount} ${e.attemptCount === 1 ? 'attempt' : 'attempts'}`;
   }
 
   /**
