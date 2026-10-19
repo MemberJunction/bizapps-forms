@@ -293,13 +293,22 @@ async function settlementFor(outcome: RunOutcome, event: ClaimedEvent, contextUs
   const partial = event.Trigger === 'OnPartial';
   const closed = await closeOpenRuns(event, partial ? 'Abandoned' : 'DeadLettered', outcome.reason, contextUser, source);
   if (!partial) {
+    // A dead letter is otherwise visible only as a row; the log line is what an operator's alert sees.
+    LogError(
+      `[Forms automation drain] ${event.Trigger} automations of response ${event.FormResponseID} dead-lettered: ${outcome.reason} ${stepsClosed(closed)}`,
+    );
     return { status: 'DeadLetter', lastError: outcome.reason };
   }
   LogError(
     `[Forms automation drain] partial-save automations of response ${event.FormResponseID} abandoned, not dead-lettered ` +
-      `(a dead letter would hold the response's final behind it): ${outcome.reason} Steps closed: ${closed.length > 0 ? closed.join(', ') : 'none'}.`,
+      `(a dead letter would hold the response's final behind it): ${outcome.reason} ${stepsClosed(closed)}`,
   );
   return { status: 'Abandoned', lastError: outcome.reason };
+}
+
+/** The close-out's tail for a give-up log line. */
+function stepsClosed(closed: string[]): string {
+  return `Steps closed: ${closed.length > 0 ? closed.join(', ') : 'none'}.`;
 }
 
 /** Best-effort, on its own isolated instance: returns the steps closed; a failure is logged and closes none. */
