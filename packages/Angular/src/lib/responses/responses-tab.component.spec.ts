@@ -238,7 +238,7 @@ describe('ResponsesTabComponent', () => {
   it('wires the detail\'s Reload in both of its hosts', () => {
     const source = (file: string): string => readFileSync(join(__dirname, file), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
     expect(source('responses-tab.component.ts')).toContain('(Reload)="ReloadDetail()"');
-    expect(source('response-form.component.ts')).toContain('(Reload)="loadDetail()"');
+    expect(source('response-form.component.ts')).toContain('(Reload)="reloadDetail()"');
   });
 
   it('ignores a second click while a response is opening, so the reader lands on the one they picked', async () => {
