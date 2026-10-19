@@ -1,12 +1,12 @@
 /**
  * The outbox store's statements (#303). A fake provider cannot run SQL, so these assert the SHAPE
- * each statement must keep — the parts that make a claim atomic, ordered and leased, and a settle
- * fenced — and the opt-in DB suite in `engines/__tests__/FormSubmissionEngine.integration.spec.ts`
+ * each statement must keep — the parts that make a claim atomic, ordered and leased, a settle
+ * fenced, and a replay fenced on `DeadLetter` — and the opt-in DB suite in `engines/__tests__/FormSubmissionEngine.integration.spec.ts`
  * proves the behaviour on a real SQL Server.
  */
 import { describe, expect, it } from 'vitest';
 import { makeContextUser, makeFakeProvider } from '../../../testing/index.js';
-import { LEASE_SECONDS, sqlOutboxStore } from '../claim.js';
+import { LEASE_SECONDS, replayDeadLetteredEvent, sqlOutboxStore } from '../claim.js';
 
 const RESPONSE = '11111111-1111-4111-8111-111111111111';
 
@@ -133,6 +133,56 @@ describe('the settle', () => {
     const { outbox } = world('sqlserver', []);
 
     await expect(outbox.Settle('E1', 'worker-1', { status: 'Complete', lastError: null })).rejects.toThrow(/E1/);
+  });
+});
+
+describe('the replay', () => {
+  const ctx = makeContextUser();
+
+  it('re-queues only a DeadLetter event, as a fresh replay due now (SQL Server)', async () => {
+    const { db } = world('sqlserver', [{ AffectedRows: 1 }]);
+
+    expect(await replayDeadLetteredEvent(db.provider, 'E1', ctx)).toBe(true);
+
+    const sql = db.statements[0].sql;
+    expect(sql).toContain("[Status] = 'Pending'");
+    expect(sql).toContain('[AttemptCount] = 0');
+    expect(sql).toContain('[IsReplay] = 1');
+    expect(sql).toContain('[NextAttemptAt] = SYSDATETIMEOFFSET()');
+    expect(sql).toContain('[LastError] = NULL');
+    expect(sql).toContain('[CompletedAt] = NULL');
+    expect(sql).toContain('[__mj_UpdatedAt] = SYSDATETIMEOFFSET()');
+    expect(sql).toContain("WHERE [ID] = 'E1' AND [Status] = 'DeadLetter'");
+  });
+
+  it('writes the same on PostgreSQL with true and now()', async () => {
+    const { db } = world('postgresql', [{ AffectedRows: 1 }]);
+
+    await replayDeadLetteredEvent(db.provider, 'E1', ctx);
+
+    const sql = db.statements[0].sql;
+    expect(sql).toContain('"IsReplay" = true');
+    expect(sql).toContain('"NextAttemptAt" = now()');
+    expect(sql).toContain(`WHERE "ID" = 'E1' AND "Status" = 'DeadLetter'`);
+  });
+
+  it('reports an event that is not dead-lettered as false', async () => {
+    const { db } = world('sqlserver', [{ AffectedRows: 0 }]);
+
+    expect(await replayDeadLetteredEvent(db.provider, 'E1', ctx)).toBe(false);
+  });
+
+  it('throws, naming the event, when the database reports no readable count', async () => {
+    const { db } = world('sqlserver', []);
+
+    await expect(replayDeadLetteredEvent(db.provider, 'E1', ctx)).rejects.toThrow(/E1/);
+  });
+
+  it('refuses an empty event id, before any SQL', async () => {
+    const { db } = world();
+
+    await expect(replayDeadLetteredEvent(db.provider, '', ctx)).rejects.toThrow(/event id/);
+    expect(db.statements).toHaveLength(0);
   });
 });
 

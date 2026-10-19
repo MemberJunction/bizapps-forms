@@ -19,6 +19,9 @@
  * now; the caller writes nothing further. A run in flight renews its lease on a timer, so a step that
  * takes longer than the lease is not dispatched a second time by a reclaiming drain.
  *
+ * REPLAY is the third write, and the only one with no lease: it re-queues a `DeadLetter` event, fenced
+ * on that status, so an event that is not dead-lettered is left untouched.
+ *
  * The PostgreSQL branches have not been run against a database: `migrations-pg/` stops at v0.8.x, so
  * no PostgreSQL host has this table yet.
  *
@@ -147,6 +150,27 @@ async function settleEvent(
     `${q('__mj_UpdatedAt')} = ${now} ` +
     `WHERE ${leaseHeldBy(provider, eventId, workerId)}`;
   return (await affectedOne(provider, update, contextUser, `Settling automation event ${eventId} as ${settlement.status}`)) === 1;
+}
+
+/**
+ * Re-queue a dead-lettered event for one more run (the third write; no drain holds the event, so it
+ * is fenced on `Status = 'DeadLetter'` rather than on a lease). Two callers racing to replay the same
+ * event cannot both win: the loser finds it already Pending and writes nothing. `IsReplay` tells the
+ * next run to reopen the dead letter's `Dead-lettered: ` step rows. `LockedBy`/`LockedUntil` are
+ * already NULL on a settled event. `false` when the event is not dead-lettered.
+ */
+export async function replayDeadLetteredEvent(provider: DatabaseProviderBase, eventId: string, contextUser: UserInfo): Promise<boolean> {
+  if (eventId.length === 0) {
+    throw new Error('Replaying an automation event needs an event id; got an empty one.');
+  }
+  const q = (name: string): string => provider.QuoteIdentifier(name);
+  const pg = provider.PlatformKey === 'postgresql';
+  const now = pg ? 'now()' : 'SYSDATETIMEOFFSET()';
+  const update =
+    `UPDATE ${eventTable(provider)} SET ${q('Status')} = 'Pending', ${q('AttemptCount')} = 0, ${q('IsReplay')} = ${pg ? 'true' : '1'}, ` +
+    `${q('NextAttemptAt')} = ${now}, ${q('LastError')} = NULL, ${q('CompletedAt')} = NULL, ${q('__mj_UpdatedAt')} = ${now} ` +
+    `WHERE ${q('ID')} = ${quoteSqlString(eventId)} AND ${q('Status')} = 'DeadLetter'`;
+  return (await affectedOne(provider, update, contextUser, `Replaying automation event ${eventId}`)) === 1;
 }
 
 /** Push this worker's lease out by {@link LEASE_SECONDS} again; a run in flight calls it on a timer. */
