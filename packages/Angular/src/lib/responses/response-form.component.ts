@@ -55,6 +55,7 @@ import { FormsResponseDetailComponent } from './response-detail.component';
         <mj-forms-response-detail
           [Detail]="d"
           [ShowBack]="false"
+          (Reload)="loadDetail()"
           (OpenRecord)="openLinkedRecord($event)"></mj-forms-response-detail>
       }
 
@@ -147,7 +148,8 @@ export class ResponseFormComponent extends BaseFormComponent {
     await this.loadDetail();
   }
 
-  private async loadDetail(): Promise<void> {
+  /** First read on open, and the re-read the detail asks for after a replay changed the response. */
+  protected async loadDetail(): Promise<void> {
     this.busy = true;
     this.error = null;
     try {

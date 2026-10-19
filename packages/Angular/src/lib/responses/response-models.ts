@@ -9,6 +9,7 @@
  */
 import type {
   FormQuestionType,
+  FormsResponseAutomationEvent,
   FormsResponseAutomationRun,
   FormsResponseBindingRecord,
   FormsResponseListRow,
@@ -103,6 +104,23 @@ export interface ResponseAutomationAttempt {
   aiAgentRunId: string | null;
 }
 
+/**
+ * One automation event (`FormAutomationEvent`, an outbox row a save queued) this response owes or
+ * has run. A `DeadLetter` one is a final submit whose automations gave up, and the only status an
+ * author can replay (`Forms.ReplayAutomationEvent`, #311).
+ */
+export interface ResponseAutomationEventView {
+  eventId: string;
+  trigger: FormsResponseAutomationEvent['Trigger'];
+  status: FormsResponseAutomationEvent['Status'];
+  /** How many times a drain has attempted it. */
+  attemptCount: number;
+  /** Why the last attempt failed; null when none did. */
+  lastError: string | null;
+  /** When it settled; null while it is still open. */
+  completedAt: Date | null;
+}
+
 /** One business record this submission created or merged into. */
 export interface ResponseBindingRecordView {
   bindingRecordId: string;
@@ -152,6 +170,8 @@ export interface ResponseDetail {
   unavailableSections: string[];
   /** What the submission triggered. Empty when it triggered nothing. */
   automationRuns: ResponseAutomationAttempt[];
+  /** The automation events its saves queued, oldest first. Empty when they queued none. */
+  automationEvents: ResponseAutomationEventView[];
   /** What business records it wrote. Empty when it wrote none. */
   bindingRecords: ResponseBindingRecordView[];
 }

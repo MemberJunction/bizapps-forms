@@ -121,6 +121,7 @@ export const LIST_CHANGED_NOTICE = 'The list changed — refresh to see it.';
           <mj-forms-response-detail
             [Detail]="d"
             (Back)="CloseDetail()"
+            (Reload)="ReloadDetail()"
             (OpenRecord)="OpenRecord.emit($event)"></mj-forms-response-detail>
         }
       }
@@ -310,6 +311,17 @@ export class ResponsesTabComponent implements OnInit, OnDestroy {
     } finally {
       this.OpeningResponse.set(false);
       this.BusyChange.emit(false);
+    }
+  }
+
+  /**
+   * Re-read the open response after the detail changed it on the server (a replayed dead letter),
+   * through the same read that opened it. The stale detail stays on screen until the new one lands.
+   */
+  public async ReloadDetail(): Promise<void> {
+    const open = this.Detail();
+    if (open) {
+      await this.OpenResponse(open.responseId);
     }
   }
 

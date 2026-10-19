@@ -8,6 +8,8 @@
  */
 import '@angular/compiler';
 import { Injector, runInInjectionContext } from '@angular/core';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteOpResult } from '@memberjunction/core';
 import type { FormsGetResponseDetailOutput, FormsListResponsesInput, FormsListResponsesOutput, FormsResponseListRow } from '@mj-biz-apps/forms-entities';
@@ -213,6 +215,30 @@ describe('ResponsesTabComponent', () => {
 
     expect(calls[1]).toMatchObject({ key: 'Forms.GetResponseDetail', input: { ResponseID: 'r-1', LabelFormVersionID: 'published-v' } });
     expect(c.View()).toBe('detail');
+  });
+
+  it('re-reads the open response, labelled the same way, when the detail asks to reload (#311)', async () => {
+    const c = construct();
+    const loading = c.ngOnInit();
+    calls[0].settle(listPage([1], 1, 'published-v'));
+    await loading;
+    const open = c.OpenResponse('r-1');
+    calls[1].settle(detail('r-1'));
+    await open;
+
+    const reload = c.ReloadDetail();
+    expect(calls[2]).toMatchObject({ key: 'Forms.GetResponseDetail', input: { ResponseID: 'r-1', LabelFormVersionID: 'published-v' } });
+    calls[2].settle(detail('r-1'));
+    await reload;
+
+    expect(c.View()).toBe('detail');
+    expect(c.Detail()?.responseId).toBe('r-1');
+  });
+
+  it('wires the detail\'s Reload in both of its hosts', () => {
+    const source = (file: string): string => readFileSync(join(__dirname, file), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+    expect(source('responses-tab.component.ts')).toContain('(Reload)="ReloadDetail()"');
+    expect(source('response-form.component.ts')).toContain('(Reload)="loadDetail()"');
   });
 
   it('ignores a second click while a response is opening, so the reader lands on the one they picked', async () => {

@@ -10,12 +10,15 @@ import {
   ViewChild,
   inject,
 } from '@angular/core';
+import { FormsReplayAutomationEventOperation } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
-import { MJ_CORE_ENTITY } from '../shared/entity-names';
+import { FORMS_ENTITY, MJ_CORE_ENTITY } from '../shared/entity-names';
+import { runOperation } from '../shared/remote-operation';
 import type {
   ResponseAnswerView,
   ResponseFileView,
   ResponseAutomationAttempt,
+  ResponseAutomationEventView,
   ResponseBindingRecordView,
   ResponseDetail,
   ResponseRecordLink,
@@ -24,6 +27,9 @@ import { ResponseFileDownloadService } from './response-file-download.service';
 
 /** Byte-size units, largest step first, for the human-readable file size. */
 const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
+
+/** What a replay writes: the event it re-queues, and the run rows its drain reopens. */
+const REPLAY_WRITES = [FORMS_ENTITY.FormAutomationEvent, FORMS_ENTITY.FormAutomationRun];
 
 /**
  * Run status / binding outcome -> badge tone.
@@ -169,9 +175,37 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
         </p>
       }
 
-      @if (Detail.automationRuns.length > 0 || Detail.bindingRecords.length > 0) {
+      @if (Detail.automationRuns.length > 0 || Detail.bindingRecords.length > 0 || DeadLetters.length > 0) {
         <section class="rd-did">
           <h3 class="mjf-section-title rd-did-title">What this submission did</h3>
+
+          <!-- A dead letter first: it is the one thing here the author can act on. Every Retry
+               button holds while any replay runs, because the reload that follows re-renders
+               this whole list. -->
+          @for (e of DeadLetters; track e.eventId) {
+            <div class="run run--dead">
+              <span class="mjf-badge mjf-badge--danger" title="These automations gave up after {{ e.attemptCount }} attempts">
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Automations failed
+              </span>
+              <button
+                type="button"
+                class="mjf-btn mjf-btn--ghost mjf-btn--sm"
+                [disabled]="RetryingEventId !== ''"
+                [attr.aria-busy]="RetryingEventId === e.eventId"
+                (click)="RetryAutomations(e)"
+              >
+                <i class="fa-solid fa-rotate-right" [class.fa-spin]="RetryingEventId === e.eventId" aria-hidden="true"></i>
+                Retry automations
+              </button>
+              @if (RetryError && RetryErrorEventId === e.eventId) {
+                <span class="retry-error" role="alert">{{ RetryError }}</span>
+              }
+              <span class="run-msg" title="The automation event that gave up">Event {{ e.eventId }}</span>
+              @if (e.lastError) {
+                <p class="run-error">{{ e.lastError }}</p>
+              }
+            </div>
+          }
 
           @for (r of Detail.automationRuns; track r.runId) {
             <div class="run">
@@ -352,6 +386,8 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
         border-radius: var(--mjf-radius-sm);
         background: var(--mj-bg-surface);
       }
+      /* The error border marks the row as needing the author, not just as one more step. */
+      .run--dead { border-color: var(--mj-status-error-border); }
       .run-name,
       .bind-entity { font-weight: 600; }
       .run-meta,
@@ -364,6 +400,8 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
         overflow-wrap: anywhere;
         user-select: all;
       }
+      /* Beside the button that failed, like a download error beside its file. */
+      .retry-error { font-size: var(--mjf-meta); color: var(--mj-status-error-text); }
       .run-error,
       .run-output { flex-basis: 100%; margin: 0; font-size: var(--mjf-label); line-height: 1.5; white-space: pre-wrap; }
       .run-error { color: var(--mj-status-error-text); }
@@ -403,6 +441,18 @@ export class FormsResponseDetailComponent implements AfterViewInit {
    */
   @Output() OpenRecord = new EventEmitter<ResponseRecordLink>();
 
+  /**
+   * A replay re-queued an event and drained it, so what the panel shows is stale. The host
+   * re-reads the detail the way it read it first: it owns the read, and the label version.
+   */
+  @Output() Reload = new EventEmitter<void>();
+
+  /** The dead-lettered event a replay is running for; empty when none is. */
+  public RetryingEventId = '';
+  /** The last replay refusal, and which event it belongs to. */
+  public RetryError = '';
+  public RetryErrorEventId = '';
+
   @ViewChild('backButton') private backButton?: ElementRef<HTMLButtonElement>;
 
   /**
@@ -412,6 +462,46 @@ export class FormsResponseDetailComponent implements AfterViewInit {
    */
   public ngAfterViewInit(): void {
     this.backButton?.nativeElement.focus();
+  }
+
+  /**
+   * The events whose automations gave up — the only ones offered a retry. The server refuses a
+   * replay of any other status, so offering one would be a button that can only fail.
+   */
+  public get DeadLetters(): ResponseAutomationEventView[] {
+    return this.Detail.automationEvents.filter((e) => e.status === 'DeadLetter');
+  }
+
+  /**
+   * Replay one dead-lettered event (`Forms.ReplayAutomationEvent`): re-queue it and run it once,
+   * now. On success the host reloads the detail, which shows how the run ended; a refusal stays
+   * beside the event it belongs to and nothing reloads.
+   */
+  public async RetryAutomations(event: ResponseAutomationEventView): Promise<void> {
+    if (event.status !== 'DeadLetter' || this.RetryingEventId) {
+      return;
+    }
+    this.RetryingEventId = event.eventId;
+    this.RetryError = '';
+    this.RetryErrorEventId = '';
+    try {
+      const outcome = await runOperation(
+        new FormsReplayAutomationEventOperation(),
+        { FormAutomationEventID: event.eventId },
+        `replaying automation event ${event.eventId} of response ${this.Detail.responseId}`,
+        REPLAY_WRITES,
+      );
+      if (outcome.ok) {
+        this.Reload.emit();
+      } else {
+        this.RetryError = outcome.error;
+        this.RetryErrorEventId = event.eventId;
+      }
+    } finally {
+      this.RetryingEventId = '';
+      // OnPush with an awaited handler, as in DownloadFile.
+      this.cdr.markForCheck();
+    }
   }
 
   /** Badge tone for an automation run's status. See RUN_TONE. */

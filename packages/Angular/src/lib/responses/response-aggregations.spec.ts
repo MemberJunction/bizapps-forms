@@ -277,6 +277,22 @@ describe('buildResponseDetail — what the submission did', () => {
     expect(vi.mocked(LogError).mock.calls.flat().join(' ')).toContain('b2');
   });
 
+  it('carries each automation event, oldest first, with its settled instant as a Date (#311)', () => {
+    const detail = buildResponseDetail(
+      output({
+        AutomationEvents: [
+          { ID: 'evt-1', Trigger: 'OnPartial', Status: 'Complete', AttemptCount: 1, LastError: null, CompletedAt: '2026-09-01T09:59:00.000Z' },
+          { ID: 'evt-2', Trigger: 'OnComplete', Status: 'DeadLetter', AttemptCount: 5, LastError: 'Provider timed out', CompletedAt: null },
+        ],
+      }),
+    );
+
+    expect(detail.automationEvents).toEqual([
+      { eventId: 'evt-1', trigger: 'OnPartial', status: 'Complete', attemptCount: 1, lastError: null, completedAt: new Date('2026-09-01T09:59:00.000Z') },
+      { eventId: 'evt-2', trigger: 'OnComplete', status: 'DeadLetter', attemptCount: 5, lastError: 'Provider timed out', completedAt: null },
+    ]);
+  });
+
   it('passes the sections the caller could not read through, so the view says MISSING rather than empty', () => {
     expect(buildResponseDetail(output({ UnavailableSections: ['automation runs'] })).unavailableSections).toEqual(['automation runs']);
   });
