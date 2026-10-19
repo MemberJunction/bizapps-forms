@@ -62,6 +62,7 @@ whatever it looks up. `users` and `user-roles` come last because the grant looks
 | `remote-operations`, `remote-operation-categories` | yes | the Forms API surface (#303): one row per `Forms.*` operation; CodeGen emits its typed base into `packages/Entities/src/generated/remote_operations.ts`, and `types/` holds the I/O contracts (no imports — pasted verbatim) |
 | `queries`, `query-categories` | yes | the reporting read models `FormReportingEngine` runs through `RunQuery` |
 | `scheduled-job-types`, `scheduled-jobs` | yes | the automation outbox sweep: the `FormsAutomationDrainDriver` job type and the job that runs it about every 15 seconds (cron every 30 s; retries, and events a stopped process left behind) |
+| `notification-types` | yes | `Form Automation Failed`, the in-app notice a form's owner gets when a submitted response's automations dead-letter (#311); in-app by default, and it ships no email or SMS template |
 | `entity-relationships` | yes | fills `RelatedRecordCollection` on CodeGen-minted relationship rows (Form.Pages/Screens, FormPage.Questions, FormQuestion.Options); creates nothing — see its `.mj-sync.json` |
 | `users`, `user-roles` | yes | the automation service principal **and** its role grant — see [`users/README.md`](users/README.md); the two are useless apart |
 
