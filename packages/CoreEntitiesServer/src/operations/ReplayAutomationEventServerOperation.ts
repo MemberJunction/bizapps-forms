@@ -56,7 +56,7 @@ export class ReplayAutomationEventServerOperation extends FormsReplayAutomationE
             : `Automation event ${eventId} is not dead-lettered (it is ${event.Status}), so it was not replayed.`;
         throw new FormAutomationError(reason);
       }
-      await drainReplayedResponse(eventId, event.FormResponseID);
+      await drainReplayedResponse(database, eventId, event.FormResponseID);
       return { FormAutomationEventID: eventId, Status: 'Pending' };
     });
   }
@@ -114,7 +114,7 @@ async function requeueEvent(database: DatabaseProviderBase, eventId: string, use
  * and swallowed on purpose: the event is `Pending`, the scheduled sweep runs it, and telling the
  * author "not replayed" would be false.
  */
-async function drainReplayedResponse(eventId: string, responseId: string): Promise<void> {
+async function drainReplayedResponse(database: DatabaseProviderBase, eventId: string, responseId: string): Promise<void> {
   try {
     // The drain reads what plans a run (form versions) as its context user; the author may not hold
     // that grant, and the steps run as the automation principal regardless. So it runs as the host's
@@ -123,7 +123,9 @@ async function drainReplayedResponse(eventId: string, responseId: string): Promi
     if (!system) {
       throw new Error('MJ has no system user on this host');
     }
-    await drainAutomationOutbox({ reason: 'replay', responseId }, system);
+    // Through the provider the dispatcher gave this operation, as the read and the re-queue do: the
+    // process provider may be another one, or unset.
+    await drainAutomationOutbox({ reason: 'replay', responseId }, system, { source: database });
   } catch (err) {
     LogError(
       `[Forms] event ${eventId} of response ${responseId} was re-queued but its drain failed (the sweep will run it): ${err instanceof Error ? err.message : String(err)}`,

@@ -65,11 +65,16 @@ export interface DrainReport {
   roundsCapped: boolean;
 }
 
-/** Test seams. Production passes none of them. */
+/**
+ * What the drain runs against. `store` and `notice` are test seams. `source` is also passed in
+ * production, by the callers that were handed a provider: the post-commit drain
+ * (`FormSubmissionEngine`) and the replay operation drain through that provider, not the process
+ * one, which may differ or be unset. The scheduled sweep passes nothing.
+ */
 export interface DrainSeams {
   /** The outbox; defaults to the SQL store on an isolated instance of `source`. */
   readonly store?: OutboxStore;
-  /** The provider isolated instances are made from; defaults to the process provider. */
+  /** The provider isolated instances are made from; defaults to the process provider (`Metadata.Provider`). */
   readonly source?: IMetadataProvider | null;
   /** The dead letter's owner notice; defaults to the form-owner read and MJ's `NotificationEngine`. */
   readonly notice?: DeadLetterNoticeSeams;

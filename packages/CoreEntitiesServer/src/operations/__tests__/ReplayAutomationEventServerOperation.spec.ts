@@ -123,6 +123,21 @@ describe('Forms.ReplayAutomationEvent', () => {
     expect(drain.mock.calls[0]?.[1]).toMatchObject({ ID: SYSTEM.ID });
   });
 
+  it('drains through the provider the operation was given, not the process provider', async () => {
+    const db = world();
+    // The global differs from the dispatcher's provider: `Authorize` reads it, the drain must not.
+    const elsewhere = world();
+    Metadata.Provider = elsewhere.provider;
+    replay.mockResolvedValue(true);
+    drain.mockResolvedValue({ claimed: 1, completed: 1, retried: 0, deadLettered: 0, abandoned: 0, roundsCapped: false });
+
+    const result = await run(db, { FormAutomationEventID: EVENT });
+
+    expect(result.ResultCode).toBe('SUCCESS');
+    expect(drain).toHaveBeenCalledTimes(1);
+    expect(drain.mock.calls[0]?.[2]?.source).toBe(db.provider);
+  });
+
   it('still reports Pending when the drain fails: the event is queued and the sweep will run it', async () => {
     const db = world();
     replay.mockResolvedValue(true);
