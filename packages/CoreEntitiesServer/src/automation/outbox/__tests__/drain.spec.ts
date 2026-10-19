@@ -341,6 +341,8 @@ describe('the owner notice', () => {
     await drainOnce([[claimed({ AttemptCount: MAX_ATTEMPTS })]], { settleResult: false });
 
     expect(notices.sends).toEqual([]);
+    // Nor logs it as dead-lettered: an operator's alert on that line would report an event that is not.
+    expect(logged.filter((l) => l.includes('dead-lettered'))).toEqual([]);
   });
 
   it('an abandoned partial on its last attempt notifies nobody', async () => {

@@ -18,8 +18,8 @@
  *  - `DeadLetter` — FINAL submits only, when nothing will change (a response that does not exist, a
  *    snapshot that cannot be read), or the event's last attempt would retry. The event's open run
  *    rows are closed `Failed` first, with the `Dead-lettered: ` prefix that lets an operator's
- *    replay (`IsReplay`) reopen exactly those rows. It logs one error line, and once it is settled
- *    the form's owner is notified (`dead-letter-notice.ts`, best-effort);
+ *    replay (`IsReplay`) reopen exactly those rows. Once it is settled (never on a lost lease) it
+ *    logs one error line and the form's owner is notified (`dead-letter-notice.ts`, best-effort);
  *  - `Abandoned` — where a final would dead-letter, a PARTIAL save instead closes its open rows as
  *    abandoned, logs one error line naming the response and the steps, and settles; it must never
  *    hold the response's final behind it (the claim runs one response's events in order).
@@ -147,6 +147,37 @@ async function runAndSettle(
   source: IMetadataProvider | null,
   notice: DeadLetterNoticeSeams | undefined,
 ): Promise<EventSettlement['status'] | 'unsettled'> {
+  const written = await runAndWriteSettlement(event, store, workerId, contextUser, source);
+  if (written === 'unsettled') {
+    return 'unsettled';
+  }
+  const { settlement, closed } = written;
+  if (settlement.status === 'DeadLetter') {
+    // Only once the dead letter is written, so a lost lease neither logs one nor notifies anybody.
+    // Outside the settle's try: the event IS settled, so nothing here may count it as unsettled.
+    // A dead letter is otherwise visible only as a row; the log line is what an operator's alert sees.
+    LogError(
+      `[Forms automation drain] ${event.Trigger} automations of response ${event.FormResponseID} dead-lettered: ${settlement.lastError} ${stepsClosed(closed)}`,
+    );
+    // Never throws.
+    await sendDeadLetterNotice(
+      { responseId: event.FormResponseID, eventId: event.ID, trigger: event.Trigger, reason: settlement.lastError, stepsClosed: closed },
+      contextUser,
+      source,
+      notice,
+    );
+  }
+  return settlement.status;
+}
+
+/** Run one event and write its settlement; `unsettled` when the lease was lost or anything failed (logged). Never throws. */
+async function runAndWriteSettlement(
+  event: ClaimedEvent,
+  store: OutboxStore,
+  workerId: string,
+  contextUser: UserInfo,
+  source: IMetadataProvider | null,
+): Promise<{ settlement: EventSettlement; closed: string[] } | 'unsettled'> {
   try {
     const ran = event.AttemptCount > MAX_ATTEMPTS ? neverSettled(event) : await runEvent(event, store, workerId, contextUser, source);
     if (ran.kind === 'lease-taken') {
@@ -155,23 +186,14 @@ async function runAndSettle(
       return 'unsettled';
     }
     const outcome = lastAttemptGuard(ran, event);
-    const { settlement, closed } = await settlementFor(outcome, event, contextUser, source);
-    if (!(await store.Settle(event.ID, workerId, settlement))) {
+    const written = await settlementFor(outcome, event, contextUser, source);
+    if (!(await store.Settle(event.ID, workerId, written.settlement))) {
       LogError(
-        `[Forms automation drain] the lease on event ${event.ID} (response ${event.FormResponseID}) was lost before it settled as ${settlement.status}; another drain owns it now.`,
+        `[Forms automation drain] the lease on event ${event.ID} (response ${event.FormResponseID}) was lost before it settled as ${written.settlement.status}; another drain owns it now.`,
       );
       return 'unsettled';
     }
-    if (settlement.status === 'DeadLetter') {
-      // Only once the dead letter is written, so a lost lease notifies nobody. Never throws.
-      await sendDeadLetterNotice(
-        { responseId: event.FormResponseID, eventId: event.ID, trigger: event.Trigger, reason: settlement.lastError, stepsClosed: closed },
-        contextUser,
-        source,
-        notice,
-      );
-    }
-    return settlement.status;
+    return written;
   } catch (err) {
     LogError(`[Forms automation drain] event ${event.ID} (response ${event.FormResponseID}) could not be settled: ${describe(err)}`);
     return 'unsettled';
@@ -298,7 +320,7 @@ function lastAttemptGuard(outcome: RunOutcome, event: ClaimedEvent): RunOutcome 
  * How the event settles. Giving up closes its open run rows first — `DeadLettered` for a final,
  * which a replay may reopen; `Abandoned` for a partial, which settles Abandoned rather than holding
  * its response's final behind a dead letter. Hands back the steps it closed, which a dead letter's
- * owner notice names.
+ * log line and owner notice name — both written by the caller, only once the settle succeeded.
  */
 async function settlementFor(
   outcome: RunOutcome,
@@ -315,10 +337,6 @@ async function settlementFor(
   const partial = event.Trigger === 'OnPartial';
   const closed = await closeOpenRuns(event, partial ? 'Abandoned' : 'DeadLettered', outcome.reason, contextUser, source);
   if (!partial) {
-    // A dead letter is otherwise visible only as a row; the log line is what an operator's alert sees.
-    LogError(
-      `[Forms automation drain] ${event.Trigger} automations of response ${event.FormResponseID} dead-lettered: ${outcome.reason} ${stepsClosed(closed)}`,
-    );
     return { settlement: { status: 'DeadLetter', lastError: outcome.reason }, closed };
   }
   LogError(
