@@ -14,6 +14,9 @@ import { FormsReplayAutomationEventOperation } from '@mj-biz-apps/forms-entities
 import { FORMS_UI_CSS } from '../shared';
 import { FORMS_ENTITY, MJ_CORE_ENTITY } from '../shared/entity-names';
 import { runOperation } from '../shared/remote-operation';
+// Deep import on purpose: the widget barrel would pull the whole respondent widget into Explorer;
+// this file and its glyph table import nothing but @angular/core.
+import { IconComponent } from '../widget/components/icon.component';
 import type {
   ResponseAnswerView,
   ResponseFileView,
@@ -66,6 +69,7 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
 @Component({
   selector: 'mj-forms-response-detail',
   standalone: true,
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [ResponseFileDownloadService],
   template: `
@@ -185,7 +189,7 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
           @for (e of DeadLetters; track e.eventId) {
             <div class="run run--dead">
               <span class="mjf-badge mjf-badge--danger" title="These automations gave up after {{ e.attemptCount }} attempts">
-                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Automations failed
+                <mjf-icon name="triangle-exclamation" /> Automations failed
               </span>
               <button
                 type="button"
@@ -194,7 +198,7 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
                 [attr.aria-busy]="RetryingEventId === e.eventId"
                 (click)="RetryAutomations(e)"
               >
-                <i class="fa-solid fa-rotate-right" [class.fa-spin]="RetryingEventId === e.eventId" aria-hidden="true"></i>
+                <mjf-icon name="rotate-right" [spin]="RetryingEventId === e.eventId" />
                 Retry automations
               </button>
               @if (RetryError && RetryErrorEventId === e.eventId) {

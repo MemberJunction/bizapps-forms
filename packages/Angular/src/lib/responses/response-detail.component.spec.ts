@@ -85,7 +85,10 @@ const deadLetterBlock = (): string => {
   const source = template();
   const start = source.indexOf('@for (e of DeadLetters');
   expect(start).toBeGreaterThan(-1);
-  return source.slice(start, source.indexOf('@for (r of Detail.automationRuns', start));
+  const end = source.indexOf('@for (r of Detail.automationRuns', start);
+  // A renamed end marker would otherwise widen the slice to the rest of the file, silently.
+  expect(end).toBeGreaterThan(start);
+  return source.slice(start, end);
 };
 
 describe('a dead-lettered automation event', () => {
@@ -115,6 +118,13 @@ describe('a dead-lettered automation event', () => {
     const block = deadLetterBlock();
     expect(block).toMatch(/\[disabled\]="RetryingEventId !== ''"/);
     expect(block).toMatch(/\[attr\.aria-busy\]="RetryingEventId === e\.eventId"/);
+    expect(block).toContain('<mjf-icon name="rotate-right" [spin]="RetryingEventId === e.eventId" />');
+  });
+
+  it('draws its icons with mjf-icon, not a font', () => {
+    const block = deadLetterBlock();
+    expect(block).toContain('<mjf-icon name="triangle-exclamation" />');
+    expect(block).not.toContain('fa-');
   });
 });
 
