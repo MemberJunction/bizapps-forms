@@ -35,11 +35,13 @@ import {
   type FormsGetResponseDetailOutput,
   type FormsGetResponseSummaryOutput,
   type FormsListResponsesOutput,
+  type FormsResponseAutomationEvent,
   type FormsResponseAutomationRun,
   type FormsResponseBindingRecord,
   type FormsResponseListRow,
   type FormsResponseUpload,
   type FormsStoredAnswer,
+  type mjBizAppsFormsFormAutomationEventEntityType,
   type mjBizAppsFormsFormAutomationRunEntityType,
   type mjBizAppsFormsFormEntityBindingRecordEntityType,
   type mjBizAppsFormsFormResponseAnswerEntityType,
@@ -243,7 +245,8 @@ export class FormReportingEngine extends BaseSingleton<FormReportingEngine> {
 
   /**
    * One response with everything its detail view shows, read as the caller: the response, its stored
-   * answers, the files behind them, the automation runs it triggered and the records those wrote, and
+   * answers, the files behind them, the automation runs it triggered, the automation events its saves
+   * queued (a dead-lettered one is what the panel offers to replay) and the records the runs wrote, and
    * the definition that labels the answers. A satellite section the caller may not read is reported
    * in `UnavailableSections`, never as empty — and so is the response's own version when it labels
    * the answers and cannot be read (`question labels`, `DefinitionJSON: null`). A label version the
@@ -255,7 +258,7 @@ export class FormReportingEngine extends BaseSingleton<FormReportingEngine> {
     requireUser(user, `Reading response ${responseId}`);
     return runEngineCall(provider, `[FormReportingEngine] response ${responseId} was not read (user ${user.ID})`, () =>
       callerSafe('Reading the response', async () => {
-        const [responseResult, answersResult, runsResult, bindingsResult] = await provider.RunViews(responseDetailReads(responseId), user);
+        const [responseResult, answersResult, runsResult, eventsResult, bindingsResult] = await provider.RunViews(responseDetailReads(responseId), user);
         const [response] = rowsOrFault<ResponseRow>(responseResult, `Response ${responseId} could not be read.`);
         if (!response) {
           throw new FormReportingError(`Response ${responseId} was not found.`);
@@ -263,6 +266,7 @@ export class FormReportingEngine extends BaseSingleton<FormReportingEngine> {
         const answers = rowsOrFault<AnswerRow>(answersResult, `The answers of response ${responseId} could not be read.`);
         const unavailable: string[] = [];
         const runs = rowsOrDegrade<mjBizAppsFormsFormAutomationRunEntityType>(runsResult, 'automation runs', responseId, unavailable);
+        const events = rowsOrDegrade<mjBizAppsFormsFormAutomationEventEntityType>(eventsResult, 'automation events', responseId, unavailable);
         const bindings = rowsOrDegrade<mjBizAppsFormsFormEntityBindingRecordEntityType>(bindingsResult, 'created records', responseId, unavailable);
         const [uploads, label] = await Promise.all([
           readUploadsOf(provider, answers, user, responseId, unavailable),
@@ -282,6 +286,7 @@ export class FormReportingEngine extends BaseSingleton<FormReportingEngine> {
           Answers: answers.map(storedAnswer),
           Uploads: uploads.map(uploadOf),
           AutomationRuns: runs.map(automationRunOf),
+          AutomationEvents: events.map(automationEventOf),
           BindingRecords: bindings.map((record) => bindingRecordOf(record, provider)),
           LabelFormVersionID: label.id,
           DefinitionJSON: label.snapshot,
@@ -292,7 +297,7 @@ export class FormReportingEngine extends BaseSingleton<FormReportingEngine> {
   }
 }
 
-/** The four reads keyed on the response id, batched into one round trip. */
+/** The five reads keyed on the response id, batched into one round trip. */
 function responseDetailReads(responseId: string): RunViewParams[] {
   const byResponse = `FormResponseID=${quoteSqlString(responseId)}`;
   return [
@@ -311,6 +316,16 @@ function responseDetailReads(responseId: string): RunViewParams[] {
       OrderBy: '__mj_CreatedAt',
       ResultType: 'simple',
       IgnoreMaxRows: true,
+    },
+    {
+      EntityName: FORMS_ENTITY.FormAutomationEvent,
+      ExtraFilter: byResponse,
+      Fields: ['ID', 'Trigger', 'Status', 'AttemptCount', 'LastError', 'CompletedAt'],
+      OrderBy: '__mj_CreatedAt',
+      ResultType: 'simple',
+      IgnoreMaxRows: true,
+      // The drain writes events with raw SQL, so a cached copy would hide a fresh dead letter.
+      BypassCache: true,
     },
     {
       EntityName: FORMS_ENTITY.FormEntityBindingRecord,
@@ -577,6 +592,17 @@ function automationRunOf(run: mjBizAppsFormsFormAutomationRunEntityType): FormsR
     OutputSummary: run.OutputSummary ?? null,
     ActionExecutionLogID: run.ActionExecutionLogID ?? null,
     AIAgentRunID: run.AIAgentRunID ?? null,
+  };
+}
+
+function automationEventOf(event: mjBizAppsFormsFormAutomationEventEntityType): FormsResponseAutomationEvent {
+  return {
+    ID: event.ID,
+    Trigger: event.Trigger,
+    Status: event.Status,
+    AttemptCount: event.AttemptCount,
+    LastError: event.LastError ?? null,
+    CompletedAt: isoOrNull(event.CompletedAt),
   };
 }
 

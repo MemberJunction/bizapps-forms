@@ -60,6 +60,7 @@ function detail(id: string): RemoteOpResult<FormsGetResponseDetailOutput> {
     Answers: [],
     Uploads: [],
     AutomationRuns: [],
+    AutomationEvents: [],
     BindingRecords: [],
     LabelFormVersionID: 'v1',
     DefinitionJSON: '{"pages":[]}',

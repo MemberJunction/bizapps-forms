@@ -87,6 +87,7 @@ function output(overrides: Partial<FormsGetResponseDetailOutput> = {}): FormsGet
     Answers: [],
     Uploads: [],
     AutomationRuns: [],
+    AutomationEvents: [],
     BindingRecords: [],
     LabelFormVersionID: 'ver-1',
     DefinitionJSON: definition([FIRST, LAST, CHOICE, YESNO, FILE, EMAIL]),

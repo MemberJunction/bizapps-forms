@@ -17,6 +17,7 @@ export const VERSIONS = 'MJ_BizApps_Forms: Form Versions';
 export const RESPONSES = 'MJ_BizApps_Forms: Form Responses';
 export const ANSWERS = 'MJ_BizApps_Forms: Form Response Answers';
 export const RUNS = 'MJ_BizApps_Forms: Form Automation Runs';
+export const EVENTS = 'MJ_BizApps_Forms: Form Automation Events';
 export const LEDGER = 'MJ_BizApps_Forms: Form Entity Binding Records';
 export const UPLOADS = 'MJ_BizApps_Forms: Form Uploads';
 
@@ -30,6 +31,7 @@ export interface ReportingFixture {
   responses?: FakeRow[];
   answers?: FakeRow[];
   runs?: FakeRow[];
+  events?: FakeRow[];
   ledger?: FakeRow[];
   uploads?: FakeRow[];
 }
@@ -45,6 +47,7 @@ export function reportingWorld(fixture: ReportingFixture, config: Omit<FakeProvi
       [RESPONSES]: fixture.responses ?? [],
       [ANSWERS]: fixture.answers ?? [],
       [RUNS]: fixture.runs ?? [],
+      [EVENTS]: fixture.events ?? [],
       [LEDGER]: fixture.ledger ?? [],
       [UPLOADS]: fixture.uploads ?? [],
     },

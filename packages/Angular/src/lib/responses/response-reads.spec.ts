@@ -87,6 +87,7 @@ describe('readResponseDetail', () => {
     Answers: [],
     Uploads: [],
     AutomationRuns: [],
+    AutomationEvents: [],
     BindingRecords: [],
     LabelFormVersionID: 'v1',
     DefinitionJSON: JSON.stringify({ pages: [] }),

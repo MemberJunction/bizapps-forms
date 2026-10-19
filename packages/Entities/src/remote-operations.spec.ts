@@ -61,6 +61,7 @@ const EXPECTED_KEYS = [
   'Forms.ReissueDistributionLink',
   'Forms.RemoveAutomation',
   'Forms.ReorderAutomations',
+  'Forms.ReplayAutomationEvent',
   'Forms.RestoreForm',
   'Forms.SaveAutomation',
   'Forms.SaveResponse',
@@ -91,6 +92,7 @@ const EXPECTED_SCOPES: Record<string, string | undefined> = {
   'Forms.SaveAutomation': 'forms:write',
   'Forms.ReorderAutomations': 'forms:write',
   'Forms.RemoveAutomation': 'forms:write',
+  'Forms.ReplayAutomationEvent': 'forms:write',
   'Forms.GetRespondentForm': undefined,
   'Forms.SaveResponse': undefined,
 };

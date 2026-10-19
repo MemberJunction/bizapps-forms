@@ -368,6 +368,22 @@ export interface FormsResponseAutomationRun {
     AIAgentRunID: string | null;
 }
 
+/** One automation event (an outbox row a save queued) this response owes or has run. */
+export interface FormsResponseAutomationEvent {
+    /** The `MJ_BizApps_Forms: Form Automation Events` row; a run's `FormAutomationEventID` names it. */
+    ID: string;
+    /** Which save queued it (the `FormAutomationEvent.Trigger` CHECK values). */
+    Trigger: 'OnComplete' | 'OnPartial';
+    /** Where it stands; `DeadLetter` is the one a replay can re-queue (the `FormAutomationEvent.Status` CHECK values). */
+    Status: 'Pending' | 'Running' | 'Complete' | 'DeadLetter' | 'Abandoned';
+    /** How many times a drain has attempted it. */
+    AttemptCount: number;
+    /** Why the last attempt failed; `null` when none did. */
+    LastError: string | null;
+    /** When it settled; `null` while it is still open. */
+    CompletedAt: string | null;
+}
+
 /** One business record this response's entity bindings created or merged into. */
 export interface FormsResponseBindingRecord {
     /** The `MJ_BizApps_Forms: Form Entity Binding Records` ledger row. */
@@ -397,6 +413,8 @@ export interface FormsGetResponseDetailOutput {
     Uploads: FormsResponseUpload[];
     /** Automation attempts, oldest first. */
     AutomationRuns: FormsResponseAutomationRun[];
+    /** Automation events the response's saves queued, oldest first. */
+    AutomationEvents: FormsResponseAutomationEvent[];
     /** Binding ledger rows, oldest first. */
     BindingRecords: FormsResponseBindingRecord[];
     /** The version that labelled the answers. When none was named, this is the version the response was submitted against, even if it could not be read. */
@@ -865,6 +883,33 @@ export interface FormsReorderAutomationsOutput {
 }
 
 /**
+ * Input for `Forms.ReplayAutomationEvent` — names one dead-lettered automation event to run again.
+ *
+ * NO import statements — definitions are emitted verbatim into remote_operations.ts.
+ */
+export interface FormsReplayAutomationEventInput {
+    /** The `FormAutomationEvent` to replay; it must be `DeadLetter`, or the call is refused and nothing is written. */
+    FormAutomationEventID: string;
+}
+
+/**
+ * Output for `Forms.ReplayAutomationEvent`.
+ *
+ * The event is re-queued, then its response is drained once, now. A replay reopens only that event's
+ * `Dead-lettered: ` run rows, so a step that already succeeded does not run a second time. `Status` is
+ * the state the replay WROTE, not the outcome of the run: the caller reloads the response detail to
+ * see how the drain ended.
+ *
+ * NO import statements — definitions are emitted verbatim into remote_operations.ts.
+ */
+export interface FormsReplayAutomationEventOutput {
+    /** The event replayed. */
+    FormAutomationEventID: string;
+    /** The status the replay wrote: always `Pending`, the re-queued state. */
+    Status: 'Pending';
+}
+
+/**
  * Input for `Forms.SaveAutomation`: create or update one on-submit step, together with the entity
  * binding it runs when it is a "send responses to a record" step.
  *
@@ -1236,7 +1281,7 @@ export class FormsGetRespondentFormOperation extends BaseRemotableOperation<Form
 // ============================================================
 /**
  * Get Response Detail
- * One response with everything its detail view shows: the response row, its stored answers, the provenance of the files they reference, the automation runs it triggered and the business records those wrote, plus the published definition that labels the answers. Sections the caller may not read are reported as unavailable rather than empty. Read-only.
+ * One response with everything its detail view shows: the response row, its stored answers, the provenance of the files they reference, the automation events its saves queued (with their status and last error), the automation runs it triggered and the business records those wrote, plus the published definition that labels the answers. Sections the caller may not read are reported as unavailable rather than empty. Read-only.
  * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
  * under 'Forms.GetResponseDetail'. This generated base provides the typed contract only (client-safe).
  */
@@ -1370,6 +1415,22 @@ export class FormsRemoveAutomationOperation extends BaseRemotableOperation<Forms
  */
 export class FormsReorderAutomationsOperation extends BaseRemotableOperation<FormsReorderAutomationsInput, FormsReorderAutomationsOutput> {
     public readonly OperationKey = "Forms.ReorderAutomations";
+    public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
+    public readonly RequiresSystemUser = false;
+}
+
+// ============================================================
+// Forms.ReplayAutomationEvent — Replay Automation Event
+// ============================================================
+/**
+ * Replay Automation Event
+ * Run a dead-lettered final submit's automations again. Re-queues one event only while it is DeadLetter and runs it once, now; an event in any other state is refused and nothing is written. A replay reopens only that event's Dead-lettered: rows, so steps that succeeded never run twice. Needs the forms:write scope.
+ * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
+ * under 'Forms.ReplayAutomationEvent'. This generated base provides the typed contract only (client-safe).
+ */
+export class FormsReplayAutomationEventOperation extends BaseRemotableOperation<FormsReplayAutomationEventInput, FormsReplayAutomationEventOutput> {
+    public readonly OperationKey = "Forms.ReplayAutomationEvent";
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
