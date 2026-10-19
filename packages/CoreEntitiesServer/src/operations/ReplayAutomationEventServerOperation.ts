@@ -43,7 +43,12 @@ export class ReplayAutomationEventServerOperation extends FormsReplayAutomationE
     return runEngineCall(database, `[Forms] automation event ${eventId} was not replayed (user ${user.ID})`, async () => {
       const event = await readEvent(database, eventId, user);
       if (!(await replayDeadLetteredEvent(database, eventId, user))) {
-        throw new FormAutomationError(`Automation event ${eventId} is not dead-lettered (it is ${event.Status}), so it was not replayed.`);
+        // Read as DeadLetter yet the fenced UPDATE changed nothing: a concurrent replay won between the two.
+        const reason =
+          event.Status === 'DeadLetter'
+            ? `Automation event ${eventId} was already replayed or changed, so it was not replayed again.`
+            : `Automation event ${eventId} is not dead-lettered (it is ${event.Status}), so it was not replayed.`;
+        throw new FormAutomationError(reason);
       }
       await drainReplayedResponse(eventId, event.FormResponseID);
       return { FormAutomationEventID: eventId, Status: 'Pending' };
@@ -92,7 +97,7 @@ async function drainReplayedResponse(eventId: string, responseId: string): Promi
   try {
     // The drain reads what plans a run (form versions) as its context user; the author may not hold
     // that grant, and the steps run as the automation principal regardless. So it runs as the host's
-    // system user, as the sweep and the post-commit drain do.
+    // system user, as the post-commit drain does.
     const system = UserCache.Instance.GetSystemUser();
     if (!system) {
       throw new Error('MJ has no system user on this host');

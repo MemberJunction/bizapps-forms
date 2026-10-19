@@ -26,10 +26,13 @@ vi.mock('@mj-biz-apps/forms-entities', async () => {
   return { ...actual, mjBizAppsFormsFormEntity: WriteThroughEntityBase, mjBizAppsFormsFormVersionEntity: WriteThroughEntityBase };
 });
 
-const SYSTEM = { ID: 'system-1', Name: 'System' } as unknown as UserInfo;
+const { SYSTEM, getSystemUser } = vi.hoisted(() => {
+  const system = { ID: 'system-1', Name: 'System' };
+  return { SYSTEM: system, getSystemUser: vi.fn(() => system as { ID: string; Name: string } | undefined) };
+});
 vi.mock('@memberjunction/generic-database-provider', async () => {
   const actual = await vi.importActual<typeof import('@memberjunction/generic-database-provider')>('@memberjunction/generic-database-provider');
-  return { ...actual, UserCache: { Instance: { GetSystemUser: () => ({ ID: 'system-1', Name: 'System' }) } } };
+  return { ...actual, UserCache: { Instance: { GetSystemUser: getSystemUser } } };
 });
 
 // The module mocks are the seam to the outbox: keep the real module, replace the two calls.
@@ -83,6 +86,8 @@ beforeEach(() => {
   replay.mockReset();
   drain.mockReset();
   vi.mocked(LogError).mockClear();
+  getSystemUser.mockReset();
+  getSystemUser.mockReturnValue(SYSTEM);
   try {
     original = Metadata.Provider;
   } catch {
@@ -128,6 +133,34 @@ describe('Forms.ReplayAutomationEvent', () => {
     expect(result.ResultCode).toBe('SUCCESS');
     expect(result.Output).toEqual({ FormAutomationEventID: EVENT, Status: 'Pending' });
     expect(LogError).toHaveBeenCalledWith(expect.stringContaining(EVENT));
+    expect(LogError).toHaveBeenCalledWith(expect.stringContaining(RESPONSE));
+  });
+
+  it('still reports Pending when the host has no system user, logging the ids and draining nothing', async () => {
+    const db = world();
+    replay.mockResolvedValue(true);
+    getSystemUser.mockReturnValue(undefined);
+
+    const result = await run(db, { FormAutomationEventID: EVENT });
+
+    expect(result.ResultCode).toBe('SUCCESS');
+    expect(result.Output).toEqual({ FormAutomationEventID: EVENT, Status: 'Pending' });
+    expect(drain).not.toHaveBeenCalled();
+    expect(LogError).toHaveBeenCalledWith(expect.stringContaining(EVENT));
+    expect(LogError).toHaveBeenCalledWith(expect.stringContaining(RESPONSE));
+  });
+
+  it('says a concurrent replay won when the event read as dead-lettered but the fenced update changed nothing', async () => {
+    const db = world();
+    replay.mockResolvedValue(false);
+
+    const result = await run(db, { FormAutomationEventID: EVENT });
+
+    expect(result.Success).toBe(false);
+    expect(result.ErrorMessage).toContain(EVENT);
+    expect(result.ErrorMessage).toContain('already replayed or changed');
+    expect(result.ErrorMessage).not.toContain('is not dead-lettered');
+    expect(drain).not.toHaveBeenCalled();
   });
 
   it('refuses an event that is no longer dead-lettered, naming it, and drains nothing', async () => {
