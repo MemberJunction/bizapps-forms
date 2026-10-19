@@ -18,18 +18,17 @@ import type {
   mjBizAppsFormsFormResponseEntityType,
 } from '@mj-biz-apps/forms-entities';
 
-import type { AcquireIsolatedProvider } from '../automation/isolated-provider.js';
 import {
-  findInviteByRawToken,
-  mintResponseInvite,
-  revokeInviteById,
+  deviceResumeAllowed,
+  distributionOfResponse,
+  distributionQuotaExceeded,
+  distributionWindowRefusal,
+  FormsRateLimiter,
+  FORMS_ENTITY,
   revokeResponseInvites,
-} from '../magic-link/resume-invites.service';
-import { distributionQuotaExceeded } from '../public-submit/quota.service';
-import { distributionWindowRefusal } from '../public-submit/distribution-window';
-import { FORM_DISTRIBUTION_ENTITY, FORM_RESPONSE_ENTITY } from '../public-submit/entity-names';
-import { FormsRateLimiter } from '../public-submit/rate-limit.service';
-import { deviceResumeAllowed, distributionOfResponse } from '../public-submit/resume-columns';
+  type AcquireIsolatedProvider,
+} from '@mj-biz-apps/forms-core-entities-server';
+import { findInviteByRawToken, mintResponseInvite, revokeInviteById } from '../magic-link/resume-invites.service';
 import { getRespondentHostConfig } from './config';
 import type { DeviceResumeDeps, ResumeDistribution, ResumeResponseRow } from './device-resume.service';
 import { redeemRawToken } from './redeem.service';
@@ -122,7 +121,7 @@ async function loadDistribution(
 ): Promise<ResumeDistribution | undefined> {
   const result = await new RunView(provider).RunView<mjBizAppsFormsFormDistributionEntityType>(
     {
-      EntityName: FORM_DISTRIBUTION_ENTITY,
+      EntityName: FORMS_ENTITY.FormDistribution,
       ExtraFilter: `Slug=${quoteSqlString(slug)}`,
       ResultType: 'simple',
       MaxRows: 1,
@@ -159,7 +158,7 @@ async function loadResponse(
 ): Promise<ResumeResponseRow | undefined> {
   const result = await new RunView(provider).RunView<mjBizAppsFormsFormResponseEntityType>(
     {
-      EntityName: FORM_RESPONSE_ENTITY,
+      EntityName: FORMS_ENTITY.FormResponse,
       ExtraFilter: `ID=${quoteSqlString(responseId)}`,
       ResultType: 'simple',
       MaxRows: 1,

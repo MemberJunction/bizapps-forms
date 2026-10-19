@@ -28,21 +28,17 @@
   "peerDependencies": {
     "@memberjunction/actions": "^6.1.0-edge.6",
     "@memberjunction/actions-base": "^6.1.0-edge.6",
-    "@memberjunction/ai-agents": "^6.1.0-edge.6",
-    "@memberjunction/ai-core-plus": "^6.1.0-edge.6",
     "@memberjunction/core": "^6.1.0-edge.6",
     "@memberjunction/core-entities": "^6.1.0-edge.6",
     "@memberjunction/generic-database-provider": "^6.1.0-edge.6",
     "@memberjunction/global": "^6.1.0-edge.6",
     "@memberjunction/server": "^6.1.0-edge.6",
-    "@memberjunction/storage": "^6.1.0-edge.6",
-    "type-graphql": "2.0.0-beta.3"
+    "@memberjunction/storage": "^6.1.0-edge.6"
   },
   "devDependencies": {
-    "@memberjunction/generic-database-provider": "^6.1.1",
+    "@memberjunction/generic-database-provider": "^6.1.0-edge.6",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
-    "type-graphql": "2.0.0-beta.3",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4",
     "@aws-sdk/credential-providers": "3.1109.0",

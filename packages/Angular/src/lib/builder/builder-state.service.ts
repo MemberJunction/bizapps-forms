@@ -1,20 +1,21 @@
 import { Injectable, signal } from '@angular/core';
+import { EntitySaveOptions, LogError, Metadata, RunView } from '@memberjunction/core';
 import {
-  Metadata,
-  RunView,
-  LogError,
-  type UserInfo,
-} from '@memberjunction/core';
-import type {
-  mjBizAppsFormsFormEntity,
-  mjBizAppsFormsFormPageEntity,
-  mjBizAppsFormsFormQuestionEntity,
-  mjBizAppsFormsFormQuestionOptionEntity,
-  mjBizAppsFormsFormScreenEntity,
-  FormQuestionType,
+  adoptStoredValues,
+  FormStructureGraph,
+  quoteSqlString,
+  questionTypeBehavior,
+  type FormQuestionType,
+  type mjBizAppsFormsFormEntity,
+  type mjBizAppsFormsFormPageEntity,
+  type mjBizAppsFormsFormQuestionEntity,
+  type mjBizAppsFormsFormQuestionOptionEntity,
+  type mjBizAppsFormsFormScreenEntity,
+  type mjBizAppsFormsFormStyleEntity,
 } from '@mj-biz-apps/forms-entities';
-import { questionTypeBehavior } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
+import type { FormTree, PageNode, QuestionNode } from './builder-models';
+import { defaultEndingChanges, defaultEndingId, vacantDefaultEnding } from './default-ending';
 
 /**
  * How long an edit waits for a follow-up before it is written.
@@ -34,223 +35,176 @@ const SAVE_DEBOUNCE_MS = 400;
 const MAX_FLUSH_PASSES = 50;
 
 /** Anything the builder persists in place. */
-type SaveableEntity =
+export type SaveableEntity =
   | mjBizAppsFormsFormEntity
+  | mjBizAppsFormsFormStyleEntity
   | mjBizAppsFormsFormPageEntity
   | mjBizAppsFormsFormQuestionEntity
   | mjBizAppsFormsFormQuestionOptionEntity
   | mjBizAppsFormsFormScreenEntity;
 
-import type { FormTree, PageNode, QuestionNode } from './builder-models';
-import { defaultEndingChanges, defaultEndingId, vacantDefaultEnding } from './default-ending';
+/**
+ * The part of {@link FormStructureGraph} the builder drives — named so a spec can stand in for it
+ * (a real graph needs a live metadata provider, which no unit test here has).
+ */
+export type StructureGraph = Pick<
+  FormStructureGraph,
+  | 'StagePage'
+  | 'AddPage'
+  | 'RemovePage'
+  | 'StageQuestion'
+  | 'AddQuestion'
+  | 'RemoveQuestion'
+  | 'StageOption'
+  | 'AddOption'
+  | 'RemoveOption'
+  | 'StageScreen'
+  | 'AddScreen'
+  | 'RemoveScreen'
+  | 'Save'
+>;
 
 /**
- * Loads and persists the editable form tree (Form + Pages + Questions + Options).
+ * Loads the editable form tree and persists every change to it.
  *
- * The service owns NO global state — it is a stateless set of operations over MJ
- * entity objects, instantiated per builder component. Every create goes through
- * `Metadata.GetEntityObject` (never `new`); every read through `RunView` (checked
- * for `.Success`); every save/delete checks the returned boolean and surfaces the
- * `LatestResult.CompleteMessage` on failure.
+ * Two kinds of write, deliberately different:
+ *
+ * - FIELD edits (a prompt, a page title, a setting) are single-row saves, coalesced per row by
+ *   {@link saveDebounced}. They are saved with `SkipRelatedCollections`, so a row's collections —
+ *   which the builder loads — can never turn one field's autosave into a multi-row graph.
+ * - STRUCTURAL edits (add, delete, reorder, move, the default-ending pair) touch several rows and
+ *   go through ONE {@link FormStructureGraph}: every row the edit touches is staged under the Form
+ *   root and saved as one `MJ.SaveEntityGraph` call, in one server transaction. A refusal leaves the
+ *   database AND the tree exactly as they were — the graph stages copies, so nothing in memory moves
+ *   until the save has committed (spec #303 §3, closes #103). A staged row travels as its key plus
+ *   only what the edit sets, so a structural save never writes back a column changed elsewhere.
+ *
+ * The two meet in one place: a field autosave never runs while a structural save is in flight (see
+ * {@link runStructural}), because its payload carries the row's pre-edit `DisplayOrder` and would
+ * undo the structural write it raced.
  */
 @Injectable()
 export class BuilderStateService {
   private readonly md = new Metadata();
 
-  private get user(): UserInfo {
-    return this.md.CurrentUser;
-  }
-
-  /** Load the full form tree for an already-loaded Form entity. */
+  /**
+   * Load the full tree for an already-saved Form.
+   *
+   * Three reads, issued together: the form's `Pages` and `Screens` collections (forced, because a
+   * record the host loaded earlier holds whatever was stored THEN), and every question of the form
+   * with its `Options` collection batched in by MJ (`IncludeRelatedRecords`, one query for all
+   * options rather than one per question). They replaced four sequential reads.
+   *
+   * A failed read THROWS, naming what failed. It used to come back as an empty list, and an empty
+   * page list is what tells the builder to create "Page 1" — so a failed read wrote a page into a
+   * form that already had pages.
+   */
   public async loadTree(form: mjBizAppsFormsFormEntity): Promise<FormTree> {
-    const pages = await this.loadPages(form.ID);
-    const questions = await this.loadQuestions(form.ID);
-    const optionsByQuestion = await this.loadOptions(questions.map((q) => q.ID));
-    const screens = await this.loadScreens(form.ID);
-
-    const pageNodes: PageNode[] = pages.map((p) => ({
-      entity: p,
-      questions: questions
-        .filter((q) => q.PageID === p.ID)
-        .map((q) => this.toQuestionNode(q, optionsByQuestion)),
+    const [questions] = await Promise.all([
+      this.loadQuestions(form.ID),
+      form.Pages.Load(true),
+      form.Screens.Load(true),
+    ]);
+    const pageNodes: PageNode[] = form.Pages.Items.map((page) => ({
+      entity: page,
+      questions: questions.filter((q) => q.PageID === page.ID).map(toQuestionNode),
     }));
 
-    // Questions with no PageID land on the first page (defensive — the builder
-    // always assigns a PageID, but legacy/imported rows may not).
+    // Questions with no PageID land on the first page (defensive — the builder always assigns a
+    // PageID, but legacy/imported rows may not).
     const orphans = questions.filter((q) => !q.PageID);
     if (orphans.length > 0 && pageNodes.length > 0) {
-      for (const orphan of orphans) {
-        pageNodes[0].questions.push(this.toQuestionNode(orphan, optionsByQuestion));
-      }
-      this.sortQuestions(pageNodes[0]);
+      pageNodes[0].questions.push(...orphans.map(toQuestionNode));
+      pageNodes[0].questions.sort((a, b) => a.entity.DisplayOrder - b.entity.DisplayOrder);
     }
-
-    return { form, pages: pageNodes, screens };
-  }
-
-  private toQuestionNode(
-    q: mjBizAppsFormsFormQuestionEntity,
-    optionsByQuestion: Map<string, mjBizAppsFormsFormQuestionOptionEntity[]>,
-  ): QuestionNode {
-    return { entity: q, options: optionsByQuestion.get(q.ID) ?? [] };
-  }
-
-  private sortQuestions(page: PageNode): void {
-    page.questions.sort((a, b) => a.entity.DisplayOrder - b.entity.DisplayOrder);
-  }
-
-  private async loadPages(formId: string): Promise<mjBizAppsFormsFormPageEntity[]> {
-    const rv = new RunView();
-    const result = await rv.RunView<mjBizAppsFormsFormPageEntity>(
-      {
-        EntityName: FORMS_ENTITY.FormPage,
-        ExtraFilter: `FormID='${formId}'`,
-        OrderBy: 'DisplayOrder',
-        ResultType: 'entity_object',
-      },
-      this.user,
-    );
-    if (!result.Success) {
-      LogError(`Failed to load form pages: ${result.ErrorMessage}`);
-      return [];
-    }
-    return result.Results ?? [];
+    return { form, pages: pageNodes, screens: [...form.Screens.Items] };
   }
 
   private async loadQuestions(formId: string): Promise<mjBizAppsFormsFormQuestionEntity[]> {
-    const rv = new RunView();
-    const result = await rv.RunView<mjBizAppsFormsFormQuestionEntity>(
+    const result = await new RunView().RunView<mjBizAppsFormsFormQuestionEntity>(
       {
         EntityName: FORMS_ENTITY.FormQuestion,
-        ExtraFilter: `FormID='${formId}'`,
+        ExtraFilter: `FormID=${quoteSqlString(formId)}`,
         OrderBy: 'DisplayOrder',
         ResultType: 'entity_object',
+        IncludeRelatedRecords: ['Options'],
       },
-      this.user,
+      this.md.CurrentUser,
     );
     if (!result.Success) {
-      LogError(`Failed to load form questions: ${result.ErrorMessage}`);
-      return [];
+      throw new Error(`The questions of form ${formId} could not be read: ${result.ErrorMessage || 'no reason given'}`);
     }
     return result.Results ?? [];
   }
 
-  private async loadScreens(formId: string): Promise<mjBizAppsFormsFormScreenEntity[]> {
-    const rv = new RunView();
-    const result = await rv.RunView<mjBizAppsFormsFormScreenEntity>(
-      {
-        EntityName: FORMS_ENTITY.FormScreen,
-        ExtraFilter: `FormID='${formId}'`,
-        OrderBy: 'DisplayOrder',
-        ResultType: 'entity_object',
-      },
-      this.user,
-    );
-    if (!result.Success) {
-      // A failed read is NOT "this form has no screens", and the difference bites: `addScreen`
-      // guards against a second Welcome by looking for an existing one in this list, and computes
-      // a new Ending's `IsDefault` as "no Ending exists yet". An empty list defeats both.
-      //
-      // Reported rather than thrown, deliberately. `loadPages`, `loadQuestions` and `loadOptions`
-      // all answer a failed read the same way, and `loadTree`'s caller does not catch — so
-      // throwing only here would take the whole builder down over the least important of the
-      // four, while a failed QUESTIONS read still loaded fine. Making all four fail loudly is the
-      // right fix and is bigger than this change; tracked rather than half-done here.
-      LogError(`Failed to load form screens: ${result.ErrorMessage}`);
-      return [];
-    }
-    return result.Results ?? [];
-  }
-
-  private async loadOptions(
-    questionIds: string[],
-  ): Promise<Map<string, mjBizAppsFormsFormQuestionOptionEntity[]>> {
-    const byQuestion = new Map<string, mjBizAppsFormsFormQuestionOptionEntity[]>();
-    if (questionIds.length === 0) {
-      return byQuestion;
-    }
-    const idList = questionIds.map((id) => `'${id}'`).join(',');
-    const rv = new RunView();
-    const result = await rv.RunView<mjBizAppsFormsFormQuestionOptionEntity>(
-      {
-        EntityName: FORMS_ENTITY.FormQuestionOption,
-        ExtraFilter: `QuestionID IN (${idList})`,
-        OrderBy: 'DisplayOrder',
-        ResultType: 'entity_object',
-      },
-      this.user,
-    );
-    if (!result.Success) {
-      LogError(`Failed to load question options: ${result.ErrorMessage}`);
-      return byQuestion;
-    }
-    for (const opt of result.Results ?? []) {
-      const list = byQuestion.get(opt.QuestionID) ?? [];
-      list.push(opt);
-      byQuestion.set(opt.QuestionID, list);
-    }
-    return byQuestion;
-  }
-
   // -------------------------------------------------------------------------
-  // Mutations — each returns the new entity (already saved) or a boolean.
+  // Structural edits — one graph save each.
   // -------------------------------------------------------------------------
 
-  /** Create + save a new page at the end of the form. */
+  /** A new page at the end of the form. */
   public async addPage(tree: FormTree, title: string): Promise<PageNode | undefined> {
-    const page = await this.md.GetEntityObject<mjBizAppsFormsFormPageEntity>(
-      FORMS_ENTITY.FormPage,
-      this.user,
-    );
-    page.NewRecord();
-    page.FormID = tree.form.ID;
-    page.Title = title;
-    page.DisplayOrder = tree.pages.length;
-    if (!(await this.saveChecked(page, 'create page'))) {
-      return undefined;
-    }
-    return { entity: page, questions: [] };
+    return this.runStructural(tree, 'create page', undefined, async (graph) => {
+      const page = await graph.AddPage();
+      page.Title = title;
+      page.DisplayOrder = tree.pages.length;
+      return (await this.commit(graph, 'create page')) ? { entity: page, questions: [] } : undefined;
+    });
   }
 
-  /** Create + save a new question of the given type at the end of a page. */
+  /**
+   * A new question of `type` at `index` on `page` (the end, by default), with its starter options.
+   *
+   * The question, its options AND the renumbering of every question it pushes down are one save,
+   * so an insert between two questions cannot leave two rows sharing a `DisplayOrder`. Once saved,
+   * the node is put into `page.questions` HERE, at the index as it stands when the save runs —
+   * the caller does not splice it in, because another structural edit queued ahead of this one may
+   * have changed the page by then.
+   */
   public async addQuestion(
     tree: FormTree,
     page: PageNode,
     type: FormQuestionType,
     prompt: string,
+    index?: number,
   ): Promise<QuestionNode | undefined> {
-    const question = await this.md.GetEntityObject<mjBizAppsFormsFormQuestionEntity>(
-      FORMS_ENTITY.FormQuestion,
-      this.user,
-    );
-    question.NewRecord();
-    question.FormID = tree.form.ID;
-    question.PageID = page.entity.ID;
-    question.QuestionType = type;
-    question.Prompt = prompt;
-    question.IsRequired = false;
-    question.DisplayOrder = page.questions.length;
-    if (!(await this.saveChecked(question, 'create question'))) {
-      return undefined;
-    }
-
-    const node: QuestionNode = { entity: question, options: [] };
-    await this.seedDefaultOptions(node, type);
-    return node;
+    return this.runStructural(tree, 'create question', undefined, async (graph) => {
+      // The end of the page as it stands when the save runs, unless the caller named a seam.
+      const at = Math.max(0, Math.min(index ?? page.questions.length, page.questions.length));
+      const stagedPage = await graph.StagePage(page.entity);
+      const question = await graph.AddQuestion(stagedPage);
+      question.QuestionType = type;
+      question.Prompt = prompt;
+      question.IsRequired = false;
+      question.DisplayOrder = at;
+      const after = page.questions.map((n) => n.entity);
+      after.splice(at, 0, question);
+      await this.stageRenumber(after, (q) => (q === question ? null : graph.StageQuestion(stagedPage, q)));
+      const options = await this.seedDefaultOptions(graph, question, type);
+      if (!(await this.commit(graph, 'create question'))) {
+        return undefined;
+      }
+      const node: QuestionNode = { entity: question, options };
+      page.questions.splice(at, 0, node);
+      return node;
+    });
   }
 
   /**
-   * Seed starter options appropriate to the type's option mode.
+   * Seed starter options appropriate to the type's option mode, in the question's own save.
    *
    * A Matrix seeded with the flat "Option 1 / Option 2" pair renders as a grid with two rows and
    * NO columns — an empty table with no cell to click, which reads as a broken question rather
    * than as one needing configuration. Ranking and PictureChoice are fine with plain options; only
    * the matrix needs both axes present to be a coherent starting point.
    */
-  private async seedDefaultOptions(node: QuestionNode, type: FormQuestionType): Promise<void> {
+  private async seedDefaultOptions(
+    graph: StructureGraph,
+    question: mjBizAppsFormsFormQuestionEntity,
+    type: FormQuestionType,
+  ): Promise<mjBizAppsFormsFormQuestionOptionEntity[]> {
     const mode = questionTypeBehavior(type).optionMode;
     if (mode === 'none') {
-      return;
+      return [];
     }
     const seeds: ReadonlyArray<{ label: string; axis?: 'Row' | 'Column' }> =
       mode === 'matrix'
@@ -261,41 +215,36 @@ export class BuilderStateService {
             { label: 'Column 2', axis: 'Column' },
           ]
         : [{ label: 'Option 1' }, { label: 'Option 2' }];
-
-    for (const seed of seeds) {
-      const option = await this.addOption(node, seed.label, seed.axis);
-      if (option) {
-        node.options.push(option);
-      }
+    const options: mjBizAppsFormsFormQuestionOptionEntity[] = [];
+    for (const [index, seed] of seeds.entries()) {
+      const option = await graph.AddOption(question);
+      fillOption(option, seed.label, index, seed.axis);
+      options.push(option);
     }
+    return options;
   }
 
-  /** Create + save a new option at the end of a question. */
+  /** A new option at the end of a question, put into `node.options` here once it is saved. */
   public async addOption(
+    tree: FormTree,
     node: QuestionNode,
     label: string,
     matrixAxis?: 'Row' | 'Column',
   ): Promise<mjBizAppsFormsFormQuestionOptionEntity | undefined> {
-    const option = await this.md.GetEntityObject<mjBizAppsFormsFormQuestionOptionEntity>(
-      FORMS_ENTITY.FormQuestionOption,
-      this.user,
-    );
-    option.NewRecord();
-    option.QuestionID = node.entity.ID;
-    option.Label = label;
-    option.DisplayOrder = node.options.length;
-    option.IsDefault = false;
-    if (matrixAxis) {
-      option.MatrixAxis = matrixAxis;
-    }
-    if (!(await this.saveChecked(option, 'create option'))) {
-      return undefined;
-    }
-    return option;
+    return this.runStructural(tree, 'create option', undefined, async (graph) => {
+      const stagedQuestion = await this.stageQuestionOf(graph, tree, node);
+      const option = await graph.AddOption(stagedQuestion);
+      fillOption(option, label, node.options.length, matrixAxis);
+      if (!(await this.commit(graph, 'create option'))) {
+        return undefined;
+      }
+      node.options.push(option);
+      return option;
+    });
   }
 
   /**
-   * Create + save a Welcome or Ending screen.
+   * A new Welcome or Ending screen.
    *
    * A second Welcome screen is refused here rather than left to the database: the filtered unique
    * index does reject it, but as a duplicate-key error with no indication of which of the author's
@@ -313,153 +262,306 @@ export class BuilderStateService {
         return existing;
       }
     }
-    const screen = await this.md.GetEntityObject<mjBizAppsFormsFormScreenEntity>(
-      FORMS_ENTITY.FormScreen,
-      this.user,
-    );
-    screen.NewRecord();
-    screen.FormID = tree.form.ID;
-    screen.ScreenType = screenType;
-    screen.Title = title;
-    screen.DisplayOrder = tree.screens.filter((s) => s.ScreenType === screenType).length;
-    // A new ending becomes the catch-all when the form does not already have one. Without this a
-    // form whose only ending carries a condition silently shows nothing when the condition misses.
-    //
-    // The question is "does this form HAVE a default", not "does it have any endings" — which is
-    // what it used to ask, and the two differ exactly where it matters: a form whose only ending
-    // is screened out has an ending and no default, so the next one added was left un-flagged and
-    // the form kept no catch-all at all.
-    screen.IsDefault = screenType === 'Ending' && defaultEndingId(tree.screens) === null;
-    if (!(await this.saveChecked(screen, 'create screen'))) {
-      return undefined;
-    }
-    return screen;
+    return this.runStructural(tree, 'create screen', undefined, async (graph) => {
+      const screen = await graph.AddScreen();
+      screen.ScreenType = screenType;
+      screen.Title = title;
+      screen.DisplayOrder = tree.screens.filter((s) => s.ScreenType === screenType).length;
+      // A new ending becomes the catch-all when the form does not already have one. The question is
+      // "does this form HAVE a default", not "does it have any endings": a form whose only ending
+      // is screened out has an ending and no default, and must still get one.
+      screen.IsDefault = screenType === 'Ending' && defaultEndingId(tree.screens) === null;
+      return (await this.commit(graph, 'create screen')) ? screen : undefined;
+    });
   }
 
   /**
-   * Delete a screen and leave the form's ending invariant intact.
+   * Delete a screen and leave the form's ending invariant intact, in ONE save.
    *
-   * Takes the tree, and removes the screen from it, because the two cannot be separated: deleting
-   * the DEFAULT ending leaves the form with none, and the survivor then reads "Never shown — add
-   * a condition" on a form where it is the only place a respondent can land. Handing the caller a
-   * boolean and letting it splice the tree itself is what made that possible — the repair had no
-   * obvious owner, so nobody did it.
-   *
-   * Screens own nothing, so there is still no cascade; the only follow-on is the promotion.
+   * Deleting the DEFAULT ending leaves the form with none, and the survivor then reads "Never shown
+   * — add a condition" on a form where it is the only place a respondent can land. So the survivor
+   * that takes the flag is promoted in the same save as the delete: both happen or neither does,
+   * and there is no half-state to report or to undo. Takes the tree, and removes the screen from
+   * it, because the delete and the repair cannot be separated.
    */
-  public async deleteScreen(
-    tree: FormTree,
-    screen: mjBizAppsFormsFormScreenEntity,
-  ): Promise<boolean> {
-    if (!(await this.deleteChecked(screen, 'delete screen'))) {
-      return false;
+  public async deleteScreen(tree: FormTree, screen: mjBizAppsFormsFormScreenEntity): Promise<boolean> {
+    const survivors = tree.screens.filter((s) => s.ID !== screen.ID);
+    const promote = vacantDefaultEnding(survivors);
+    const deleted = await this.runStructural(tree, 'delete screen', false, async (graph) => {
+      graph.RemoveScreen(await graph.StageScreen(screen));
+      const promoted = promote ? await graph.StageScreen(promote) : null;
+      if (promoted) {
+        promoted.IsDefault = true;
+      }
+      await this.stageRenumber(
+        survivors.filter((s) => s.ScreenType === screen.ScreenType),
+        (s) => s === promote && promoted ? Promise.resolve(promoted) : graph.StageScreen(s),
+      );
+      return this.commit(graph, 'delete screen');
+    });
+    if (deleted) {
+      tree.screens = survivors;
     }
-    tree.screens = tree.screens.filter((s) => s.ID !== screen.ID);
-    const promote = vacantDefaultEnding(tree.screens);
-    if (promote === null) {
-      return true;
-    }
-    promote.IsDefault = true;
-    // Reported but not fatal: the screen IS deleted, and saying otherwise would offer an undo
-    // that cannot happen. `saveChecked` has already surfaced why the promotion did not stick.
-    //
-    // The flag comes back off when it does not stick, though. Left on, the builder shows a
-    // catch-all the database never recorded — the form reads as repaired while every respondent
-    // who finishes still falls through to the confirmation message.
-    if (!(await this.chainSave(promote, 'promote default ending'))) {
-      promote.IsDefault = false;
-    }
-    return true;
+    return deleted;
   }
 
   /**
-   * Move the form's default ending to one screen, clearing whichever screens held it.
+   * Move the form's default ending to one screen, clearing whichever screens held it — one save.
    *
-   * NOT `saveDebounced`, and that is the whole reason this method exists rather than the caller
-   * flipping two flags. The debounce keys a timer per entity OBJECT with no ordering between
-   * them, so the two writes could land in either order — and a filtered unique index permits one
-   * default per form, so "set the new one" landing first is a save the database REFUSES. The
-   * author sees a switch that flipped itself back, with the failure reported against the wrong
-   * screen. Cleared first, awaited, then set.
-   *
-   * Every write goes through {@link chainSave} rather than saving directly, for the reason the
-   * chain exists: `BaseEntity.Save()` re-reads the record from the row it gets back, so a save
-   * running concurrently with a pending autosave of the SAME screen overwrites whichever landed
-   * first. Making a screen the default while its title edit is still settling is an ordinary
-   * thing to do, and it used to be the one case that skipped the queue.
-   *
-   * Returns false if any write fails, and puts the form back the way it was — in the database via
-   * {@link restoreDefaultEnding}, and in memory, so the builder does not go on showing a move
-   * that did not happen. `saveChecked` has already surfaced why.
+   * The screens losing the flag are staged before the one gaining it, and the graph writes them in
+   * that order: the filtered unique index permits one default per form, so "set the new one"
+   * landing first is a save the database refuses. Inside one transaction the order is all that
+   * matters, and a refusal leaves both the rows and the builder's flags as they were.
    */
   public async setDefaultEnding(tree: FormTree, screenId: string): Promise<boolean> {
     const changes = defaultEndingChanges(tree.screens, screenId);
-    const cleared: mjBizAppsFormsFormScreenEntity[] = [];
-    for (const screen of changes.clear) {
-      screen.IsDefault = false;
-      if (!(await this.chainSave(screen, 'clear default ending'))) {
-        // The row still holds the flag, so the builder must too. Dropped in memory BEFORE the
-        // save is attempted, a refused clear otherwise leaves the author looking at a form with
-        // no default while the database has one, and nothing later corrects it.
-        screen.IsDefault = true;
+    if (changes.set === null && changes.clear.length === 0) {
+      return true;
+    }
+    return this.runStructural(tree, 'change the default ending', false, async (graph) => {
+      for (const screen of changes.clear) {
+        (await graph.StageScreen(screen)).IsDefault = false;
+      }
+      if (changes.set !== null) {
+        (await graph.StageScreen(changes.set)).IsDefault = true;
+      }
+      return this.commit(graph, 'change the default ending');
+    });
+  }
+
+  /** Delete a page and close its order gap; the server cascades its children in the same transaction. */
+  public async deletePage(tree: FormTree, page: PageNode): Promise<boolean> {
+    return this.runStructural(tree, 'delete page', false, async (graph) => {
+      graph.RemovePage(await graph.StagePage(page.entity));
+      await this.stageRenumber(tree.pages.filter((p) => p !== page).map((p) => p.entity), (p) => graph.StagePage(p));
+      return this.commit(graph, 'delete page');
+    });
+  }
+
+  /**
+   * Delete a question (the server deletes its options with it) and close the gap it leaves in the
+   * page's order, in one save. Removes the node from `page.questions` once it is gone.
+   */
+  public async deleteQuestion(tree: FormTree, page: PageNode, node: QuestionNode): Promise<boolean> {
+    return this.runStructural(tree, 'delete question', false, async (graph) => {
+      // Read when the save RUNS, not when it was asked for: a delete queued behind another one
+      // must renumber, and leave on screen, what the first left — not a list from before it.
+      if (!page.questions.includes(node)) {
+        return true;
+      }
+      const survivors = page.questions.filter((q) => q !== node);
+      const stagedPage = await graph.StagePage(page.entity);
+      graph.RemoveQuestion(stagedPage, await graph.StageQuestion(stagedPage, node.entity));
+      await this.stageRenumber(survivors.map((q) => q.entity), (q) => graph.StageQuestion(stagedPage, q));
+      if (!(await this.commit(graph, 'delete question'))) {
         return false;
       }
-      cleared.push(screen);
-    }
-    if (changes.set === null) {
+      page.questions = page.questions.filter((q) => q !== node);
+      return true;
+    });
+  }
+
+  /** Delete one option and close the gap in its question's order, in one save. */
+  public async deleteOption(
+    tree: FormTree,
+    node: QuestionNode,
+    option: mjBizAppsFormsFormQuestionOptionEntity,
+  ): Promise<boolean> {
+    return this.runStructural(tree, 'delete option', false, async (graph) => {
+      // Read when the save runs — see deleteQuestion.
+      if (!node.options.includes(option)) {
+        return true;
+      }
+      const survivors = node.options.filter((o) => o !== option);
+      const stagedQuestion = await this.stageQuestionOf(graph, tree, node);
+      graph.RemoveOption(stagedQuestion, await graph.StageOption(stagedQuestion, option));
+      await this.stageRenumber(survivors, (o) => graph.StageOption(stagedQuestion, o));
+      if (!(await this.commit(graph, 'delete option'))) {
+        return false;
+      }
+      node.options = node.options.filter((o) => o !== option);
+      return true;
+    });
+  }
+
+  /** Persist `page.questions`' array order as `DisplayOrder` — every changed row in one save. */
+  public async persistQuestionOrder(tree: FormTree, page: PageNode): Promise<boolean> {
+    if (!needsRenumber(page.questions.map((q) => q.entity))) {
       return true;
     }
-    changes.set.IsDefault = true;
-    if (await this.chainSave(changes.set, 'set default ending')) {
+    return this.runStructural(tree, 'reorder questions', false, async (graph) => {
+      const stagedPage = await graph.StagePage(page.entity);
+      await this.stageRenumber(page.questions.map((q) => q.entity), (q) => graph.StageQuestion(stagedPage, q));
+      return this.commit(graph, 'reorder questions');
+    });
+  }
+
+  /**
+   * Persist a question's move to another page, and the renumbering of BOTH pages, as ONE save
+   * (issue #149).
+   *
+   * The caller has already moved it in the in-memory tree — this persists that, it does not decide
+   * it. The preconditions are asserted rather than assumed because getting them wrong is silent:
+   * renumbering a page the question is still in writes the collision this exists to avoid.
+   *
+   * Staging the question under the DESTINATION page is the move: the page's collection stamps its
+   * `PageID` on save. It used to be one `PageID` write and up to N+M `DisplayOrder` writes, ordered
+   * so a failure part-way left a tree that still reloaded; in one transaction there is no part-way.
+   */
+  public async persistCrossPageMove(
+    tree: FormTree,
+    node: QuestionNode,
+    source: PageNode,
+    destination: PageNode,
+  ): Promise<boolean> {
+    if (source.entity.ID === destination.entity.ID) {
+      throw new Error(
+        `persistCrossPageMove: source and destination are the same page (${source.entity.ID}); ` +
+          'an in-page reorder is persistQuestionOrder.',
+      );
+    }
+    if (destination.questions.indexOf(node) < 0) {
+      throw new Error(
+        `persistCrossPageMove: question ${node.entity.ID} is not in destination page ` +
+          `${destination.entity.ID}; the caller moves it in memory first.`,
+      );
+    }
+    if (source.questions.includes(node)) {
+      throw new Error(
+        `persistCrossPageMove: question ${node.entity.ID} is still in source page ` +
+          `${source.entity.ID}; renumbering it there would write the collision this avoids.`,
+      );
+    }
+    return this.runStructural(tree, 'move question to another section', false, async (graph) => {
+      const stagedDestination = await graph.StagePage(destination.entity);
+      await this.stageRenumber(
+        destination.questions.map((q) => q.entity),
+        (q) => graph.StageQuestion(stagedDestination, q),
+        node.entity,
+      );
+      const stagedSource = await graph.StagePage(source.entity);
+      await this.stageRenumber(source.questions.map((q) => q.entity), (q) => graph.StageQuestion(stagedSource, q));
+      return this.commit(graph, 'move question to another section');
+    });
+  }
+
+  /** Persist `node.options`' array order as `DisplayOrder` — every changed row in one save. */
+  public async persistOptionOrder(tree: FormTree, node: QuestionNode): Promise<boolean> {
+    if (!needsRenumber(node.options)) {
       return true;
     }
-    await this.restoreDefaultEnding(changes.set, cleared);
+    return this.runStructural(tree, 'reorder options', false, async (graph) => {
+      const stagedQuestion = await this.stageQuestionOf(graph, tree, node);
+      await this.stageRenumber(node.options, (o) => graph.StageOption(stagedQuestion, o));
+      return this.commit(graph, 'reorder options');
+    });
+  }
+
+  /**
+   * Stage every row whose `DisplayOrder` is not its index in `rows`, and set it on the staged copy.
+   *
+   * `alwaysStage` is staged even when its order already matches — a moved question still has to be
+   * staged under its new page for the move itself to be written. `stage` answers null for a row
+   * the graph created in this edit, which is numbered in place.
+   */
+  private async stageRenumber<T extends { DisplayOrder: number }>(
+    rows: readonly T[],
+    stage: (row: T) => Promise<T> | null,
+    alwaysStage?: T,
+  ): Promise<void> {
+    for (const [index, row] of rows.entries()) {
+      if (row.DisplayOrder === index && row !== alwaysStage) {
+        continue;
+      }
+      const staged = await stage(row);
+      (staged ?? row).DisplayOrder = index;
+    }
+  }
+
+  /** Stage `node`'s question under its staged page — the parents an option edit needs. */
+  private async stageQuestionOf(
+    graph: StructureGraph,
+    tree: FormTree,
+    node: QuestionNode,
+  ): Promise<mjBizAppsFormsFormQuestionEntity> {
+    const page = tree.pages.find((p) => p.questions.includes(node));
+    if (!page) {
+      throw new Error(`Question ${node.entity.ID} is not on any page of form ${tree.form.ID}.`);
+    }
+    return graph.StageQuestion(await graph.StagePage(page.entity), node.entity);
+  }
+
+  /** Opens the graph a structural edit is staged in. A spec overrides this with a stand-in. */
+  protected openGraph(form: mjBizAppsFormsFormEntity): Promise<StructureGraph> {
+    return FormStructureGraph.Open(form, Metadata.Provider, this.md.CurrentUser);
+  }
+
+  /** The one structural save in flight, or null. Field autosaves wait for it (see the class note). */
+  private structuralInFlight: Promise<void> | null = null;
+  /** Structural edits run one at a time, in the order they were asked for. */
+  private structuralQueue: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Run one structural edit: after every pending field save has landed, alone, and with field
+   * autosaves held until it finishes.
+   *
+   * Pending saves are flushed FIRST because a save already in flight carries its row's pre-edit
+   * `DisplayOrder` and would undo the structural write if it landed second. (An edit still on its
+   * timer is safe either way: the graph stages rows as STORED and never overwrites a field the
+   * caller has changed, so that edit is still there to be saved.) Holding later autosaves until the
+   * graph has committed, and its rows have adopted the stored values, closes the same race from the
+   * other side.
+   *
+   * A throw while staging (a read the graph needed failed, or a staging mistake) is reported like a
+   * refused save — logged, and shown to the author — and answers `failed`.
+   */
+  private runStructural<T>(
+    tree: FormTree,
+    action: string,
+    failed: T,
+    work: (graph: StructureGraph) => Promise<T>,
+  ): Promise<T> {
+    const run = this.structuralQueue.then(async () => {
+      let release = (): void => undefined;
+      try {
+        await this.flushPendingSaves();
+        this.structuralInFlight = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return await work(await this.openGraph(tree.form));
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        LogError(`Forms builder failed to ${action} on form ${tree.form.ID}: ${reason}`);
+        this._lastFailure.set(`Could not ${action}. ${reason}`);
+        return failed;
+      } finally {
+        this.structuralInFlight = null;
+        release();
+      }
+    });
+    // The queue only needs to know the edit has SETTLED; its outcome goes to the caller through `run`.
+    this.structuralQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  /** Save the graph; report a refusal to the author. */
+  private async commit(graph: StructureGraph, action: string): Promise<boolean> {
+    const result = await graph.Save();
+    if (result.ok) {
+      return true;
+    }
+    LogError(`Forms builder failed to ${action}: ${result.error}`);
+    this._lastFailure.set(`Could not ${action}. ${result.error}`);
     return false;
   }
 
-  /**
-   * Put the default back after a move that got halfway.
-   *
-   * The two halves of this invariant fail differently, and only one of them is noisy. The unique
-   * index refuses a SECOND default, so a bad `set` is reported; NOTHING refuses a form with none,
-   * which is exactly what a successful clear followed by a refused set leaves behind. Without
-   * this the method's own contract — "leaves the form as it was" — was false in the one case it
-   * was written for.
-   *
-   * ONE screen is restored, never all of them. `clear` holds more than one row only on a form
-   * that was already carrying several defaults, and re-setting those would ask the index to
-   * accept the very state it exists to refuse. The first is the lowest `DisplayOrder`, because
-   * `defaultEndingChanges` orders them the way `resolveEndingScreen` reads them — so the row that
-   * comes back is the one respondents were already landing on.
-   *
-   * Best effort, and deliberately not retried: if the restore is refused too, `saveChecked` has
-   * reported it and the author has to fix the form by hand. Looping here would spin on a database
-   * that is saying no.
-   */
-  private async restoreDefaultEnding(
-    failed: mjBizAppsFormsFormScreenEntity,
-    cleared: readonly mjBizAppsFormsFormScreenEntity[],
-  ): Promise<void> {
-    failed.IsDefault = false;
-    const restore = cleared[0];
-    if (restore === undefined) {
-      return;
-    }
-    restore.IsDefault = true;
-    await this.chainSave(restore, 'restore default ending');
-  }
-
   // -------------------------------------------------------------------------
-  // Coalesced saves
+  // Field edits — coalesced single-row saves
   // -------------------------------------------------------------------------
 
-  /**
-   * Pending debounced saves, keyed by the entity instance being saved.
-   *
-   * A `Map` keyed by the object rather than by ID, because two different entity types can share
-   * an id space only by accident but the same OBJECT is exactly what must not be saved twice
-   * concurrently.
-   */
   /** Debounce timers, keyed by the entity instance awaiting a write. */
   private readonly saveTimers = new Map<SaveableEntity, ReturnType<typeof setTimeout>>();
 
@@ -497,6 +599,8 @@ export class BuilderStateService {
       entity,
       setTimeout(() => {
         this.saveTimers.delete(entity);
+        // Not awaited, and safe to drop: `saveChecked` reports a refused OR thrown save to the
+        // author (`lastFailure`) and the log itself, so this promise never rejects.
         void this.chainSave(entity);
       }, SAVE_DEBOUNCE_MS),
     );
@@ -505,14 +609,15 @@ export class BuilderStateService {
   /**
    * Await every coalesced save, running any still on its timer immediately.
    *
-   * Call before anything that reads the PERSISTED form — publishing above all. The builder's
-   * in-memory tree is always current, so a pending save never changes what gets published; what it
-   * changes is whether the database agrees with it afterwards.
+   * Call before anything that reads the PERSISTED form — publishing above all, which the server
+   * builds from the stored rows alone, so an edit still on its timer would be missing from the
+   * published version.
    */
   public async flushPendingSaves(): Promise<void> {
     for (const [entity, timer] of [...this.saveTimers]) {
       clearTimeout(timer);
       this.saveTimers.delete(entity);
+      // Awaited through `saveChains` below; its failure is reported by `saveChecked` (see above).
       void this.chainSave(entity);
     }
     // Loop rather than one `Promise.all`: awaiting a chain can let a queued save start, and the
@@ -521,9 +626,7 @@ export class BuilderStateService {
     // Capped, because the exit condition depends on something this method does not control:
     // edits arriving during the drain re-arm the debounce and put a new chain in the map. A
     // steady enough stream keeps it non-empty indefinitely, and since publish AWAITS this, an
-    // uncapped loop would hang Publish with no error and no way out but a reload. No path in the
-    // builder saves on save today, so the cap is a backstop rather than a fix for a live hang —
-    // but "no caller does this yet" is not something a loop should rely on.
+    // uncapped loop would hang Publish with no error and no way out but a reload.
     for (let pass = 0; pass < MAX_FLUSH_PASSES && this.saveChains.size > 0; pass++) {
       await Promise.all([...this.saveChains.values()]);
     }
@@ -537,17 +640,56 @@ export class BuilderStateService {
   }
 
   /**
-   * Queue a save behind any save already running for the same entity, and report whether it stuck.
-   *
-   * The boolean is what lets the default-ending writes use this instead of calling `saveChecked`
-   * directly. They have to know: moving the default is two writes whose order the unique index
-   * enforces, so a caller that cannot tell the first one failed will go on to make the second.
+   * Queue a save behind any save already running for the same entity — and behind any structural
+   * save in flight — and report whether it stuck.
    */
   private chainSave(entity: SaveableEntity, action = 'save'): Promise<boolean> {
+    return this.inQueue(entity, () => this.saveChecked(entity, action));
+  }
+
+  /**
+   * Re-read one row and take what is stored into it — INSIDE its save chain.
+   *
+   * Outside the chain, a read could return a row from before a save of the same entity that then
+   * committed and resolved first; adopting it would put the pre-save value back into a field the
+   * save had just made clean, and the next whole-row save would write it. In the chain, no save of
+   * this row runs between the read and the adopt, and saves asked for later run after it. Fields
+   * the author has changed since are kept (`adoptStoredValues`).
+   *
+   * @param read - The stored row, or null when it could not be read (the caller has logged why).
+   * @returns Whether the row was read and adopted.
+   */
+  public adoptStored(entity: SaveableEntity, read: () => Promise<Record<string, unknown> | null>): Promise<boolean> {
+    return this.inQueue(entity, async () => {
+      const row = await read();
+      if (!row) {
+        return false;
+      }
+      adoptStoredValues(entity, row);
+      return true;
+    });
+  }
+
+  /**
+   * Run `work` for `entity` behind its earlier queued work and any structural save in flight.
+   *
+   * The slot waits for the earlier step to SETTLE, never for it to succeed: that step's outcome —
+   * a thrown re-read included — already went to its own caller through `result`. Chaining on its
+   * success instead made one failure reject every save queued behind it on that row, dropping the
+   * author's edits with an unhandled rejection and no `lastFailure` (final review I3).
+   */
+  private inQueue<T>(entity: SaveableEntity, work: () => Promise<T>): Promise<T> {
     const previous = this.saveChains.get(entity) ?? Promise.resolve();
-    const result = previous.then(() => this.saveChecked(entity, action));
+    const result = previous
+      .then(() => this.structuralInFlight ?? undefined)
+      .then(work);
+    // Settles on BOTH outcomes, which is what makes `previous` above never reject: every slot in the
+    // map is one of these. It is also why a rejected step raises no unhandled rejection here.
     const next = result
-      .then(() => undefined)
+      .then(
+        () => undefined,
+        () => undefined,
+      )
       .finally(() => {
         // Only clear the slot if no later edit has chained onto it meanwhile.
         if (this.saveChains.get(entity) === next) {
@@ -560,9 +702,8 @@ export class BuilderStateService {
 
   /**
    * The most recent mutation the database refused, phrased for the author, or null when there is
-   * nothing outstanding. One signal for every path — direct save, debounced autosave, delete —
-   * because they all funnel through the same two checked helpers, and a second place to publish
-   * from is a second place to forget.
+   * nothing outstanding. One signal for every path — field save, autosave, structural save —
+   * because a second place to publish from is a second place to forget.
    */
   private readonly _lastFailure = signal<string | null>(null);
   public readonly lastFailure = this._lastFailure.asReadonly();
@@ -572,150 +713,36 @@ export class BuilderStateService {
     this._lastFailure.set(null);
   }
 
-  /** Persist an entity that the UI has mutated in place. */
+  /**
+   * Persist a field edit to one entity now (not debounced) — through the same queue as every other
+   * builder write, so it is flushed before a publish, never runs twice at once for one row, and
+   * never runs while a structural save is in flight (and vice versa).
+   */
   public async save(entity: SaveableEntity): Promise<boolean> {
-    return this.saveChecked(entity, 'save');
-  }
-
-  /** Delete a page and all its questions/options (cascade handled in order). */
-  public async deletePage(page: PageNode): Promise<boolean> {
-    for (const q of [...page.questions]) {
-      if (!(await this.deleteQuestion(q))) {
-        return false;
-      }
-    }
-    return this.deleteChecked(page.entity, 'delete page');
-  }
-
-  /** Delete a question and all its options. */
-  public async deleteQuestion(node: QuestionNode): Promise<boolean> {
-    for (const opt of [...node.options]) {
-      if (!(await this.deleteChecked(opt, 'delete option'))) {
-        return false;
-      }
-    }
-    return this.deleteChecked(node.entity, 'delete question');
-  }
-
-  /** Delete a single option. */
-  public async deleteOption(option: mjBizAppsFormsFormQuestionOptionEntity): Promise<boolean> {
-    return this.deleteChecked(option, 'delete option');
-  }
-
-  /** Renumber + persist DisplayOrder on a page's questions to match array order. */
-  public async persistQuestionOrder(page: PageNode): Promise<boolean> {
-    let ok = true;
-    for (let i = 0; i < page.questions.length; i++) {
-      const q = page.questions[i].entity;
-      if (q.DisplayOrder !== i) {
-        q.DisplayOrder = i;
-        ok = (await this.saveChecked(q, 'reorder question')) && ok;
-      }
-    }
-    return ok;
+    return this.chainSave(entity, 'save');
   }
 
   /**
-   * Move a question to another page and renumber BOTH pages (issue #149).
-   *
-   * The caller has already moved it in the in-memory tree — this persists that, it does not
-   * decide it. The preconditions are asserted rather than assumed because getting them wrong is
-   * silent: renumbering a page the question is still in writes the collision it exists to avoid.
-   *
-   * THE ORDER IS THE INTEGRITY STORY. There is no transaction — this is one `PageID` write plus
-   * up to N+M `DisplayOrder` writes, one row at a time, and `persistQuestionOrder` already
-   * documents that it can fail halfway. So the order is chosen so that every prefix of it leaves
-   * a tree that reloads consistently:
-   *
-   *   1. the moved question's `PageID` AND its final `DisplayOrder`, in ONE `Save()`;
-   *   2. the destination's remaining rows;
-   *   3. the source's remaining rows.
-   *
-   * Membership goes first and alone because it is the only write that cannot be re-derived from
-   * what is on screen — a wrong `DisplayOrder` is corrected by the next reorder or a reload; a
-   * lost `PageID` is not. And because `PageID` is one column on one row written by one `Save()`,
-   * the question belongs to exactly one page at every instant: "orphaned between sections" is
-   * unrepresentable, and the worst a partial failure can do is leave the order within one page
-   * wrong. Failing at (1) leaves the pre-move state untouched; failing inside (2) or (3) leaves
-   * duplicate or gapped `DisplayOrder` values, which `loadTree`'s sort tolerates.
-   *
-   * NOTHING IS ROLLED BACK, matching `reorderQuestion`: the screen goes on showing what the
-   * author did, `lastFailure()` says the database refused, and a reload re-asserts the truth. A
-   * rollback needs writes of its own, which can fail in turn, and would be a second answer to a
-   * question this file already answers one way.
-   *
-   * The moved row is not written twice: step 1 sets its `DisplayOrder` to its final value, so
-   * step 2's `persistQuestionOrder` skips it.
+   * One row's save, never a graph: `SkipRelatedCollections` keeps a row's loaded collections (a
+   * question's options, a form's pages) out of a field edit. Without it, a prompt's autosave that
+   * happened to find one of its options dirty would ship both as a graph, and MJ would replace the
+   * question's option objects with new ones the builder's tree does not hold.
    */
-  public async persistCrossPageMove(
-    node: QuestionNode,
-    source: PageNode,
-    destination: PageNode,
-  ): Promise<boolean> {
-    if (source.entity.ID === destination.entity.ID) {
-      throw new Error(
-        `persistCrossPageMove: source and destination are the same page (${source.entity.ID}); ` +
-          'an in-page reorder is persistQuestionOrder.',
-      );
-    }
-    const index = destination.questions.indexOf(node);
-    if (index < 0) {
-      throw new Error(
-        `persistCrossPageMove: question ${node.entity.ID} is not in destination page ` +
-          `${destination.entity.ID}; the caller moves it in memory first.`,
-      );
-    }
-    if (source.questions.includes(node)) {
-      throw new Error(
-        `persistCrossPageMove: question ${node.entity.ID} is still in source page ` +
-          `${source.entity.ID}; renumbering it there would write the collision this avoids.`,
-      );
-    }
-
-    node.entity.PageID = destination.entity.ID;
-    node.entity.DisplayOrder = index;
-    if (!(await this.saveChecked(node.entity, 'move question to another section'))) {
+  private async saveChecked(entity: SaveableEntity, action: string): Promise<boolean> {
+    const options = new EntitySaveOptions();
+    options.SkipRelatedCollections = true;
+    let ok: boolean;
+    try {
+      ok = await entity.Save(options);
+    } catch (err) {
+      // A THROWN save (a dropped connection, a provider bug) is the same news to the author as a
+      // refused one, and most callers never await this: the debounce timer and the flush drop the
+      // promise. Reported here, so it reaches the log and the builder's error banner either way.
+      const reason = err instanceof Error ? err.message : String(err);
+      LogError(`Forms builder failed to ${action}: ${reason}`);
+      this._lastFailure.set(`Could not ${action}. ${reason}`);
       return false;
     }
-
-    const destinationOk = await this.persistQuestionOrder(destination);
-    const sourceOk = await this.persistQuestionOrder(source);
-    return destinationOk && sourceOk;
-  }
-
-  /** Renumber + persist DisplayOrder on a question's options to match array order. */
-  public async persistOptionOrder(node: QuestionNode): Promise<boolean> {
-    let ok = true;
-    for (let i = 0; i < node.options.length; i++) {
-      const opt = node.options[i];
-      if (opt.DisplayOrder !== i) {
-        opt.DisplayOrder = i;
-        ok = (await this.saveChecked(opt, 'reorder option')) && ok;
-      }
-    }
-    return ok;
-  }
-
-  // -------------------------------------------------------------------------
-  // Internal checked save/delete (CLAUDE.md: check the boolean + LatestResult).
-  // -------------------------------------------------------------------------
-
-  private async saveChecked(
-    entity: Parameters<BuilderStateService['save']>[0],
-    action: string,
-  ): Promise<boolean> {
-    const ok = await entity.Save();
-    if (!ok) {
-      this.reportFailure(action, entity);
-    }
-    return ok;
-  }
-
-  private async deleteChecked(
-    entity: Parameters<BuilderStateService['save']>[0],
-    action: string,
-  ): Promise<boolean> {
-    const ok = await entity.Delete();
     if (!ok) {
       this.reportFailure(action, entity);
     }
@@ -726,15 +753,36 @@ export class BuilderStateService {
    * Record a refusal where the AUTHOR can see it, as well as in the log.
    *
    * `BaseEntity` refuses by returning false, never by throwing, so nothing upstream notices
-   * unless it is told — and until this existed, nothing told it. A delete looked like a button
-   * that did nothing; an autosave looked like nothing at all, and the edit the author had just
-   * typed was simply gone. The reason is included verbatim rather than softened: this surface is
-   * for people who build forms, and "conflicted with a FOREIGN KEY constraint" is the difference
+   * unless it is told. The reason is included verbatim rather than softened: this surface is for
+   * people who build forms, and "conflicted with a FOREIGN KEY constraint" is the difference
    * between fixing it and filing a bug.
    */
-  private reportFailure(action: string, entity: Parameters<BuilderStateService['save']>[0]): void {
+  private reportFailure(action: string, entity: SaveableEntity): void {
     const reason = entity.LatestResult?.CompleteMessage ?? 'unknown error';
     LogError(`Forms builder failed to ${action}: ${reason}`);
     this._lastFailure.set(`Could not ${action}. ${reason}`);
   }
+}
+
+function toQuestionNode(question: mjBizAppsFormsFormQuestionEntity): QuestionNode {
+  return { entity: question, options: [...question.Options.Items] };
+}
+
+function fillOption(
+  option: mjBizAppsFormsFormQuestionOptionEntity,
+  label: string,
+  displayOrder: number,
+  matrixAxis?: 'Row' | 'Column',
+): void {
+  option.Label = label;
+  option.DisplayOrder = displayOrder;
+  option.IsDefault = false;
+  if (matrixAxis) {
+    option.MatrixAxis = matrixAxis;
+  }
+}
+
+/** Whether any row's `DisplayOrder` differs from its index. */
+function needsRenumber(rows: readonly { DisplayOrder: number }[]): boolean {
+  return rows.some((row, index) => row.DisplayOrder !== index);
 }

@@ -13,10 +13,11 @@
 import { LogError, LogStatus, type UserInfo } from '@memberjunction/core';
 import type { MagicLinkProvisioningConfig } from './config.js';
 import { decideProvisioning, resolveExpiry, type DistributionProvisioningState, type ProvisioningReason } from './provisioning-decision.js';
-import type { IAnonymousMagicLinkMinter } from './minter.js';
+import type { IAnonymousMagicLinkMinter, InviteWriteHost } from './minter.js';
+import { FORMS_ENTITY } from '../shared/entity-names.js';
 
 /** Entity name of the distribution itself — the resource the invite is scoped to. */
-export const DISTRIBUTION_ENTITY_NAME = 'MJ_BizApps_Forms: Form Distributions';
+export const DISTRIBUTION_ENTITY_NAME = FORMS_ENTITY.FormDistribution;
 
 /** Inputs the runner needs from the saved distribution record. */
 export interface ProvisionContext extends DistributionProvisioningState {
@@ -79,14 +80,21 @@ export interface ProvisionOutcome {
  * @param minter            the registered minter, or `undefined` when none is registered
  * @param contextUser       the internal staff user saving the record (the invite issuer)
  * @param persistCredential writes (or clears) the credential on the record
+ * @param host              where every invite write goes. A distribution UPDATE passes its own
+ *                          provider, so the mint, revoke and expiry writes join the transaction that
+ *                          save holds and roll back with it; without one the minter writes through
+ *                          its own provider, on another connection, and a rolled-back save leaves a
+ *                          committed revoke beside a live token — the #104 dead link.
  */
 export async function runProvisioning(
   ctx: ProvisionContext,
   config: MagicLinkProvisioningConfig,
-  minter: IAnonymousMagicLinkMinter | undefined,
+  registeredMinter: IAnonymousMagicLinkMinter | undefined,
   contextUser: UserInfo | undefined,
   persistCredential: PersistCredential,
+  host?: InviteWriteHost,
 ): Promise<ProvisionOutcome> {
+  const minter = registeredMinter && host ? writingThrough(registeredMinter, host) : registeredMinter;
   const decision = decideProvisioning(ctx, config);
   if (!decision.revoke && !decision.mint) {
     // Nothing to issue or withdraw. A credential we are KEEPING still has to stay
@@ -153,10 +161,10 @@ export async function runProvisioning(
 /**
  * Keep a credential we are not replacing bounded by the link it belongs to.
  *
- * Runs on every save of a live, credentialled distribution — which includes every public
- * submission, since submitting bumps `ResponseCount`. Each run LOADS THE INVITE ROW: one
- * core-entity read per save, on the anonymous hot path, and it is the price of the expiry
- * staying in step. It cannot be skipped on "nothing to re-bound" without reading the row,
+ * Runs on every entity save of a live, credentialled distribution. A public submission is no
+ * longer one: since #303 it advances `ResponseCount` with a raw conditional `UPDATE`
+ * (`submission/quota.ts`), so this pass runs on author and engine saves only. Each run LOADS THE
+ * INVITE ROW: one core-entity read per save, and it is the price of the expiry staying in step. It cannot be skipped on "nothing to re-bound" without reading the row,
  * because the distribution does not record the credential's expiry: when `CloseAt` was just
  * cleared the stored value is the OLD date, not the sentinel, and when a previous re-bound
  * failed this save is its retry. A review proposed skipping when `closeAt` is null and no
@@ -213,7 +221,7 @@ async function realignExpiry(
  *
  * Split from {@link withdrawCredential} so the reissue path can revoke WITHOUT the intermediate
  * unlink save. That save was a concurrency window: between "cleared" and "written with the new
- * pair", a concurrent load — a second builder tab, a public submission bumping `ResponseCount` —
+ * pair", a concurrent load — a second builder tab, an engine verb on the same link —
  * read "live link, no credential", decided `mint`, and left one of the two invites Active and
  * unreferenced: the orphan bizapps-forms#104 exists to remove, produced by the act of rotating.
  */
@@ -384,4 +392,18 @@ async function issueCredential(
       `${mint.inviteId} for distribution ${ctx.distributionId}.`,
   );
   return { result: replacing ? 'reissued' : 'minted', inviteId: mint.inviteId };
+}
+
+/**
+ * The minter, with every write it makes bound to `host`. One binding here rather than a `host`
+ * argument threaded through each helper below, so no helper can forget it: a single unhosted call
+ * is the one write that escapes the transaction.
+ */
+function writingThrough(minter: IAnonymousMagicLinkMinter, host: InviteWriteHost): IAnonymousMagicLinkMinter {
+  return {
+    MintAnonymousInvite: (params, creatingUser) => minter.MintAnonymousInvite(params, creatingUser, host),
+    RevokeAnonymousInvite: (credential, contextUser) => minter.RevokeAnonymousInvite(credential, contextUser, host),
+    SetAnonymousInviteExpiry: (credential, bounds, contextUser) =>
+      minter.SetAnonymousInviteExpiry(credential, bounds, contextUser, host),
+  };
 }

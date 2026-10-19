@@ -20,7 +20,10 @@ import type { ConditionalRule } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
 import { RuleEditorDialogComponent } from './rule-editor-dialog.component';
 import { LogicEditorComponent } from './logic-editor.component';
-import type { ConditionalSourceQuestion } from './condition-sources';
+import {
+  describeCondition,
+  type ConditionalSourceQuestion,
+} from '@mj-biz-apps/forms-entities/contracts';
 import {
   emptyLogicDraft,
   isLogicDraftDirty,
@@ -29,7 +32,6 @@ import {
   type LogicDraft,
 } from './logic-draft';
 import type { JumpTargetOption } from './jump-target-options';
-import { describeCondition } from './rules-panel-model';
 import { storedTargetLabel } from './jump-target-options';
 import type { FormSection } from './section-groups';
 

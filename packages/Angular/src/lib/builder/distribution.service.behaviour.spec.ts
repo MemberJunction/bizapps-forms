@@ -1,13 +1,15 @@
 /**
  * `DistributionService` exercised as a class. It has no constructor injection, so under the
- * `@angular/compiler` side-effect import the repo already uses it constructs in this node env —
- * which the sibling source-text spec claimed it could not. The entity is a recording fake: the
- * methods under test touch only the record they are handed and `Save(options)`.
+ * `@angular/compiler` side-effect import the repo already uses it constructs in this node env. The
+ * entity is a recording fake: the settings writes touch only the record they are handed and
+ * `Save(options)`; the lifecycle verbs go through the real operation classes, with the provider
+ * they route through faked.
  */
 import '@angular/compiler';
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import type { EntitySaveOptions } from '@memberjunction/core';
-import type { mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
+import type { FormsDistributionLinkOutput, mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
+import { installFakeOperations, refused, succeeded, type FakeOperations } from '../shared/testing/fake-operations';
 import { DistributionService } from './distribution.service';
 
 interface FakeDistribution {
@@ -63,31 +65,74 @@ function fakeDistribution(overrides: Partial<FakeDistribution> = {}): FakeDistri
 const asEntity = (d: FakeDistribution): mjBizAppsFormsFormDistributionEntity =>
   d as unknown as mjBizAppsFormsFormDistributionEntity;
 
-describe('DistributionService — opening a link', () => {
-  it('writes BOTH halves of "open to responses", and forces the save', async () => {
-    // Writing only Status left a row at Status='Active', IsActive=false unchanged, Save() skipped
-    // the clean record, and the control reported success having done nothing — permanently.
-    const d = fakeDistribution({ Status: 'Active', IsActive: false });
-    const out = await new DistributionService().open(asEntity(d));
-    expect(out.ok).toBe(true);
-    expect(d.writes).toMatchObject({ Status: 'Active', IsActive: true });
-    expect(d.savedWith?.IgnoreDirtyState).toBe(true);
+/**
+ * The lifecycle verbs are Remote Operations (#303). What the builder must do is ask for the right
+ * one, for the right link, and never write the credential columns or the status itself — the server
+ * writes "open" as both halves, forces the save, and clears only the token on a reissue
+ * (`FormDistributionEngine.spec.ts`). The record this client holds is stale afterwards by design;
+ * the Distribute tab re-reads it.
+ */
+describe('DistributionService — the lifecycle verbs are operations', () => {
+  let operations: FakeOperations | null = null;
+  afterEach(() => {
+    operations?.restore();
+    operations = null;
   });
 
-  it('issueLink is the same operation as open', async () => {
-    const d = fakeDistribution();
-    await new DistributionService().issueLink(asEntity(d));
-    expect(d.writes).toMatchObject({ Status: 'Active', IsActive: true });
-    expect(d.savedWith?.IgnoreDirtyState).toBe(true);
+  const link = (status: string): FormsDistributionLinkOutput => ({
+    FormDistributionID: 'dist-1',
+    Slug: 'summer',
+    Status: status as FormsDistributionLinkOutput['Status'],
+    RespondentURL: 'https://forms.example/f/summer',
   });
-});
 
-describe('DistributionService — reissuing', () => {
-  it('clears ONLY the token; the invite id is what tells the server which credential to revoke', async () => {
+  it.each([
+    ['open', 'Forms.OpenDistribution', 'Active'],
+    ['issueLink', 'Forms.OpenDistribution', 'Active'],
+    ['close', 'Forms.CloseDistribution', 'Closed'],
+    ['reissueLink', 'Forms.ReissueDistributionLink', 'Active'],
+  ] as const)('%s asks %s for this link, and writes nothing to the record itself', async (verb, key, status) => {
+    operations = installFakeOperations(() => succeeded(link(status)));
     const d = fakeDistribution({ Status: 'Active', IsActive: true });
-    await new DistributionService().reissueLink(asEntity(d));
-    expect(d.writes).toEqual({ PublicLinkToken: null });
+
+    const out = await new DistributionService()[verb](asEntity(d));
+
+    expect(out).toEqual({ ok: true });
+    expect(operations.calls).toEqual([{ key, input: { FormDistributionID: 'dist-1' } }]);
+    expect(d.writes).toEqual({});
+    expect(d.savedWith).toBeUndefined();
     expect(d.MagicLinkInviteID).toBe('invite-old');
+  });
+
+  it('reports the server\'s refusal, naming what could not be done', async () => {
+    operations = installFakeOperations(() => refused('Form f-1 is archived; restore it before opening a share link to it.'));
+
+    const out = await new DistributionService().open(asEntity(fakeDistribution()));
+
+    expect(out).toEqual({
+      ok: false,
+      error: 'Could not reopen this share link. Form f-1 is archived; restore it before opening a share link to it.',
+    });
+  });
+
+  it('creates a link through Forms.IssueDistributionLink — the server picks the slug', async () => {
+    operations = installFakeOperations(() => succeeded(link('Active')));
+
+    const out = await new DistributionService().create({ formId: 'f-1', name: 'Share link 2' });
+
+    expect(out).toEqual({ ok: true, distributionId: 'dist-1', respondentUrl: 'https://forms.example/f/summer' });
+    expect(operations.calls[0]).toEqual({
+      key: 'Forms.IssueDistributionLink',
+      input: expect.objectContaining({ FormID: 'f-1', Name: 'Share link 2', Slug: undefined }),
+    });
+  });
+
+  it('says why a link was not created', async () => {
+    operations = installFakeOperations(() => refused('Form f-1 is a template; templates are never shared.'));
+
+    const out = await new DistributionService().create({ formId: 'f-1' });
+
+    expect(out).toEqual({ ok: false, error: 'Could not create a share link. Form f-1 is a template; templates are never shared.' });
   });
 });
 
@@ -106,7 +151,7 @@ describe('DistributionService — a refused save', () => {
 /**
  * The captcha switch writes the column the SUBMIT gate reads.
  *
- * `submit-pipeline` stage 4 ORs this column with the form's own `settings.captchaRequired`, and
+ * `FormSubmissionEngine.SaveResponse` ORs this column with the form's own `settings.captchaRequired`, and
  * until #151 nothing in the builder could see or set it — the only surfaces that could were a raw
  * entity form and a direct write.
  */

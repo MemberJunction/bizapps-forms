@@ -128,6 +128,27 @@
   },
   {
     "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Automation Events"
+    },
+    "fields": {
+      "AllowUserSearchAPI": false,
+      "AutoUpdateAllowUserSearchAPI": false
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=FormResponseID&EntityID=@parent:ID"
+          },
+          "fields": {
+            "IncludeRelatedEntityNameFieldInBaseView": false
+          }
+        }
+      ]
+    }
+  },
+  {
+    "primaryKey": {
       "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Automation Runs"
     },
     "fields": {
@@ -137,6 +158,18 @@
     "sync": {
       "lastModified": "2026-09-18T18:45:47.880Z",
       "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=FormResponseID&EntityID=@parent:ID"
+          },
+          "fields": {
+            "IncludeRelatedEntityNameFieldInBaseView": false
+          }
+        }
+      ]
     }
   },
   {
@@ -176,6 +209,18 @@
     "sync": {
       "lastModified": "2026-09-18T18:45:47.883Z",
       "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=FormResponseID&EntityID=@parent:ID"
+          },
+          "fields": {
+            "IncludeRelatedEntityNameFieldInBaseView": false
+          }
+        }
+      ]
     }
   },
   {
@@ -241,6 +286,18 @@
     "sync": {
       "lastModified": "2026-09-18T18:45:48.001Z",
       "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=ResponseID&EntityID=@parent:ID"
+          },
+          "fields": {
+            "IncludeRelatedEntityNameFieldInBaseView": false
+          }
+        }
+      ]
     }
   },
   {
@@ -254,7 +311,26 @@
     "sync": {
       "lastModified": "2026-09-18T18:45:48.006Z",
       "checksum": "557b2f2d442156dd31b2ae55bcfb3080cb61cf2d094d43039aa4c5907568aba6"
-    }
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=Form&EntityID=@parent:ID"
+          },
+          "fields": {
+            "IsNameField": true,
+            "AutoUpdateIsNameField": false
+          }
+        }
+      ]
+    },
+    "_comments": [
+      "Form is the record name: present on every response, where RespondentPerson is null for an",
+      "anonymous one. Without a name field MJ's record-name lookup failed for every response. Every",
+      "foreign key to this entity turns IncludeRelatedEntityNameFieldInBaseView off, so CodeGen adds no",
+      "vwFormResponses join to their views (a schema change for a column nobody reads)."
+    ]
   },
   {
     "primaryKey": {

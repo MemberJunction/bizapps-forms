@@ -43,6 +43,10 @@
         "startupExport": "LoadBizAppsFormsServer"
       },
       {
+        "name": "@mj-biz-apps/forms-core-entities-server",
+        "role": "library"
+      },
+      {
         "name": "@mj-biz-apps/forms-actions",
         "role": "library"
       }

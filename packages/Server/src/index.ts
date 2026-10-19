@@ -6,12 +6,40 @@
  * are registered with the MJ class factory.
  */
 
-// Import entity and action packages to trigger @RegisterClass decorators
+// Import entity and action packages to trigger @RegisterClass decorators. Order matters:
+// forms-entities FIRST, so the generated entity classes register before the server subclasses in
+// forms-core-entities-server that extend them (MJ's ClassFactory takes the LAST registration for a
+// key). forms-actions imports forms-core-entities-server itself, so it is loaded by then either way.
 import '@mj-biz-apps/forms-entities';
 import '@mj-biz-apps/forms-actions';
 
-// Import server-side entity subclasses (lifecycle hooks / hardening) to trigger @RegisterClass
-import { MagicLinkMinterRegistry } from '@mj-biz-apps/forms-core-entities-server';
+// Server-side entity subclasses (invariants for every writer) and Remote Operation server subclasses
+// (`Forms.<Name>`) — importing registers them. The operations register over the CodeGen-emitted
+// bases in forms-entities, which is one more reason that package must load first.
+import {
+  LoadArchiveFormOperation,
+  LoadCloneFormOperation,
+  LoadCloseDistributionOperation,
+  LoadCreateFormFromTemplateOperation,
+  LoadDeleteTemplateOperation,
+  LoadFormsEntityServerSubclasses,
+  LoadGetDistributionClaimsOperation,
+  LoadGetRespondentFormOperation,
+  LoadGetResponseDetailOperation,
+  LoadGetResponseSummaryOperation,
+  LoadIssueDistributionLinkOperation,
+  LoadListResponsesOperation,
+  LoadOpenDistributionOperation,
+  LoadPublishFormOperation,
+  LoadReissueDistributionLinkOperation,
+  LoadRemoveAutomationOperation,
+  LoadReorderAutomationsOperation,
+  LoadRestoreFormOperation,
+  LoadFormsAutomationDrainDriver,
+  LoadSaveAutomationOperation,
+  LoadSaveResponseOperation,
+  MagicLinkMinterRegistry,
+} from '@mj-biz-apps/forms-core-entities-server';
 
 // Concrete magic-link invite minter, registered into the entity-hook seam so the
 // FormDistribution lifecycle hook can provision anonymous links via MJ core's
@@ -38,7 +66,7 @@ import './http/RequestIdentityMiddleware.js';
 // are running on the built-in PUBLIC salt (stored hashes then dictionary-recoverable), and refuse
 // to boot at all when the deployment opted into FORMS_REQUIRE_SESSION_HASH_SALT=true. The
 // first-use warning inside hash-salt.ts is easy to miss hours after startup; a boot line is not.
-import { enforceSessionHashSaltAtBoot } from './http/hash-salt.js';
+import { enforceSessionHashSaltAtBoot } from '@mj-biz-apps/forms-core-entities-server';
 enforceSessionHashSaltAtBoot();
 
 // Import the stacktrace-redaction middleware so its @RegisterClass fires and MJ server bootstrap
@@ -46,12 +74,6 @@ enforceSessionHashSaltAtBoot();
 // — on every error unless NODE_ENV is production, and the anonymous session a public link mints is
 // enough to request one; this keeps it off the wire whatever NODE_ENV says (#119).
 import './http/StacktraceRedactionMiddleware.js';
-
-// WP-B: import the custom public-submit resolver so its TypeGraphQL metadata is registered.
-import './public-submit/PublicFormResolver.js';
-
-// #292: same for the authenticated author query that reports consumer-owned share-link slugs.
-import './distribution-claims/DistributionClaimsResolver.js';
 
 // TASK 2: import the respondent host-page middleware so its @RegisterClass fires and MJ
 // server bootstrap discovers the public /f/:slug route (anonymous, shell-free host page).
@@ -108,12 +130,13 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 // at import time makes provisioning work regardless. Idempotent: a re-register replaces.
 MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());
 
-/** Absolute paths to the generated resolver files, for use with createMJServer() */
+/**
+ * Absolute paths to the generated resolver files, for use with createMJServer(). Generated resolvers
+ * ONLY (spec #303 §1): the respondent API that used to add `public-submit/*Resolver` here is now the
+ * `Forms.GetRespondentForm` / `Forms.SaveResponse` Remote Operations, served by MJ's own
+ * `ExecuteRemoteOperation` mutation — as `Forms.GetDistributionClaims` replaced #292's resolver.
+ */
 export const RESOLVER_PATHS = [resolve(__dirname, 'generated/generated.{js,ts}')];
-// WP-B (public submit endpoint): custom anonymous resolvers, discovered via the *Resolver glob.
-RESOLVER_PATHS.push(resolve(__dirname, 'public-submit/*Resolver.{js,ts}'));
-// #292: the FormDistributionClaims query. An authenticated AUTHOR query (builder), not a respondent one.
-RESOLVER_PATHS.push(resolve(__dirname, 'distribution-claims/*Resolver.{js,ts}'));
 
 /**
  * Bootstrap function called by DynamicPackageLoader during MJAPI startup.
@@ -121,8 +144,34 @@ RESOLVER_PATHS.push(resolve(__dirname, 'distribution-claims/*Resolver.{js,ts}'))
  * the module is fully evaluated.
  */
 export function LoadBizAppsFormsServer(): void {
-    // Static imports above ensure all classes are registered. Register the concrete
-    // magic-link minter so the FormDistribution hook can provision anonymous links.
-    // Idempotent: re-registering simply replaces the instance.
+    // Static imports above ensure all classes are registered; these references keep a bundler from
+    // dropping the entity server subclasses and the operation server subclasses as unused.
+    LoadFormsEntityServerSubclasses();
+    LoadPublishFormOperation();
+    LoadCloneFormOperation();
+    LoadCreateFormFromTemplateOperation();
+    LoadArchiveFormOperation();
+    LoadRestoreFormOperation();
+    LoadDeleteTemplateOperation();
+    LoadIssueDistributionLinkOperation();
+    LoadReissueDistributionLinkOperation();
+    LoadOpenDistributionOperation();
+    LoadCloseDistributionOperation();
+    LoadGetDistributionClaimsOperation();
+    LoadSaveAutomationOperation();
+    LoadReorderAutomationsOperation();
+    LoadRemoveAutomationOperation();
+    // The respondent operations (#303 Task 8): what an anonymous respondent loads, and every save.
+    LoadGetRespondentFormOperation();
+    LoadSaveResponseOperation();
+    // Response reporting (#303 Task 9): the dashboard summary, the paged list and export, one response.
+    LoadGetResponseSummaryOperation();
+    LoadListResponsesOperation();
+    LoadGetResponseDetailOperation();
+    // The automation outbox sweep (#303): the scheduled-job driver the shipped Forms job names by
+    // DriverClass. Kept from tree-shaking here; MJ's scheduler resolves it once the host is up.
+    LoadFormsAutomationDrainDriver();
+    // Register the concrete magic-link minter so the FormDistribution hook can provision anonymous
+    // links. Idempotent: re-registering simply replaces the instance.
     MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());
 }

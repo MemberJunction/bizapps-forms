@@ -1,33 +1,26 @@
 /**
- * Seam S1 — the public read + submit API the respondent widget consumes.
+ * Seam S1 — the public read + save API the respondent widget consumes.
  *
- * `PublishedForm(distributionSlug)` and `SubmitFormResponse(input)` are implemented
- * server-side by WP-B as anonymous-scope custom resolvers. The widget codes ONLY
- * against this interface so the real GraphQL transport ({@link FormsGraphQLApiService})
- * and the standalone {@link FormsMockApiService} are interchangeable — swap the DI
- * provider, nothing else changes.
+ * Two Remote Operations, `Forms.GetRespondentForm` and `Forms.SaveResponse` (#303), posted through
+ * MJ's one generic `ExecuteRemoteOperation` mutation. The widget codes ONLY against this interface so
+ * the real transport ({@link FormsGraphQLApiService}) and the standalone {@link FormsMockApiService}
+ * are interchangeable — swap the DI provider, nothing else changes.
  *
- * The shapes (`PublishedFormDefinition`, `FormSubmissionInput`, `FormSubmissionResult`)
- * are imported from the frozen contract in `@mj-biz-apps/forms-entities`; they are NOT
- * redefined here.
- *
- * Every widget file imports the `/contracts` subpath, never the package root (#245). The root
- * also re-exports the CodeGen entity subclasses, whose `@RegisterClass` side effects drag MJCore,
- * MJGlobal, sql-dialect and acorn into the respondent bundle on anonymous visitors' phones.
- * `scripts/build-widget.mjs` fails the build if any of them get bundled again.
+ * The wire shapes are the CodeGen-emitted operation types (`FormsSaveResponseInput` /
+ * `FormsSaveResponseOutput`), imported with `import type` from the package root: a type-only import
+ * is erased, so none of the root's runtime — the entity subclasses whose `@RegisterClass` side effects
+ * drag MJCore, MJGlobal, sql-dialect and acorn in (#245) — reaches the respondent bundle. Every RUNTIME
+ * import in a widget file still comes from the `/contracts` subpath; `scripts/build-widget.mjs` fails
+ * the build if the root's runtime is ever bundled.
  */
-import type {
-  PublishedFormDefinition,
-  FormSubmissionInput,
-  FormSubmissionResult,
-  ResumeSnapshot,
-} from '@mj-biz-apps/forms-entities/contracts';
+import type { FormsSaveResponseInput, FormsSaveResponseOutput } from '@mj-biz-apps/forms-entities';
+import type { RespondentFormDefinition, ResumeSnapshot } from '@mj-biz-apps/forms-entities/contracts';
 
 import { InjectionToken } from '@angular/core';
 
 /**
- * What one `PublishedForm` call returns: the definition, and — when the session's magic-link scope
- * names a Form Response — the draft it may continue.
+ * What one `Forms.GetRespondentForm` call returns: the projection to render and — when the session's
+ * magic-link scope names a Form Response — the draft it may continue.
  *
  * The two travel TOGETHER rather than in a second call, deliberately. They are decided by the same
  * session: whether there is a draft to resume is a property of the JWT the widget is mounted with,
@@ -35,39 +28,34 @@ import { InjectionToken } from '@angular/core';
  * expired). It also means the widget knows at MOUNT whether it is resuming, which is what lets a
  * sealed draft show its screen before the autosave controller is ever wired.
  */
-export interface PublishedFormLoad {
-  definition: PublishedFormDefinition;
+export interface RespondentFormLoad {
+  /** The Published version served; echoed on every save. Equal to `definition.formVersionId` (checked). */
+  formVersionId: string;
+  /** The respondent projection, parsed and checked with the contracts zod schema. */
+  definition: RespondentFormDefinition;
   /** Absent for an ordinary public-link session, which is every first sitting. */
   resume?: ResumeSnapshot;
 }
 
-/**
- * The transport contract for the respondent widget. Method signatures mirror the S1
- * GraphQL operations exactly:
- *
- * - `query PublishedForm(distributionSlug: String!): PublishedFormDefinition`
- * - `mutation SubmitFormResponse(input: FormSubmissionInput!): FormSubmissionResult!`
- */
+/** The transport contract for the respondent widget, one method per operation. */
 export interface IFormsApiService {
   /**
-   * Load a published form by its distribution slug, plus any draft this session may continue.
-   * Resolves to `null` when the slug is unknown, the form is closed, or quota is exhausted
-   * (server decides).
+   * Load the form behind a distribution slug, plus any draft this session may continue.
+   *
+   * Rejects with {@link FormUnavailableError} when the server refuses (unknown or closed link, an
+   * unpublished form, a session scoped elsewhere) or serves something the widget cannot render; with
+   * {@link SessionExpiredError} when the session has lapsed; with a plain `Error` on a transport failure.
    */
-  loadPublishedForm(distributionSlug: string): Promise<PublishedFormLoad | null>;
+  loadRespondentForm(distributionSlug: string): Promise<RespondentFormLoad>;
 
   /**
-   * Submit (or partial-save) a response. The server re-validates before persisting.
+   * Save (`Mode: 'partial'`) or submit (`Mode: 'final'`) a response. The server re-validates, decides
+   * whether the form ended, and which ending shows (`Outcome`, `Ending`).
    *
-   * `existingResponseId` is the id returned by a prior partial save; passing it lets the
-   * server UPSERT the same in-progress response (autosave) rather than creating a new
-   * one. It is a transport-level parameter — NOT part of the frozen `FormSubmissionInput`
-   * contract — because it is a widget-session concern (cross-session resume is Phase 2).
+   * A refusal the respondent can act on (validation, captcha, quota) RESOLVES with `Success: false`;
+   * a refusal of the call itself rejects with {@link ResponseNotSavedError}.
    */
-  submitResponse(
-    input: FormSubmissionInput,
-    existingResponseId?: string,
-  ): Promise<FormSubmissionResult>;
+  saveResponse(input: FormsSaveResponseInput): Promise<FormsSaveResponseOutput>;
 
   /**
    * The `x-session-id` this service sends — the OWNERSHIP RECORD for every row it writes.
@@ -98,6 +86,48 @@ export class SessionExpiredError extends Error {
   constructor() {
     super('The anonymous session has expired; a new page is needed to mint a new one.');
     this.name = 'SessionExpiredError';
+  }
+}
+
+/**
+ * The one sentence for every reason a form cannot be shown.
+ *
+ * The same words as the server's `FORM_UNAVAILABLE_MESSAGE`, deliberately, but a separate literal:
+ * nothing matches on it (the widget reacts to {@link FormUnavailableError} by type), and the server's
+ * constant lives in a package the widget cannot import. If the two ever differ, a respondent reads one
+ * sentence from the widget and never sees the server's, so nothing breaks.
+ */
+export const FORM_UNAVAILABLE_MESSAGE = 'This form is not available.';
+
+/**
+ * The one sentence for a save refused as a CALL (a rejected session binding, a malformed request)
+ * rather than as a result. The server's own wording for a system failure (`SUBMIT_FAILED_MESSAGE`),
+ * separate for the reason {@link FORM_UNAVAILABLE_MESSAGE} is; what went wrong goes to the console.
+ */
+export const RESPONSE_NOT_SAVED_MESSAGE = 'Something went wrong while submitting your response. Please try again.';
+
+/**
+ * `Forms.GetRespondentForm` was refused, or served a definition the widget cannot render.
+ *
+ * `message` is always {@link FORM_UNAVAILABLE_MESSAGE}, which is what the respondent sees; `reason`
+ * says what happened, for the console and for tests — never for the screen.
+ */
+export class FormUnavailableError extends Error {
+  constructor(public readonly reason: string) {
+    super(FORM_UNAVAILABLE_MESSAGE);
+    this.name = 'FormUnavailableError';
+  }
+}
+
+/**
+ * `Forms.SaveResponse` was refused as a call (`FORBIDDEN`, `EXECUTION_ERROR`, …) or answered with
+ * something that is not a save result. `message` is {@link RESPONSE_NOT_SAVED_MESSAGE}; `reason`
+ * carries the server's code and text for the console.
+ */
+export class ResponseNotSavedError extends Error {
+  constructor(public readonly reason: string) {
+    super(RESPONSE_NOT_SAVED_MESSAGE);
+    this.name = 'ResponseNotSavedError';
   }
 }
 

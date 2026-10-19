@@ -77,26 +77,6 @@ export {
   type JumpTargetGroup,
   type JumpTargetOption,
 } from './jump-target-options';
-export {
-  jumpReach,
-  reachNote,
-  type JumpReach,
-  type ReachItem,
-  type ReachPage,
-  type ReachSource,
-} from './jump-reach';
-export {
-  collectRuleEntries,
-  endingReachFor,
-  ruleBadgesFor,
-  type EndingReach,
-  type RuleBadge,
-  type RuleEntry,
-  type RuleInventoryForm,
-  type RuleInventoryItem,
-  type RuleInventoryPage,
-  type RuleItemKind,
-} from './rules-inventory';
 export { PageEditorComponent } from './page-editor.component';
 export { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 export { BuilderStateService } from './builder-state.service';
@@ -110,10 +90,10 @@ export {
   selectScreen,
   type BuilderSelection,
 } from './builder-selection';
-export { PublishService, type PublishResult } from './publish.service';
 export {
   DistributionService,
   type CreateDistributionInput,
+  type CreateDistributionResult,
   type DistributionChannel,
   type DistributionListResult,
   type MutationOutcome,
@@ -122,7 +102,6 @@ export {
   autoShareName,
   credentialMayStillRedeem,
   formReach,
-  isOpenToResponses,
   shareState,
   type FormReach,
   type FormReachKind,
@@ -143,8 +122,7 @@ export {
 } from './question-type-catalog';
 export { generateQrMatrix, qrMatrixToSvg, textToQrSvg, type QrMatrix } from './qr-code';
 export { isValidReorder } from './reorder';
-export { buildPublishedDefinition } from './snapshot-builder';
-export { publicUrl, embedSnippet, slugify } from './distribution-links';
+export { publicUrl, embedSnippet } from './distribution-links';
 export type { FormTree, PageNode, QuestionNode } from './builder-models';
 
 import './form-builder.component';

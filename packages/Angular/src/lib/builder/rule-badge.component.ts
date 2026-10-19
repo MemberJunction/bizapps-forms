@@ -21,7 +21,7 @@ import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 import { FORMS_UI_CSS } from '../shared';
-import type { RuleBadge } from './rules-inventory';
+import type { RuleBadge } from '@mj-biz-apps/forms-entities/contracts';
 
 const RULE_BADGE_CSS = `
 :host { display: inline-flex; position: relative; }

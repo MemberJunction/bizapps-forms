@@ -29,10 +29,15 @@ import type { FormQuestionType } from '@mj-biz-apps/forms-entities';
 // does not generate it (rationale: `excludeSchemas` in mj.config.cjs).
 import type { mjBizAppsCommonPersonEntity } from '@mj-biz-apps/common-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
-import { saveOrExplain } from '../shared/save-entity';
+import {
+  type ActionDataProvider,
+  type AnswerWithType,
+  type FormResponseContext,
+  loadFormResponseContext,
+  resolveActionProvider,
+  saveOrExplain,
+} from '@mj-biz-apps/forms-core-entities-server';
 import { explainMissingEntityClasses } from '../shared/generated-entity';
-import { loadFormResponseContext, type AnswerWithType, type FormResponseContext } from '../shared/form-response-context';
-import { resolveActionProvider, type ActionDataProvider } from '../shared/action-provider';
 
 const PERSON_ENTITY = 'MJ_BizApps_Common: People';
 

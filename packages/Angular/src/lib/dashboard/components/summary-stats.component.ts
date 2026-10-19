@@ -41,6 +41,9 @@ import { FormsProportionBarComponent } from './proportion-bar.component';
         @if (stats.partialResponses > 0) {
           <span class="ss-hero-sub">{{ inProgressLabel }}</span>
         }
+        @if (stats.disqualifiedResponses > 0) {
+          <span class="ss-hero-sub">{{ screenedOutLabel }}</span>
+        }
       </div>
 
       <div class="ss-split">
@@ -156,6 +159,15 @@ export class FormsSummaryStatsComponent {
 
   public get inProgressLabel(): string {
     return `${plural(this.stats.partialResponses, 'other')} started but unfinished`;
+  }
+
+  /**
+   * Respondents a knockout question ended early. Stated apart from the unfinished ones: being
+   * screened out is the form doing its job, and folding it into "unfinished" made a well-targeted
+   * screener read as an abandonment problem.
+   */
+  public get screenedOutLabel(): string {
+    return `${plural(this.stats.disqualifiedResponses, 'other')} screened out`;
   }
 
   public get durationLabel(): string {

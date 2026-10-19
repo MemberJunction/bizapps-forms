@@ -13,10 +13,9 @@
  * hardcoded sentence in a template, and a hardcoded sentence is exactly what a later edit
  * could put back with every logic test still green.
  *
- * Source text rather than a rendered component: the builder uses decorated inputs and cannot
- * be instantiated in this suite's node environment (see `distribution-manager.spec.ts`, same
- * constraint, same trade). Comments are stripped before every assertion, because this file's
- * subject is discussed at length in the prose of the very files it inspects.
+ * Source text for the TEMPLATE, which this suite cannot render; the component's own behaviour is
+ * executed in `form-builder.verbs.spec.ts`. Comments are stripped before every assertion, because
+ * this file's subject is discussed at length in the prose of the very files it inspects.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,7 +28,6 @@ const stripped = (file: string): string =>
     .replace(/\/\/[^\n]*/g, '');
 
 const template = (): string => stripped('form-builder.component.html');
-const component = (): string => stripped('form-builder.component.ts');
 
 /** Everything above the tab strip. Holds the publish control and its neighbours. */
 const header = (): string => {
@@ -88,31 +86,7 @@ describe('the builder header on a published form', () => {
   });
 });
 
-describe('the reach the header renders', () => {
-  it('is read from the database, never inferred from Form.Status', () => {
-    const source = component();
-    expect(source).toMatch(/formReach\(/);
-    expect(source).toMatch(/shareLinkFacts\(/);
-  });
-
-  it('survives a failed read as "unknown" rather than as "no links"', () => {
-    // `shareLinkFacts` returns null when the RunView fails, and null is a distinct kind
-    // (`share-state.spec.ts` tests what it then says). What is guarded here is the seed:
-    // starting the field at `[]` would have an unread list argue for a second share link,
-    // and go on arguing for one forever if the read failed.
-    const source = component();
-    expect(source).toMatch(/shareLinks[^;=]*=\s*null/);
-    expect(source).not.toMatch(/shareLinks[^;=]*=\s*\[\]/);
-  });
-
-  it('re-reads when a share link is written anywhere else in the app', () => {
-    // The builder stays mounted while its tabs change, so the Distribute tab creating the
-    // first link would otherwise leave the header insisting the form is not shared — the
-    // inverse of #83 and just as wrong. Same MJGlobal entity-event seam the automations use.
-    const source = component();
-    expect(source).toMatch(/FORMS_ENTITY\.FormDistribution/);
-    expect(source).toMatch(/distributionChanges/);
-    // A listener that outlives the component keeps re-reading for a form nobody is looking at.
-    expect(source).toMatch(/distributionChanges\?\.unsubscribe\(\)/);
-  });
-});
+// "The reach the header renders" — read from the share links, re-read when one is written elsewhere,
+// released on destroy — is EXECUTED in `form-builder.verbs.spec.ts` (#303). The re-read hears
+// share-link OPERATIONS now (`shared/forms-writes.ts`), which a regex over the old entity-event
+// listener could not see.

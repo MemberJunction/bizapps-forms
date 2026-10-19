@@ -1,0 +1,33 @@
+[
+  {
+    "_comments": [
+      "The MJAPI application's ceiling for the Forms scopes. Without a matching allow rule here, MJ's API-key evaluator",
+      "refuses every key that is not full_access (ScopeEvaluator.evaluateApplicationCeiling), so a forms:read or",
+      "forms:write grant on a key would be unusable. Same shape as MJ core's workqueue rows."
+    ],
+    "fields": {
+      "ApplicationID": "@lookup:MJ: API Applications.Name=MJAPI",
+      "ScopeID": "@lookup:MJ: API Scopes.FullPath=forms:read",
+      "ResourcePattern": "*",
+      "PatternType": "Include",
+      "IsDeny": false,
+      "Priority": 0
+    },
+    "primaryKey": {
+      "ID": "8DBCDC79-062E-48D1-B665-29AF4D1E2A0E"
+    }
+  },
+  {
+    "fields": {
+      "ApplicationID": "@lookup:MJ: API Applications.Name=MJAPI",
+      "ScopeID": "@lookup:MJ: API Scopes.FullPath=forms:write",
+      "ResourcePattern": "*",
+      "PatternType": "Include",
+      "IsDeny": false,
+      "Priority": 0
+    },
+    "primaryKey": {
+      "ID": "11DCD8CF-FF3A-403D-90A4-DFB788CC0364"
+    }
+  }
+]

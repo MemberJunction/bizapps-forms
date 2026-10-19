@@ -10,18 +10,21 @@
 import '@angular/compiler';
 import { ChangeDetectorRef, Injector, runInInjectionContext } from '@angular/core';
 import { NavigationService } from '@memberjunction/ng-shared';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FormsHomeDashboardComponent } from './forms-home-dashboard.component';
 import { FormsHomeService } from './forms-home.service';
-import { FormCloneService } from '../templates/form-clone.service';
-import type { FormStatus, FormSummaryRow } from './home-models';
+import { HOME_ENTITY, type FormStatus, type FormSummaryRow } from './home-models';
+import { announceWrites } from '../shared/forms-writes';
+import { LOAD_TIMEOUT_MS } from '../shared/coalesced-load';
 
-type HomeServiceSurface = Pick<FormsHomeService, 'loadForms' | 'setStatus' | 'runAuthoringAction'>;
+type HomeServiceSurface = Pick<FormsHomeService, 'loadForms' | 'archive' | 'restore' | 'createFromTemplate' | 'runAuthoringAction'>;
 
 function homeService(overrides: Partial<HomeServiceSurface>): HomeServiceSurface {
   return {
     loadForms: async () => [],
-    setStatus: async (_id: string, _status: FormStatus) => null,
+    archive: async (id: string) => ({ ok: true, output: { FormID: id, Status: 'Closed' as FormStatus } }),
+    restore: async (id: string) => ({ ok: true, output: { FormID: id, Status: 'Draft' as FormStatus } }),
+    createFromTemplate: async () => ({ ok: true, output: { FormID: 'new-1', Warnings: [] } }),
     runAuthoringAction: async () => ({ success: true, formId: null, message: 'Form created.' }),
     ...overrides,
   };
@@ -31,9 +34,7 @@ function makeComponent(service: HomeServiceSurface): FormsHomeDashboardComponent
   const injector = Injector.create({
     providers: [
       { provide: FormsHomeService, useValue: service },
-      // The failure paths under test never reach the clone service or navigation; empty
-      // doubles are enough to satisfy the injector.
-      { provide: FormCloneService, useValue: {} },
+      // The failure paths under test never reach navigation; an empty double satisfies the injector.
       { provide: NavigationService, useValue: {} },
       { provide: ChangeDetectorRef, useValue: { markForCheck: () => undefined, detectChanges: () => undefined } },
     ],
@@ -86,7 +87,7 @@ describe('FormsHomeDashboardComponent failure alert (#253)', () => {
 
   it('says the archive failed, then why', async () => {
     const component = makeComponent(
-      homeService({ setStatus: async () => Promise.reject(new Error('timeout')) }),
+      homeService({ archive: async () => Promise.reject(new Error('timeout')) }),
     );
     expect(component.isArchived(draftRow)).toBe(false);
 
@@ -95,10 +96,12 @@ describe('FormsHomeDashboardComponent failure alert (#253)', () => {
     expect(component.errorMessage).toBe('Could not archive this form: timeout');
   });
 
-  // A failed Save() does not throw — BaseEntity.Save() returns false and setStatus hands back
-  // LatestResult.CompleteMessage — so this, not a rejection, is what a live archive failure looks like.
-  it('says the archive failed when setStatus reports a failure instead of throwing', async () => {
-    const component = makeComponent(homeService({ setStatus: async () => 'Simulated save failure' }));
+  // An operation does not throw on a refusal — it returns one — so this, not a rejection, is what a
+  // live archive failure looks like.
+  it('says the archive failed when the operation reports a refusal instead of throwing', async () => {
+    const component = makeComponent(
+      homeService({ archive: async () => ({ ok: false, error: 'Simulated save failure', resultCode: 'EXECUTION_ERROR' }) }),
+    );
     const errors = emitted(component);
 
     await component.toggleArchive(draftRow);
@@ -124,5 +127,255 @@ describe('FormsHomeDashboardComponent failure alert (#253)', () => {
     await component.authorWithAI();
 
     expect(component.errorMessage).toBe('The authoring action failed: Error: GraphQL Error (Code: unknown)');
+  });
+});
+
+describe('FormsHomeDashboardComponent lifecycle and templates', () => {
+  it('keeps copy warnings after its own operation announcement debounce expires', async () => {
+    vi.useFakeTimers();
+    const component = makeComponent(homeService({ createFromTemplate: async () => {
+      announceWrites([HOME_ENTITY.forms]);
+      return { ok: true, output: { FormID: 'new-1', Warnings: ['A rule could not be carried over.'] } };
+    } }));
+    try {
+      await component.Refresh();
+      await component.useTemplate({ kind: 'saved', templateId: 't1', name: 'Intake' });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(component.errorMessage).toBe('A rule could not be carried over.');
+    } finally {
+      component.ngOnDestroy();
+      vi.useRealTimers();
+    }
+  });
+
+  const archivedRow: FormSummaryRow = { ...draftRow, status: 'Closed' };
+
+  it('restores an archived form through restore(), and archives a live one through archive()', async () => {
+    const asked: string[] = [];
+    const component = makeComponent(
+      homeService({
+        archive: async (id) => {
+          asked.push(`archive ${id}`);
+          return { ok: true, output: { FormID: id, Status: 'Closed' } };
+        },
+        restore: async (id) => {
+          asked.push(`restore ${id}`);
+          return { ok: true, output: { FormID: id, Status: 'Published' } };
+        },
+      }),
+    );
+
+    await component.toggleArchive(draftRow);
+    await component.toggleArchive(archivedRow);
+
+    expect(asked).toEqual(['archive form-1', 'restore form-1']);
+  });
+
+  it("shows a saved template's copy notes AFTER the list reloads, rather than letting the reload wipe them", async () => {
+    // The reload's start clears the alert; set before it, the notes were wiped unseen.
+    const component = makeComponent(
+      homeService({ createFromTemplate: async () => ({ ok: true, output: { FormID: 'new-1', Warnings: ['A rule could not be carried over.'] } }) }),
+    );
+    component.OpenEntityRecord.subscribe(() => undefined);
+
+    await component.useTemplate({ kind: 'saved', templateId: 't1', name: 'Intake' });
+
+    expect(component.errorMessage).toBe('A rule could not be carried over.');
+  });
+
+  it("says the copy failed, then the server's reason", async () => {
+    const component = makeComponent(
+      homeService({ createFromTemplate: async () => ({ ok: false, error: 'Form t1 is not a template.', resultCode: 'EXECUTION_ERROR' }) }),
+    );
+
+    await component.useTemplate({ kind: 'saved', templateId: 't1', name: 'Intake' });
+
+    expect(component.errorMessage).toBe('Could not create a form from "Intake": Form t1 is not a template.');
+  });
+});
+
+describe('FormsHomeDashboardComponent — opening reads the list once', () => {
+  // MJ's dashboard host calls `Refresh()` on the instance it creates, and the instance's own
+  // `ngOnInit` loads too; both reach `loadData` while the first load is in flight. Same shape as
+  // the reporting dashboard's double `Forms.GetResponseSummary` (click-through observation 3).
+  const loadData = (c: FormsHomeDashboardComponent): void => (c as unknown as { loadData(): void }).loadData();
+
+  function deferredLoads() {
+    const pending: Array<(rows: FormSummaryRow[]) => void> = [];
+    const service = homeService({
+      loadForms: () => new Promise<FormSummaryRow[]>((resolve) => pending.push(resolve)),
+    });
+    return { service, pending };
+  }
+
+  it('joins a load already in flight instead of starting a second', async () => {
+    const { service, pending } = deferredLoads();
+    const component = makeComponent(service);
+    loadData(component);
+    loadData(component);
+
+    expect(pending).toHaveLength(1);
+    pending[0]([draftRow]);
+    component.ngOnDestroy();
+  });
+
+  it('still re-reads on a Refresh that comes after the first load settled', async () => {
+    const { service, pending } = deferredLoads();
+    const component = makeComponent(service);
+    loadData(component);
+    pending[0]([draftRow]);
+    await new Promise((settled) => setTimeout(settled, 0));
+
+    loadData(component);
+
+    expect(pending).toHaveLength(2);
+    pending[1]([draftRow]);
+    component.ngOnDestroy();
+  });
+
+  it('signals load-complete only once the list is in', async () => {
+    const { service, pending } = deferredLoads();
+    const component = makeComponent(service);
+    const notified = vi.fn();
+    (component as unknown as { NotifyLoadComplete(): void }).NotifyLoadComplete = notified;
+
+    const opening = component.Refresh();
+    loadData(component);
+    await new Promise((settled) => setTimeout(settled, 0));
+    expect(notified).not.toHaveBeenCalled();
+
+    pending[0]([draftRow]);
+    await opening;
+
+    expect(notified).toHaveBeenCalledTimes(1);
+    expect(pending).toHaveLength(1);
+    expect(component.forms).toEqual([draftRow]);
+    component.ngOnDestroy();
+  });
+
+  it("queues a write's reload behind a Refresh in flight: one follow-up, no overlap, and the list shows the write", async () => {
+    const pending: Array<(rows: FormSummaryRow[]) => void> = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const archived: FormSummaryRow = { ...draftRow, status: 'Closed' };
+    const service = homeService({
+      loadForms: () => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        return new Promise<FormSummaryRow[]>((resolve) =>
+          pending.push((rows) => {
+            inFlight -= 1;
+            resolve(rows);
+          }),
+        );
+      },
+    });
+    const component = makeComponent(service);
+
+    const refreshing = component.Refresh();
+    const archiving = component.toggleArchive(draftRow);
+    const restoring = component.toggleArchive(archived);
+    await new Promise((settled) => setTimeout(settled, 0));
+    // Both writes landed; their reloads wait for the Refresh's read instead of racing it.
+    expect(pending).toHaveLength(1);
+
+    pending[0]([draftRow]);
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    pending[1]([archived]);
+    await Promise.all([refreshing, archiving, restoring]);
+
+    expect(pending).toHaveLength(2);
+    expect(maxInFlight).toBe(1);
+    expect(component.forms).toEqual([archived]);
+    component.ngOnDestroy();
+  });
+
+  it('runs a Refresh that arrives during the first load once that load settles, not alongside it', async () => {
+    const { service, pending } = deferredLoads();
+    const component = makeComponent(service);
+    const notified = vi.fn();
+    (component as unknown as { NotifyLoadComplete(): void }).NotifyLoadComplete = notified;
+    const renamed: FormSummaryRow = { ...draftRow, name: 'Intake (renamed)' };
+
+    loadData(component);
+    const refreshing = component.Refresh();
+    const again = component.Refresh();
+    await new Promise((settled) => setTimeout(settled, 0));
+    expect(pending).toHaveLength(1);
+
+    pending[0]([draftRow]);
+    // Two Refreshes during one load ask for one more read, not two.
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    expect(notified).not.toHaveBeenCalled();
+    pending[1]([renamed]);
+    await Promise.all([refreshing, again]);
+
+    expect(pending).toHaveLength(2);
+    expect(component.forms).toEqual([renamed]);
+    expect(notified).toHaveBeenCalledTimes(2);
+    component.ngOnDestroy();
+  });
+});
+
+
+describe('FormsHomeDashboardComponent — reloads heard from elsewhere, and a hung read', () => {
+  const loadData = (c: FormsHomeDashboardComponent): void => void (c as unknown as { loadData(): Promise<void> }).loadData();
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function deferredLoads() {
+    const pending: Array<(rows: FormSummaryRow[]) => void> = [];
+    const service = homeService({
+      loadForms: () => new Promise<FormSummaryRow[]>((resolve) => pending.push(resolve)),
+    });
+    return { service, pending };
+  }
+
+  it('queues a re-read behind the read in flight when a Forms write is heard elsewhere, instead of skipping it', async () => {
+    // The read in flight may have started before that write, so skipping it (the old `loading`
+    // guard) left the list showing the pre-write state.
+    vi.useFakeTimers();
+    const { service, pending } = deferredLoads();
+    const component = makeComponent(service);
+    const renamed: FormSummaryRow = { ...draftRow, name: 'Intake (renamed)' };
+    loadData(component);
+    expect(component.loading).toBe(true);
+
+    announceWrites([HOME_ENTITY.forms]);
+    await vi.advanceTimersByTimeAsync(1_000); // past the listener's debounce
+    expect(pending).toHaveLength(1); // queued, not alongside
+
+    pending[0]([draftRow]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pending).toHaveLength(2);
+    pending[1]([renamed]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(component.forms).toEqual([renamed]);
+    component.ngOnDestroy();
+  });
+
+  it('abandons a read that hangs past the load timeout: says so, ends the loading state, and ignores its late rows', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { service, pending } = deferredLoads();
+    const component = makeComponent(service);
+    const errors = emitted(component);
+    loadData(component);
+
+    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS);
+    expect(component.loading).toBe(false);
+    expect(component.errorMessage).toContain('Failed to load forms');
+    expect(component.errorMessage).toContain(`did not settle within ${LOAD_TIMEOUT_MS} ms`);
+    expect(errors).toHaveLength(1);
+
+    pending[0]([draftRow]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(component.forms).toEqual([]);
+    expect(component.loading).toBe(false);
+    component.ngOnDestroy();
   });
 });
