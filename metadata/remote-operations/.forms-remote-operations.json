@@ -368,7 +368,7 @@
       "Name": "Get Response Detail",
       "OperationKey": "Forms.GetResponseDetail",
       "CategoryID": "@lookup:MJ: Remote Operation Categories.Name=Forms",
-      "Description": "One response with everything its detail view shows: the response row, its stored answers, the provenance of the files they reference, the automation runs it triggered and the business records those wrote, plus the published definition that labels the answers. Sections the caller may not read are reported as unavailable rather than empty. Read-only.",
+      "Description": "One response with everything its detail view shows: the response row, its stored answers, the provenance of the files they reference, the automation events its saves queued (with their status and last error), the automation runs it triggered and the business records those wrote, plus the published definition that labels the answers. Sections the caller may not read are reported as unavailable rather than empty. Read-only.",
       "InputTypeName": "FormsGetResponseDetailInput",
       "InputTypeDefinition": "@file:types/forms-get-response-detail.input.ts",
       "InputTypeIsArray": false,
@@ -384,6 +384,29 @@
     },
     "primaryKey": {
       "ID": "80AF1E01-3A05-46E7-BE39-5B803B52FDA7"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Replay Automation Event",
+      "OperationKey": "Forms.ReplayAutomationEvent",
+      "CategoryID": "@lookup:MJ: Remote Operation Categories.Name=Forms",
+      "Description": "Run a dead-lettered final submit's automations again. Re-queues one event only while it is DeadLetter and runs it once, now; an event in any other state is refused and nothing is written. A replay reopens only that event's Dead-lettered: rows, so steps that succeeded never run twice. Needs the forms:write scope.",
+      "InputTypeName": "FormsReplayAutomationEventInput",
+      "InputTypeDefinition": "@file:types/forms-replay-automation-event.input.ts",
+      "InputTypeIsArray": false,
+      "OutputTypeName": "FormsReplayAutomationEventOutput",
+      "OutputTypeDefinition": "@file:types/forms-replay-automation-event.output.ts",
+      "OutputTypeIsArray": false,
+      "ExecutionMode": "Sync",
+      "RequiredScope": "forms:write",
+      "RequiresSystemUser": false,
+      "GenerationType": "Manual",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "B8B91983-F8A1-492B-BD42-882AD4746561"
     }
   },
   {
