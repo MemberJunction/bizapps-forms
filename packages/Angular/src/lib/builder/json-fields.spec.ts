@@ -1,18 +1,39 @@
 import { describe, it, expect } from 'vitest';
-import type { ConditionalRule, ValidationRule, FormSettings } from '@mj-biz-apps/forms-entities';
 import {
-  parseConditionalRule,
-  serializeConditionalRule,
-  parseValidationRule,
-  serializeValidationRule,
-  parseFormSettings,
-  serializeFormSettings,
   parseQuestionSettings,
+  readStoredConditionalRule,
+  readStoredFormSettings,
+  readStoredValidationRule,
+  withVerbGroup,
+  type ConditionalRule,
+  type FormSettings,
+  type ValidationRule,
+} from '@mj-biz-apps/forms-entities/contracts';
+import {
+  editableConditionalRule,
+  editableValidationRule,
+  serializeConditionalRule,
+  serializeValidationRule,
+  serializeFormSettings,
   serializeQuestionSettings,
-  parseStyleTokens,
-  buildStyleTokens,
 } from './json-fields';
-import { withVerbGroup } from './rules-panel-model';
+
+/**
+ * The builder WRITES these columns and the contracts READ them (#303), so what is pinned here is
+ * the round trip: whatever a serializer writes, the reader publish uses reads back unchanged. The
+ * readers' own cases — empty, invalid, defaults — live in the contracts' `stored-columns.spec.ts`.
+ */
+
+/** Read a column back through the publish reader, failing the test if it does not read. */
+function readBack<T>(read: { ok: true; value: T } | { ok: false; reason: string }): T {
+  if (!read.ok) {
+    throw new Error(`did not read back: ${read.reason}`);
+  }
+  return read.value;
+}
+const parseConditionalRule = (raw: string | null): ConditionalRule | undefined => readBack(readStoredConditionalRule(raw));
+const parseValidationRule = (raw: string | null): ValidationRule | undefined => readBack(readStoredValidationRule(raw));
+const parseFormSettings = (raw: string | null): FormSettings => readBack(readStoredFormSettings(raw));
 
 describe('conditional rule round-trip', () => {
   it('parses valid JSON', () => {
@@ -21,10 +42,15 @@ describe('conditional rule round-trip', () => {
     expect(rule?.show?.all?.[0].questionId).toBe('q1');
   });
 
-  it('returns undefined for null/blank/invalid', () => {
-    expect(parseConditionalRule(null)).toBeUndefined();
-    expect(parseConditionalRule('')).toBeUndefined();
-    expect(parseConditionalRule('not json')).toBeUndefined();
+  it('shows an editor no rule for an empty or unreadable column', () => {
+    // Unreadable is reported elsewhere (the canvas badge, the publish refusal); the editor's job
+    // is to offer a working control, so it shows none rather than throwing on render.
+    expect(editableConditionalRule(null)).toBeUndefined();
+    expect(editableConditionalRule('')).toBeUndefined();
+    expect(editableConditionalRule('not json')).toBeUndefined();
+    expect(editableConditionalRule('{"show":{"all":[{"questionId":"q1","op":"bogus"}]}}')).toBeUndefined();
+    expect(editableValidationRule('{"minLength":"two"}')).toBeUndefined();
+    expect(editableValidationRule('{"minLength":2}')).toEqual({ minLength: 2 });
   });
 
   it('serializes to null only when the rule carries no verb at all', () => {
@@ -75,23 +101,6 @@ describe('validation rule round-trip', () => {
 });
 
 describe('form settings', () => {
-  it('applies defaults when blank', () => {
-    const settings = parseFormSettings(null);
-    expect(settings.anonymousAllowed).toBe(true);
-    expect(settings.captchaRequired).toBe(false);
-  });
-
-  it('drops an on-submit mode it does not recognise rather than passing it on', () => {
-    // This parser is a whitelist with no validation, so it used to copy whatever sat in
-    // `Form.Settings` straight into the next published snapshot. The server then rejected the
-    // whole snapshot over it and served "Form unavailable" — the server is tolerant now, but the
-    // builder should not be the thing manufacturing a value nothing can read.
-    for (const bad of ['configured', 'Legcy', '', 'null']) {
-      expect(parseFormSettings(JSON.stringify({ anonymousAllowed: true, captchaRequired: false, onSubmitMode: bad })).onSubmitMode)
-        .toBeUndefined();
-    }
-  });
-
   it('preserves an on-submit mode through a round-trip', () => {
     // The builder marks a form `Configured` the moment it writes its first automation row. This
     // parser is a whitelist, so a field missing from it is dropped on the next save — the form
@@ -119,10 +128,6 @@ describe('form settings', () => {
 });
 
 describe('question settings', () => {
-  it('defaults to empty object', () => {
-    expect(parseQuestionSettings(null)).toEqual({});
-  });
-
   it('serializes empty to null', () => {
     expect(serializeQuestionSettings({})).toBeNull();
   });
@@ -131,26 +136,5 @@ describe('question settings', () => {
     const settings = { scaleMax: 5, npsLabels: ['low', 'high'] };
     const json = serializeQuestionSettings(settings);
     expect(parseQuestionSettings(json)).toEqual(settings);
-  });
-});
-
-describe('style tokens', () => {
-  it('keeps only string values', () => {
-    const raw = JSON.stringify({ '--mj-brand-primary': '#fff', bad: 5 });
-    expect(parseStyleTokens(raw)).toEqual({ '--mj-brand-primary': '#fff' });
-  });
-
-  it('builds resolved tokens with optional custom css + logo', () => {
-    const tokens = buildStyleTokens('{"--mj-brand-primary":"#000"}', '.x{}', 'http://logo');
-    expect(tokens.cssVariables['--mj-brand-primary']).toBe('#000');
-    expect(tokens.customCSS).toBe('.x{}');
-    expect(tokens.logoURL).toBe('http://logo');
-  });
-
-  it('omits empty custom css / logo', () => {
-    const tokens = buildStyleTokens(null, null, null);
-    expect(tokens.customCSS).toBeUndefined();
-    expect(tokens.logoURL).toBeUndefined();
-    expect(tokens.cssVariables).toEqual({});
   });
 });

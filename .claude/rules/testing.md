@@ -39,12 +39,13 @@ directly. MJ's rule lists both; they do not exist here.
   from the MJ app scaffold — leave it alone; new package tests use `.spec.ts`.
 - Two placements, both in use:
   - **colocated** beside the source — `create-followup-task.action.spec.ts`
-  - **`__tests__/`** subdirectory — `packages/Server/src/public-submit/__tests__/`
+  - **`__tests__/`** subdirectory — `packages/CoreEntitiesServer/src/submission/__tests__/`
 
   Follow whichever the neighbouring code already uses.
 - **`@memberjunction/test-utils` is not installed here.** MJ's rule tells you to use it; don't, unless
   you add it deliberately. Hand-rolled fakes are the established pattern —
-  `packages/Server/src/public-submit/__tests__/fakes.ts` is worth copying.
+  `packages/CoreEntitiesServer/src/testing/fake-provider.ts` (imported as
+  `@mj-biz-apps/forms-core-entities-server/testing`) is the shared one, and worth extending rather than copying.
 - No database connections in unit tests. Stack-level checks live elsewhere (below).
 - There is no `scripts/scaffold-tests.mjs` and no `guides/` directory — both are MJ-only.
 
@@ -88,7 +89,8 @@ script says which form it looked at, what role it needed, and which slugs would 
 **None of these run in CI.** `smoke/` appears in the scope list `build.yml`'s `scope` job feeds to
 `scripts/check-paths-touched.mjs`, so editing one still starts `build-and-test` — but no job
 executes them: they need a live API, a SQL Server container and a published form, which no build
-agent has. (Three plain-Node specs *under* `smoke/lib/` — `fixture`, `sqlcmd`, `target` — do run
+agent has. (Five plain-Node specs *under* `smoke/lib/` — `fixture`, `sqlcmd`, `target`, `operations`,
+`grants` — do run
 there, and run nowhere else.) They are manual, and they are the only thing standing
 between you and the failure class below.
 

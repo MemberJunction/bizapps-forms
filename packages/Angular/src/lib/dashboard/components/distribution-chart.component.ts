@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, Input, computed, signal } from '@angular/core';
 import { FORMS_VIZ_CSS, vizSeriesClass } from '../../shared';
-import { percent } from '../reporting-view-model';
+import { isOffListLabel, percent } from '../reporting-view-model';
 import type { DistributionBucket } from '../models/reporting.model';
 
 /**
@@ -40,6 +40,11 @@ import type { DistributionBucket } from '../models/reporting.model';
           </li>
         }
       </ul>
+      @if (hasOffList()) {
+        <!-- Said, not left to the label: an answer outside the options can be anything a client
+             sent, so the server counts it under one bucket and never shows its text. -->
+        <p class="dc-note">“Other (not an option)” counts answers that match none of this question’s options.</p>
+      }
       @if (hasMore()) {
         <button type="button" class="dc-more" (click)="toggle()">
           <i class="fa-solid" [class.fa-chevron-down]="!expanded()" [class.fa-chevron-up]="expanded()" aria-hidden="true"></i>
@@ -54,6 +59,7 @@ import type { DistributionBucket } from '../models/reporting.model';
       :host { display: block; }
 
       .dc-empty { margin: 0; font-size: var(--mjf-meta); color: var(--mj-text-muted); }
+      .dc-note { margin: var(--mjf-gap-sm) 0 0; font-size: var(--mjf-label); color: var(--mj-text-muted); }
 
       .dc-list { display: flex; flex-direction: column; gap: 14px; margin: 0; padding: 0; list-style: none; }
       .dc-row { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -145,9 +151,17 @@ export class FormsDistributionChartComponent {
    * Colour by position in the SORTED list, so the biggest bucket always gets the first
    * hue of the rotation and cards across the dashboard open the same way.
    */
+  /**
+   * The off-list fold always takes the neutral grey, wherever it lands in the order: it is a catch-all
+   * of values outside the options, not one more category, and a hue of its own would read as one.
+   */
   public colorFor(index: number): string {
+    if (isOffListLabel(this.visible()[index]?.label ?? '')) return 'mjf-viz-neutral';
     return this._ordered() ? 'mjf-viz-series' : vizSeriesClass(index);
   }
+
+  /** Whether any answer fell outside the options (and so a footnote explains the bucket). */
+  public readonly hasOffList = computed(() => this._buckets().some((b) => isOffListLabel(b.label) && b.count > 0));
 
   public pct(fraction: number): string {
     return percent(fraction);

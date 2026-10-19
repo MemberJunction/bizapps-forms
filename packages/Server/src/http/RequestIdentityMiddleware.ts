@@ -8,7 +8,7 @@
  *
  * PRE-AUTH, deliberately. MJ mounts pre-auth middleware before both `createUnifiedAuthMiddleware`
  * and the Apollo handler, so the identity established here is in scope for the whole request —
- * including inside `SubmitFormResponse`, whose `AppContext` carries no request object of its own.
+ * including inside a Remote Operation such as `Forms.SaveResponse`, which is handed no request object.
  * Post-auth would work for the GraphQL path too, but pre-auth also covers requests that never get
  * that far, which is where an abusive caller lives.
  *
@@ -20,7 +20,9 @@ import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware } from '@memberjunction/server';
 import { LogErrorEx, LogStatus } from '@memberjunction/core';
 
-import { FORMS_SELF_CALL_HEADER, hashClientIp, resolveClientIp, runWithRequestIdentity } from './request-identity.js';
+import { runWithRequestIdentity } from '@mj-biz-apps/forms-core-entities-server';
+
+import { FORMS_SELF_CALL_HEADER, forwardableAddress, hashClientIp, resolveClientIp } from './request-identity.js';
 
 /**
  * How many proxies WE operate in front of the API — the number of trailing `X-Forwarded-For`
@@ -158,8 +160,25 @@ export function requestIdentityHandler(hops: number = trustedProxyHops()): Reque
     //
     // The redeem forward (#207) is unaffected: `forwardedHeaders` already forwards nothing for an
     // absent address, so an absent `ip` here reaches core exactly as an absent store did.
-    runWithRequestIdentity({ ip, ipHash: ip ? hashClientIp(ip) : undefined, origin }, next);
+    //
+    // `sessionId` rides along for the Remote Operations (#303 Task 8): MJ copies the same header
+    // onto `UserPayload.sessionId`, but an operation is handed no `AppContext`, so this store is the
+    // only way `Forms.SaveResponse` can see the correlator the retired resolver read from there.
+    runWithRequestIdentity(
+      { ip, forwardableIp: forwardableAddress(ip), ipHash: ip ? hashClientIp(ip) : undefined, origin, sessionId: sessionHeader(req) },
+      next,
+    );
   };
+}
+
+/**
+ * The caller's `x-session-id` header, read exactly as MJ core reads it into `UserPayload.sessionId`
+ * (`extractAuthInputs`: `raw ? raw.toString() : ''`), so the submit path keys on the same value the
+ * retired resolver did. Absent when the caller sent none.
+ */
+function sessionHeader(req: Request): string | undefined {
+  const raw = req.headers['x-session-id'];
+  return raw ? raw.toString() : undefined;
 }
 
 @RegisterClass(BaseServerMiddleware, 'mj:formsRequestIdentity')

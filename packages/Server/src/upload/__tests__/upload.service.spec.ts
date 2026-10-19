@@ -8,11 +8,13 @@ import { fileURLToPath } from 'node:url';
 import type { EntityInfo, EntityUserPermissionInfo, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import { runUpload, UPLOAD_FAILED_MESSAGE, type UploadContext, type UploadRequest, type UploadStorageEngine } from '../upload.service';
 import { resetUploadConfigForTests } from '../config';
-import { FOREIGN_ORIGIN_MESSAGE } from '../../http/embed-origin';
 import type { ParsedFile } from '../multipart';
-import { makeDefinition, makeDistribution, makeVersion } from '../../public-submit/__tests__/fakes';
+import { makeDefinition, makeDistribution, makeVersion } from '@mj-biz-apps/forms-core-entities-server/testing';
+import { FOREIGN_ORIGIN_MESSAGE, FORM_UNAVAILABLE_MESSAGE, FORMS_ENTITY } from '@mj-biz-apps/forms-core-entities-server';
 
 const USER = { ID: 'anon', Name: 'Anonymous' } as unknown as UserInfo;
+/** MJ's system user, which the middleware always supplies: the form-status read and the writes run as it. */
+const SYSTEM = { ID: 'system', Name: 'System' } as unknown as UserInfo;
 
 const FORM_RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
 const FORM_RESPONSE_ANSWER_ENTITY = 'MJ_BizApps_Forms: Form Response Answers';
@@ -74,13 +76,21 @@ function makeUploadDefinition() {
 }
 
 /** RunView provider that resolves an open published distribution for slug 'public-1'. */
-function runViewProvider(options: { openDistribution?: boolean; allowedOrigins?: string | null } = {}) {
+function runViewProvider(
+  options: { openDistribution?: boolean; allowedOrigins?: string | null; formStatus?: string; formReadFails?: boolean } = {},
+) {
   const open = options.openDistribution ?? true;
   return {
     RunView: async <T>(params: RunViewParams): Promise<RunViewResult<T>> => {
+      if (options.formReadFails && params.EntityName === FORMS_ENTITY.Form) {
+        return { Success: false, Results: [], RowCount: 0, TotalRowCount: 0, ExecutionTime: 0, ErrorMessage: 'login timeout' } as RunViewResult<T>;
+      }
       let rows: unknown[] = [];
       if (params.EntityName === FORM_DISTRIBUTION_ENTITY && open) {
         rows = [makeDistribution({ AllowedOrigins: options.allowedOrigins ?? null })];
+      } else if (params.EntityName === FORMS_ENTITY.Form && open) {
+        // The form's own Status — the respondent path refuses a form that is not Published (#303).
+        rows = [{ ID: 'form-1', Status: options.formStatus ?? 'Published' }];
       } else if (params.EntityName === FORM_VERSION_ENTITY && open) {
         rows = [makeVersion(makeUploadDefinition())];
       }
@@ -119,12 +129,21 @@ function context(opts: {
   provenanceFails?: boolean;
   allowedOrigins?: string | null;
   requestOrigin?: string;
+  formStatus?: string;
+  formReadFails?: boolean;
+  noSystemUser?: boolean;
 }): UploadContext {
   return {
     contextUser: USER,
+    elevatedUser: opts.noSystemUser ? undefined : SYSTEM,
     requestOrigin: opts.requestOrigin,
     metadataProvider: metadataProvider(opts.perms ?? respondentPerms()),
-    runViewProvider: runViewProvider({ openDistribution: opts.open, allowedOrigins: opts.allowedOrigins }),
+    runViewProvider: runViewProvider({
+      openDistribution: opts.open,
+      allowedOrigins: opts.allowedOrigins,
+      formStatus: opts.formStatus,
+      formReadFails: opts.formReadFails,
+    }),
     storage: opts.storage ?? storageEngine().engine,
     // Stubbed rather than hitting the database. The endpoint fails closed when provenance cannot
     // be recorded, so without a substitute every upload test would fail for the wrong reason.
@@ -319,9 +338,44 @@ describe('runUpload', () => {
     expect(recordedProvenance[0].questionId).toBe('q-file');
   });
 
-  it('rejects (404) when the distribution does not resolve to an open form', async () => {
+  it('rejects (404) when the distribution does not resolve to an open form, naming no reason', async () => {
     const result = await runUpload(context({ open: false }), request());
     expect(result.failure?.status).toBe(404);
+    expect(result.failure?.error).toBe(FORM_UNAVAILABLE_MESSAGE);
+  });
+
+  // Review minor 12 (#303 Task 8 fix round 1). With no system user the form-status read used to fall
+  // back to the respondent, whose role has no grant on Forms — so every upload was refused as if the
+  // form were archived. It is a host configuration error, and is refused (and logged) as one.
+  it('refuses (500) without reading or storing anything when the host has no system user', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ noSystemUser: true, storage: engine }), request());
+    expect(result.failure?.status).toBe(500);
+    expect(result.failure?.error).toBe(UPLOAD_FAILED_MESSAGE);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  // #303 Task 8: the same link resolution `Forms.SaveResponse` runs — an archived form takes no
+  // uploads, before any byte is stored, even while its link row still reads Active.
+  it('rejects (404) an upload to a form that is no longer Published, storing nothing', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ formStatus: 'Closed', storage: engine }), request());
+    expect(result.failure?.status).toBe(404);
+    // One fixed sentence for every reason a link cannot take uploads; the reason goes to the log.
+    expect(result.failure?.error).toBe(FORM_UNAVAILABLE_MESSAGE);
+    expect(result.failure?.error).not.toContain('form-not-published');
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  // Re-review N2: an unreadable form status is a database problem, not a missing form. It is a 503
+  // with the generic failure sentence — never a 404, and never the internal reason's name.
+  it('answers an unreadable form status as a 503 with the generic message, storing nothing', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ formReadFails: true, storage: engine }), request());
+    expect(result.failure?.status).toBe(503);
+    expect(result.failure?.error).toBe(UPLOAD_FAILED_MESSAGE);
+    expect(JSON.stringify(result)).not.toContain('form-unreadable');
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it('returns a clean 5xx (not a crash) when storage is unconfigured', async () => {

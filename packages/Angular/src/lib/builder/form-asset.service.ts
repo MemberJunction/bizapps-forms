@@ -13,7 +13,7 @@
  * builder stores `toAssetRef(url)`, the host-independent `/forms/asset/<id>`, and every renderer
  * resolves that against the API it is talking to: an absolute URL names whichever MJAPI took the
  * upload, often `localhost`, and broke every form served from anywhere else (#270). See
- * `../widget/core/asset-ref.ts`.
+ * `asset-ref.ts` in `@mj-biz-apps/forms-entities/contracts`.
  *
  * Before sending, the image is shrunk in the browser (`image-optimize.ts`): re-encoded as WebP where
  * the browser can, at most 1600 px on its longest side for screen and option images, 3840 px for a
@@ -29,7 +29,7 @@ import { Injectable } from '@angular/core';
 import { resolveApiBase, resolveApiToken } from '../shared/mj-api-origin';
 import { serverErrorText } from '../shared/server-error-text';
 // The upload POST and the anonymous read share one route, so one constant names both.
-import { ASSET_ROUTE } from '../widget/core/asset-ref';
+import { ASSET_ROUTE } from '@mj-biz-apps/forms-entities/contracts';
 import { optimizeImageForUpload, type ImageUse } from './image-optimize';
 
 /** What the server returns for a stored asset. */

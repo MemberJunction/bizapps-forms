@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import type { ConditionalRule } from '@mj-biz-apps/forms-entities';
-import type { ConditionalSourceQuestion } from './condition-sources';
-import { collectRuleEntries, type RuleEntry, type RuleInventoryForm } from './rules-inventory';
+import {
+  collectRuleEntries,
+  type ConditionalSourceQuestion,
+  type RuleEntry,
+  type RuleInventoryForm,
+} from '@mj-biz-apps/forms-entities/contracts';
 import {
   damageKeys,
   isValidCrossPageMove,

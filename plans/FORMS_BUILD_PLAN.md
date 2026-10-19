@@ -742,6 +742,39 @@ native entities. This is the reporting differentiator no incumbent has.
 
 ## 12. Progress Log
 
+- **2026-10-17 — PR #306: #303 rebuilt on MJ 6.1.5 LTS, plus @rkihm-bc's review of it.** #304's
+  server-engine move now ships on the LTS line: the MJ 6.2 Work Queue is replaced by a transactional
+  `FormAutomationEvent` outbox (claim/settle/renew in `automation/outbox/`, a post-commit drain and a
+  30 s scheduled sweep). The review's fixes, each with a spec observed red first: a never-attempted
+  event is claimable at once, because on insert its `NextAttemptAt` carries the API host's clock
+  (`BaseEntity.NewRecord()` stamps the column default from the process), so a host clock running
+  ahead hid a final from its post-commit drain, for good with the scheduler off; a drain whose lease
+  another drain took closes no rows and settles nothing, and a renewal in flight across the settle no
+  longer logs a lost lease; a widget load that fails after a newer load succeeded leaves the form
+  alone. Merging `next` brought #310 (`V202610171645`, `SaveReturnMode = datestamps_only`), which
+  sorted after this PR's three migrations and redefined `spCreate`/`spUpdateFormAutomationRun`
+  without `@FormAutomationEventID`; they are now `V202610172100`–`V202610172102`, and the outbox file
+  carries #310's datestamps-only result SELECTs (header edit 4). Validation: 5/5 packages build;
+  5,774 unit tests pass (33 opt-in skipped); typecheck and every local gate pass; the opt-in SQL
+  Server suite passes 31/33 on a migrations-only room (`MJ_306_Rename`), the two failures being the
+  reporting specs, whose `Forms:` queries arrive only with the release seed.
+- **2026-10-14 — PR #304 verified review fixes (superseded by PR #306 above; #304 targeted the MJ 6.2
+  edge).** Addressed the confirmed GUID-casing,
+  builder ordering, knockout resume, delayed notification, automation history/error, permission
+  retirement, safe error reporting, answer aggregation, input validation, template deletion,
+  metadata pull and reporting pagination defects. Behavioral regressions were observed red before
+  their fixes. The smoke-helper inventory now names all five helpers. Validation against the
+  existing MJ 6.2 edge workspace dependencies: all five packages build; 5,754 unit tests pass
+  (26 opt-in integration tests skipped); root typecheck, UI tokens, migration order, CodeGen
+  append, distribution and generated-scope gates pass. Live respondent, device-resume, binding
+  and respondent-error smokes pass on the edge test harness (the error suite skips two conditional
+  failure paths and reports two pre-existing MJ-core development-mode error disclosures).
+  `smoke/review-data-regressions.mjs`
+  executes the reporting query, renamed-entity permission retirement and metadata filters against
+  SQL Server temporary fixtures; it passes without modifying host metadata. Reporting now seeks
+  by answer ID and remains a live scan rather than a point-in-time snapshot. Release metadata
+  seeding remains the existing release step.
+
 - **2026-08-13 — the seed that finally shipped was shipping an exploit, and could not install
   where it was needed most.** Found from the other side: bizapps-caliber#219 was bricked by our
   0.8.0 seed, and fixing it there surfaced three defects here (#39, plan

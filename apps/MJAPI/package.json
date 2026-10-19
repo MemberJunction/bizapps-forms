@@ -4,7 +4,7 @@
   "private": true,
   "license": "BUSL-1.1",
   "type": "module",
-  "description": "Local dev harness hosting forms-server in MJAPI (MJ 6.1.0-edge era, rebuilt 2026-08-18). Dev-only workspace member — never published. Run from this directory: node server.mjs",
+  "description": "Local dev harness hosting forms-server in MJAPI. The exact @memberjunction/* pins below track the MJ host build this repo develops against; move them only with .claude/skills/mj-upgrade/scripts/bump-pins.sh. Dev-only workspace member — never published. Run from this directory: node server.mjs",
   "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs"
@@ -18,6 +18,8 @@
     "@memberjunction/core-entities": "^6.1.5",
     "@memberjunction/generic-database-provider": "^6.1.5",
     "@memberjunction/global": "^6.1.5",
+    "@memberjunction/scheduling-base-types": "^6.1.5",
+    "@memberjunction/scheduling-engine": "^6.1.5",
     "@memberjunction/server": "^6.1.5",
     "@memberjunction/server-bootstrap": "^6.1.5",
     "@memberjunction/storage": "^6.1.5",

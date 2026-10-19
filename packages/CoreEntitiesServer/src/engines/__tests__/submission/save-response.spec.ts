@@ -1,0 +1,689 @@
+/**
+ * `FormSubmissionEngine.SaveResponse` (moved from forms-server's `submit-pipeline.spec.ts`, #303 Task 8):
+ * scope-denied, quota-exceeded, turnstile-fail, and the happy-path save + queued automations — plus
+ * server-side re-validation, the rate ceilings and the never-throws boundary.
+ */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { UserInfo } from '@memberjunction/core';
+import { saveThroughEngine, recordingQueue, type EngineSaveContext, type EngineSaveSubmission } from './harness.js';
+import type { RespondentSaveResult } from '../../../submission/save-request.js';
+import { FORM_UNAVAILABLE_MESSAGE, SUBMIT_FAILED_MESSAGE } from '../../FormSubmissionEngine.js';
+import { FormsRateLimiter } from '../../../submission/rate-limit.js';
+import { resetPublicSubmitConfigForTests } from '../../../submission/config.js';
+import {
+  makeContextUser,
+  makeDefinition,
+  makeDistribution,
+  makeFakeProvider,
+  makeVersion,
+  respondentPermissions,
+  type CreatePermissions,
+} from '../../../testing/index.js';
+
+const FORM_RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
+const FORM_RESPONSE_ANSWER_ENTITY = 'MJ_BizApps_Forms: Form Response Answers';
+
+/** A submission that satisfies the default required ShortText question. */
+function validSubmission(overrides?: Partial<EngineSaveSubmission>): EngineSaveSubmission {
+  return {
+    distributionSlug: 'public-1',
+    formVersionId: 'ver-1',
+    answers: [{ questionId: 'q-name', textValue: 'Ada Lovelace' }],
+    ...overrides,
+  };
+}
+
+/** Build a pipeline context around a fake provider, with hooks captured. */
+function makeContext(
+  perms: CreatePermissions,
+  options: {
+    captcha?: boolean;
+    /** The distribution's own `CaptchaRequired` column — OR-ed with the form's setting by the gate. */
+    distributionCaptcha?: boolean;
+    maxResponses?: number | null;
+    responseCount?: number;
+    formResponseCount?: number;
+    queue?: EngineSaveContext['queue'];
+    fetchImpl?: typeof fetch;
+    clientIpHash?: string;
+    forwardableIp?: string;
+  } = {},
+): { ctx: EngineSaveContext; saved: () => ReturnType<typeof makeFakeProvider>['saved'] } {
+  const definition = makeDefinition(
+    options.captcha
+      ? { settings: { anonymousAllowed: true, captchaRequired: true } }
+      : undefined,
+  );
+  const distribution = makeDistribution({
+    CaptchaRequired: options.distributionCaptcha ?? false,
+    MaxResponses: options.maxResponses ?? null,
+    ResponseCount: options.responseCount ?? 0,
+  });
+  const fake = makeFakeProvider({
+    distribution,
+    version: makeVersion(definition),
+    createPermissions: perms,
+    formResponseCount: options.formResponseCount,
+  });
+  const ctx: EngineSaveContext = {
+    provider: fake.provider,
+    contextUser: makeContextUser(),
+    elevatedUser: makeContextUser(),
+    sessionId: 'sess-abc',
+    clientIpHash: options.clientIpHash,
+    forwardableIp: options.forwardableIp,
+    fetchImpl: options.fetchImpl,
+    queue: options.queue,
+  };
+  return { ctx, saved: () => fake.saved };
+}
+
+/**
+ * Every knob these tests touch, cleared before each one.
+ *
+ * A test that sets an env var and unsets it on its LAST line unsets nothing when an assertion
+ * above that line throws — so one genuine failure silently reconfigures every test after it and
+ * reports as a cascade. Clearing up front makes each test independent of whatever its
+ * predecessor did or failed to undo, which is the difference between reading a failure and
+ * chasing one.
+ */
+const TUNABLES = [
+  'FORMS_TURNSTILE_SECRET',
+  'FORMS_RATELIMIT_MAX',
+  'FORMS_AUTOSAVE_RATELIMIT_MAX',
+  'FORMS_RATELIMIT_IP_MAX',
+  'FORMS_COMPLETION_MAX',
+  'FORMS_RATELIMIT_MAX_KEYS',
+  'FORMS_RATELIMIT_WINDOW_MS',
+] as const;
+
+beforeEach(() => {
+  FormsRateLimiter.Instance.resetForTests();
+  for (const knob of TUNABLES) {
+    delete process.env[knob];
+  }
+  resetPublicSubmitConfigForTests();
+});
+
+describe('SaveResponse', () => {
+  it('rejects when the anonymous session lacks CanCreate on responses (scope denied)', async () => {
+    const perms = respondentPermissions();
+    perms[FORM_RESPONSE_ENTITY] = false;
+    const { ctx, saved } = makeContext(perms);
+
+    const result = await saveThroughEngine(ctx, validSubmission());
+
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/not authorized/i);
+    expect(saved()).toHaveLength(0);
+  });
+
+  it('rejects on privilege accretion (create access on a definition entity)', async () => {
+    const perms = respondentPermissions();
+    perms['MJ_BizApps_Forms: Forms'] = true;
+    const { ctx } = makeContext(perms);
+
+    const result = await saveThroughEngine(ctx, validSubmission());
+
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/privilege accretion/i);
+  });
+
+  it('rejects when the distribution quota is already reached (quota exceeded)', async () => {
+    const { ctx, saved } = makeContext(respondentPermissions(), {
+      maxResponses: 3,
+      responseCount: 3,
+    });
+
+    const result = await saveThroughEngine(ctx, validSubmission());
+
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/no longer accepting/i);
+    expect(saved()).toHaveLength(0);
+  });
+
+  it('rejects when the form-level quota count is reached', async () => {
+    const definition = makeDefinition({
+      settings: { anonymousAllowed: true, captchaRequired: false, quota: 2 },
+    });
+    const fake = makeFakeProvider({
+      distribution: makeDistribution(),
+      version: makeVersion(definition),
+      createPermissions: respondentPermissions(),
+      formResponseCount: 2,
+    });
+    const ctx: EngineSaveContext = {
+      provider: fake.provider,
+      contextUser: makeContextUser(),
+      elevatedUser: makeContextUser(),
+      sessionId: 'sess-q',
+    };
+
+    const result = await saveThroughEngine(ctx, validSubmission());
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/no longer accepting/i);
+  });
+
+  it('lets a PARTIAL save through on a captcha-required form', async () => {
+    // The widget deliberately withholds the token from autosaves: a Turnstile token is
+    // single-use, so spending it on a background save leaves the real submit with nothing. The
+    // pipeline verified unconditionally anyway, so on any captcha-enabled form every autosave and
+    // every submit-point checkpoint failed — silently, because autosave is fail-soft. The
+    // respondent's in-progress answers were never actually being saved.
+    process.env.FORMS_TURNSTILE_SECRET = 'test-secret';
+    resetPublicSubmitConfigForTests();
+    const fetchImpl = vi.fn(async () => new Response('{}', { status: 200 })) as unknown as typeof fetch;
+
+    const { ctx, saved } = makeContext(respondentPermissions(), { captcha: true, fetchImpl });
+
+    const result = await saveThroughEngine(ctx, validSubmission({ partial: true }));
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Partial');
+    expect(saved().map((r) => r.entityName)).toContain(FORM_RESPONSE_ENTITY);
+    // Never even asked Cloudflare: there is no token to verify and nothing to spend.
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('still requires the captcha for the FINAL submit', async () => {
+    // The partial exemption must not become a bypass: `partial: false` is the state that counts.
+    process.env.FORMS_TURNSTILE_SECRET = 'test-secret';
+    resetPublicSubmitConfigForTests();
+    const failingFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ success: false, 'error-codes': ['missing-input-response'] }), { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    const { ctx, saved } = makeContext(respondentPermissions(), { captcha: true, fetchImpl: failingFetch });
+
+    const result = await saveThroughEngine(ctx, validSubmission({ partial: false }));
+
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/captcha/i);
+    expect(saved()).toHaveLength(0);
+  });
+
+  it("sends the caller's screened address to Turnstile as remoteip on a captcha-required final save", async () => {
+    process.env.FORMS_TURNSTILE_SECRET = 'test-secret';
+    resetPublicSubmitConfigForTests();
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
+
+    const { ctx } = makeContext(respondentPermissions(), {
+      captcha: true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      forwardableIp: '203.0.113.9',
+    });
+    await saveThroughEngine(ctx, validSubmission({ turnstileToken: 'tok' }));
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const body = fetchImpl.mock.calls[0][1]?.body as URLSearchParams;
+    expect(body.get('remoteip')).toBe('203.0.113.9');
+  });
+
+  it('rejects when captcha is required but verification fails (turnstile fail)', async () => {
+    process.env.FORMS_TURNSTILE_SECRET = 'test-secret';
+    resetPublicSubmitConfigForTests();
+    const failingFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ success: false, 'error-codes': ['invalid-input-response'] }), { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    const { ctx, saved } = makeContext(respondentPermissions(), { captcha: true, fetchImpl: failingFetch });
+
+    const result = await saveThroughEngine(ctx, validSubmission({ turnstileToken: 'bad-token' }));
+
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/captcha/i);
+    expect(saved()).toHaveLength(0);
+  });
+
+  // #122. A link born with `CaptchaRequired = 1` (the column's old default) on a host that never
+  // configured Turnstile refused every final submit with "Captcha verification failed
+  // (turnstile-not-configured)" — telling the respondent THEY failed a check that was never set up,
+  // and telling the operator nothing at error level. Misconfiguration is the server's problem:
+  // the respondent gets copy that says so, the operator gets the env var by name.
+  it('words a captcha-required submit on a Turnstile-less host as a server misconfiguration, not a respondent failure', async () => {
+    // FORMS_TURNSTILE_SECRET is cleared by beforeEach: this host has no Turnstile.
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(' '));
+    });
+    try {
+      const { ctx, saved } = makeContext(respondentPermissions(), { distributionCaptcha: true });
+
+      const result = await saveThroughEngine(ctx, validSubmission());
+
+      expect(result.success).toBe(false);
+      const message = result.errors?.[0].message ?? '';
+      expect(message).toMatch(/contact the form owner/i);
+      expect(message).not.toMatch(/failed|verification|turnstile-not-configured/i);
+      expect(saved()).toHaveLength(0);
+
+      const line = errors.find((l) => l.includes('FORMS_TURNSTILE_SECRET'));
+      expect(line, 'the operator should be told which setting is missing').toBeDefined();
+      expect(line).toContain('public-1');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('saves the response + answers and queues the on-submit automations (happy path)', async () => {
+    const queue = recordingQueue();
+    const { ctx, saved } = makeContext(respondentPermissions(), { queue });
+
+    const result = await saveThroughEngine(ctx, validSubmission());
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Complete');
+    expect(result.outcome).toBe('ended');
+    expect(result.confirmationMessage).toBe('Thanks!');
+    expect(result.responseId).toBeTruthy();
+    // one response row + one answer row
+    const entityNames = saved().map((r) => r.entityName);
+    expect(entityNames).toContain(FORM_RESPONSE_ENTITY);
+    expect(entityNames).toContain(FORM_RESPONSE_ANSWER_ENTITY);
+    // A form that configures nothing runs the four legacy hooks — on the handler, from ONE
+    // OnComplete message published inside the save's transaction.
+    expect(queue.published).toEqual([
+      expect.objectContaining({ ResponseID: result.responseId, Trigger: 'OnComplete', PartialSaveKey: null }),
+    ]);
+    expect(queue.depths).toEqual([1]);
+  });
+
+  it('queues nothing for a partial save of a form with no OnPartial step', async () => {
+    const fireHooks = recordingQueue();
+    const { ctx } = makeContext(respondentPermissions(), { queue: fireHooks });
+
+    const result = await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] }));
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Partial');
+    expect(fireHooks.published).toHaveLength(0);
+  });
+
+  it('enforces required fields server-side (re-validation)', async () => {
+    const { ctx, saved } = makeContext(respondentPermissions());
+
+    const result = await saveThroughEngine(ctx, validSubmission({ answers: [] }));
+
+    expect(result.success).toBe(false);
+    expect(result.errors?.some((e) => e.questionId === 'q-name')).toBe(true);
+    expect(saved()).toHaveLength(0);
+  });
+
+  it('rejects a submission whose formVersionId does not match the published version', async () => {
+    const { ctx } = makeContext(respondentPermissions());
+
+    const result = await saveThroughEngine(ctx, validSubmission({ formVersionId: 'stale-version' }));
+
+    expect(result.success).toBe(false);
+    // One fixed sentence for every reason the link cannot take the save (review minor 4); the reason
+    // itself goes to the log.
+    expect(result.errors?.[0].message).toBe(FORM_UNAVAILABLE_MESSAGE);
+    expect(JSON.stringify(result)).not.toContain('version-mismatch');
+  });
+
+  // Regression: every anonymous submission failed with version-mismatch because this
+  // comparison was case-sensitive. The widget echoes back the `formVersionId` embedded
+  // in the published snapshot, which carries the client-minted (lowercase) GUID, while
+  // SQL Server returns the column uppercased. Two spellings of the same uniqueidentifier
+  // are the same version — a GUID is case-insensitive by definition.
+  it('accepts a formVersionId that differs from the published version only by case', async () => {
+    const { ctx, saved } = makeContext(respondentPermissions());
+
+    const result = await saveThroughEngine(ctx, validSubmission({ formVersionId: 'VER-1' }));
+
+    expect(result.errors ?? []).toEqual([]);
+    expect(result.success).toBe(true);
+    expect(saved().length).toBeGreaterThan(0);
+  });
+
+  it('rate-limits repeated submissions from the same session+distribution', async () => {
+    process.env.FORMS_RATELIMIT_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = recordingQueue();
+    const { ctx } = makeContext(respondentPermissions(), { queue: fireHooks });
+
+    const first = await saveThroughEngine(ctx, validSubmission());
+    const second = await saveThroughEngine(ctx, validSubmission());
+    const third = await saveThroughEngine(ctx, validSubmission());
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(third.success).toBe(false);
+    expect(third.errors?.[0].message).toMatch(/too many/i);
+    delete process.env.FORMS_RATELIMIT_MAX;
+  });
+
+  // SECURITY REGRESSION (the defect PR #48 diagnosed). `ctx.sessionId` is `UserPayload.sessionId`,
+  // which MJ populates from the client-settable `x-session-id` header — so a caller who rotates
+  // it lands in a fresh per-session bucket on every request and the per-session cap never trips.
+  // Each accepted completion fires on-submit automations (confirmation email to an address the
+  // caller chose, an LLM run, entity upserts), so the bypass amplifies. The ceiling therefore has
+  // to key on something the caller cannot pick: their resolved IP.
+  it('throttles a caller who rotates the session id, because the bucket follows their IP', async () => {
+    // Final submits are bounded per address by the COMPLETION ceiling (c); the save ceiling (b)
+    // counts autosaves only, so a respondent's neighbours typing cannot refuse their Submit (#272).
+    process.env.FORMS_COMPLETION_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = recordingQueue();
+    const { ctx } = makeContext(respondentPermissions(), { queue: fireHooks, clientIpHash: 'ip-attacker' });
+
+    ctx.sessionId = 'forged-1';
+    const first = await saveThroughEngine(ctx, validSubmission());
+    ctx.sessionId = 'forged-2';
+    const second = await saveThroughEngine(ctx, validSubmission());
+    ctx.sessionId = 'forged-3';
+    const third = await saveThroughEngine(ctx, validSubmission());
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(third.success).toBe(false);
+    expect(third.errors?.[0].message).toMatch(/too many/i);
+    // The amplification is what the cap is really for: the rejected request fires nothing.
+    expect(fireHooks.published).toHaveLength(2);
+    delete process.env.FORMS_COMPLETION_MAX;
+  });
+
+  // The other half of the fix, and the reason the ceiling is keyed per (caller, distribution)
+  // rather than per distribution: a cap every respondent of a form shares is not an abuse
+  // ceiling, it is a shared kill switch. One caller saturating it would take the form offline
+  // for everyone filling it in — trading a rate-limit bypass for a cheaper, louder outage.
+  it('does not let one saturated caller throttle a different caller on the same form', async () => {
+    process.env.FORMS_COMPLETION_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = recordingQueue();
+    const { ctx } = makeContext(respondentPermissions(), { queue: fireHooks, clientIpHash: 'ip-attacker' });
+
+    ctx.sessionId = 'forged-1';
+    await saveThroughEngine(ctx, validSubmission());
+    ctx.sessionId = 'forged-2';
+    await saveThroughEngine(ctx, validSubmission());
+    ctx.sessionId = 'forged-3';
+    const saturated = await saveThroughEngine(ctx, validSubmission());
+
+    // A real respondent arrives mid-attack, on the same form, from their own address.
+    ctx.clientIpHash = 'ip-respondent';
+    ctx.sessionId = 'honest-session';
+    const bystander = await saveThroughEngine(ctx, validSubmission());
+
+    expect(saturated.success).toBe(false);
+    expect(bystander.success).toBe(true);
+    delete process.env.FORMS_COMPLETION_MAX;
+  });
+
+  // Saves and completions cost wildly different things — an autosave upserts one row, a
+  // completion fires the confirmation email, the LLM run and the entity upserts — so one
+  // counter covering both can only ever be wrong in one direction: tight enough to throttle a
+  // respondent who is still typing, or loose enough to be no limit at all on the expensive path.
+  it('caps completions on their own budget, without throttling autosaves', async () => {
+    process.env.FORMS_RATELIMIT_IP_MAX = '50';
+    process.env.FORMS_COMPLETION_MAX = '1';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = recordingQueue();
+    const { ctx } = makeContext(respondentPermissions(), { queue: fireHooks, clientIpHash: 'ip-respondent' });
+
+    const autosaves: RespondentSaveResult[] = [];
+    for (let i = 0; i < 4; i++) {
+      autosaves.push(await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] })));
+    }
+    const completion = await saveThroughEngine(ctx, validSubmission());
+    const secondCompletion = await saveThroughEngine(ctx, validSubmission());
+
+    expect(autosaves.every((r) => r.success)).toBe(true);
+    expect(completion.success).toBe(true);
+    expect(secondCompletion.success).toBe(false);
+    expect(secondCompletion.errors?.[0].message).toMatch(/too many/i);
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
+    delete process.env.FORMS_COMPLETION_MAX;
+  });
+
+  // Gauntlet #272 (F5). Once autosaves stopped being cut off at 5 per session, three respondents
+  // typing behind one NAT (an office, a campus) could fill the per-address SAVE ceiling on their own,
+  // and it was charged by final submits too — so the next Submit from that address was refused
+  // "Too many submissions": #271's symptom again, moved from one session to one address. The save
+  // ceiling now counts autosaves only; a Submit is bounded by the completion/knockout ceilings.
+  it("never refuses a Submit because co-located respondents' autosaves filled the save ceiling", async () => {
+    process.env.FORMS_RATELIMIT_IP_MAX = '3';
+    resetPublicSubmitConfigForTests();
+    const { ctx } = makeContext(respondentPermissions(), { clientIpHash: 'ip-office-nat' });
+
+    for (const neighbour of ['typist-1', 'typist-2', 'typist-3']) {
+      ctx.sessionId = neighbour;
+      expect((await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] }))).success).toBe(true);
+    }
+    ctx.sessionId = 'submitter';
+    const submit = await saveThroughEngine(ctx, validSubmission());
+
+    expect(submit.success).toBe(true);
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
+  });
+
+  it('still bounds autosaves by the per-address save ceiling across rotated sessions', async () => {
+    process.env.FORMS_RATELIMIT_IP_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const { ctx } = makeContext(respondentPermissions(), { clientIpHash: 'ip-attacker' });
+
+    const results: RespondentSaveResult[] = [];
+    for (const forged of ['forged-1', 'forged-2', 'forged-3']) {
+      ctx.sessionId = forged;
+      results.push(await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] })));
+    }
+
+    expect(results.map((r) => r.success)).toEqual([true, true, false]);
+    expect(results[2].errors?.[0].message).toMatch(/too many/i);
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
+  });
+
+  // #271. Autosave and the respondent's own Submit press used to share ONE per-(session,
+  // distribution) bucket (gate (a)), so enough autosaves emptied the budget the eventual Submit
+  // needed — a respondent who had been typing for a while saw their own final submit refused
+  // "Too many submissions", by traffic that was entirely theirs. AT DEFAULTS (rateLimitMax=10),
+  // twenty partial saves is already twice that ceiling, so this is red before the fix: the final
+  // submit shares the bucket the autosaves just spent and is refused by it.
+  it('#271 regression: twenty autosaves at defaults never cost the final Submit its own budget', async () => {
+    const { ctx } = makeContext(respondentPermissions(), { clientIpHash: 'ip-respondent' });
+
+    for (let i = 0; i < 20; i++) {
+      const autosave = await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] }));
+      expect(autosave.errors?.[0]?.message ?? '', `autosave ${i + 1}`).not.toMatch(/too many/i);
+    }
+    const final = await saveThroughEngine(ctx, validSubmission());
+
+    expect(final.success).toBe(true);
+    expect(final.errors?.[0]?.message ?? '').not.toMatch(/too many/i);
+  });
+
+  // The retry-tap half of #271: whatever refuses a repeated final submit after a run of
+  // autosaves, it must never be THIS limiter — a final submit that reaches validation, dedupe, or
+  // any other real gate is a different failure from one that never got past the rate limiter that
+  // the autosaves in front of it should not have been able to touch.
+  it('#271: repeated final submits after a run of autosaves are never refused by the limiter', async () => {
+    const { ctx } = makeContext(respondentPermissions(), { clientIpHash: 'ip-respondent' });
+
+    for (let i = 0; i < 20; i++) {
+      await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] }));
+    }
+    const attempts = [
+      await saveThroughEngine(ctx, validSubmission()),
+      await saveThroughEngine(ctx, validSubmission()),
+      await saveThroughEngine(ctx, validSubmission()),
+    ];
+
+    for (const [i, attempt] of attempts.entries()) {
+      expect(attempt.errors?.[0]?.message ?? '', `final submit ${i + 1}`).not.toMatch(/too many/i);
+    }
+  });
+
+  // FORMS_AUTOSAVE_RATELIMIT_MAX is autosave's OWN ceiling (#271) — tight here so the third
+  // autosave trips it, while a final submit right after still succeeds because it charges a
+  // completely different bucket (FORMS_RATELIMIT_MAX, untouched by any of this).
+  it('FORMS_AUTOSAVE_RATELIMIT_MAX bounds autosaves without touching the Submit budget', async () => {
+    process.env.FORMS_AUTOSAVE_RATELIMIT_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const { ctx } = makeContext(respondentPermissions(), { clientIpHash: 'ip-respondent' });
+
+    const first = await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] }));
+    const second = await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] }));
+    const third = await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] }));
+    const final = await saveThroughEngine(ctx, validSubmission());
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(third.success).toBe(false);
+    expect(third.errors?.[0].message).toMatch(/too many/i);
+    expect(final.success).toBe(true);
+  });
+
+  // Gates (b)/(c)/(d) drop out entirely with no resolved IP (see `abuseIdentity`), leaving gate
+  // (a) — split by request kind — as the only bound left for a caller who still names a session.
+  // Autosave's own bucket must keep working in that degraded mode, not just in the common one.
+  it('bounds autosaves by their own budget even with no resolved IP, given a named session', async () => {
+    process.env.FORMS_AUTOSAVE_RATELIMIT_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const { ctx } = makeContext(respondentPermissions());
+    ctx.clientIpHash = undefined;
+
+    const first = await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] }));
+    const second = await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] }));
+    const third = await saveThroughEngine(ctx, validSubmission({ partial: true, answers: [] }));
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(third.success).toBe(false);
+    expect(third.errors?.[0].message).toMatch(/too many/i);
+  });
+
+  // When no IP could be resolved (middleware not mounted, or a socket already gone) the ceilings
+  // have nothing to key on. The tempting fallback — the session id — is blank for any client that
+  // omits the header, so every such caller would hash to ONE bucket and any one of them could
+  // refuse the form for all the others. That is a worse failure than not limiting, so the
+  // ceilings are dropped instead and the pre-existing per-session gate is left to do its job.
+  it('does not put unidentifiable callers in a shared bucket', async () => {
+    process.env.FORMS_RATELIMIT_IP_MAX = '1';
+    process.env.FORMS_COMPLETION_MAX = '1';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = recordingQueue();
+    const { ctx } = makeContext(respondentPermissions(), { queue: fireHooks });
+    ctx.clientIpHash = undefined;
+
+    // BLANK, not merely distinct: MJ sets `sessionId` to '' for any client that omits the
+    // header, so this is what two unrelated header-less callers genuinely look like, and it is
+    // the case a session-derived fallback collapses onto a single bucket.
+    ctx.sessionId = '';
+    const first = await saveThroughEngine(ctx, validSubmission());
+    const second = await saveThroughEngine(ctx, validSubmission());
+    const third = await saveThroughEngine(ctx, validSubmission());
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(third.success).toBe(true);
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
+    delete process.env.FORMS_COMPLETION_MAX;
+  });
+
+  // THE SAME REASONING, APPLIED TO THE GATE THAT WAS ALREADY HERE — and this is the half that was
+  // missed. MJ hands the pipeline a BLANK `sessionId` for any client that omits `x-session-id`
+  // (curl, a bespoke integration, and this repo's own smoke scripts until `smoke/lib/session.mjs`
+  // was written), so every one of those callers hashes to the same key. The per-session gate is
+  // the tightest of the four at 10/min by default (this is the FINAL-submit half of it — see
+  // #271), so they do not merely share a bucket, they share the TIGHTEST one: a single script
+  // pushes it over and the next unrelated caller is refused with
+  // "Too many submissions" — a message about someone else's traffic. That is exactly the shared
+  // kill switch the ceiling above is keyed per-caller to avoid, and a gate that cannot tell two
+  // callers apart has no business refusing either of them.
+  it('does not let one header-less caller throttle another, and still bounds them by address', async () => {
+    process.env.FORMS_RATELIMIT_MAX = '1';
+    process.env.FORMS_COMPLETION_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = recordingQueue();
+    const { ctx } = makeContext(respondentPermissions(), { queue: fireHooks, clientIpHash: 'ip-script' });
+
+    // Blank, and from an address that DID resolve: the routine shape of a scripted client.
+    ctx.sessionId = '';
+    const first = await saveThroughEngine(ctx, validSubmission());
+    const second = await saveThroughEngine(ctx, validSubmission());
+    const overCeiling = await saveThroughEngine(ctx, validSubmission());
+
+    // A different header-less caller, on their own address, arriving after the first has spent
+    // everything the shared bucket had.
+    ctx.clientIpHash = 'ip-other-script';
+    const bystander = await saveThroughEngine(ctx, validSubmission());
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(bystander.success).toBe(true);
+    // Dropping that gate must not leave them unbounded: their ADDRESS still bounds them, which is
+    // the identity they cannot rotate. Without this line the test would pass on no gates at all.
+    expect(overCeiling.success).toBe(false);
+    expect(overCeiling.errors?.[0].message).toMatch(/too many/i);
+  });
+
+  // Turnstile ran BEFORE the rate limit, so a request the limiter was about to refuse had already
+  // spent an outbound Cloudflare round trip — and, worse, a Turnstile token is single-use (see
+  // the partial-save test above), so the refusal consumed the respondent's token. Their retry
+  // then failed with "Captcha verification failed" instead of the wait-and-retry message, on a
+  // form whose author cared enough to turn a captcha on. The cheap local gate belongs first.
+  it('does not spend a Turnstile token on a submission it is going to rate-limit', async () => {
+    process.env.FORMS_TURNSTILE_SECRET = 'test-secret';
+    process.env.FORMS_RATELIMIT_MAX = '1';
+    resetPublicSubmitConfigForTests();
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify({ success: true }), { status: 200 }),
+    ) as unknown as typeof fetch;
+    const { ctx } = makeContext(respondentPermissions(), {
+      captcha: true,
+      fetchImpl,
+      clientIpHash: 'ip-respondent',
+    });
+
+    const first = await saveThroughEngine(ctx, validSubmission({ turnstileToken: 'token-1' }));
+    const refused = await saveThroughEngine(ctx, validSubmission({ turnstileToken: 'token-2' }));
+
+    expect(first.success).toBe(true);
+    expect(refused.success).toBe(false);
+    expect(refused.errors?.[0].message).toMatch(/too many/i);
+    // One verification for the accepted submit, none for the refused one.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    delete process.env.FORMS_TURNSTILE_SECRET;
+    delete process.env.FORMS_RATELIMIT_MAX;
+  });
+});
+
+
+/**
+ * The pipeline's contract is a RESULT, never a throw. Its own comments have said so since the shape
+ * guard was written ("never a throw that would yield a blank screen"), and every gate honours it —
+ * but an exception from a stage (a bug, a driver throwing instead of returning false, #116's
+ * `RangeError: Invalid time value` from a Date it could not parse) escaped to Apollo, which put the
+ * exception's own words in `errors[].message` for the widget to render to the respondent (#119).
+ */
+describe('SaveResponse never throws', () => {
+  it('turns an exception from a stage into the authored failure and logs the exception with context', async () => {
+    const logged: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    });
+    try {
+      const { ctx } = makeContext(respondentPermissions());
+      // The definition load is the first stage that touches the provider; make it blow up the way
+      // an unexpected bug does — with an Error the pipeline has no branch for.
+      const throwing = Object.create(ctx.provider, {
+        RunView: { value: async () => { throw new RangeError('Invalid time value'); } },
+      }) as EngineSaveContext['provider'];
+
+      const result = await saveThroughEngine({ ...ctx, provider: throwing }, validSubmission());
+
+      expect(result.success).toBe(false);
+      expect(result.errors?.[0].message).toBe(SUBMIT_FAILED_MESSAGE);
+      expect(JSON.stringify(result)).not.toContain('Invalid time value');
+
+      const line = logged.find((l) => l.includes('Invalid time value'));
+      expect(line, 'the exception must reach the server log').toBeDefined();
+      expect(line).toContain('public-1');
+      expect(line).toContain('ver-1');
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});

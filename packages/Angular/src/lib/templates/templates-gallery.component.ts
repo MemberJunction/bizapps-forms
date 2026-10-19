@@ -23,9 +23,9 @@ import {
   Output,
   inject,
 } from '@angular/core';
-import { BaseEntity, LogError } from '@memberjunction/core';
-import { MJEventType, MJGlobal } from '@memberjunction/global';
+import { LogError } from '@memberjunction/core';
 import {
+  FormsDeleteTemplateOperation,
   STARTER_TEMPLATE_CATALOG,
   type StarterTemplateInfo,
 } from '@mj-biz-apps/forms-entities';
@@ -34,14 +34,17 @@ import { FORMS_UI_CSS } from '../shared';
 import { FORMS_ENTITY } from '../shared/entity-names';
 import { FORMS_VIZ_CSS, vizSeriesClass } from '../shared/forms-viz';
 import { TEMPLATES_GALLERY_CSS } from './templates-gallery.styles';
-import { FormTemplatesService, type SavedTemplateRow } from './form-templates.service';
+import { readSavedTemplates, type SavedTemplateRow } from '../shared/form-catalog';
+import { runOperation } from '../shared/remote-operation';
+import { onFormsWrite, type FormsWriteSubscription } from '../shared/forms-writes';
 import { templateMark, type TemplateMark } from './template-marks';
 
+
 /**
- * The handle returned by subscribing to MJGlobal's event stream. Derived from the API because
- * rxjs is not a dependency of this package (it arrives through Angular in the host).
+ * How long a burst of Form writes elsewhere settles before the gallery re-reads once — an open
+ * builder writes the Form row on every structural edit (see `shared/forms-writes.ts`).
  */
-type EventSubscription = ReturnType<ReturnType<MJGlobal['GetEventListener']>['subscribe']>;
+const FORM_WRITE_DEBOUNCE_MS = 750;
 
 /** Which template the author picked, and which of the two kinds it is. */
 export type TemplateChoice =
@@ -52,12 +55,10 @@ export type TemplateChoice =
   selector: 'mjf-templates-gallery',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [FormTemplatesService],
   styles: [FORMS_UI_CSS, FORMS_VIZ_CSS, TEMPLATES_GALLERY_CSS],
   templateUrl: './templates-gallery.component.html',
 })
 export class TemplatesGalleryComponent {
-  private readonly data = inject(FormTemplatesService);
   private readonly cdr = inject(ChangeDetectorRef);
 
   /** Disables every card while the parent is creating a form from one. */
@@ -81,7 +82,7 @@ export class TemplatesGalleryComponent {
   public deleting = false;
 
   /** MJGlobal subscription behind {@link watchForTemplateChanges}; released on destroy. */
-  private templateChanges?: EventSubscription;
+  private templateChanges?: FormsWriteSubscription;
 
   public async ngOnInit(): Promise<void> {
     this.watchForTemplateChanges();
@@ -98,9 +99,9 @@ export class TemplatesGalleryComponent {
    *
    * Templates are saved from the BUILDER, which is a different component on a different tab, so
    * a gallery that loaded once showed a stale list until the whole page was refreshed — you saved
-   * two templates and neither appeared. MJ already broadcasts the fact: every `BaseEntity.Save()`
-   * and `.Delete()` raises an MJGlobal `ComponentEvent` tagged `BaseEntity.BaseEventCode`. This
-   * listens for the Forms ones and re-reads, which is the same mechanism the forms list uses.
+   * two templates and neither appeared. `onFormsWrite` hears every Forms row written elsewhere — a
+   * record's own save or delete, or an announced operation such as `Forms.CloneForm` — and this
+   * re-reads, which is the same mechanism the forms list uses.
    *
    * It cannot filter to templates only — the event carries the row, and a row's `IsTemplate` may
    * be what changed — so it reloads on any Forms save. The read is two small queries and the
@@ -110,23 +111,13 @@ export class TemplatesGalleryComponent {
     if (this.templateChanges) {
       return;
     }
-    this.templateChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
-      if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
-        return;
-      }
-      const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
-      if (args?.type !== 'save' && args?.type !== 'delete') {
-        return;
-      }
-      if (args.baseEntity?.EntityInfo?.Name !== FORMS_ENTITY.Form) {
-        return;
-      }
+    this.templateChanges = onFormsWrite(FORMS_ENTITY.Form, ['save', 'delete'], () => {
       // `deleting` guards the gallery's own delete, which reloads when it finishes.
       if (this.loading || this.deleting) {
         return;
       }
       void this.reload();
-    });
+    }, { debounceMs: FORM_WRITE_DEBOUNCE_MS, shouldHandle: () => !this.deleting });
   }
 
   /** Reload the saved half. The starters are code, so they never need reloading. */
@@ -134,7 +125,7 @@ export class TemplatesGalleryComponent {
     this.loading = true;
     this.cdr.markForCheck();
     try {
-      this.saved = await this.data.loadSavedTemplates();
+      this.saved = await readSavedTemplates();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not load your saved templates.';
       LogError(message);
@@ -191,9 +182,19 @@ export class TemplatesGalleryComponent {
     this.deleting = true;
     this.cdr.markForCheck();
     try {
-      const failure = await this.data.deleteTemplate(target.id);
-      if (failure) {
-        this.Failed.emit(failure);
+      // `Forms.DeleteTemplate`: the template and everything under it in one transaction, refused
+      // for a working form or a template anything is attached to.
+      const outcome = await runOperation(
+        new FormsDeleteTemplateOperation(),
+        { TemplateFormID: target.id },
+        `deleting template ${target.id}`,
+        [FORMS_ENTITY.Form],
+        // Announced as a DELETE: an open builder showing "Saved as template" for this template
+        // listens for Form deletes, and must stop claiming it.
+        'delete',
+      );
+      if (!outcome.ok) {
+        this.Failed.emit(`Could not delete "${target.name}": ${outcome.error}`);
         return;
       }
       this.pendingDelete = null;

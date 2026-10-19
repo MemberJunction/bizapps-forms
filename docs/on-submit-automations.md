@@ -47,7 +47,9 @@ naming the entity, the missing permission and the hook that needs it.
 
 ### Durable entity actions run in-process for the runner
 
-Every hook above runs as a plain synchronous write, inside the submission request. Some of those
+Every hook above runs as a plain synchronous write inside the automation drain — after the submission
+has committed, from the submitting process (or from the 30-second outbox sweep for a retry; see
+[`local-host.md`, Operating the automation outbox](local-host.md#operating-the-automation-outbox)). Some of those
 writes carry their own durable entity action — bizapps-common's `Common.LogActivity`, fired when
 `Upsert Respondent Person` creates a `Person` — and MJ can run a durable entity action two ways: an
 async task-graph submission (queued, dispatched later) or inline (run immediately, in the caller's
@@ -65,7 +67,7 @@ of on MJ's task queue, is therefore the correct, intended behaviour for this pri
 runs depends on the host:
 
 - **A durable submitter is registered** (the normal MJ 6.1 host): core tries to submit the task
-  graph, is refused, and runs the action inline, inside the submission. Each submit whose automations
+  graph, is refused, and runs the action inline, inside the drain. Each submit whose automations
   create a Person then logs a refused read on `MJ: Task Types` (twice), a
   `[TaskGraphService] Submit failed … Could not create task type` line, and "asked for durable
   dispatch but ran inline instead". All of these are expected, not symptoms.

@@ -1,46 +1,48 @@
 /**
  * Forms reporting data service (WP-F).
  *
- * Pure RunView/RunViews + snapshot-parsing — NO new infra (FORMS_BUILD_PLAN §8.1).
- * Loads the reportable forms, then for a selected form: the published snapshot (for
- * question labels/options), the responses, and the answers, and folds them into the
- * `FormReportData` read-model. Stateless and injectable; the dashboard owns selection
- * state.
+ * Two reads, the dashboard owning selection state:
+ *  - the form picker: the reportable forms (a published version each) and their Complete counts,
+ *    counted on the server through the shared counter (`loadCompleteResponseCounts`), so the rail and
+ *    the Forms home grid can never disagree about what "a response" is;
+ *  - the selected form's report: ONE operation, `Forms.GetResponseSummary` (#303), which computes
+ *    every section on the server from every response and returns aggregates only. The dashboard no
+ *    longer downloads a single response or answer row to draw a chart.
  *
- * Everything response-shaped lives in {@link ResponsesDataService}, which the builder's
- * Responses tab and the Form Response entity-form override consume directly. This service
- * adds only the dashboard-only concerns: the form picker and the summary/breakdown/funnel
- * aggregations. It does NOT re-expose the response reads — callers that want a single
- * response's detail inject `ResponsesDataService` themselves, rather than reaching it
- * through a pass-through method here. The export's answer rows are not a separate read at
- * all: the report carries the rows it was built from (`FormReportData.answers`).
+ * Individual responses (the Responses view, the export) are read through `response-reads.ts`.
  */
-import { Injectable, inject } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { RunView, RunViewResult } from '@memberjunction/core';
-import type {
-  mjBizAppsFormsFormVersionEntityType,
-  mjBizAppsFormsFormEntityType,
+import {
+  FormsGetResponseSummaryOperation,
+  type mjBizAppsFormsFormEntityType,
+  type mjBizAppsFormsFormVersionEntityType,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../../shared/entity-names';
 import { loadCompleteResponseCounts } from '../../shared/complete-response-counts';
-import { flattenQuestions } from '../../shared/published-questions';
-import { buildResponseRows } from '../../responses/response-aggregations';
-import { ResponsesDataService } from '../../responses/responses-data.service';
+import { runOperation } from '../../shared/remote-operation';
 import type { FormReportData, ReportableForm } from '../models/reporting.model';
-import {
-  buildSummary,
-  buildBreakdowns,
-  buildFunnel,
-} from './reporting-aggregations';
-import { buildRespondentProfile } from './respondent-profile';
-import { buildOpenTextInsights } from './open-text-insights';
-import { insightRoleFor } from './question-insight-roles';
-import { questionTypeMeta } from '../../builder/question-type-catalog';
+import { toFormReport } from './report-view';
+
+/**
+ * The selected form's report, or the reason it is not this reader's to see.
+ *
+ * `unavailable` is not a failure. The operation refuses the summary, as `FORBIDDEN`, to a caller it
+ * may not compute it for — one without read access to responses, or one whose access is
+ * row-restricted (the summary would otherwise count rows they cannot read) — and the dashboard says
+ * "not available to you" rather than putting an error banner over a form that is working. The two
+ * cases are not told apart, so the wording promises nothing about what else the reader can see.
+ */
+export type ReportLoad =
+  | { status: 'ready'; report: FormReportData }
+  | { status: 'unavailable'; message: string };
+
+/** What the dashboard tells a reader the summary is refused to. */
+export const SUMMARY_UNAVAILABLE_TO_YOU = 'A summary of this form’s responses is not available to you.';
 
 @Injectable()
 export class FormsReportingService {
   private readonly rv = new RunView();
-  private readonly responses = inject(ResponsesDataService);
 
   /**
    * Lists forms that have at least one published version, with their latest
@@ -105,63 +107,23 @@ export class FormsReportingService {
   }
 
   /**
-   * Loads the full report bundle for a form — across ALL its versions.
-   *
-   * Responses are scoped by `FormID`, NOT by a single `FormVersionID`. Every response
-   * pins the form version that was live at submission, so a form with multiple
-   * published versions has responses spread across them; filtering to only the latest
-   * version silently hides every response submitted against an earlier one (the "I
-   * submitted a response but the dashboard shows nothing" bug). Question labels/options
-   * come from the latest published definition; answers map back by `QuestionID`.
+   * The report for a form — across ALL its versions, labelled from its Published one — computed on
+   * the server. Any refusal other than "not yours to see" THROWS with the server's message.
    */
-  public async loadReport(form: ReportableForm): Promise<FormReportData> {
-    // Neither read needs the other's result, so they run together: serial awaits cost the
-    // reader a full extra round trip on every form they click (#246). Either one failing
-    // rejects the whole report — there is no half-built report to fall back to.
-    const [definition, { responses, answers }] = await Promise.all([
-      this.responses.loadDefinition(form.formVersionId),
-      this.responses.loadResponsesForForm(form.formId),
-    ]);
-    const questions = flattenQuestions(definition);
-
-    const summary = buildSummary(responses);
-    // Every rate on the Insights view divides by the RESPONSE count rather than by the
-    // number of answers to the question, so a skipped question counts against its own
-    // coverage instead of silently reporting 100%.
-    const totalResponses = summary.totalResponses;
-
-    // Insights describe the COMPLETE responses the headline counts, so their answers must
-    // come from the same population. `answers` spans partial (in-progress) responses too,
-    // and mixing them produced counts larger than the denominator they were shown against —
-    // "Contactable: 40 of 32 responses" on a live form, which reads as a broken dashboard
-    // because it is an impossible statement.
-    //
-    // The funnel below deliberately keeps the UNFILTERED rows: drop-off is a fact about the
-    // people who abandoned, so excluding partials would leave it measuring only the
-    // respondents who never dropped off.
-    const completeResponseIds = new Set(
-      responses.filter((r) => r.Status === 'Complete').map((r) => r.ID),
+  public async loadReport(form: ReportableForm): Promise<ReportLoad> {
+    const outcome = await runOperation(
+      new FormsGetResponseSummaryOperation(),
+      { FormID: form.formId },
+      `reading the response summary of form ${form.formId}`,
     );
-    const completeAnswers = answers.filter((a) => completeResponseIds.has(a.ResponseID));
-
-    return {
-      form,
-      questions,
-      summary,
-      profile: buildRespondentProfile(questions, completeAnswers, totalResponses),
-      breakdowns: buildBreakdowns(questions, completeAnswers),
-      openText: buildOpenTextInsights(
-        questions.filter((q) => insightRoleFor(q.type) === 'openText'),
-        completeAnswers,
-        totalResponses,
-        (q) => questionTypeMeta(q.type).label,
-      ),
-      funnel: buildFunnel(definition, answers),
-      responses: buildResponseRows(responses, answers, questions),
-      // The UNFILTERED rows, as fetched: this is the record of what the report was built from.
-      // The export's rows are chosen by `responses` (Complete only, see `buildResponseRows`), so
-      // filtering here too would put that decision in a second place without changing the sheet.
-      answers,
-    };
+    if (outcome.ok) {
+      return { status: 'ready', report: toFormReport(form, outcome.output) };
+    }
+    // By result code alone: FORBIDDEN is the operation refusing this reader. Any other refusal is a
+    // failure, whatever its text says.
+    if (outcome.resultCode === 'FORBIDDEN') {
+      return { status: 'unavailable', message: SUMMARY_UNAVAILABLE_TO_YOU };
+    }
+    throw new Error(outcome.error);
   }
 }

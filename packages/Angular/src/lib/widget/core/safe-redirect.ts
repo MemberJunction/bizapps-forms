@@ -7,10 +7,12 @@
  * embedding page's origin, reachable from a compromised builder account and landing on careers
  * pages and customer sites that never see our code.
  *
- * The server drops these too, at both mutation chokepoints. This half is still load-bearing rather
- * than belt-and-braces: `mj-form.component.ts` also follows `outcome.screen.redirectURL` read
- * straight from the PUBLISHED DEFINITION, without asking the server, so on that path this check is
- * the only one there is.
+ * The server drops these too: `safeRedirectUrl` in CoreEntitiesServer's `respondent-ending.ts` judges
+ * every ending a `Forms.SaveResponse` returns, and the live widget follows only that returned URL —
+ * the respondent projection carries no endings. This half is still load-bearing rather than
+ * belt-and-braces on two counts: it is the embedding page's last line of defence, and builder
+ * Preview follows `outcome.screen.redirectURL` read straight from the author's DRAFT, without asking
+ * the server, so on that path this check is the only one there is.
  *
  * Lives here, as a pure function, because the alternative is a private method on a component that
  * cannot be instantiated without the whole widget runtime — which is how it came to ship untested.

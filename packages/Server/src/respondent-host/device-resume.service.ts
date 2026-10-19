@@ -12,8 +12,8 @@
  *   2. A resume failure never harms the draft row. Nothing here writes to a response, ever.
  */
 import { LogError, LogStatus } from '@memberjunction/core';
+import { foldId, responseIsOurs, scopeNamesResponse } from '@mj-biz-apps/forms-core-entities-server';
 
-import { foldId, responseIsOurs, scopeNamesResponse } from '../public-submit/persistence.service';
 
 /** Why a resume could not happen. The page maps these to copy; the respondent sees no code. */
 export type ResumeRefusal =

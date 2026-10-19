@@ -138,6 +138,7 @@ export function automationRun(
     CompletedAt: null,
     ActionExecutionLogID: null,
     AIAgentRunID: null,
+    FormAutomationEventID: null,
     ErrorMessage: null,
     OutputSummary: null,
     __mj_CreatedAt: now,

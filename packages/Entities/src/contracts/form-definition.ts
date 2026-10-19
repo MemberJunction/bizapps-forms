@@ -13,6 +13,7 @@ import type { QuestionScoring } from './scoring';
 import type { SocialLink } from './social-links';
 import type { JSONValue } from './json-value';
 import type { FormQuestionType, MatrixAxis } from './question-types';
+import type { FieldMappings, IdentityRule, MergePolicy } from './entity-binding';
 
 
 /** Render mode for the whole form (FORMS_BUILD_PLAN §2 principle 2). */
@@ -28,7 +29,7 @@ export interface FormStyleTokens {
   customCSS?: string;
   /**
    * Optional logo image. An uploaded image is stored as `/forms/asset/<id>`, relative to the API
-   * base, and renderers resolve it (see forms-ng `widget/core/asset-ref.ts`).
+   * base, and renderers resolve it (see `asset-ref.ts` beside this file).
    */
   logoURL?: string;
 }
@@ -95,8 +96,8 @@ export interface PublishedFormQuestionOption {
   isDefault?: boolean;
   /**
    * `PictureChoice` only: the image shown above the label. An uploaded image is stored as
-   * `/forms/asset/<id>`, relative to the API base, and renderers resolve it (see forms-ng
-   * `widget/core/asset-ref.ts`).
+   * `/forms/asset/<id>`, relative to the API base, and renderers resolve it (see `asset-ref.ts`
+   * beside this file).
    */
   imageURL?: string;
   /** `Matrix` only: which axis this option is part of. Absent is treated as `Row`. */
@@ -171,10 +172,10 @@ export type FormAutomationTrigger = 'OnComplete' | 'OnPartial' | 'OnCompleteOrPa
  * true when the dispatch was detached, and a contract nobody honours is worse than a narrower one
  * that everybody does.
  *
- * The gap this leaves is real and deliberate: there is no per-automation way to say "hold the
- * confirmation until this finishes", only the process-wide `FORMS_HOOKS_BLOCKING` switch. Adding
- * one is a product decision, not a doc fix — every automation the builder creates defaults to
- * `Sync`, so making Sync block would put existing forms' respondents back behind the full chain.
+ * The gap this leaves is real and deliberate: there is no way to say "hold the confirmation until
+ * this finishes" — the submit commits a `FormAutomationEvent` and the automation drain runs the
+ * chain after the commit (#303; the process-wide `FORMS_HOOKS_BLOCKING` switch went with the inline
+ * path). Adding one is a product decision, not a doc fix.
  */
 export type FormAutomationExecutionMode = 'Sync' | 'Async';
 
@@ -207,6 +208,33 @@ export interface PublishedFormAutomation {
   /** When false, a failure halts later `Sync` automations for this response. */
   continueOnError: boolean;
   isActive: boolean;
+  /**
+   * The binding's settings as they stood at publish — present on an `EntityBinding` automation
+   * published since #303, absent on every snapshot published before it.
+   *
+   * Frozen here for the same reason the automation itself is: a response is pinned to the version
+   * it was answered against, so the field mappings and merge rules that write it into a business
+   * record must be that version's too, not whatever the binding row says on the day the work
+   * runs. Optional, and read leniently, because older snapshots never carried it.
+   */
+  binding?: PublishedAutomationBinding;
+}
+
+/**
+ * An entity binding's settings, frozen into a published automation.
+ *
+ * The parsed shapes rather than the stored JSON text: publish reads each column through the same
+ * parsers the executor uses and refuses one it cannot read, so a snapshot never carries binding
+ * settings that would only fail later, at submit time, for a respondent.
+ */
+export interface PublishedAutomationBinding {
+  /** The entity the binding writes, by name — the only handle that is portable between hosts. */
+  targetEntityName: string;
+  fieldMappings: FieldMappings;
+  identityRule: IdentityRule;
+  mergePolicy: MergePolicy;
+  /** `Disabled` is the author's kill switch; the binding then writes nothing. */
+  status: 'Active' | 'Disabled';
 }
 
 /**
@@ -237,7 +265,7 @@ export interface PublishedFormScreen {
   buttonLabel?: string;
   /**
    * Optional image shown above the title. An uploaded image is stored as `/forms/asset/<id>`,
-   * relative to the API base, and renderers resolve it (see forms-ng `widget/core/asset-ref.ts`).
+   * relative to the API base, and renderers resolve it (see `asset-ref.ts` beside this file).
    */
   mediaURL?: string;
   /**

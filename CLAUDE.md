@@ -23,7 +23,7 @@ node -p "require('./mj-app.json').mjVersionRange"                               
 node -p "require('./apps/MJAPI/package.json').dependencies['@memberjunction/core']" # the pin (caret floor)
 ```
 
-**Pinning model** (matches the sibling repos'): `apps/*` use a **caret** floor `^X.Y.Z` in `dependencies` (the lockfile fixes the build you run; the advisory `caret pins` check flags tilde and exact ranges outside devDependencies); `packages/*` declare MJ only as **caret** `^X.Y.Z` `peerDependencies` and carry no MJ `dependencies` at all; `mj-app.json` `mjVersionRange` is `>=X.Y.Z <(major+1).0.0`.
+**Pinning model** (matches the sibling repos'): `apps/*` use a **caret** floor `^X.Y.Z` in `dependencies` (the lockfile fixes the build you run; the advisory `caret pins` check flags tilde and exact ranges outside devDependencies and overrides); `packages/*` declare MJ only as **caret** `^X.Y.Z` `peerDependencies` and carry no MJ `dependencies` at all; `mj-app.json` `mjVersionRange` is `>=X.Y.Z <(major+1).0.0`.
 
 **On every MJ upgrade, diff `@memberjunction/ng-auth-services`'s peer set.** It is the trap most likely to break the Angular build. That package has added auth providers as **required** peers (empty `peerDependenciesMeta`), and the Angular build cannot resolve a peer that is not installed — which is why MJExplorer carries auth SDKs this repo never authenticates with. A version bump that needs a new one fails at build time with a bare module-resolution error that says nothing about auth.
 

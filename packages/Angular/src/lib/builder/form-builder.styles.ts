@@ -576,10 +576,18 @@ const LAYOUT_CSS = /* css */ `
    as the same KIND of thing those are: an offer to add something here, rather than one more of
    the question's settings. Centred, because it spans the card rather than starting a list. */
 .fb-q-add-btn { justify-content: center; margin-bottom: 0; }
+/* ADD CONTENT ABOVE — the footer bar's mirror on the selected first question. Its distance from the
+   row is the article's own column gap, the same space that separates the footer bar from its row,
+   so it carries no margin of its own; the icon-to-label gap is the token the footer's 8px stands for. */
+.fb-q-add--above .fb-q-add-btn { margin-block: 0; gap: var(--mjf-gap-sm); }
 
-/* Hidden mid-drag. The placeholder and the preview are clones of the article, so a visible bar
-   would be towed around with the card and the gap it leaves behind would be reserved for one. */
-.fb-q-list.cdk-drop-list-dragging .fb-q-add { display: none; }
+/* Hidden mid-drag, because the placeholder is a clone of the article and would show a bar. Hidden
+   with VISIBILITY, never display: CDK measures every connected list when the drag starts, and this
+   rule lands a moment later. Taking the bar out of layout pulled everything below the selected
+   question up by its height, so CDK's measurements went stale; an empty section, shorter than the
+   shift, then sat wholly outside its own cached rect and could not be dropped into. The cost is a
+   bar-high gap under the placeholder while dragging the selected question. */
+.fb-q-list.cdk-drop-list-dragging .fb-q-add { visibility: hidden; }
 
 .fb-q:hover .fb-q-row { border-color: var(--mj-border-strong); box-shadow: var(--mj-shadow-sm); }
 .fb-q:focus-visible .fb-q-row { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
@@ -755,6 +763,23 @@ const LAYOUT_CSS = /* css */ `
    cannot capture something that merely happens to be nested here. */
 .fb-canvas-empty > i { font-size: 1.5rem; color: var(--mj-text-disabled); }
 .fb-canvas-empty > p { margin: 0; font-size: var(--mjf-meta); }
+
+/* NEW FORM START STEP — shown in place of the builder until a new record is created. */
+.fb-start { align-items: center; justify-content: center; padding: var(--mjf-card-pad); }
+.fb-start-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mjf-gap-sm);
+  width: 100%;
+  max-width: 420px;
+  padding: var(--mjf-card-pad);
+  border: 1px solid var(--mj-border-subtle);
+  border-radius: var(--mjf-radius);
+  background: var(--mj-bg-surface);
+}
+.fb-start-title { margin: 0; font-size: 1.125rem; color: var(--mj-text-primary); }
+.fb-start-label { font-size: var(--mjf-meta); color: var(--mj-text-secondary); }
+.fb-start-error { margin: 0; font-size: var(--mjf-meta); color: var(--mj-status-error-text); }
 
 /* ------------------------------------------------------- non-Build tab panes */
 

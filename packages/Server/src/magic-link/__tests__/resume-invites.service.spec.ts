@@ -1,5 +1,7 @@
 /**
- * Provider threading for the four resume-invite helpers (#265).
+ * Provider threading for the three resume-invite helpers left here (#265); the fourth,
+ * `revokeResponseInvites`, moved to forms-core-entities-server with #303 Task 8 and its threading
+ * spec moved with it (`magic-link/__tests__/response-invite-revocation.spec.ts`).
  *
  * Every read and write these helpers perform must run on the CALLER's provider, never on the
  * process-global one — see the header comment on `revokeResponseInvites` for why. This spec proves
@@ -24,6 +26,7 @@ const { mintSpy, revokeSpy, recordedProviders, scripted } = vi.hoisted(() => ({
 }));
 
 vi.mock('@mj-biz-apps/forms-core-entities-server', () => ({
+  FORMS_ENTITY: { FormResponse: 'MJ_BizApps_Forms: Form Responses' },
   MagicLinkMinterRegistry: {
     Instance: {
       Minter: { MintAnonymousInvite: mintSpy, RevokeAnonymousInvite: revokeSpy },
@@ -53,7 +56,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   return { ...actual, RunView: FakeRunView };
 });
 
-import { findInviteByRawToken, mintResponseInvite, revokeInviteById, revokeResponseInvites } from '../resume-invites.service';
+import { findInviteByRawToken, mintResponseInvite, revokeInviteById } from '../resume-invites.service';
 
 beforeEach(() => {
   mintSpy.mockReset();
@@ -83,21 +86,6 @@ describe('revokeInviteById', () => {
 
     await revokeInviteById('inv-1', 'r1', CONTEXT_USER, isolated);
 
-    expect(revokeSpy).toHaveBeenCalledTimes(1);
-    const [, , host] = revokeSpy.mock.calls[0] as [unknown, unknown, unknown];
-    expect(host).toBe(isolated);
-  });
-});
-
-describe('revokeResponseInvites', () => {
-  it('lists AND revokes through the caller\'s isolated provider', async () => {
-    scripted.results = [{ ID: 'inv-1' }];
-    revokeSpy.mockResolvedValue({ success: true, changed: true });
-
-    await revokeResponseInvites('r1', { deviceOnly: true }, CONTEXT_USER, isolated);
-
-    // The RunView listing the Active invites was constructed on `isolated`, not the global default.
-    expect(recordedProviders).toContain(isolated);
     expect(revokeSpy).toHaveBeenCalledTimes(1);
     const [, , host] = revokeSpy.mock.calls[0] as [unknown, unknown, unknown];
     expect(host).toBe(isolated);

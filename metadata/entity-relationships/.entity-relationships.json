@@ -1,0 +1,117 @@
+[
+  {
+    "_comments": [
+      "The builder's editable tree, declared as owned collections so a structural edit (add, delete,",
+      "reorder) saves through the Form root as ONE MJ.SaveEntityGraph transaction instead of a loop of",
+      "individual Save()/Delete() calls with no rollback (#103, #303). Reused from closed PR #112, which",
+      "declared Pages, Questions and Options; #303 adds Screens and makes all four Load immediate.",
+      "",
+      "Load 'immediate' populates the collection in BaseEntity.Load() ONLY, never in LoadFromData(), and a",
+      "collection's own Load() materialises its children through RunView, i.e. LoadFromData. So Form.Load()",
+      "fills Pages and Screens, but each loaded page's Questions (and each question's Options) are NOT",
+      "filled by that cascade; a reader of the whole tree loads them explicitly or batches them with",
+      "RunView's IncludeRelatedRecords (one WHERE fk IN (...) per level).",
+      "",
+      "Source/ReadOnly are stated explicitly rather than left to default, following MJ core's writable",
+      "collections: in a catalog of cache-backed read-only projections, an implicit writable one reads",
+      "as an oversight.",
+      "",
+      "Sequence.From is 0, NOT the default 1: every DisplayOrder already stored is zero-based, and",
+      "From: 1 would mark every page, question and option in every form dirty on the first reorder.",
+      "",
+      "RelatedEntity and RelatedEntityJoinField are deliberately absent from the JSON: they are read",
+      "from this row's own columns. The lookup carries RelatedEntityJoinField because",
+      "MJ_BizApps_Forms: Forms has relationships to BOTH Form Pages and Form Questions on FormID, and the",
+      "join field is what keeps them apart."
+    ],
+    "fields": {
+      "RelatedRecordCollection": {
+        "Name": "Pages",
+        "Source": "database",
+        "ReadOnly": false,
+        "Load": "immediate",
+        "OnRemove": "delete",
+        "OrderBy": "DisplayOrder ASC",
+        "Sequence": {
+          "Field": "DisplayOrder",
+          "From": 0
+        },
+        "ClearAfterSave": false
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.EntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Forms&RelatedEntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Pages&RelatedEntityJoinField=FormID"
+    }
+  },
+  {
+    "_comments": [
+      "No Sequence policy. Screen DisplayOrder is numbered WITHIN a ScreenType (the builder writes the",
+      "count of existing screens of the same type), so one sequence across the Welcome and Ending rows",
+      "would renumber both together and change what 'first ending' means."
+    ],
+    "fields": {
+      "RelatedRecordCollection": {
+        "Name": "Screens",
+        "Source": "database",
+        "ReadOnly": false,
+        "Load": "immediate",
+        "OnRemove": "delete",
+        "OrderBy": "DisplayOrder ASC",
+        "ClearAfterSave": false
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.EntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Forms&RelatedEntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Screens&RelatedEntityJoinField=FormID"
+    }
+  },
+  {
+    "_comments": [
+      "Joined on PageID, not FormID. FormQuestion carries BOTH keys, and MJ metadata has a",
+      "'Forms -> Form Questions' relationship on FormID as well: declaring the collection there would",
+      "put every question in the form on every page.",
+      "",
+      "READ-SAFE, CREATE-UNSAFE. A collection's Create()/Add() stamps the JOIN FIELD and nothing else,",
+      "so a question created through page.Questions gets PageID and NOT FormID, which is NOT NULL and",
+      "derived by no hook. The caller must set FormID itself. PageID is also NULLABLE: a question can",
+      "belong to a form and to no page, so this collection is a partial view of the form's questions."
+    ],
+    "fields": {
+      "RelatedRecordCollection": {
+        "Name": "Questions",
+        "Source": "database",
+        "ReadOnly": false,
+        "Load": "immediate",
+        "OnRemove": "delete",
+        "OrderBy": "DisplayOrder ASC",
+        "Sequence": {
+          "Field": "DisplayOrder",
+          "From": 0
+        },
+        "ClearAfterSave": false
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.EntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Pages&RelatedEntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Questions&RelatedEntityJoinField=PageID"
+    }
+  },
+  {
+    "fields": {
+      "RelatedRecordCollection": {
+        "Name": "Options",
+        "Source": "database",
+        "ReadOnly": false,
+        "Load": "immediate",
+        "OnRemove": "delete",
+        "OrderBy": "DisplayOrder ASC",
+        "Sequence": {
+          "Field": "DisplayOrder",
+          "From": 0
+        },
+        "ClearAfterSave": false
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.EntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Questions&RelatedEntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Question Options&RelatedEntityJoinField=QuestionID"
+    }
+  }
+]

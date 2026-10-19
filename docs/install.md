@@ -113,6 +113,17 @@ Beyond the `magicLink` block in the [README](../README.md#-install-into-a-host-a
   packages — the mirror image of what this repo does.
 - `mj app remove` retires the rows Forms wrote into the shared `__mj` schema, via
   `migrations-teardown/`.
+- **`READ_COMMITTED_SNAPSHOT ON`** on the host database (since #303). No migration sets it — it is a
+  database-wide setting and switching it needs exclusive access:
+  `ALTER DATABASE [<db>] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;`. Without it,
+  saving a link and archiving its form can deadlock (one is rolled back and fails).
+- **MJ's scheduler** (`scheduledJobs` in the host's `mj.config.cjs`, on by default) with a
+  `systemUserEmail` that names an existing user. On-submit automations run from an outbox: the
+  submitting process runs them right after the save, and the *Forms — Automation Outbox Sweep* job
+  this release seeds runs retries and recovers anything a stopped process left behind. With the
+  scheduler off, first attempts still run; retries wait until some host runs the sweep. Details and
+  the operator runbook: [`local-host.md` §5](local-host.md#5-host-requirements-since-303-the-automation-outbox-and-read_committed_snapshot)
+  and [Operating the automation outbox](local-host.md#operating-the-automation-outbox).
 
 ---
 
@@ -196,9 +207,9 @@ too) the first time a request arrives carrying `X-Forwarded-For` while `FORMS_TR
 Forms' own internal magic-link redeem call is excluded — but the warning is a symptom check,
 not a substitute for setting the variable at deploy time.
 
-The public-submit path is bounded by a second set of env vars, all read once at process start by
-`packages/Server/src/public-submit/config.ts` (its header comment is the source of truth; this
-table mirrors it):
+The public-submit path (`Forms.SaveResponse`) is bounded by a second set of env vars, all read once at
+process start by `packages/CoreEntitiesServer/src/submission/config.ts` (its header comment is the
+source of truth; this table mirrors it):
 
 | Variable | Default | What it bounds |
 |---|---|---|

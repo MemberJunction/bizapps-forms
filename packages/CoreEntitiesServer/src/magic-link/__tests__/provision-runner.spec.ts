@@ -6,6 +6,7 @@ import type {
   AnonymousCredentialRef,
   IAnonymousMagicLinkMinter,
   InviteExpiryBounds,
+  InviteWriteHost,
   InviteWriteResult,
   MintAnonymousInviteParams,
   MintAnonymousInviteResult,
@@ -469,5 +470,68 @@ describe('runProvisioning — reissuing', () => {
     );
     expect(outcome.result).toBe('mint-failed');
     expect(persist).toHaveBeenCalledExactlyOnceWith(null);
+  });
+});
+
+describe('a write host, when given, carries EVERY minter write (#303 fix round 1)', () => {
+  // The distribution's update save runs inside a transaction on the row's own provider. A minter
+  // left to its own provider writes on another connection, so its revoke commits even when the
+  // save — or the form archive enclosing it — rolls back: a revoked invite beside a live token, the
+  // #104 dead link. Handing the minter the row's provider as `host` puts the write in that
+  // transaction. Each case drives one minter method and asserts the host reached it.
+  const host: InviteWriteHost = {
+    GetEntityObject: async () => {
+      throw new Error('the recording minter never creates entities');
+    },
+  };
+
+  /** A minter that records the host each write was handed. */
+  function hostRecordingMinter(): { minter: IAnonymousMagicLinkMinter; hosts: [string, InviteWriteHost | undefined][] } {
+    const hosts: [string, InviteWriteHost | undefined][] = [];
+    return {
+      hosts,
+      minter: {
+        MintAnonymousInvite: async (_params, _user, h) => {
+          hosts.push(['mint', h]);
+          return { success: true, inviteId: 'invite-new', rawToken: 'mj_ml_new' };
+        },
+        RevokeAnonymousInvite: async (_credential, _user, h) => {
+          hosts.push(['revoke', h]);
+          return { success: true, changed: true };
+        },
+        SetAnonymousInviteExpiry: async (_credential, _bounds, _user, h) => {
+          hosts.push(['expiry', h]);
+          return { success: true, changed: false };
+        },
+      },
+    };
+  }
+
+  it('hands the host to the mint, the revoke and the expiry re-bound', async () => {
+    const reissue = hostRecordingMinter();
+    await runProvisioning(livingCtx({ publicLinkToken: null }), config, reissue.minter, contextUser, async () => true, host);
+    expect(reissue.hosts).toEqual([
+      ['revoke', host],
+      ['mint', host],
+    ]);
+
+    const live = hostRecordingMinter();
+    await runProvisioning(livingCtx(), config, live.minter, contextUser, async () => true, host);
+    expect(live.hosts).toEqual([['expiry', host]]);
+  });
+
+  it('hands the host to the clean-up revoke of a mint whose store failed', async () => {
+    const fake = hostRecordingMinter();
+    await runProvisioning(ctx(), config, fake.minter, contextUser, async () => false, host);
+    expect(fake.hosts).toEqual([
+      ['mint', host],
+      ['revoke', host],
+    ]);
+  });
+
+  it('without a host, the minter is left to its own provider, as before', async () => {
+    const fake = hostRecordingMinter();
+    await runProvisioning(livingCtx({ status: 'Closed' }), config, fake.minter, contextUser, async () => true);
+    expect(fake.hosts).toEqual([['revoke', undefined]]);
   });
 });

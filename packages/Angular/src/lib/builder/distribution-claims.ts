@@ -1,11 +1,12 @@
 /**
- * Client side of the share-link claim warning (#292): the query, the parse of its answer, and
- * the copy the Distribute tab shows. Everything here is pure; the one network call lives in
- * `DistributionService.claims`.
+ * Client side of the share-link claim warning (#292): the reading of `Forms.GetDistributionClaims`'
+ * answer, and the copy the Distribute tab shows. Everything here is pure; the one network call
+ * lives in `DistributionService.claims`.
  *
  * The server is the single authority on what a claim may contain (including whether its
  * `respondentUrl` is safe to link), so nothing here re-validates URLs.
  */
+import type { FormsGetDistributionClaimsOutput } from '@mj-biz-apps/forms-entities';
 
 /** One app's claim on a share-link slug. */
 export interface ShareLinkClaim {
@@ -29,50 +30,45 @@ export type ClaimsResult =
   | { ok: true; claims: ShareLinkClaim[]; failures: ClaimProviderFailure[] }
   | { ok: false; error: string };
 
-export const FORM_DISTRIBUTION_CLAIMS_QUERY = `query FormDistributionClaims($formId: String!) {
-  FormDistributionClaims(formId: $formId) {
-    claims { appName slug ownerLabel respondentUrl }
-    failures { appName message }
-  }
-}`;
-
 const MALFORMED = 'the server sent an answer this builder could not read';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isClaim(value: unknown): value is ShareLinkClaim {
-  return (
-    isRecord(value) &&
-    typeof value['appName'] === 'string' &&
-    typeof value['slug'] === 'string' &&
-    typeof value['ownerLabel'] === 'string' &&
-    (value['respondentUrl'] === null || typeof value['respondentUrl'] === 'string')
-  );
+/** One wire claim, checked: the operation's output is typed, but it crossed the network as JSON. */
+function claimOf(value: unknown): ShareLinkClaim | null {
+  if (!isRecord(value)) return null;
+  const { AppName, Slug, OwnerLabel, RespondentURL } = value;
+  if (typeof AppName !== 'string' || typeof Slug !== 'string' || typeof OwnerLabel !== 'string') return null;
+  if (RespondentURL !== null && typeof RespondentURL !== 'string') return null;
+  return { appName: AppName, slug: Slug, ownerLabel: OwnerLabel, respondentUrl: RespondentURL };
 }
 
-function isFailure(value: unknown): value is ClaimProviderFailure {
-  return isRecord(value) && typeof value['appName'] === 'string' && typeof value['message'] === 'string';
+function failureOf(value: unknown): ClaimProviderFailure | null {
+  if (!isRecord(value) || typeof value['AppName'] !== 'string' || typeof value['Message'] !== 'string') return null;
+  return { appName: value['AppName'], message: value['Message'] };
 }
 
 /**
- * Narrow the GraphQL root object to a {@link ClaimsResult}.
- *
- * `payload` is `unknown` ONLY because this is the network boundary: nothing upstream has typed
- * it. Anything missing or garbled becomes `{ ok: false }`, never an empty success.
+ * `Forms.GetDistributionClaims`' answer as a {@link ClaimsResult}. Anything missing or garbled
+ * becomes `{ ok: false }`, never an empty success — "nobody claims these links" must only ever
+ * mean the server said so.
  */
-export function parseClaimsPayload(payload: unknown): ClaimsResult {
-  const root = isRecord(payload) ? payload['FormDistributionClaims'] : undefined;
-  if (!isRecord(root)) return { ok: false, error: `${MALFORMED} (no FormDistributionClaims result)` };
-  const { claims, failures } = root;
-  if (!Array.isArray(claims) || !claims.every(isClaim)) {
+export function toClaimsResult(output: FormsGetDistributionClaimsOutput): ClaimsResult {
+  const claims = Array.isArray(output?.Claims) ? output.Claims.map(claimOf) : null;
+  if (!claims || claims.some((c) => c === null)) {
     return { ok: false, error: `${MALFORMED} (claims missing or malformed)` };
   }
-  if (!Array.isArray(failures) || !failures.every(isFailure)) {
+  const failures = Array.isArray(output?.Failures) ? output.Failures.map(failureOf) : null;
+  if (!failures || failures.some((f) => f === null)) {
     return { ok: false, error: `${MALFORMED} (failures missing or malformed)` };
   }
-  return { ok: true, claims, failures };
+  return {
+    ok: true,
+    claims: claims.filter((c): c is ShareLinkClaim => c !== null),
+    failures: failures.filter((f): f is ClaimProviderFailure => f !== null),
+  };
 }
 
 /** Group claims by slug, preserving the server's order within each slug. */

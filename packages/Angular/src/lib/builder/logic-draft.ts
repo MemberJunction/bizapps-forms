@@ -22,7 +22,7 @@ import {
   type ConditionalRule,
   type JumpTarget,
 } from '@mj-biz-apps/forms-entities';
-import { operatorNeedsValue } from './condition-sources';
+import { operatorNeedsValue } from '@mj-biz-apps/forms-entities/contracts';
 
 /**
  * One row in the dialog. Its target is optional ONLY here: a row exists from the moment the
