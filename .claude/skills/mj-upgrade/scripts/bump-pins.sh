@@ -48,8 +48,8 @@ MAJ="${V%%.*}"; CEIL="$(( MAJ + 1 )).0.0"
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-# Manifests that track the HOST BUILD you are developing against. Exact in apps/* by documented
-# policy; caret at the root. Safe to move to any target, prerelease or not.
+# Manifests that track the HOST BUILD you are developing against. Caret floors in apps/* and at
+# the root; pnpm-lock.yaml fixes the concrete build. Safe to move to any target, prerelease or not.
 HOST_FILES=(
   package.json
   apps/MJAPI/package.json

@@ -51,7 +51,11 @@ export function pinnedMJVersion(repoRoot = REPO_ROOT) {
   if (!entry) {
     throw new Error('no @memberjunction/* dependency in apps/MJAPI/package.json — cannot resolve the pin');
   }
-  return entry[1].replace(/^[\^~=v]+/, '');
+  const floor = String(entry[1]).trim().replace(/^(?:>=|[\^~=v]|\s)+/, '').split(/\s+/)[0];
+  if (!/^\d+\.\d+\.\d+/.test(floor)) {
+    throw new Error(`cannot parse numeric floor from ${entry[0]}="${entry[1]}" in apps/MJAPI/package.json`);
+  }
+  return floor;
 }
 
 /**

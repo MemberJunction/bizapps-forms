@@ -1,6 +1,6 @@
 ---
 name: mj-upgrade
-description: Dry-run then (on approval) apply a MemberJunction version upgrade in bizapps-forms. Bumps every @memberjunction/* pin (apps exact, packages caret peerDeps) + mj-app.json range on a throwaway branch from next, regenerates the lockfile, installs/builds/tests, reports a GO/NO-GO summary, and STOPS for the user's decision before applying. The core DB migration in Phase 3 is MANDATORY, not optional — an upgrade that skips it is not an upgrade, it is a pin bump that leaves the database behind. It still runs only on the user's go-ahead, because it is destructive. Use when upgrading MJ — "/mj-upgrade 5.51.0", "rev the MJ pin", "try the new MJ version".
+description: Dry-run then (on approval) apply a MemberJunction version upgrade in bizapps-forms. Bumps every @memberjunction/* pin (apps caret floors, packages caret peerDeps) + mj-app.json range on a throwaway branch from next, regenerates the lockfile, installs/builds/tests, reports a GO/NO-GO summary, and STOPS for the user's decision before applying. The core DB migration in Phase 3 is MANDATORY, not optional — an upgrade that skips it is not an upgrade, it is a pin bump that leaves the database behind. It still runs only on the user's go-ahead, because it is destructive. Use when upgrading MJ — "/mj-upgrade 5.51.0", "rev the MJ pin", "try the new MJ version".
 disable-model-invocation: true
 allowed-tools: Bash, Read, Edit
 ---

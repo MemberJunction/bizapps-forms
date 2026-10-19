@@ -46,25 +46,31 @@ const SINGLE_CARET = '\\^\\d+(\\.\\d+){0,2}(-[0-9A-Za-z.-]+)?';
 const CARET = new RegExp(`^${SINGLE_CARET}(\\s*\\|\\|\\s*${SINGLE_CARET})*$`);
 const LOWER_BOUND = /^>=\s*\d+(\.\d+){0,2}(-[0-9A-Za-z.-]+)?(\s+<\s*\d+(\.\d+){0,2}(-[0-9A-Za-z.-]+)?)?$/;
 const PROTOCOL = /^(workspace:|file:|link:|catalog:|portal:|patch:|git\+|git:|github:|https?:|[\w.-]+\/[\w.-]+(#.*)?$)/;
+const NPM_PKG_NAME = /^(?:@[\w.-]+\/)?[\w.-]+$/;
+const TILDE_VER = /^~v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+const EXACT_VER = /^=?v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 
 /** Why `spec` is not accepted, or null when it is. */
-function problem(spec) {
+function problem(spec, inNpmAlias = false) {
   const s = spec.trim();
   if (s.startsWith('npm:')) {
-    const rest = s.slice(4);
-    const at = rest.lastIndexOf('@');
-    if (at <= 0 || (rest.startsWith('@') && !rest.slice(0, at).includes('/'))) {
+    if (inNpmAlias) {
       return 'not a caret range';
     }
-    return problem(rest.slice(at + 1));
+    const rest = s.slice(4);
+    const at = rest.lastIndexOf('@');
+    if (at <= 0 || !NPM_PKG_NAME.test(rest.slice(0, at))) {
+      return 'not a caret range';
+    }
+    return problem(rest.slice(at + 1), true);
   }
-  if (CARET.test(s) || LOWER_BOUND.test(s) || PROTOCOL.test(s)) {
+  if (CARET.test(s) || LOWER_BOUND.test(s) || (!inNpmAlias && PROTOCOL.test(s))) {
     return null;
   }
-  if (s.startsWith('~')) {
+  if (TILDE_VER.test(s)) {
     return 'tilde';
   }
-  if (/^=?v?\d+(\.\d+){0,2}(-[0-9A-Za-z.-]+)?$/.test(s)) {
+  if (EXACT_VER.test(s)) {
     return 'exact';
   }
   return 'not a caret range';
@@ -133,6 +139,9 @@ function check(root) {
         .filter((a) => !isValidEntry(a))
         .map((a) => `${ALLOWLIST}: entry ${JSON.stringify(a)} needs a "name" and a "reason"`)
     : [`${ALLOWLIST}: root value must be a JSON array`];
+  if (manifests.length === 0) {
+    allowErrors.push(`No package.json manifests found under ${root}`);
+  }
   const used = new Set();
   const matches = (a, e) =>
     isValidEntry(a) && a.name === e.name && (!a.section || a.section === e.section) && (!a.file || a.file === e.file);
@@ -154,25 +163,25 @@ function check(root) {
   return { violations, stale, allowErrors };
 }
 
-function report(root) {
+function report(root, log = console.log) {
   const { violations, stale, allowErrors } = check(root);
   for (const a of stale) {
-    console.log(`::warning file=${ALLOWLIST}::Stale allowlist entry for ${a.name}: nothing matches it any more`);
+    log(`::warning file=${ALLOWLIST}::Stale allowlist entry for ${a.name}: nothing matches it any more`);
   }
   for (const msg of allowErrors) {
-    console.log(`::error file=${ALLOWLIST}::${msg}`);
+    log(`::error file=${ALLOWLIST}::${msg}`);
   }
   for (const v of violations) {
-    console.log(`::error file=${v.file}::${v.section} ${v.name}: "${v.spec}" is ${v.why}${suggest(v.spec, v.why)}`);
+    log(`::error file=${v.file}::${v.section} ${v.name}: "${v.spec}" is ${v.why}${suggest(v.spec, v.why)}`);
   }
   if (violations.length || allowErrors.length) {
-    console.log(
+    log(
       `\n${violations.length} non-caret pin(s). Use a caret range, or add the package to ${ALLOWLIST} ` +
         'with the reason it must stay pinned. This check is not required: merging red is allowed when the pin is deliberate.',
     );
     return 1;
   }
-  console.log('All dependency ranges are caret (devDependencies and overrides not checked).');
+  log('All dependency ranges are caret (devDependencies and overrides not checked).');
   return 0;
 }
 
@@ -184,6 +193,12 @@ function selfTest() {
     ['npm:@scope/pkg@^1.2.0', null], ['npm:@scope/pkg@1.2.0', 'exact'], ['npm:@scope/pkg@~1.2.0', 'tilde'],
     ['npm:lodash', 'not a caret range'], ['npm:@scope/pkg', 'not a caret range'], ['npm:@1.0.0', 'not a caret range'],
     ['^21.0.0 || 22.0.0', 'not a caret range'], ['^21.0.0 || ~22.0.0', 'not a caret range'],
+    ['~21.0.0 || ~22.0.0', 'not a caret range'], ['~0.8.0 || ~0.9.0', 'not a caret range'],
+    ['~ 1.2.3', 'not a caret range'], ['~>1.2.3', 'not a caret range'], ['~1.x', 'not a caret range'],
+    ['~1', 'not a caret range'], ['~1.2', 'not a caret range'],
+    ['1', 'not a caret range'], ['1.2', 'not a caret range'],
+    ['npm:pkg@workspace:*', 'not a caret range'], ['npm:pkg@github:org/repo', 'not a caret range'],
+    ['npm:@scope/pkg@1.0.0/foo', 'not a caret range'], ['npm:a/b/c@^1.0.0', 'not a caret range'],
     ['github:org/repo#main', null], ['~3.24.4', 'tilde'], ['6.1.5', 'exact'], ['2.0.0-beta.3', 'exact'],
     ['*', 'not a caret range'], ['latest', 'not a caret range'], ['1.x', 'not a caret range'],
   ];
@@ -211,10 +226,29 @@ function selfTest() {
       failed++;
       console.error(`suggest(${JSON.stringify(spec)}, ${JSON.stringify(why)}) = ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
     }
+    if (got.startsWith(' — use ') && problem(got.slice(' — use '.length)) !== null) {
+      failed++;
+      console.error(`suggest(${JSON.stringify(spec)}, ${JSON.stringify(why)}) produced a non-passing range: ${got}`);
+    }
   }
 
   const dir = mkdtempSync(join(tmpdir(), 'caret-pins-'));
   try {
+    // An empty or nonexistent root must fail closed instead of passing with 0 manifests scanned,
+    // and an unknown CLI flag must return 1 instead of being treated as a directory path.
+    const emptyRes = check(join(dir, 'does-not-exist'));
+    const emptyLog = [];
+    const flagLog = [];
+    if (
+      !emptyRes.allowErrors ||
+      emptyRes.allowErrors.length === 0 ||
+      report(join(dir, 'does-not-exist'), (m) => emptyLog.push(m)) === 0 ||
+      runCli(['--selftest'], (m) => flagLog.push(m)) !== 1
+    ) {
+      failed++;
+      console.error(`empty/nonexistent root or unknown flag passed instead of failing closed: ${JSON.stringify({ emptyRes, emptyLog, flagLog })}`);
+    }
+
     const write = (path, value) => {
       mkdirSync(join(dir, path, '..'), { recursive: true });
       writeFileSync(join(dir, path), typeof value === 'string' ? value : JSON.stringify(value));
@@ -279,5 +313,16 @@ function selfTest() {
   return failed ? 1 : 0;
 }
 
-const arg = process.argv[2];
-process.exit(arg === '--self-test' ? selfTest() : report(arg ?? process.cwd()));
+function runCli(args = process.argv.slice(2), log = console.log) {
+  const arg = args[0];
+  if (arg === '--self-test') {
+    return selfTest();
+  }
+  if (arg && arg.startsWith('-')) {
+    log(`Unknown option: ${arg}. Usage: node .github/scripts/check-caret-pins.mjs [repo-root | --self-test]`);
+    return 1;
+  }
+  return report(arg ?? process.cwd(), log);
+}
+
+process.exit(runCli());
