@@ -30,6 +30,11 @@ export interface RespondentCaller {
   readonly sessionId: string;
   /** Salted hash of the resolved peer address — the one attribute the caller did not choose. */
   readonly ipHash?: string;
+  /**
+   * The resolved peer address, already screened by the transport (see `RequestIdentity.forwardableIp`).
+   * Read by one consumer only — Turnstile's `remoteip` — and never stored, logged or bucketed.
+   */
+  readonly forwardableIp?: string;
   /** The `Origin` header, checked against the link's author-written allowlist. */
   readonly origin?: string;
 }

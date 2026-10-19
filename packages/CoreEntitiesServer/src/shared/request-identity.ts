@@ -37,6 +37,16 @@ export interface RequestIdentity {
    */
   ip?: string;
   /**
+   * {@link ip}, screened for leaving the process as an address: source port and IPv6 zone
+   * stripped, and `undefined` unless what is left parses as an IP. Set by the transport (which owns
+   * `forwardableAddress`) so a consumer in this package never sees a header remnant.
+   *
+   * Exists for exactly ONE consumer: the Turnstile siteverify call, which sends it as `remoteip` so
+   * Cloudflare binds the token to the machine that solved the challenge. Same rule as `ip`: Forms
+   * never stores, logs or buckets it.
+   */
+  forwardableIp?: string;
+  /**
    * Salted one-way hash of the resolved client IP (IPv6 reduced to its /64).
    *
    * Optional because the peer address can already be gone by the time the handler runs. When it

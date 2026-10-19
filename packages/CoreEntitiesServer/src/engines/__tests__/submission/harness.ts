@@ -26,6 +26,8 @@ export interface EngineSaveContext {
   elevatedUser: UserInfo;
   sessionId: string;
   clientIpHash?: string;
+  /** The transport-screened peer address Turnstile receives as `remoteip`. */
+  forwardableIp?: string;
   requestOrigin?: string;
   /** The verified scope claim; set on the respondent's `MagicLinkScope.ResourceID`. */
   scopeResourceId?: string;
@@ -68,7 +70,7 @@ export function saveThroughEngine(ctx: EngineSaveContext, submission: EngineSave
       turnstileToken: submission.turnstileToken,
       clientMeta: submission.clientMeta,
       answers: submission.answers,
-      caller: { sessionId: ctx.sessionId, ipHash: ctx.clientIpHash, origin: ctx.requestOrigin },
+      caller: { sessionId: ctx.sessionId, ipHash: ctx.clientIpHash, forwardableIp: ctx.forwardableIp, origin: ctx.requestOrigin },
     },
     ctx.provider,
     respondent,

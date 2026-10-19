@@ -62,6 +62,13 @@ installConfirmationEmailSender();
 // back to the client-settable `x-session-id`, which a caller can rotate to escape them.
 import './http/RequestIdentityMiddleware.js';
 
+// Deployment-default hardening: announce at EVERY boot, at error level, when the privacy hashes
+// are running on the built-in PUBLIC salt (stored hashes then dictionary-recoverable), and refuse
+// to boot at all when the deployment opted into FORMS_REQUIRE_SESSION_HASH_SALT=true. The
+// first-use warning inside hash-salt.ts is easy to miss hours after startup; a boot line is not.
+import { enforceSessionHashSaltAtBoot } from '@mj-biz-apps/forms-core-entities-server';
+enforceSessionHashSaltAtBoot();
+
 // Import the stacktrace-redaction middleware so its @RegisterClass fires and MJ server bootstrap
 // merges its Apollo plugin. Apollo puts `extensions.stacktrace` — server paths, dependency versions
 // — on every error unless NODE_ENV is production, and the anonymous session a public link mints is

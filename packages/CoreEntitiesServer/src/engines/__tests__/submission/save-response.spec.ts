@@ -46,6 +46,7 @@ function makeContext(
     queue?: EngineSaveContext['queue'];
     fetchImpl?: typeof fetch;
     clientIpHash?: string;
+    forwardableIp?: string;
   } = {},
 ): { ctx: EngineSaveContext; saved: () => ReturnType<typeof makeFakeProvider>['saved'] } {
   const definition = makeDefinition(
@@ -70,6 +71,7 @@ function makeContext(
     elevatedUser: makeContextUser(),
     sessionId: 'sess-abc',
     clientIpHash: options.clientIpHash,
+    forwardableIp: options.forwardableIp,
     fetchImpl: options.fetchImpl,
     queue: options.queue,
   };
@@ -198,6 +200,25 @@ describe('SaveResponse', () => {
     expect(result.success).toBe(false);
     expect(result.errors?.[0].message).toMatch(/captcha/i);
     expect(saved()).toHaveLength(0);
+  });
+
+  it("sends the caller's screened address to Turnstile as remoteip on a captcha-required final save", async () => {
+    process.env.FORMS_TURNSTILE_SECRET = 'test-secret';
+    resetPublicSubmitConfigForTests();
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
+
+    const { ctx } = makeContext(respondentPermissions(), {
+      captcha: true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      forwardableIp: '203.0.113.9',
+    });
+    await saveThroughEngine(ctx, validSubmission({ turnstileToken: 'tok' }));
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const body = fetchImpl.mock.calls[0][1]?.body as URLSearchParams;
+    expect(body.get('remoteip')).toBe('203.0.113.9');
   });
 
   it('rejects when captcha is required but verification fails (turnstile fail)', async () => {

@@ -22,7 +22,7 @@ import { LogErrorEx, LogStatus } from '@memberjunction/core';
 
 import { runWithRequestIdentity } from '@mj-biz-apps/forms-core-entities-server';
 
-import { FORMS_SELF_CALL_HEADER, hashClientIp, resolveClientIp } from './request-identity.js';
+import { FORMS_SELF_CALL_HEADER, forwardableAddress, hashClientIp, resolveClientIp } from './request-identity.js';
 
 /**
  * How many proxies WE operate in front of the API — the number of trailing `X-Forwarded-For`
@@ -164,7 +164,10 @@ export function requestIdentityHandler(hops: number = trustedProxyHops()): Reque
     // `sessionId` rides along for the Remote Operations (#303 Task 8): MJ copies the same header
     // onto `UserPayload.sessionId`, but an operation is handed no `AppContext`, so this store is the
     // only way `Forms.SaveResponse` can see the correlator the retired resolver read from there.
-    runWithRequestIdentity({ ip, ipHash: ip ? hashClientIp(ip) : undefined, origin, sessionId: sessionHeader(req) }, next);
+    runWithRequestIdentity(
+      { ip, forwardableIp: forwardableAddress(ip), ipHash: ip ? hashClientIp(ip) : undefined, origin, sessionId: sessionHeader(req) },
+      next,
+    );
   };
 }
 

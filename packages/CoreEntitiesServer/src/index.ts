@@ -271,7 +271,7 @@ export { deviceResumeAllowed, distributionOfResponse } from './submission/resume
 export { revokeResponseInvites, type RevokeSummary } from './magic-link/response-invite-revocation.js';
 export { checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE, apiOwnOrigin, resetEmbedOriginConfigForTests, type EmbedOriginVerdict } from './shared/embed-origin.js';
 export { InFlightLimiter, DEFAULT_MAX_IN_FLIGHT } from './shared/in-flight-limiter.js';
-export { DEFAULT_SESSION_HASH_SALT, sessionHashSalt, resetDefaultSaltWarningForTests, warnOnceIfDefaultHashSalt } from './shared/hash-salt.js';
+export { DEFAULT_SESSION_HASH_SALT, enforceSessionHashSaltAtBoot, sessionHashSalt, resetDefaultSaltWarningForTests, warnOnceIfDefaultHashSalt } from './shared/hash-salt.js';
 export { currentRequestIdentity, runWithRequestIdentity, type RequestIdentity } from './shared/request-identity.js';
 
 // The on-submit automation outbox (#303): the event contract, the enqueue the submit path makes in its

@@ -60,7 +60,7 @@ import {
   type RespondentFormDefinition,
   type ResumeSnapshot,
 } from '@mj-biz-apps/forms-entities';
-import { checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE } from '../shared/embed-origin.js';
+import { apiOwnOrigin, checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE } from '../shared/embed-origin.js';
 import { InFlightLimiter } from '../shared/in-flight-limiter.js';
 import { withIsolatedProvider } from '../shared/isolated-provider.js';
 import { revokeResponseInvites } from '../magic-link/response-invite-revocation.js';
@@ -92,7 +92,7 @@ import type { RespondentCaller, RespondentSaveRequest, RespondentSaveResult } fr
 import { resolveScopedResponseId, scopeNamesDistribution } from '../submission/scoped-response.js';
 import { buildSourceMetadata, warnOnceIfAbuseKeyingDegraded } from '../submission/source-metadata.js';
 import { createStageTimer, formatTimings } from '../submission/stage-timer.js';
-import { captchaRequired, TURNSTILE_NOT_CONFIGURED, verifyTurnstile } from '../submission/turnstile.js';
+import { captchaRequired, expectedTurnstileHostnames, TURNSTILE_NOT_CONFIGURED, verifyTurnstile } from '../submission/turnstile.js';
 import { OUTBOX_RESPONSE_SUBMITTED, type ResponseSubmittedQueue } from '../automation/outbox/enqueue.js';
 import type { ResponseSubmittedPayload, ResponseSubmittedTrigger } from '../automation/outbox/response-submitted-event.js';
 import { drainAutomationOutbox } from '../automation/outbox/drain.js';
@@ -390,7 +390,21 @@ export class FormSubmissionEngine extends BaseSingleton<FormSubmissionEngine> {
     // runs this gate), and the completion that matters runs this gate. Ordered after the rate limit so a refused request does
     // not spend the respondent's token.
     const needCaptcha = complete && captchaRequired(resolved.definition.settings.captchaRequired, resolved.distribution.CaptchaRequired);
-    const turnstile = await verifyTurnstile(needCaptcha, request.turnstileToken, seams.fetchImpl);
+    //     `remoteip` binds the token to the solver's address at Cloudflare's end; the expected
+    //     hostnames (this API's public host + the distribution's authored embed origins) feed the
+    //     service's warn-only hostname check. Both are computed only when a captcha is actually
+    //     demanded, so an unchallenged save never triggers `apiOwnOrigin()`'s unset-variable
+    //     diagnostic on a deployment that uses neither allowlists nor captchas.
+    const turnstile = await verifyTurnstile(needCaptcha, request.turnstileToken, {
+      fetchImpl: seams.fetchImpl,
+      remoteIp: needCaptcha ? request.caller.forwardableIp : undefined,
+      expectedHostnames: needCaptcha
+        ? expectedTurnstileHostnames([
+            apiOwnOrigin(),
+            ...(embedOrigin.policy.kind === 'allowlist' ? embedOrigin.policy.origins : []),
+          ])
+        : undefined,
+    });
     if (!turnstile.success && turnstile.errorCode === TURNSTILE_NOT_CONFIGURED) {
       LogError(
         `[Forms] submit to '${request.distributionSlug}' requires a captcha but FORMS_TURNSTILE_SECRET is not set on this host. ` +

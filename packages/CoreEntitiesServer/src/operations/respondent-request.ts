@@ -15,7 +15,12 @@ import type { RespondentCaller } from '../submission/save-request.js';
 /** The current request's caller, as the respondent engine reads it. */
 export function respondentCallerFromRequest(): RespondentCaller {
   const identity = currentRequestIdentity();
-  return { sessionId: identity?.sessionId ?? '', ipHash: identity?.ipHash, origin: identity?.origin };
+  return {
+    sessionId: identity?.sessionId ?? '',
+    ipHash: identity?.ipHash,
+    forwardableIp: identity?.forwardableIp,
+    origin: identity?.origin,
+  };
 }
 
 /**
