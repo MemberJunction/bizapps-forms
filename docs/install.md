@@ -38,16 +38,16 @@ are in [`migrations/README.md`](../migrations/README.md).
 
 ## 2. Read the MJ version, never recall it
 
-The supported range and the exact pin live in the files an upgrade actually edits. Restating
+The supported range and the pin live in the files an upgrade actually edits. Restating
 either in prose is how the README came to claim a pin two majors behind what the repo was
 building against.
 
 ```bash
 node -p "require('./mj-app.json').mjVersionRange"                                   # supported range
-node -p "require('./apps/MJAPI/package.json').dependencies['@memberjunction/core']" # the exact pin
+node -p "require('./apps/MJAPI/package.json').dependencies['@memberjunction/core']" # the pin (caret floor)
 ```
 
-**Pinning model:** `apps/*` use exact `X.Y.Z` in `dependencies`; `packages/*` declare MJ only
+**Pinning model:** `apps/*` use a caret floor `^X.Y.Z` in `dependencies`; `packages/*` declare MJ only
 as caret `^X.Y.Z` `peerDependencies` and carry no MJ `dependencies` at all.
 
 **Upgrading MJ is a database operation, not just a pin bump.** Bumping npm versions leaves the

@@ -14,16 +14,16 @@ MJ Forms reuses ~70% of what it needs from MJ core (the heart of the plan — se
 - **RSU** (`RuntimeSchemaManager` + `SchemaEvolution`) for promoting responses to first-class entities.
 - **bizapps-common** Person / Organization for known-respondent identity (optional, loose coupling).
 
-These capabilities all come from MJ core. We pin `@memberjunction/*` to the **`lts-6.1`** line and rev that pin upward over time (do not loosen an app's exact pin to a caret range without a reason — the caret ranges in `peerDependencies` are correct and deliberate; the `dependencies` pins are the ones that must stay exact).
+These capabilities all come from MJ core. We pin `@memberjunction/*` to the **`lts-6.1`** line and rev that pin upward over time (see the pinning model below for how `apps/*` and `packages/*` state that floor).
 
 **The exact version is not written here, on purpose.** It lives in `apps/MJAPI/package.json` and `mj-app.json`, which are the files an upgrade actually edits; restating it in prose is how this section came to claim a pin two majors behind the one the repo was building against. Read it, don't recall it:
 
 ```bash
 node -p "require('./mj-app.json').mjVersionRange"                                  # supported range
-node -p "require('./apps/MJAPI/package.json').dependencies['@memberjunction/core']" # the exact pin
+node -p "require('./apps/MJAPI/package.json').dependencies['@memberjunction/core']" # the pin (caret floor)
 ```
 
-**Pinning model** (matches the sibling repos'): `apps/*` use **exact** `X.Y.Z` in `dependencies`; `packages/*` declare MJ only as **caret** `^X.Y.Z` `peerDependencies` and carry no MJ `dependencies` at all; `mj-app.json` `mjVersionRange` is `>=X.Y.Z <(major+1).0.0`.
+**Pinning model** (matches the sibling repos'): `apps/*` use a **caret** floor `^X.Y.Z` in `dependencies` (the lockfile fixes the build you run; the advisory `caret pins` check flags tilde and exact ranges outside devDependencies and overrides); `packages/*` declare MJ only as **caret** `^X.Y.Z` `peerDependencies` and carry no MJ `dependencies` at all; `mj-app.json` `mjVersionRange` is `>=X.Y.Z <(major+1).0.0`.
 
 **On every MJ upgrade, diff `@memberjunction/ng-auth-services`'s peer set.** It is the trap most likely to break the Angular build. That package has added auth providers as **required** peers (empty `peerDependenciesMeta`), and the Angular build cannot resolve a peer that is not installed — which is why MJExplorer carries auth SDKs this repo never authenticates with. A version bump that needs a new one fails at build time with a bare module-resolution error that says nothing about auth.
 

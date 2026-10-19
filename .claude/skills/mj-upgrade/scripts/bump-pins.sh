@@ -4,7 +4,7 @@
 # Version-agnostic: replaces whatever semver is currently pinned. Idempotent.
 #
 # Pinning model (verified 2026-07-30 against this repo):
-#   apps/*      -> exact  "X.Y.Z" in dependencies
+#   apps/*      -> caret  "^X.Y.Z" in dependencies (exact before the caret-pins check)
 #   packages/*  -> caret  "^X.Y.Z" in peerDependencies, no MJ dependencies at all
 # The perl substitution preserves whichever prefix each line already has, so it upholds
 # that model rather than imposing one.
@@ -29,7 +29,7 @@
 # AND is refused by `npm run lint:mj-ranges`, a step in the required `build-and-test` check.
 # This script used to do exactly that, on all 40 peers, while printing "all pins consistent ✓".
 #
-# So: a target with NO prerelease bumps only the host-tracking pins (`apps/*` exact deps, the
+# So: a target with NO prerelease bumps only the host-tracking pins (`apps/*` deps, the
 # root devDependencies) and leaves the peers and mjVersionRange alone — which is correct, because
 # `^6.1.0-edge.6` already admits 6.1.1, 6.1.2 and every later 6.x. Moving the supported LINE is a
 # separate, deliberate act: pass that line's own prerelease, e.g. `bump-pins.sh 6.2.0-edge.0`.
@@ -48,8 +48,8 @@ MAJ="${V%%.*}"; CEIL="$(( MAJ + 1 )).0.0"
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-# Manifests that track the HOST BUILD you are developing against. Exact in apps/* by documented
-# policy; caret at the root. Safe to move to any target, prerelease or not.
+# Manifests that track the HOST BUILD you are developing against. Caret floors in apps/* and at
+# the root; pnpm-lock.yaml fixes the concrete build. Safe to move to any target, prerelease or not.
 HOST_FILES=(
   package.json
   apps/MJAPI/package.json
