@@ -10,14 +10,17 @@
  * would have to remember, and would eventually forget.
  *
  * Implemented as a `BaseSingleton` so a single shared window store exists across
- * all import paths in the MJAPI process (per CLAUDE.md rule 6). This is a
- * best-effort, single-process limiter — it is the FIRST line of defense in front
- * of the per-distribution quota (which is the durable, DB-backed cap). A
- * distributed deployment would back this with a shared store; that is out of
- * Phase-1 scope.
+ * all import paths in the MJAPI process (per CLAUDE.md rule 6). It is the FIRST line
+ * of defense in front of the per-distribution quota (which is the durable, DB-backed
+ * cap). When MJ's LocalStorageProvider is Redis the windows are shared by every
+ * instance on that Redis; otherwise — and during a Redis outage — each process keeps
+ * its own.
  */
+import { LogError, LogStatus, Metadata } from '@memberjunction/core';
 import { BaseSingleton } from '@memberjunction/global';
+import { RedisLocalStorageProvider } from '@memberjunction/redis-provider';
 import { getPublicSubmitConfig } from './config.js';
+import { RedisRateLimitStore } from './redis-rate-limit-store.js';
 
 /** Result of a rate-limit check; `retryAfterMs` is set only when limited. */
 export interface RateLimitResult {
@@ -133,8 +136,19 @@ export class MemoryRateLimitStore implements RateLimitStore {
   }
 }
 
+/** The store the limiter charges, and — in shared mode — the provider whose connection it watches. */
+interface PickedStore {
+  store: RateLimitStore;
+  redis?: RedisLocalStorageProvider;
+}
+
 export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
+  /** Always kept: it is the memory-mode store and the shared mode's fallback during an outage. */
   private readonly memory = new MemoryRateLimitStore();
+  /** Unset until the first charge picks; see {@link pickStore}. */
+  private picked: PickedStore | undefined;
+  /** True from a Redis outage's first fallback until the next charge Redis answers. */
+  private inOutage = false;
 
   public static get Instance(): FormsRateLimiter {
     return super.getInstance<FormsRateLimiter>();
@@ -151,15 +165,134 @@ export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
    *
    * `retryAfterMs` is the longest wait across the gates that refused: the caller has to clear all
    * of them, not the nearest one.
+   *
+   * The first call picks the store (Redis when MJ's LocalStorageProvider is Redis, else memory). A
+   * call that cannot reach Redis is charged to the in-process store instead, so an outage loosens
+   * the caps to per-process rather than switching them off.
    */
   public async charge(gates: readonly RateLimitGate[], now: number = Date.now()): Promise<RateLimitResult> {
-    return this.memory.charge(gates, getPublicSubmitConfig().rateLimitWindowMs, now);
+    const windowMs = getPublicSubmitConfig().rateLimitWindowMs;
+    const picked = this.picked ?? this.pickStore();
+    if (!picked.redis) {
+      return picked.store.charge(gates, windowMs, now);
+    }
+    return this.chargeShared(picked.store, picked.redis, gates, windowMs, now);
   }
 
-  /** Test-only: drop all recorded windows. */
+  /** Test-only: drop all recorded windows, and forget the picked store and any outage. */
   public resetForTests(): void {
     this.memory.reset();
+    this.picked = undefined;
+    this.inOutage = false;
   }
+
+  /** Test-only: the store the first charge picked, or undefined before it. */
+  public activeStoreForTests(): RateLimitStore | undefined {
+    return this.picked?.store;
+  }
+
+  /**
+   * Choose the store from MJ's LocalStorageProvider, and log the choice once.
+   *
+   * Lazy — on the first charge, never in the constructor — because MJ's server installs its Redis
+   * provider (`SetLocalStorageProvider(new RedisLocalStorageProvider(...))`) only after engines
+   * load. A limiter that chose at construction would see no Redis and stay per-process for good.
+   */
+  private pickStore(): PickedStore {
+    const provider = this.readLocalStorageProvider();
+    if (provider instanceof RedisLocalStorageProvider) {
+      this.picked = { store: new RedisRateLimitStore(provider.Client), redis: provider };
+      LogStatus('Forms rate limit: window counts are shared through Redis (RedisLocalStorageProvider).');
+    } else {
+      this.picked = { store: this.memory };
+      LogStatus(describePerProcessPick(provider));
+    }
+    return this.picked;
+  }
+
+  /** MJ's LocalStorageProvider, or undefined when there is no metadata provider yet (early boot, unit tests). */
+  private readLocalStorageProvider(): unknown {
+    try {
+      return Metadata.Provider?.LocalStorageProvider;
+    } catch (error) {
+      LogError(
+        `Forms rate limit: could not read MJ's LocalStorageProvider (${errorMessage(error)}); window counts will be kept per process.`,
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * Charge Redis, or — while it is unreachable — the in-process store.
+   *
+   * During an outage the limit is per-process, which is what it was before Redis: each instance
+   * caps on its own count. Looser than shared, but never off.
+   */
+  private async chargeShared(
+    store: RateLimitStore,
+    redis: RedisLocalStorageProvider,
+    gates: readonly RateLimitGate[],
+    windowMs: number,
+    now: number,
+  ): Promise<RateLimitResult> {
+    // Not sent at all while disconnected: MJ's ioredis client runs an offline queue with
+    // maxRetriesPerRequest: null, so a command sent now would never settle and the request
+    // awaiting it would hang.
+    if (!redis.IsConnected) {
+      this.recordFallback('Redis is disconnected');
+      return this.memory.charge(gates, windowMs, now);
+    }
+
+    let result: RateLimitResult;
+    try {
+      result = await store.charge(gates, windowMs, now);
+    } catch (error) {
+      this.recordFallback(`the Redis charge failed: ${errorMessage(error)}`);
+      return this.memory.charge(gates, windowMs, now);
+    }
+    this.recordRedisAnswered();
+    return result;
+  }
+
+  /** Mark the outage, logging only its first fallback so a long outage cannot flood the log. */
+  private recordFallback(reason: string): void {
+    if (this.inOutage) {
+      return;
+    }
+    this.inOutage = true;
+    LogError(`Forms rate limit: ${reason}; window counts are kept per process until Redis answers again.`);
+  }
+
+  /** End the outage, if there was one, with a single recovery line. */
+  private recordRedisAnswered(): void {
+    if (!this.inOutage) {
+      return;
+    }
+    this.inOutage = false;
+    LogStatus('Forms rate limit: Redis recovered; window counts are shared through Redis again.');
+  }
+}
+
+/**
+ * The per-process pick's log line. A provider that says it is shared across processes but is not
+ * a `RedisLocalStorageProvider` is named outright: the likely cause is a second copy of
+ * `@memberjunction/redis-provider` making the `instanceof` miss, and this line is how an operator
+ * finds out the caps are not shared.
+ */
+function describePerProcessPick(provider: unknown): string {
+  const shared = (provider as { SharedAcrossProcesses?: unknown } | undefined)?.SharedAcrossProcesses === true;
+  if (!shared) {
+    return 'Forms rate limit: window counts are kept per process (no Redis LocalStorageProvider).';
+  }
+  const name = (provider as object).constructor?.name ?? 'unknown';
+  return (
+    `Forms rate limit: window counts are kept per process — the LocalStorageProvider (${name}) reports ` +
+    'SharedAcrossProcesses but is not a RedisLocalStorageProvider from this copy of @memberjunction/redis-provider.'
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**

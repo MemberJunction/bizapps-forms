@@ -94,6 +94,9 @@ importers:
       '@memberjunction/notifications':
         specifier: ^6.1.6
         version: 6.1.6(@aws-sdk/credential-provider-node@3.972.86)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.4)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@memberjunction/redis-provider':
+        specifier: ^6.1.6
+        version: 6.1.6
       '@memberjunction/scheduling-base-types':
         specifier: ^6.1.6
         version: 6.1.6
@@ -300,6 +303,9 @@ importers:
       '@memberjunction/notifications':
         specifier: ^6.1.0-edge.6
         version: 6.1.6(@aws-sdk/credential-provider-node@3.972.86)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.4)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
+      '@memberjunction/redis-provider':
+        specifier: ^6.1.0-edge.6
+        version: 6.1.6
       '@memberjunction/scheduling-base-types':
         specifier: ^6.1.0-edge.6
         version: 6.1.6
