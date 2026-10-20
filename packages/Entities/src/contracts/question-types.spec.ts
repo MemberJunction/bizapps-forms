@@ -14,6 +14,7 @@ import {
   CONTACT_INFO_FIELDS,
   type FormQuestionType,
 } from './question-types';
+import { mjBizAppsFormsFormQuestionSchema } from '../generated/entity_subclasses';
 
 /** Where the shipped migrations live, from this spec's location in the package. */
 const MIGRATIONS_DIR = join(__dirname, '..', '..', '..', '..', 'migrations');
@@ -216,8 +217,7 @@ describe('the taxonomy and the generated entity', () => {
    * mistake — a migration edited and committed without re-running `mj codegen`, leaving a
    * generated `QuestionType` union that silently disagrees with both.
    */
-  it('matches the generated QuestionType value list', async () => {
-    const { mjBizAppsFormsFormQuestionSchema } = await import('../generated/entity_subclasses');
+  it('matches the generated QuestionType value list', () => {
     const field = mjBizAppsFormsFormQuestionSchema.shape.QuestionType;
     const generated = field.options.map((o) => o.value as string);
     expect([...generated].sort()).toEqual([...FORM_QUESTION_TYPES].sort());
