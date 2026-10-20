@@ -136,6 +136,17 @@ export class MemoryRateLimitStore implements RateLimitStore {
   }
 }
 
+/**
+ * How long a public request waits for Redis to answer a charge before it is charged to the
+ * in-process store instead. MJ's ioredis client has `maxRetriesPerRequest: null` and an offline
+ * queue, so a command sent just before the connection drops can wait until Redis comes back —
+ * possibly forever — and the submit, autosave, redeem, upload or resume waiting on it would hang.
+ * Two seconds is far above a healthy EVAL round trip and short enough that a respondent barely
+ * notices. A reply that lands after the timeout still charges Redis, so a blip can count a hit
+ * twice (Redis and memory): an over-count, never an under-count, which is the safe side.
+ */
+const REDIS_CHARGE_TIMEOUT_MS = 2_000;
+
 /** The store the limiter charges, and — in shared mode — the provider whose connection it watches. */
 interface PickedStore {
   store: RateLimitStore;
@@ -243,9 +254,11 @@ export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
       return this.memory.charge(gates, windowMs, now);
     }
 
+    // Bounded: the IsConnected check above cannot cover a connection that drops after it, and the
+    // offline queue would then hold this command until Redis reconnects. A timeout is an outage.
     let result: RateLimitResult;
     try {
-      result = await store.charge(gates, windowMs, now);
+      result = await withTimeout(store.charge(gates, windowMs, now), REDIS_CHARGE_TIMEOUT_MS, 'the Redis charge');
     } catch (error) {
       this.recordFallback(`the Redis charge failed: ${errorMessage(error)}`);
       return this.memory.charge(gates, windowMs, now);
@@ -289,6 +302,23 @@ function describePerProcessPick(provider: unknown): string {
     `Forms rate limit: window counts are kept per process — the LocalStorageProvider (${name}) reports ` +
     'SharedAcrossProcesses but is not a RedisLocalStorageProvider from this copy of @memberjunction/redis-provider.'
   );
+}
+
+/**
+ * `promise`'s outcome, or a rejection naming `what` once `ms` pass first. The timer is always
+ * cleared and is unref'd, so it never keeps the process alive.
+ */
+async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms}ms`)), ms);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function errorMessage(error: unknown): string {

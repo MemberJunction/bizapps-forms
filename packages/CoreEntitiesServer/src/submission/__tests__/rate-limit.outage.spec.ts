@@ -14,9 +14,15 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
   LogStatus: vi.fn(),
 }));
 
-/** What the fake Redis does: `connected` drives IsConnected, `failing` makes every eval throw. */
-const redis = { connected: true, failing: false };
+/**
+ * What the fake Redis does: `connected` drives IsConnected, `failing` makes every eval throw, and
+ * `hanging` makes every eval never settle (a connection that drops after the IsConnected check).
+ */
+const redis = { connected: true, failing: false, hanging: false };
 const send = vi.fn(async (): Promise<unknown> => {
+  if (redis.hanging) {
+    return new Promise<never>(() => undefined);
+  }
   if (redis.failing) {
     throw new Error('ECONNRESET');
   }
@@ -43,6 +49,7 @@ describe('FormsRateLimiter during a Redis outage', () => {
     previousProvider = Metadata.Provider;
     redis.connected = true;
     redis.failing = false;
+    redis.hanging = false;
     send.mockClear();
     vi.mocked(LogError).mockClear();
     vi.mocked(LogStatus).mockClear();
@@ -51,6 +58,7 @@ describe('FormsRateLimiter during a Redis outage', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     Metadata.Provider = previousProvider;
     FormsRateLimiter.Instance.resetForTests();
   });
@@ -90,6 +98,19 @@ describe('FormsRateLimiter during a Redis outage', () => {
     expect(send).toHaveBeenCalledTimes(2);
     expect(answer).toEqual({ allowed: false, retryAfterMs: 2500 });
     expect(recoveryLogs()).toHaveLength(1);
+  });
+
+  it('stops waiting for a Redis reply that never comes, and charges the in-process store instead', async () => {
+    vi.useFakeTimers();
+    redis.hanging = true;
+
+    const pending = FormsRateLimiter.Instance.charge(gate);
+    await vi.advanceTimersByTimeAsync(2_001);
+
+    await expect(pending).resolves.toEqual({ allowed: true });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(LogError).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(LogError).mock.calls[0][0])).toMatch(/timed out/);
   });
 
   it('does not send to a disconnected client, and charges the in-process store instead', async () => {
