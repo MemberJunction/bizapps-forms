@@ -33,7 +33,7 @@
 
 **Files:**
 - Delete: `metadata/entities/.save-return-datestamps-only.json`
-- Create: `migrations/V202610201900__v0.16.x__Restore_Full_Row_Save_Return.sql`
+- Create: `migrations/V202610201910__v0.16.x__Restore_Full_Row_Save_Return.sql`
 - Modify: `.changeset/save-return-datestamps-only.md`
 - Modify: `docs/database-operations.md` (paragraph after the §4a table)
 - Test: `packages/Entities/src/contracts/save-return-shape.spec.ts` (already committed, red)

@@ -25,16 +25,20 @@ const SAVE_SPROCS = [
 
 /** The body of the last shipped `CREATE PROCEDURE` for `sproc`, up to its batch's `GO`. */
 function lastShippedDefinition(sproc: string): { file: string; body: string } {
-  const header = `CREATE PROCEDURE [\${flyway:defaultSchema}].[${sproc}]`;
+  // Any spelling that (re)defines the procedure counts — CREATE, ALTER or CREATE OR ALTER, bracketed
+  // or not — so a regression written another way cannot hide behind an older full-row definition.
+  const header = new RegExp(
+    String.raw`(?:CREATE|ALTER)(?:\s+OR\s+ALTER)?\s+PROC(?:EDURE)?\s+\[?\$\{flyway:defaultSchema\}\]?\.\[?${sproc}\]?(?![\w])`,
+    'gi',
+  );
   const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
   let last: { file: string; body: string } | null = null;
   for (const file of files) {
     const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
-    let at = sql.indexOf(header);
-    while (at !== -1) {
+    for (const match of sql.matchAll(header)) {
+      const at = match.index;
       const end = sql.slice(at).search(/^\s*GO\s*$/m);
       last = { file, body: end === -1 ? sql.slice(at) : sql.slice(at, at + end) };
-      at = sql.indexOf(header, at + header.length);
     }
   }
   if (!last) throw new Error(`no shipped migration defines ${sproc}`);
