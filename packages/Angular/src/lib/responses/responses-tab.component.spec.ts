@@ -8,6 +8,8 @@
  */
 import '@angular/compiler';
 import { Injector, runInInjectionContext } from '@angular/core';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteOpResult } from '@memberjunction/core';
 import type { FormsGetResponseDetailOutput, FormsListResponsesInput, FormsListResponsesOutput, FormsResponseListRow } from '@mj-biz-apps/forms-entities';
@@ -60,6 +62,7 @@ function detail(id: string): RemoteOpResult<FormsGetResponseDetailOutput> {
     Answers: [],
     Uploads: [],
     AutomationRuns: [],
+    AutomationEvents: [],
     BindingRecords: [],
     LabelFormVersionID: 'v1',
     DefinitionJSON: '{"pages":[]}',
@@ -212,6 +215,105 @@ describe('ResponsesTabComponent', () => {
 
     expect(calls[1]).toMatchObject({ key: 'Forms.GetResponseDetail', input: { ResponseID: 'r-1', LabelFormVersionID: 'published-v' } });
     expect(c.View()).toBe('detail');
+  });
+
+  it('re-reads the open response, labelled the same way, when the detail asks to reload (#311)', async () => {
+    const c = construct();
+    const loading = c.ngOnInit();
+    calls[0].settle(listPage([1], 1, 'published-v'));
+    await loading;
+    const open = c.OpenResponse('r-1');
+    calls[1].settle(detail('r-1'));
+    await open;
+
+    const reload = c.ReloadDetail();
+    expect(calls[2]).toMatchObject({ key: 'Forms.GetResponseDetail', input: { ResponseID: 'r-1', LabelFormVersionID: 'published-v' } });
+    calls[2].settle(detail('r-1'));
+    await reload;
+
+    expect(c.View()).toBe('detail');
+    expect(c.Detail()?.responseId).toBe('r-1');
+  });
+
+  it('keeps a detail the reader closed closed when its reload lands afterwards', async () => {
+    const c = construct();
+    const loading = c.ngOnInit();
+    calls[0].settle(listPage([1], 1));
+    await loading;
+    const open = c.OpenResponse('r-1');
+    calls[1].settle(detail('r-1'));
+    await open;
+
+    const reload = c.ReloadDetail();
+    c.CloseDetail();
+    calls[2].settle(detail('r-1'));
+    await reload;
+
+    expect(c.Detail()).toBeNull();
+    expect(c.View()).toBe('list');
+  });
+
+  it('opens the response the reader picks while a reload is in flight, and drops the reload', async () => {
+    const c = construct();
+    const loading = c.ngOnInit();
+    calls[0].settle(listPage([1, 2], 2));
+    await loading;
+    const open = c.OpenResponse('r-1');
+    calls[1].settle(detail('r-1'));
+    await open;
+
+    const reload = c.ReloadDetail();
+    c.CloseDetail();
+    const pick = c.OpenResponse('r-2');
+    expect(calls.filter((x) => x.key === 'Forms.GetResponseDetail')).toHaveLength(3);
+    calls[3].settle(detail('r-2'));
+    await pick;
+    calls[2].settle(detail('r-1'));
+    await reload;
+
+    expect(c.Detail()?.responseId).toBe('r-2');
+  });
+
+  it('keeps the open detail under the error when its reload fails', async () => {
+    const c = construct();
+    const loading = c.ngOnInit();
+    calls[0].settle(listPage([1], 1));
+    await loading;
+    const open = c.OpenResponse('r-1');
+    calls[1].settle(detail('r-1'));
+    await open;
+
+    const reload = c.ReloadDetail();
+    calls[2].settle(refused('Too slow.'));
+    await reload;
+
+    expect(c.Detail()?.responseId).toBe('r-1');
+    expect(c.Error()).toContain('Too slow.');
+  });
+
+  it('clears an earlier reload failure when the next reload succeeds', async () => {
+    const c = construct();
+    const loading = c.ngOnInit();
+    calls[0].settle(listPage([1], 1));
+    await loading;
+    const open = c.OpenResponse('r-1');
+    calls[1].settle(detail('r-1'));
+    await open;
+    const failed = c.ReloadDetail();
+    calls[2].settle(refused('Too slow.'));
+    await failed;
+
+    const retried = c.ReloadDetail();
+    calls[3].settle(detail('r-1'));
+    await retried;
+
+    expect(c.Error()).toBeNull();
+  });
+
+  it('wires the detail\'s Reload in both of its hosts', () => {
+    const source = (file: string): string => readFileSync(join(__dirname, file), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+    expect(source('responses-tab.component.ts')).toContain('(Reload)="ReloadDetail()"');
+    expect(source('response-form.component.ts')).toContain('(Reload)="reloadDetail()"');
   });
 
   it('ignores a second click while a response is opening, so the reader lands on the one they picked', async () => {

@@ -1,0 +1,18 @@
+{
+  "entityName": "MJ: User Notification Types",
+  "primaryKey": {
+    "ID": "231405B3-CA10-4E78-9213-F15493CFD855"
+  },
+  "fields": {
+    "Name": "Form Automation Failed",
+    "Description": "Sent to a form's owner when the automations of a submitted response will not be retried (the event dead-lettered); the response's automation runs carry each step's error.",
+    "DefaultInApp": true,
+    "DefaultEmail": false,
+    "DefaultSMS": false,
+    "AllowUserPreference": true,
+    "Icon": "fa-triangle-exclamation",
+    "Color": "#D32F2F",
+    "AutoExpireDays": 30,
+    "Priority": 5
+  }
+}

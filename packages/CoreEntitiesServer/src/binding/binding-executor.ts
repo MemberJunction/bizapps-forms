@@ -378,7 +378,8 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<Bindin
       },
     };
   } catch (error) {
-    return fail('candidate', true, `Writing to "${config.targetEntityName}" failed: ${messageOf(error)}`);
+    // Not retryable: a Save() the entity layer refuses (validation, permission) refuses it the same way every attempt.
+    return fail('candidate', false, `Writing to "${config.targetEntityName}" failed: ${messageOf(error)}`);
   }
 }
 

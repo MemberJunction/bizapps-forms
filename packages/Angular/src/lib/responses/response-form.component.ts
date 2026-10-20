@@ -55,6 +55,7 @@ import { FormsResponseDetailComponent } from './response-detail.component';
         <mj-forms-response-detail
           [Detail]="d"
           [ShowBack]="false"
+          (Reload)="reloadDetail()"
           (OpenRecord)="openLinkedRecord($event)"></mj-forms-response-detail>
       }
 
@@ -142,22 +143,44 @@ export class ResponseFormComponent extends BaseFormComponent {
     return this.record.RespondentPerson || 'an anonymous respondent';
   }
 
+  /** Bumped by every read, so only the latest one lands when two overlap. */
+  private readGeneration = 0;
+
   override async ngOnInit(): Promise<void> {
     await super.ngOnInit();
-    await this.loadDetail();
+    // `busy` starts true, so the first open shows "Loading…" until this lands.
+    await this.readDetail('load');
   }
 
-  private async loadDetail(): Promise<void> {
-    this.busy = true;
+  /**
+   * The re-read the detail asks for after a replay changed the response. `busy` is left alone: the
+   * template draws "Loading…" instead of the detail while it is set, which would destroy the open
+   * detail (its inline state, its scroll). The old detail stays until the new one lands, and stays
+   * under the error banner if the read fails — as the Responses tab's `ReloadDetail` does.
+   */
+  protected async reloadDetail(): Promise<void> {
+    await this.readDetail('reload');
+  }
+
+  private async readDetail(verb: 'load' | 'reload'): Promise<void> {
+    const generation = ++this.readGeneration;
     this.error = null;
     try {
-      this.detail = await readResponseDetail(this.record.ID);
+      const detail = await readResponseDetail(this.record.ID);
+      if (generation === this.readGeneration) {
+        this.detail = detail;
+      }
     } catch (err) {
-      this.error = failureMessage(err, 'Failed to load this response.');
-      LogError(`ResponseFormComponent: loading response ${this.record.ID} failed — ${this.error}`);
+      const message = failureMessage(err, `Failed to ${verb} this response.`);
+      LogError(`ResponseFormComponent: ${verb === 'load' ? 'loading' : 'reloading'} response ${this.record.ID} failed — ${message}`);
+      if (generation === this.readGeneration) {
+        this.error = message;
+      }
     } finally {
-      this.busy = false;
-      this.cdr.markForCheck();
+      if (generation === this.readGeneration) {
+        this.busy = false;
+        this.cdr.markForCheck();
+      }
     }
   }
 

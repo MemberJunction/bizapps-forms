@@ -23,6 +23,7 @@ export const OPTIONS = 'MJ_BizApps_Forms: Form Question Options';
 export const SCREENS = 'MJ_BizApps_Forms: Form Screens';
 export const STYLES = 'MJ_BizApps_Forms: Form Styles';
 export const AUTOMATIONS = 'MJ_BizApps_Forms: Form Automations';
+export const AUTOMATION_EVENTS = 'MJ_BizApps_Forms: Form Automation Events';
 export const BINDINGS = 'MJ_BizApps_Forms: Form Entity Bindings';
 export const DISTRIBUTIONS = 'MJ_BizApps_Forms: Form Distributions';
 export const ACTIONS = 'MJ: Actions';
@@ -130,6 +131,11 @@ export function automationRow(overrides: Partial<FakeRow> & { ID: string }): Fak
     IsActive: true,
     ...overrides,
   };
+}
+
+/** An outbox event as the replay operation reads it: its response and its status. */
+export function automationEventRow(overrides: Partial<FakeRow> & { ID: string }): FakeRow {
+  return { FormResponseID: 'a8d1a6a4-0a53-4d52-9b62-0d5d0f6f1111', Status: 'DeadLetter', ...overrides };
 }
 
 export function bindingRow(overrides: Partial<FakeRow> & { ID: string }): FakeRow {

@@ -522,7 +522,7 @@ export class FormSubmissionEngine extends BaseSingleton<FormSubmissionEngine> {
     timer.mark('revoke');
 
     // The response's automations run now, from this process — detached, after the commit, never
-    // awaited: the respondent does not wait on them, and the 30-second sweep is only the safety net.
+    // awaited: the respondent does not wait on them, and the outbox sweep (about every 15 s) is only the safety net.
     if (committed.queuedEvent) {
       (seams.kick ?? ((responseId: string) => drainAfterCommit(responseId, provider, system)))(committed.responseId);
     }

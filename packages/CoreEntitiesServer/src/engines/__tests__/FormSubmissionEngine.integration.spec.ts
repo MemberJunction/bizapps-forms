@@ -41,7 +41,7 @@ import { FormAuthoringEngine } from '../FormAuthoringEngine.js';
 import { FormSubmissionEngine, QUOTA_REACHED_MESSAGE, SUBMIT_FAILED_MESSAGE } from '../FormSubmissionEngine.js';
 import { FormsRateLimiter } from '../../submission/rate-limit.js';
 import { OUTBOX_RESPONSE_SUBMITTED, type ResponseSubmittedQueue } from '../../automation/outbox/enqueue.js';
-import { sqlOutboxStore } from '../../automation/outbox/claim.js';
+import { replayDeadLetteredEvent, sqlOutboxStore } from '../../automation/outbox/claim.js';
 import type { RespondentSaveRequest } from '../../submission/save-request.js';
 import { FORMS_ENTITY } from '../../shared/entity-names.js';
 import type { mjBizAppsFormsFormAutomationRunEntity, mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
@@ -564,6 +564,33 @@ describe.skipIf(!ENABLED)('the automation outbox claim on SQL Server (#303)', ()
 
     expect(await store.Renew(event.ID, 'spec-renew')).toBe(true);
     expect(await store.Renew(event.ID, 'spec-intruder')).toBe(false);
+  }, 120_000);
+
+  it('a replay re-queues a dead-lettered event as a fresh replay due now, and leaves a Complete one alone', async () => {
+    const w = world!;
+    const [dead, done] = await savedResponses(w, 2);
+    const settle = (response: string, status: string): Promise<unknown[]> =>
+      scalar(
+        w,
+        `UPDATE __mj_BizAppsForms.FormAutomationEvent SET Status = '${status}', AttemptCount = 5, LastError = 'gave up', CompletedAt = SYSDATETIMEOFFSET(), NextAttemptAt = DATEADD(HOUR, 1, SYSDATETIMEOFFSET()) WHERE FormResponseID = '${response}'`,
+      );
+    await settle(dead, 'DeadLetter');
+    await settle(done, 'Complete');
+    const read = (response: string): Promise<{ ID: string; Status: string; AttemptCount: number; IsReplay: boolean; LastError: string | null; CompletedAt: Date | null; Due: number }[]> =>
+      scalar(
+        w,
+        `SELECT ID, Status, AttemptCount, IsReplay, LastError, CompletedAt, CASE WHEN NextAttemptAt <= SYSDATETIMEOFFSET() THEN 1 ELSE 0 END AS Due FROM __mj_BizAppsForms.FormAutomationEvent WHERE FormResponseID = '${response}'`,
+      );
+    const [deadBefore] = await read(dead);
+    const [doneBefore] = await read(done);
+
+    expect(await replayDeadLetteredEvent(w.provider, deadBefore.ID, w.system)).toBe(true);
+    expect(await replayDeadLetteredEvent(w.provider, doneBefore.ID, w.system)).toBe(false);
+
+    const [deadAfter] = await read(dead);
+    expect(deadAfter).toMatchObject({ Status: 'Pending', AttemptCount: 0, LastError: null, CompletedAt: null, Due: 1 });
+    expect(Boolean(deadAfter.IsReplay)).toBe(true);
+    expect(await read(done)).toEqual([doneBefore]);
   }, 120_000);
 
   it('a final is not claimed while an older event of the same response is still Running under a live lease', async () => {

@@ -1,6 +1,6 @@
 /**
  * The scheduled job type that sweeps the automation outbox (#303): `metadata/scheduled-job-types/`
- * names this class as its `DriverClass`, and `metadata/scheduled-jobs/` runs it every 30 seconds.
+ * names this class as its `DriverClass`, and `metadata/scheduled-jobs/` runs it on a 30-second cron (about every 15 s in practice; see `drain.ts`).
  *
  * It is the outbox's durable safety net, not its first responder: the submitting process drains its
  * own events right after commit. A sweep runs what that missed — retries whose backoff has passed,

@@ -15,7 +15,8 @@ metadata, so this is a `minor`. Closes #302, #75 and #103.
 
 - **MJ's scheduler on**, with a `systemUserEmail` that names an existing user (`scheduledJobs` in the
   host's `mj.config.cjs`; MJ enables it by default). It runs the seeded *Forms — Automation Outbox
-  Sweep* every 30 seconds, which retries failed automation attempts and recovers events a stopped
+  Sweep* on a 30-second cron (about every 15 s in practice: MJ's scheduler runs a job up to 1 s
+  early and again at the same mark), which retries failed automation attempts and recovers events a stopped
   process left behind. First attempts run in the submitting process right after commit, scheduler or
   not.
 - **`ALTER DATABASE … SET READ_COMMITTED_SNAPSHOT ON`.** No migration sets it. It removes a possible
@@ -85,8 +86,8 @@ metadata, so this is a `minor`. Closes #302, #75 and #103.
   never repeats a configured step that already succeeded for that event. The exception is a form that
   runs the four **legacy** on-submit hooks: they write no run rows, so a drain that dies mid-chain and
   is reclaimed fires them again. A failed attempt is retried with exponential backoff (2, 4, 8, 16 s,
-  run on the 30 s sweep, so about two minutes in all) for at most 5 attempts; a final submit then
-  dead-letters, a partial save is abandoned.
+  each waiting for the next sweep, so the fifth attempt lands 55 to 85 s after the submit) for at most
+  5 attempts; a final submit then dead-letters, a partial save is abandoned.
   `FORMS_HOOKS_BLOCKING`, the in-process hook path and the recovery sweep are gone. An anonymous
   respondent is never treated as
   verified: a binding whose identity rule MATCHES an existing record records the match on the

@@ -48,7 +48,7 @@ naming the entity, the missing permission and the hook that needs it.
 ### Durable entity actions run in-process for the runner
 
 Every hook above runs as a plain synchronous write inside the automation drain — after the submission
-has committed, from the submitting process (or from the 30-second outbox sweep for a retry; see
+has committed, from the submitting process (or from the outbox sweep, about every 15 s for a retry; see
 [`local-host.md`, Operating the automation outbox](local-host.md#operating-the-automation-outbox)). Some of those
 writes carry their own durable entity action — bizapps-common's `Common.LogActivity`, fired when
 `Upsert Respondent Person` creates a `Person` — and MJ can run a durable entity action two ways: an

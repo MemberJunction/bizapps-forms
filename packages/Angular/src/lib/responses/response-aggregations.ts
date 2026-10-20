@@ -13,6 +13,7 @@ import {
   foldQuestionId,
   renderAnswer,
   type FormsGetResponseDetailOutput,
+  type FormsResponseAutomationEvent,
   type FormsResponseAutomationRun,
   type FormsResponseBindingRecord,
   type FormsResponseListRow,
@@ -26,6 +27,7 @@ import { toDate } from '../shared/runview-dates';
 import type {
   ResponseAnswerView,
   ResponseAutomationAttempt,
+  ResponseAutomationEventView,
   ResponseBindingRecordView,
   ResponseDetail,
   ResponseFileView,
@@ -96,6 +98,7 @@ export function buildResponseDetail(output: FormsGetResponseDetailOutput): Respo
     labelsMissing: questions === null,
     unavailableSections: output.UnavailableSections,
     automationRuns: output.AutomationRuns.map(toAutomationAttempt),
+    automationEvents: output.AutomationEvents.map(toAutomationEventView),
     bindingRecords: output.BindingRecords.map(toBindingRecordView),
   };
 }
@@ -186,6 +189,18 @@ function toAutomationAttempt(run: FormsResponseAutomationRun): ResponseAutomatio
     outputSummary: runOutputText(run.OutputSummary),
     actionExecutionLogId: run.ActionExecutionLogID,
     aiAgentRunId: run.AIAgentRunID,
+  };
+}
+
+/** One automation event as the detail view shows it. */
+function toAutomationEventView(event: FormsResponseAutomationEvent): ResponseAutomationEventView {
+  return {
+    eventId: event.ID,
+    trigger: event.Trigger,
+    status: event.Status,
+    attemptCount: event.AttemptCount,
+    lastError: event.LastError,
+    completedAt: toDate(event.CompletedAt),
   };
 }
 
