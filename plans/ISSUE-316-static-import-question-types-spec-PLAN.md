@@ -37,7 +37,7 @@ None — the spec restricts the diff to moving one import statement out of the t
 - Consumes: `mjBizAppsFormsFormQuestionSchema` from `'../generated/entity_subclasses'`
 - Produces: synchronous test `'matches the generated QuestionType value list'` in `packages/Entities/src/contracts/question-types.spec.ts`
 
-- [ ] **Step 1: Verify the red condition (duration >= 50 ms before the fix)**
+- [x] **Step 1: Verify the red condition (duration >= 50 ms before the fix)**
 
 Run:
 `cd packages/Entities && npx vitest run src/contracts/question-types.spec.ts --reporter=verbose`
@@ -45,7 +45,7 @@ and
 `npx turbo test --force --only -- --reporter=verbose`
 Expected: `"matches the generated QuestionType value list"` takes ~480–550 ms alone and >2000 ms under full turbo load (exceeding the 50 ms ceiling).
 
-- [ ] **Step 2: Move `mjBizAppsFormsFormQuestionSchema` to a top-level static import and make the test callback synchronous**
+- [x] **Step 2: Move `mjBizAppsFormsFormQuestionSchema` to a top-level static import and make the test callback synchronous**
 
 In `packages/Entities/src/contracts/question-types.spec.ts`:
 1. Add at the top of the file:
@@ -71,7 +71,7 @@ In `packages/Entities/src/contracts/question-types.spec.ts`:
    });
    ```
 
-- [ ] **Step 3: Verify diff and run tests to confirm duration < 50 ms**
+- [x] **Step 3: Verify diff and run tests to confirm duration < 50 ms**
 
 Run:
 - `git diff origin/next -- packages/Entities/src/contracts/question-types.spec.ts`
@@ -83,6 +83,6 @@ Expected:
 - Diff touches only the added static import line, the removed `await import` line, and the removed `async` keyword.
 - All 22 tests in `question-types.spec.ts` pass and `"matches the generated QuestionType value list"` takes < 50 ms (typically 0–2 ms) both alone and under `npx turbo test --force --only -- --reporter=verbose`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Commit `packages/Entities/src/contracts/question-types.spec.ts` with `git commit -F <msg-file>`.
