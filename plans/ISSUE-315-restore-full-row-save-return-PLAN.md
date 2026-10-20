@@ -40,13 +40,15 @@
 
 - [ ] **Step 1:** Run `npx vitest run src/contracts/save-return-shape.spec.ts` in `packages/Entities`. Expected: 4 failed, 2 passed.
 - [ ] **Step 2:** Delete the metadata file. `grep -r datestamps_only metadata/` prints nothing.
-- [ ] **Step 3:** In the workdir run `npx mj codegen --skipfiles` (DB side; emits `migrations/codegen/CodeGen_Run_*.sql`).
+- [ ] **Step 3:** In the workdir run `npx mj codegen --skipfiles` (DB side; emits `migrations/codegen/CodeGen_Run_*.sql`) with a temporary `forceRegeneration` block in `mj.config.cjs` (`enabled`, `spCreate`, `spUpdate`, and an `entityWhereClause` scoped to the two entities). Do not commit that block. *Amended 2026-10-20 (gauntlet):* without it, MJ 6.1.6 CodeGen writes `spCreate`/`spUpdate` to the run file only for new or modified entities (`CodeGenLib/src/Database/sql_codegen.ts`, `logSQLForNewOrModifiedEntity`), and these two entities are unmodified, so the run file has no sections for Step 4.
 - [ ] **Step 4:** Write the new migration: header (supersedes the sproc definitions in `V202610171645` and `V202610172100`; published MJ expects the full row; `datestamps_only` needs MJ#5804, which is in no MJ tag; ships only the four sprocs and grants), then `-- CodeGen output (appended)`, then the run file's `spCreate`/`spUpdate` sections and their permission sections for Form Response Answers and Form Automation Runs, verbatim, schema replaced by `${flyway:defaultSchema}`. Exclude triggers, views, spDelete and every other entity. Delete the run file.
 - [ ] **Step 5:** Rewrite the changeset prose (level stays `minor`): the `datestamps_only` return is withdrawn and the four sprocs return the full row again because no published MJ supports the three-column return.
 - [ ] **Step 6:** Add to the docs paragraph: the restore migration redefines the four sprocs last, so a host keeps the full-row return.
 - [ ] **Step 7:** Spec passes (6/6). Commit.
 
 ### Task 2: Prove it on the slot database and API
+
+*Amended 2026-10-20 (gauntlet):* `agent/host-state.sql` and `agent/repro.sql`, the database `SBX_s2` and the port `4502` belonged to the implementer's sandbox slot; they are not in this repo. `agent/host-state.sql` re-applied the four procedures exactly as `V202610171645` and `V202610172100` ship them; `agent/repro.sql` is the repro script in #315. Use your own database and API port.
 
 - [ ] **Step 1 (converge):** apply `agent/host-state.sql` (shipped sprocs), run `pnpm run mj:migrate`, then `agent/repro.sql`: four tails end in `[vwFormResponseAnswers]`/`[vwFormAutomationRuns]`; both saves `SAVE OK`, `captured_rows = 1`.
 - [ ] **Step 2 (from scratch):** if the slot login can create a database, build it from all migrations and run the same checks; otherwise mark the row deferred with the reason.
