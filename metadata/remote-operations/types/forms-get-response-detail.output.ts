@@ -76,6 +76,22 @@ export interface FormsResponseAutomationRun {
     AIAgentRunID: string | null;
 }
 
+/** One automation event (an outbox row a save queued) this response owes or has run. */
+export interface FormsResponseAutomationEvent {
+    /** The `MJ_BizApps_Forms: Form Automation Events` row; a run's `FormAutomationEventID` names it. */
+    ID: string;
+    /** Which save queued it (the `FormAutomationEvent.Trigger` CHECK values). */
+    Trigger: 'OnComplete' | 'OnPartial';
+    /** Where it stands; `DeadLetter` is the one a replay can re-queue (the `FormAutomationEvent.Status` CHECK values). */
+    Status: 'Pending' | 'Running' | 'Complete' | 'DeadLetter' | 'Abandoned';
+    /** How many times a drain has attempted it. */
+    AttemptCount: number;
+    /** Why the last attempt failed; `null` when none did. */
+    LastError: string | null;
+    /** When it settled; `null` while it is still open. */
+    CompletedAt: string | null;
+}
+
 /** One business record this response's entity bindings created or merged into. */
 export interface FormsResponseBindingRecord {
     /** The `MJ_BizApps_Forms: Form Entity Binding Records` ledger row. */
@@ -105,6 +121,8 @@ export interface FormsGetResponseDetailOutput {
     Uploads: FormsResponseUpload[];
     /** Automation attempts, oldest first. */
     AutomationRuns: FormsResponseAutomationRun[];
+    /** Automation events the response's saves queued, oldest first. */
+    AutomationEvents: FormsResponseAutomationEvent[];
     /** Binding ledger rows, oldest first. */
     BindingRecords: FormsResponseBindingRecord[];
     /** The version that labelled the answers. When none was named, this is the version the response was submitted against, even if it could not be read. */

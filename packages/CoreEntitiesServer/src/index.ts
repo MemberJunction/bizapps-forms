@@ -224,6 +224,10 @@ export {
   GetResponseSummaryServerOperation,
   LoadGetResponseSummaryOperation,
 } from './operations/GetResponseSummaryServerOperation.js';
+export {
+  ReplayAutomationEventServerOperation,
+  LoadReplayAutomationEventOperation,
+} from './operations/ReplayAutomationEventServerOperation.js';
 export { ListResponsesServerOperation, LoadListResponsesOperation } from './operations/ListResponsesServerOperation.js';
 export {
   GetResponseDetailServerOperation,

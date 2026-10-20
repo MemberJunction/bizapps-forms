@@ -121,6 +121,7 @@ export const LIST_CHANGED_NOTICE = 'The list changed — refresh to see it.';
           <mj-forms-response-detail
             [Detail]="d"
             (Back)="CloseDetail()"
+            (Reload)="ReloadDetail()"
             (OpenRecord)="OpenRecord.emit($event)"></mj-forms-response-detail>
         }
       }
@@ -310,6 +311,40 @@ export class ResponsesTabComponent implements OnInit, OnDestroy {
     } finally {
       this.OpeningResponse.set(false);
       this.BusyChange.emit(false);
+    }
+  }
+
+  /**
+   * Re-read the open response after the detail changed it on the server (a replayed dead letter),
+   * labelled the way it was opened. The stale detail stays on screen until the new one lands, and
+   * under the error if the read fails.
+   *
+   * Not an open: it holds no `OpeningResponse`, so the reader can still pick another row, and it
+   * lands only while the detail it re-reads is still the one on screen. `generation` alone cannot
+   * say that — closing a detail is not a list reload — so a reader who pressed Back, or opened
+   * another response, before the read returned would otherwise have this one opened over them.
+   */
+  public async ReloadDetail(): Promise<void> {
+    const open = this.Detail();
+    const labelVersionId = this.LabelVersionID();
+    if (!open || labelVersionId === null) {
+      return;
+    }
+    const generation = this.generation;
+    const stillOpen = (): boolean => generation === this.generation && this.Detail() === open;
+    this.Error.set(null);
+    try {
+      const detail = await readResponseDetail(open.responseId, labelVersionId);
+      if (stillOpen()) {
+        this.Detail.set(detail);
+      }
+    } catch (err) {
+      const message = failureMessage(err, 'Failed to reload this response.');
+      if (stillOpen()) {
+        this.Error.set(message);
+      } else {
+        LogError(`Superseded reload of response ${open.responseId} (form ${this.FormID}): ${message}`);
+      }
     }
   }
 

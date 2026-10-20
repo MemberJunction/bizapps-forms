@@ -28,6 +28,7 @@
     "remote-operations",
     "scheduled-job-types",
     "scheduled-jobs",
+    "notification-types",
     "users",
     "user-roles"
   ],

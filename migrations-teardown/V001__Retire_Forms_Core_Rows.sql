@@ -10,9 +10,9 @@
 -- remove, and the next install re-INSERTs the same fixed UUIDs and fails on a primary-key
 -- collision. That is the whole reason the file exists.
 --
--- WHAT IS LISTED BELOW IS ONLY THE ROOTS. Fifty-one rows — the ones this app's migrations create
--- that nothing else creates: forty-eight from the metadata seed (nineteen before the #303 server
--- engines added twenty-nine), plus the three row-level-security filters V202608131600 adds for
+-- WHAT IS LISTED BELOW IS ONLY THE ROOTS. Fifty-three rows — the ones this app's migrations create
+-- that nothing else creates: fifty from the metadata seed (nineteen before the #303 server
+-- engines added twenty-nine, then #311 two), plus the three row-level-security filters V202608131600 adds for
 -- #39. (This line said "Eighteen" while the list held nineteen, from
 -- the file's first revision until 2026-08-13. Recounted rather than incremented, which is how the
 -- off-by-one was found; if you add a row here, count the list again instead of trusting this number.) Their children are NOT listed, because listing them is what breaks: a static
@@ -144,6 +144,7 @@ INSERT INTO #FormsDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'RemoteOperation',   '00DC6D34-937F-48C2-9AA8-34DC06468A38', 0),  -- Forms.GetRespondentForm
     ('${mjSchema}', 'RemoteOperation',   '8D4E68A9-73CA-4C10-95F1-A8BD76806E58', 0),  -- Forms.SaveResponse
     ('${mjSchema}', 'RemoteOperation',   '2A8946C7-0045-4B58-9B34-5E030D9D0DF0', 0),  -- Forms.DeleteTemplate
+    ('${mjSchema}', 'RemoteOperation',   'B8B91983-F8A1-492B-BD42-882AD4746561', 0),  -- Forms.ReplayAutomationEvent (#311)
     ('${mjSchema}', 'RemoteOperationCategory', '180A2931-7AAE-4545-9F2C-FD933176DC3D', 0),  -- Forms
     -- Reporting queries (QueryPermission.QueryID is NOT NULL, so their permissions follow).
     ('${mjSchema}', 'Query',             'B51015E9-0EE4-4F44-B4CB-F9948D6394EC', 0),  -- Forms: Response Completion Stats
@@ -156,7 +157,12 @@ INSERT INTO #FormsDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'APIScope',          'E816B2EA-F669-40B2-895B-3928245AF1B6', 0),  -- forms:write
     -- The on-submit automation outbox sweep: its job type and the job (the job's runs follow).
     ('${mjSchema}', 'ScheduledJob',      '918925E8-CB7C-43AF-A743-A5AB3998E106', 0),  -- Forms — Automation Outbox Sweep
-    ('${mjSchema}', 'ScheduledJobType',  '13CCEF27-0BE4-4194-945C-53FAD408F69A', 0);  -- Forms Automation Outbox Drain
+    ('${mjSchema}', 'ScheduledJobType',  '13CCEF27-0BE4-4194-945C-53FAD408F69A', 0),  -- Forms Automation Outbox Drain
+    -- The dead-letter notice type (#311). Nothing it hangs off is ours — it has no reference to any
+    -- row above — so nothing would reach it unless it is a root. Its UserNotification rows point at it
+    -- through a NULLABLE NotificationTypeID: they are the users' inbox, so they are released, not deleted.
+    -- A user's UserNotificationPreference for it is a NOT NULL child and goes with it.
+    ('${mjSchema}', 'UserNotificationType', '231405B3-CA10-4E78-9213-F15493CFD855', 0);  -- Form Automation Failed
 
 -- MJ's own AtomicBatchScript sets this, and for the same reason: with XACT_ABORT OFF an error
 -- inside EXEC sp_executesql does NOT abort the batch, so the loop would keep issuing destructive

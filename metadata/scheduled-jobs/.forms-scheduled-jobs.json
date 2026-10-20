@@ -3,8 +3,11 @@
     "_comments": [
       "THE AUTOMATION OUTBOX SWEEP. MJ's SchedulingEngine is the mechanism — no external cron.",
       "",
-      "  · CronExpression `*/30 * * * * *` — SIX fields, seconds first: every 30 seconds. A first",
-      "    attempt does not wait for it (the submitting process drains its own events after commit);",
+      "  · CronExpression `*/30 * * * * *` — SIX fields, seconds first: every 30 seconds on paper.",
+      "    The scheduler treats a job as due up to 1 s early and then runs it again at the same mark, so",
+      "    the sweep in fact runs about every 15 s, and an event's fifth attempt lands 55 to 85 s after",
+      "    the submit. A first attempt does not wait for it (the submitting process drains its own",
+      "    events after commit);",
       "    the sweep runs retries once their backoff has passed and recovers events a dead process",
       "    left Running once their 120-second lease expires.",
       "",

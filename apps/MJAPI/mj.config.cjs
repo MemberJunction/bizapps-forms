@@ -17,7 +17,7 @@ module.exports = {
     // (forms-server host-readiness check).
     grantableRoleNames: ['Form Respondent'],
   },
-  // MJ's scheduler (#303): it runs the Forms automation outbox sweep every 30 seconds — retries, and
+  // MJ's scheduler (#303): it runs the Forms automation outbox sweep (30-second cron, about every 15 s in practice) — retries, and
   // events a stopped process left behind (first attempts run in the submitting process, after commit,
   // with or without this). MJ enables it by default; stated here so the harness does not depend on
   // that. `systemUserEmail` must name an existing user — the sweep reads as it (the steps themselves

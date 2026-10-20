@@ -220,7 +220,7 @@ Error messages carry their **scope**, which tells you who has to fix it:
 (`packages/CoreEntitiesServer/src/engines/automation-run.ts`). Its one caller is the automation
 drain (`packages/CoreEntitiesServer/src/automation/outbox/drain.ts`), which runs each
 `FormAutomationEvent` the submit path wrote in its own transaction — right after the commit from the
-submitting process, and from the 30-second outbox sweep for retries. Running is at least once:
+submitting process, and from the outbox sweep (about every 15 s) for retries. Running is at least once:
 - each step's `FormAutomationRun` row is its idempotency record for that EVENT: the row carries the
   event's id (`FormAutomationEventID`), and only rows carrying it count;
 - `Succeeded`, `Failed` (a permanent failure) and `Skipped` are terminal for the event; a step

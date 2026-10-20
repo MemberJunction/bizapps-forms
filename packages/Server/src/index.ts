@@ -28,6 +28,7 @@ import {
   LoadGetResponseDetailOperation,
   LoadGetResponseSummaryOperation,
   LoadIssueDistributionLinkOperation,
+  LoadReplayAutomationEventOperation,
   LoadListResponsesOperation,
   LoadOpenDistributionOperation,
   LoadPublishFormOperation,
@@ -161,6 +162,7 @@ export function LoadBizAppsFormsServer(): void {
     LoadSaveAutomationOperation();
     LoadReorderAutomationsOperation();
     LoadRemoveAutomationOperation();
+    LoadReplayAutomationEventOperation();
     // The respondent operations (#303 Task 8): what an anonymous respondent loads, and every save.
     LoadGetRespondentFormOperation();
     LoadSaveResponseOperation();

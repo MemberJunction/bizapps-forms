@@ -11,7 +11,7 @@ import { FormReportingError } from '../reporting-errors.js';
 import { REPORT_QUERY } from '../report-queries.js';
 import { fakeEntityId, makeDefinition, makeVersion, type FakeProvider } from '../../testing/index.js';
 import { ANSWERS, DEFINITION, FORM_ID, Q, RESPONSES, VERSION_ID, gid } from './parity-fixture.js';
-import { ANSWERS as ANSWER_TABLE, READER, RESPONSES as RESPONSE_TABLE, RUNS, SYSTEM, UPLOADS, VERSIONS, reportingWorld, type ReportingFixture } from './reporting-world.js';
+import { ANSWERS as ANSWER_TABLE, EVENTS, READER, RESPONSES as RESPONSE_TABLE, RUNS, SYSTEM, UPLOADS, VERSIONS, reportingWorld, type ReportingFixture } from './reporting-world.js';
 
 vi.mock('@memberjunction/core', async () => {
   const actual = await vi.importActual<typeof import('@memberjunction/core')>('@memberjunction/core');
@@ -327,6 +327,11 @@ describe('GetResponseDetail', () => {
           ErrorMessage: null, OutputSummary: '{"ok":true}', ActionExecutionLogID: null, AIAgentRunID: null, __mj_CreatedAt: 1,
         },
       ],
+      events: [
+        { ID: gid(8201), FormResponseID: R1, Trigger: 'OnComplete', Status: 'Complete', AttemptCount: 1, LastError: null, CompletedAt: new Date('2026-09-01T10:02:03Z'), __mj_CreatedAt: 1 },
+        { ID: gid(8202), FormResponseID: R1, Trigger: 'OnComplete', Status: 'DeadLetter', AttemptCount: 5, LastError: 'gave up', CompletedAt: null, __mj_CreatedAt: 2 },
+        { ID: gid(8203), FormResponseID: gid(1002), Trigger: 'OnPartial', Status: 'Pending', AttemptCount: 0, LastError: null, CompletedAt: null, __mj_CreatedAt: 3 },
+      ],
       ledger: [
         { ID: gid(8301), FormResponseID: R1, BindingID: gid(8400), Binding: 'Contact', TargetEntityID: fakeEntityId(TARGET_ENTITY), TargetRecordID: gid(8500), Outcome: 'Created', WrittenFields: '["Email"]', __mj_CreatedAt: 1 },
         { ID: gid(8302), FormResponseID: R1, BindingID: gid(8400), Binding: 'Contact', TargetEntityID: gid(8999), TargetRecordID: null, Outcome: 'Skipped', WrittenFields: null, __mj_CreatedAt: 2 },
@@ -360,6 +365,31 @@ describe('GetResponseDetail', () => {
     expect(JSON.parse(detail.DefinitionJSON ?? '{}')).toMatchObject({ formVersionId: VERSION_ID });
     expect(new Set(db.viewCalls.map((c) => c.user))).toEqual(new Set([READER]));
     expect(db.viewCalls.find((c) => c.params.EntityName === RUNS)?.params.Fields).toContain('FormAutomationEventID');
+  });
+
+  it('returns the response’s automation events, oldest first, read past the cache', async () => {
+    const db = reportingWorld(detailFixture());
+
+    const detail = await engine.GetResponseDetail({ responseId: R1 }, db.provider, READER);
+
+    expect(detail.AutomationEvents).toEqual([
+      { ID: gid(8201), Trigger: 'OnComplete', Status: 'Complete', AttemptCount: 1, LastError: null, CompletedAt: '2026-09-01T10:02:03.000Z' },
+      { ID: gid(8202), Trigger: 'OnComplete', Status: 'DeadLetter', AttemptCount: 5, LastError: 'gave up', CompletedAt: null },
+    ]);
+    const read = db.viewCalls.find((c) => c.params.EntityName === EVENTS);
+    expect(read?.params.BypassCache).toBe(true);
+    expect(read?.params.ExtraFilter).toBe(`FormResponseID='${R1}'`);
+  });
+
+  it('reports the events as unavailable when they cannot be read, and still returns the rest', async () => {
+    const db = reportingWorld(detailFixture(), { failRunViewFor: EVENTS });
+
+    const detail = await engine.GetResponseDetail({ responseId: R1 }, db.provider, READER);
+
+    expect(detail.UnavailableSections).toEqual(['automation events']);
+    expect(detail.AutomationEvents).toEqual([]);
+    expect(detail.AutomationRuns).toHaveLength(1);
+    expect(detail.Answers).toHaveLength(16);
   });
 
   it('reports a satellite section it may not read as unavailable, logged, and still returns the response', async () => {

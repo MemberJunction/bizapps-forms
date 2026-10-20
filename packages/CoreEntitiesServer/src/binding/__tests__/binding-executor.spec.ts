@@ -307,10 +307,10 @@ describe('executeBinding', () => {
       expect(gateway.writes).toEqual([]);
     });
 
-    it('reports a failed write as retryable', async () => {
+    it('reports a failed write as NOT retryable — a Save() the entity layer refuses fails the same way every attempt', async () => {
       const result = await run(new FakeGateway({ writeThrows: true }));
 
-      expect(!result.ok && result.failure.retryable).toBe(true);
+      expect(!result.ok && result.failure.retryable).toBe(false);
     });
   });
 });
