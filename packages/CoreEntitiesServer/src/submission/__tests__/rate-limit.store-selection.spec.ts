@@ -4,7 +4,7 @@
  * construction would see no Redis and keep per-process counts for the life of the process.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { InMemoryLocalStorageProvider, LogStatus, Metadata, type IMetadataProvider } from '@memberjunction/core';
+import { InMemoryLocalStorageProvider, LogError, LogStatus, Metadata, type IMetadataProvider } from '@memberjunction/core';
 import { RedisLocalStorageProvider } from '@memberjunction/redis-provider';
 import { FormsRateLimiter, MemoryRateLimitStore } from '../rate-limit.js';
 import { RedisRateLimitStore, type RateLimitRedisClient } from '../redis-rate-limit-store.js';
@@ -78,6 +78,23 @@ describe('FormsRateLimiter store selection', () => {
     await expect(FormsRateLimiter.Instance.charge(gate)).resolves.toEqual({ allowed: true });
 
     expect(FormsRateLimiter.Instance.activeStoreForTests()).toBeInstanceOf(MemoryRateLimitStore);
+  });
+
+  it('logs a shared-but-not-Redis provider with LogError, which production does not suppress', async () => {
+    // LogStatus is hidden in production; this misconfiguration means the caps are NOT shared, so an
+    // operator has to be able to see it there.
+    class LookalikeProvider extends InMemoryLocalStorageProvider {
+      public readonly SharedAcrossProcesses = true;
+    }
+    installLocalStorage(new LookalikeProvider());
+    vi.mocked(LogError).mockClear();
+
+    await FormsRateLimiter.Instance.charge(gate);
+
+    expect(FormsRateLimiter.Instance.activeStoreForTests()).toBeInstanceOf(MemoryRateLimitStore);
+    expect(LogError).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(LogError).mock.calls[0][0]).toMatch(/LookalikeProvider.*SharedAcrossProcesses/);
+    expect(LogStatus).not.toHaveBeenCalled();
   });
 
   it('logs the pick once, not on every charge', async () => {

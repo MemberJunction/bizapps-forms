@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RedisLocalStorageProvider } from '@memberjunction/redis-provider';
-import { RATE_LIMIT_KEY_PREFIX, RedisRateLimitStore, type RateLimitRedisClient } from '../redis-rate-limit-store.js';
+import { RATE_LIMIT_KEY_PREFIX, RedisRateLimitStore } from '../redis-rate-limit-store.js';
 
 const url = process.env.FORMS_TEST_REDIS_URL;
 
@@ -31,6 +31,19 @@ describe('RedisRateLimitStore without Redis', () => {
     await expect(store.charge([{ key: 'k', max: 1 }], 1000, 0)).rejects.toThrow(/OK/);
   });
 
+  it('sends the window as an integer, because PEXPIRE rejects a fraction after the ZADD has run', async () => {
+    // A fractional FORMS_RATELIMIT_WINDOW_MS would otherwise leave a key with no TTL.
+    const send = vi.fn(async () => -1);
+    const store = new RedisRateLimitStore({ eval: send });
+
+    await store.charge([{ key: 'k', max: 1 }], 1500.5, 0);
+
+    // eval(script, numKeys, ...keys, now, windowMs, member, ...maxes) with one key: window is arg 4.
+    const windowArg = (send.mock.calls[0] as unknown[])[4];
+    expect(windowArg).toBe(1501);
+    expect(Number.isInteger(windowArg)).toBe(true);
+  });
+
   it('lets an error from Redis propagate', async () => {
     const store = new RedisRateLimitStore({
       eval: async () => {
@@ -40,6 +53,12 @@ describe('RedisRateLimitStore without Redis', () => {
 
     await expect(store.charge([{ key: 'k', max: 1 }], 1000, 0)).rejects.toThrow('connection refused');
   });
+});
+
+// In CI a missing URL must fail, not skip: a skipped Lua-script spec reads as green while testing
+// nothing (turbo's strict env mode strips the variable unless turbo.json's `test` task declares it).
+it.runIf(Boolean(process.env.CI) && !url)('FORMS_TEST_REDIS_URL must be set in CI', () => {
+  throw new Error('FORMS_TEST_REDIS_URL is not set in CI, so the real-Redis rate-limit spec would be skipped.');
 });
 
 describe.skipIf(!url)('RedisRateLimitStore against a real Redis', () => {

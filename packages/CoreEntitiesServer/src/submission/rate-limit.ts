@@ -216,7 +216,10 @@ export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
       LogStatus('Forms rate limit: window counts are shared through Redis (RedisLocalStorageProvider).');
     } else {
       this.picked = { store: this.memory };
-      LogStatus(describePerProcessPick(provider));
+      const pick = describePerProcessPick(provider);
+      // LogError for the misconfiguration: MJ suppresses LogStatus in production, and this is the
+      // line that tells an operator the caps are not shared when they were meant to be.
+      (pick.isMisconfiguration ? LogError : LogStatus)(pick.message);
     }
     return this.picked;
   }
@@ -292,16 +295,21 @@ export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
  * `@memberjunction/redis-provider` making the `instanceof` miss, and this line is how an operator
  * finds out the caps are not shared.
  */
-function describePerProcessPick(provider: unknown): string {
+function describePerProcessPick(provider: unknown): { message: string; isMisconfiguration: boolean } {
   const shared = (provider as { SharedAcrossProcesses?: unknown } | undefined)?.SharedAcrossProcesses === true;
   if (!shared) {
-    return 'Forms rate limit: window counts are kept per process (no Redis LocalStorageProvider).';
+    return {
+      message: 'Forms rate limit: window counts are kept per process (no Redis LocalStorageProvider).',
+      isMisconfiguration: false,
+    };
   }
   const name = (provider as object).constructor?.name ?? 'unknown';
-  return (
-    `Forms rate limit: window counts are kept per process — the LocalStorageProvider (${name}) reports ` +
-    'SharedAcrossProcesses but is not a RedisLocalStorageProvider from this copy of @memberjunction/redis-provider.'
-  );
+  return {
+    message:
+      `Forms rate limit: window counts are kept per process — the LocalStorageProvider (${name}) reports ` +
+      'SharedAcrossProcesses but is not a RedisLocalStorageProvider from this copy of @memberjunction/redis-provider.',
+    isMisconfiguration: true,
+  };
 }
 
 /**

@@ -96,7 +96,12 @@ export class RedisRateLimitStore implements RateLimitStore {
     const keys = gates.map((gate) => `${RATE_LIMIT_KEY_PREFIX}${gate.key}`);
     const maxes = gates.map((gate) => gate.max);
 
-    const reply = await this.client.eval(CHARGE_SCRIPT, keys.length, ...keys, now, windowMs, member, ...maxes);
+    // Rounded up to a whole millisecond: the script ends in PEXPIRE, which rejects a fraction —
+    // after the ZADD has already run, with no rollback, leaving a key with no TTL and failing every
+    // later charge. A window of 1500.5 ms becomes 1501 (never shorter than configured).
+    const windowArg = Math.ceil(windowMs);
+
+    const reply = await this.client.eval(CHARGE_SCRIPT, keys.length, ...keys, now, windowArg, member, ...maxes);
 
     if (reply === -1) {
       return { allowed: true };
