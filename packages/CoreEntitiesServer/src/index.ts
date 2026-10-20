@@ -255,7 +255,14 @@ export type {
   RespondentSaveResult,
 } from './submission/save-request.js';
 export { getPublicSubmitConfig, resetPublicSubmitConfigForTests, type PublicSubmitConfig } from './submission/config.js';
-export { FormsRateLimiter, rateLimitedMessage, type RateLimitGate, type RateLimitResult } from './submission/rate-limit.js';
+export {
+  FormsRateLimiter,
+  MemoryRateLimitStore,
+  rateLimitedMessage,
+  type RateLimitGate,
+  type RateLimitResult,
+  type RateLimitStore,
+} from './submission/rate-limit.js';
 export { abuseIdentity, hashSessionId, warnOnceIfAbuseKeyingDegraded } from './submission/source-metadata.js';
 export { distributionWindowClosed, distributionWindowRefusal, type DistributionWindowRefusal } from './submission/distribution-window.js';
 export { distributionQuotaExceeded } from './submission/quota.js';

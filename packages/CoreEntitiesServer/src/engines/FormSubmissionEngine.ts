@@ -374,7 +374,7 @@ export class FormSubmissionEngine extends BaseSingleton<FormSubmissionEngine> {
       sessionId: request.caller.sessionId,
       clientIpHash: request.caller.ipHash,
     };
-    const limit = FormsRateLimiter.Instance.charge(
+    const limit = await FormsRateLimiter.Instance.charge(
       rateLimitGatesFor(gate, resolved.distribution.ID, preliminary.terminalCompletion, preliminary.knockout !== undefined),
     );
     if (!limit.allowed) {

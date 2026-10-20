@@ -78,7 +78,7 @@ vi.mock('../resume-deps', () => ({
       inviteFor: async () => ({ ok: false }),
       revokeInvite: async () => undefined,
       scopeOf: () => undefined,
-      allowRequest: () => true,
+      allowRequest: async () => true,
       cookieFor: () => '',
       clearCookie: () => '',
       callerKey: ctx.callerKey,
@@ -199,35 +199,39 @@ describe('checkRedeemRateLimit', () => {
     FormsRateLimiter.Instance.resetForTests();
   });
 
-  it('admits up to the ceiling and refuses the next request from the same caller', () => {
+  it('admits up to the ceiling and refuses the next request from the same caller', async () => {
     process.env.FORMS_REDEEM_IP_MAX = '3';
     const caller = 'a'.repeat(64);
-    const verdicts = [1, 2, 3, 4].map(() => checkRedeemRateLimit(caller).allowed);
+    // Sequential on purpose: each charge must land before the next is consulted.
+    const verdicts: boolean[] = [];
+    for (let i = 0; i < 4; i++) {
+      verdicts.push((await checkRedeemRateLimit(caller)).allowed);
+    }
     expect(verdicts).toEqual([true, true, true, false]);
   });
 
-  it('tells a refused caller how long to wait', () => {
+  it('tells a refused caller how long to wait', async () => {
     process.env.FORMS_REDEEM_IP_MAX = '1';
     const caller = 'b'.repeat(64);
-    checkRedeemRateLimit(caller);
-    const refused = checkRedeemRateLimit(caller);
+    await checkRedeemRateLimit(caller);
+    const refused = await checkRedeemRateLimit(caller);
     expect(refused.allowed).toBe(false);
     expect(refused.retryAfterMs).toBeGreaterThan(0);
   });
 
-  it('gives each caller their own budget', () => {
+  it('gives each caller their own budget', async () => {
     process.env.FORMS_REDEEM_IP_MAX = '1';
-    checkRedeemRateLimit('c'.repeat(64));
+    await checkRedeemRateLimit('c'.repeat(64));
     // A different caller must not inherit the first one's spent budget: a shared bucket would let
     // one caller refuse the form for everyone, which is the failure the IP keying exists to avoid.
-    expect(checkRedeemRateLimit('d'.repeat(64)).allowed).toBe(true);
+    expect((await checkRedeemRateLimit('d'.repeat(64))).allowed).toBe(true);
   });
 
-  it('admits everything when the caller cannot be identified', () => {
+  it('admits everything when the caller cannot be identified', async () => {
     process.env.FORMS_REDEEM_IP_MAX = '1';
     // Deliberate no-op rather than a shared bucket — see the module note. Two calls, both admitted.
-    expect(checkRedeemRateLimit(undefined).allowed).toBe(true);
-    expect(checkRedeemRateLimit(undefined).allowed).toBe(true);
+    expect((await checkRedeemRateLimit(undefined)).allowed).toBe(true);
+    expect((await checkRedeemRateLimit(undefined)).allowed).toBe(true);
   });
 });
 

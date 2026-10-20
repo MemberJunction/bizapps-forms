@@ -31,34 +31,29 @@ export interface RateLimitGate {
   max: number;
 }
 
-export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
+/**
+ * Where the sliding windows live. ONE atomic consult-then-charge: every gate is consulted before
+ * any is charged, a refusal charges nothing (but keeps the consulted buckets alive), and
+ * `retryAfterMs` is the longest wait across the gates that refused.
+ */
+export interface RateLimitStore {
+  charge(gates: readonly RateLimitGate[], windowMs: number, now: number): Promise<RateLimitResult>;
+}
+
+/** The in-process store: a Map of per-key hit timestamps, bounded by `rateLimitMaxKeys`. */
+export class MemoryRateLimitStore implements RateLimitStore {
   /** key -> ascending list of hit timestamps (ms epoch) within the window. */
   private readonly hits = new Map<string, number[]>();
 
-  public static get Instance(): FormsRateLimiter {
-    return super.getInstance<FormsRateLimiter>();
-  }
-
-  /**
-   * Consult every gate and, if all of them admit, charge one hit to each.
-   *
-   * ONE call rather than a check followed by a charge, because the two must not be separable.
-   * Every gate has to be consulted before ANY is charged — otherwise a request the second gate
-   * refuses has already spent the respondent's budget in the first — and a refusal has to keep
-   * the buckets it consulted alive, which a caller who merely "checked" would forget to do. Both
-   * obligations live in here so no call site can get them wrong.
-   *
-   * `retryAfterMs` is the longest wait across the gates that refused: the caller has to clear all
-   * of them, not the nearest one.
-   */
-  public charge(gates: readonly RateLimitGate[], now: number = Date.now()): RateLimitResult {
-    const { rateLimitWindowMs } = getPublicSubmitConfig();
+  // Async to satisfy the store seam; the body is synchronous, so nothing can interleave between
+  // the consult and the charge and the pair stays atomic within this process.
+  public async charge(gates: readonly RateLimitGate[], windowMs: number, now: number): Promise<RateLimitResult> {
     let retryAfterMs: number | undefined;
 
     for (const gate of gates) {
-      const recent = this.recentHits(gate.key, now);
+      const recent = this.recentHits(gate.key, windowMs, now);
       if (recent.length >= gate.max) {
-        retryAfterMs = Math.max(retryAfterMs ?? 0, Math.max(0, recent[0] + rateLimitWindowMs - now));
+        retryAfterMs = Math.max(retryAfterMs ?? 0, Math.max(0, recent[0] + windowMs - now));
       }
     }
 
@@ -69,18 +64,23 @@ export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
       // faster than an idle one and the key cap below would evict it — handing a caller a fresh
       // budget precisely for having exhausted the last one.
       for (const gate of gates) {
-        this.markInUse(gate.key, now);
+        this.markInUse(gate.key, windowMs, now);
       }
       return { allowed: false, retryAfterMs };
     }
 
     for (const gate of gates) {
-      const recent = this.recentHits(gate.key, now);
+      const recent = this.recentHits(gate.key, windowMs, now);
       recent.push(now);
       this.store(gate.key, recent);
     }
     this.evictBeyondKeyCap();
     return { allowed: true };
+  }
+
+  /** Drop all recorded windows. */
+  public reset(): void {
+    this.hits.clear();
   }
 
   /**
@@ -90,9 +90,9 @@ export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
    * remembering, and creating an empty entry for it would let a caller grow the store through
    * requests that were refused for some other reason entirely.
    */
-  private markInUse(key: string, now: number): void {
+  private markInUse(key: string, windowMs: number, now: number): void {
     if (this.hits.has(key)) {
-      this.store(key, this.recentHits(key, now));
+      this.store(key, this.recentHits(key, windowMs, now));
     }
   }
 
@@ -127,14 +127,38 @@ export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
   }
 
   /** This key's still-live timestamps, as a fresh array (never the stored one). */
-  private recentHits(key: string, now: number): number[] {
-    const windowStart = now - getPublicSubmitConfig().rateLimitWindowMs;
+  private recentHits(key: string, windowMs: number, now: number): number[] {
+    const windowStart = now - windowMs;
     return (this.hits.get(key) ?? []).filter((ts) => ts > windowStart);
+  }
+}
+
+export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
+  private readonly memory = new MemoryRateLimitStore();
+
+  public static get Instance(): FormsRateLimiter {
+    return super.getInstance<FormsRateLimiter>();
+  }
+
+  /**
+   * Consult every gate and, if all of them admit, charge one hit to each.
+   *
+   * ONE call rather than a check followed by a charge, because the two must not be separable.
+   * Every gate has to be consulted before ANY is charged — otherwise a request the second gate
+   * refuses has already spent the respondent's budget in the first — and a refusal has to keep
+   * the buckets it consulted alive, which a caller who merely "checked" would forget to do. Both
+   * obligations live in the store, so no call site can get them wrong.
+   *
+   * `retryAfterMs` is the longest wait across the gates that refused: the caller has to clear all
+   * of them, not the nearest one.
+   */
+  public async charge(gates: readonly RateLimitGate[], now: number = Date.now()): Promise<RateLimitResult> {
+    return this.memory.charge(gates, getPublicSubmitConfig().rateLimitWindowMs, now);
   }
 
   /** Test-only: drop all recorded windows. */
   public resetForTests(): void {
-    this.hits.clear();
+    this.memory.reset();
   }
 }
 

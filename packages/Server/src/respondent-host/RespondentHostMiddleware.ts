@@ -382,7 +382,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       return;
     }
     try {
-      const limit = checkRedeemRateLimit(currentRequestIdentity()?.ipHash);
+      const limit = await checkRedeemRateLimit(currentRequestIdentity()?.ipHash);
       if (!limit.allowed) {
         // This door's own per-IP meter and core's redeem meter are different budgets, but they are
         // the SAME fact to the respondent — "this network, too many times" — so they get the same
