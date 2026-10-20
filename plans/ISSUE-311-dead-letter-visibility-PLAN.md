@@ -1,10 +1,17 @@
 # Issue #311 — make an automation dead letter visible and recoverable — Implementation Plan
 
+> **Status: implemented in PR #317.** The text below was corrected after review to describe the code as
+> shipped. Where the first draft differed, the task says so: the dead-letter log line moved out of
+> `settlementFor` (Task 1); the replay refuses a non-GUID id before any SQL (Tasks 5, 7); the server
+> operation is registered from `packages/Server/src/index.ts` and drains as the system user through its
+> own provider (Task 7); the Responses tab's reload reads on its own (Task 9); the teardown retires the
+> two new core rows (Task 6).
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A final submit's `DeadLetter` logs an error, notifies the form's owner through MJ notifications, and can be replayed from the response detail panel; two diagnosis corrections land with it.
 
-**Architecture:** The drain's `settlementFor` keeps deciding the settlement; a new `dead-letter-notice.ts` beside it does the best-effort owner lookup and send on its own isolated provider, behind a seam. The replay is one fenced `UPDATE` in `claim.ts`, driven by a new Manual Remote Operation `Forms.ReplayAutomationEvent` that then drains the one response. The detail panel reads the response's events through `Forms.GetResponseDetail`.
+**Architecture:** The drain's `settlementFor` keeps deciding the settlement and hands back the steps it closed; `runAndSettle` writes the dead-letter log line and calls the notice only after `store.Settle` succeeded. A new `dead-letter-notice.ts` beside it does the best-effort owner lookup and send on its own isolated provider, behind a seam. The replay is one fenced `UPDATE` in `claim.ts`, driven by a new Manual Remote Operation `Forms.ReplayAutomationEvent` that then drains the one response. The detail panel reads the response's events through `Forms.GetResponseDetail`.
 
 **Tech Stack:** TypeScript, Vitest, MJ 6.1.6 (`@memberjunction/core`, `@memberjunction/notifications`), Angular 21 standalone components.
 
@@ -36,14 +43,14 @@
 ### Task 1: A final's dead letter logs one error
 
 **Files:**
-- Modify: `packages/CoreEntitiesServer/src/automation/outbox/drain.ts` (`settlementFor`)
+- Modify: `packages/CoreEntitiesServer/src/automation/outbox/drain.ts` (`settlementFor` returns the closed steps; `runAndSettle` logs)
 - Test: `packages/CoreEntitiesServer/src/automation/outbox/__tests__/drain.spec.ts` (`describe('giving up')`)
 
 **Interfaces:** Produces nothing new.
 
 - [ ] **Step 1: Write the failing test** — `it('a final dead letter logs ONE error line naming the response, the trigger and the steps closed')`: `engine.next = failing`, `claimed({ AttemptCount: MAX_ATTEMPTS })`; filter `logged` for `'dead-lettered'`; expect length 1, containing `RESPONSE`, `'OnComplete'`, `'step-a, step-b'`.
 - [ ] **Step 2: Run** `cd packages/CoreEntitiesServer && npx vitest run src/automation/outbox/__tests__/drain.spec.ts` — expect the new test FAILS (0 lines).
-- [ ] **Step 3: Implement** — in the non-partial branch of `settlementFor`, one `LogError` shaped like the Abandoned line: `[Forms automation drain] ${event.Trigger} automations of response ${id} dead-lettered: ${reason} Steps closed: ${closed list or 'none'}.` Share the "steps closed" formatting between the two branches.
+- [ ] **Step 3: Implement** — one `LogError` shaped like the Abandoned line: `[Forms automation drain] ${event.Trigger} automations of response ${id} dead-lettered: ${reason} Steps closed: ${closed list or 'none'}.` Share the "steps closed" formatting between the two lines (`stepsClosed` in `dead-letter-notice.ts`). As shipped, the line is written in `runAndSettle`, outside the settle's `try` and only after `store.Settle` returned true, so a drain that lost its lease logs no dead letter (the first draft put it in `settlementFor`'s non-partial branch, before the settle).
 - [ ] **Step 4: Run** the spec — all pass. **Step 5: Commit** `feat(automation): log a final submit's dead letter`.
 
 ### Task 2: Notify the form's owner of a final's dead letter
@@ -108,7 +115,7 @@
 export async function replayDeadLetteredEvent(provider: DatabaseProviderBase, eventId: string, contextUser: UserInfo): Promise<boolean>;
 ```
 
-- [ ] **Step 1: Failing shape tests**: SQL Server statement contains `[Status] = 'Pending'`, `[AttemptCount] = 0`, `[IsReplay] = 1`, `[NextAttemptAt] = SYSDATETIMEOFFSET()`, `[LastError] = NULL`, `[CompletedAt] = NULL`, and `WHERE [ID] = 'E1' AND [Status] = 'DeadLetter'`; PostgreSQL uses `true` and `now()`; `{AffectedRows: 0}` → `false`; no readable count → throws naming the event.
+- [ ] **Step 1: Failing shape tests**: SQL Server statement contains `[Status] = 'Pending'`, `[AttemptCount] = 0`, `[IsReplay] = 1`, `[NextAttemptAt] = SYSDATETIMEOFFSET()`, `[LastError] = NULL`, `[CompletedAt] = NULL`, and `WHERE [ID] = '<event id>' AND [Status] = 'DeadLetter'` for a GUID event id; PostgreSQL uses `true` and `now()`; `{AffectedRows: 0}` → `false`; no readable count → throws naming the event; a non-GUID id throws before any SQL (SQL Server would fail the `uniqueidentifier` conversion).
 - [ ] **Step 2: Implement** through `affectedOne`, both dialects, also stamping `__mj_UpdatedAt`; `LockedBy`/`LockedUntil` are already NULL on a settled event.
 - [ ] **Step 3: DB test** (skipped unless `FORMS_INTEGRATION_DB`): insert a `DeadLetter` row and a `Complete` row for a fixture response; replay both; assert the five columns on the first and that the second is unchanged and returned `false`.
 - [ ] **Step 4: Run** `claim.spec.ts`. **Commit** `feat(automation): the fenced replay of a dead-lettered event`.
@@ -118,19 +125,20 @@ export async function replayDeadLetteredEvent(provider: DatabaseProviderBase, ev
 **Files:** `metadata/remote-operations/.forms-remote-operations.json` (new record after `Get Response Detail`, `primaryKey.ID` from `uuidgen`, `Name` `Replay Automation Event`, `Description` saying it re-queues a dead-lettered final's automations and runs them once now, `InputTypeDefinition: "@file:types/forms-replay-automation-event.input.ts"`, output likewise, `ExecutionMode Sync`, `RequiredScope forms:write`, `RequiresSystemUser false`, `GenerationType Manual`, `CodeApprovalStatus Approved`, `Status Active`); `metadata/remote-operations/types/forms-replay-automation-event.{input,output}.ts`; `types/forms-get-response-detail.output.ts` gains `FormsResponseAutomationEvent { ID; Trigger: 'OnComplete' | 'OnPartial'; Status: 'Pending' | 'Running' | 'Complete' | 'DeadLetter' | 'Abandoned'; AttemptCount: number; LastError: string | null; CompletedAt: string | null }` and `AutomationEvents: FormsResponseAutomationEvent[]` (oldest first). No import lines.
 
 - [ ] Write, check the JSON parses, **commit** `feat(operations): declare Forms.ReplayAutomationEvent`.
+- [ ] Both new records are created under fixed UUIDs, so list them as roots in `migrations-teardown/V001__Retire_Forms_Core_Rows.sql` (the operation's `CategoryID` and the notice type's references are nullable or absent, so nothing else reaches them and `mj app remove` would leave them behind). Added in review.
 
 ---
 
-**Tasks 7–9 need `npx mj codegen --skipdb` against a database that holds Task 6's metadata.** This
-run (worktree placement) has no database of its own, so they wait for Soham's decision.
+**Tasks 7–9 need `npx mj codegen --skipdb` against a database that holds Task 6's metadata.** They ran
+in a later slot-placed run, against the slot's own database.
 
 ### Task 7: Regenerate and the server operation
 
-**Files:** generated `packages/Entities/src/generated/remote_operations.ts` (CodeGen only); create `packages/CoreEntitiesServer/src/operations/ReplayAutomationEventServerOperation.ts`; modify `packages/CoreEntitiesServer/src/index.ts` (export + call `LoadReplayAutomationEventOperation()` in `LoadBizAppsFormsServer()`); test `operations/__tests__/AutomationServerOperations.spec.ts`.
+**Files:** generated `packages/Entities/src/generated/remote_operations.ts` (CodeGen only); create `packages/CoreEntitiesServer/src/operations/ReplayAutomationEventServerOperation.ts`; modify `packages/CoreEntitiesServer/src/index.ts` (export the class and `LoadReplayAutomationEventOperation`) and `packages/Server/src/index.ts` (call `LoadReplayAutomationEventOperation()` in `LoadBizAppsFormsServer()`, which lives there); test `operations/__tests__/ReplayAutomationEventServerOperation.spec.ts`.
 
-**Interfaces:** `ReplayAutomationEventServerOperation extends FormsReplayAutomationEventOperation`, registered `'Forms.ReplayAutomationEvent'`; seam for the spec: the replay store and drain injectable (constructor-free: module-level `ReplaySeams` the spec sets, matching how sibling operation specs stub engines).
+**Interfaces:** `ReplayAutomationEventServerOperation extends FormsReplayAutomationEventOperation`, registered `'Forms.ReplayAutomationEvent'`. No module-level seam: the spec drives `ExecuteServer` and replaces `replayDeadLetteredEvent` (`claim.js`), `drainAutomationOutbox` (`drain.js`) and `UserCache`'s system user with `vi.mock`.
 
-- [ ] Tests: `DeadLetter` event → `replayDeadLetteredEvent` called with the id, then `drainAutomationOutbox({ reason: 'replay', responseId })` once, output `{ FormAutomationEventID, Status: 'Pending' }`; `false` from the replay → refusal whose message names the event and says it is not dead-lettered, no drain; unauthorized (magic-link user) → `Authorize` false before any write. `Authorize` = `authorizeFormAuthoring`. The response id comes from a `BypassCache: true` read of the event.
+- [ ] Tests: `DeadLetter` event → the fenced update, then `drainAutomationOutbox({ reason: 'replay', responseId }, systemUser, { source: database })` once — as the host's system user (the author may lack the Form Versions grant the drain reads with) and through the provider the dispatcher gave the operation, not the process provider — output `{ FormAutomationEventID, Status: 'Pending' }`; a drain failure after the update is logged with both ids and the call still returns `Pending`; `false` from the replay → refusal naming the event: "is not dead-lettered (it is <Status>)", or "already replayed or changed" when the event read as `DeadLetter` (a concurrent replay won); a non-GUID id → refused as input before any read; unauthorized (magic-link user) → `Authorize` false before any write. `Authorize` = `authorizeFormAuthoring`. The response id comes from a `BypassCache: true` read of the event.
 - [ ] `packages/Entities/src/remote-operations.spec.ts` passes.
 
 ### Task 8: `GetResponseDetail` returns the events
@@ -139,4 +147,4 @@ run (worktree placement) has no database of its own, so they wait for Soham's de
 
 ### Task 9: The badge and the button
 
-**Files:** `packages/Angular/src/lib/responses/response-models.ts`, `response-aggregations.ts` (map events), `response-detail.component.ts` (badge `DeadLetter` + `LastError`, "Retry automations" button only for a `DeadLetter` event, calls `runOperation(new FormsReplayAutomationEventOperation(), { FormAutomationEventID }, …)` then emits `Reload`), `responses-tab.component.ts` and the record-view host (reload on `Reload`); component spec with the fake operations helper; `docs/local-host.md` `DeadLetter` row names the button first, SQL kept as fallback.
+**Files:** `packages/Angular/src/lib/responses/response-models.ts`, `response-aggregations.ts` (map events), `response-detail.component.ts` (badge `DeadLetter` + `LastError`, "Retry automations" button only for a `DeadLetter` event, calls `runOperation(new FormsReplayAutomationEventOperation(), { FormAutomationEventID }, …)` then emits `Reload`), `responses-tab.component.ts` and the record-view host `response-form.component.ts` (reload on `Reload`, keeping the open detail on screen; the tab's `ReloadDetail` reads on its own, without the open lock, and lands only while the detail it re-reads is still open, so a reader who pressed Back is not given it again); component spec with the fake operations helper; `docs/local-host.md` `DeadLetter` row names the button first, SQL kept as fallback.
