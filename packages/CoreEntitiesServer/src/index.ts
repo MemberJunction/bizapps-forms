@@ -263,6 +263,7 @@ export {
   type RateLimitResult,
   type RateLimitStore,
 } from './submission/rate-limit.js';
+export { RATE_LIMIT_KEY_PREFIX, RedisRateLimitStore, type RateLimitRedisClient } from './submission/redis-rate-limit-store.js';
 export { abuseIdentity, hashSessionId, warnOnceIfAbuseKeyingDegraded } from './submission/source-metadata.js';
 export { distributionWindowClosed, distributionWindowRefusal, type DistributionWindowRefusal } from './submission/distribution-window.js';
 export { distributionQuotaExceeded } from './submission/quota.js';
