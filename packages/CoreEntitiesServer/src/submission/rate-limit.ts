@@ -1,5 +1,5 @@
 /**
- * In-memory sliding-window rate limiter for the public routes.
+ * Sliding-window rate limiter for the public routes, shared across instances when the host has Redis.
  *
  * Consulted through a SET of gates in ONE call, because a public submission has to satisfy
  * several caps at once and they are keyed differently on purpose: a per-session cap

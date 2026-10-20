@@ -146,6 +146,20 @@ jobs:
     if: ${{ !cancelled() && (needs.scope.result != 'success' || needs.scope.outputs.relevant == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The rate limiter's Redis store is a Lua script, and only a real Redis can run it, so
+    # rate-limit.redis-store.spec.ts runs against this service (FORMS_TEST_REDIS_URL on the test
+    # step below). Without the variable the spec skips rather than fails — which is why the variable
+    # lives here and not in a developer's shell: CI is where the skip must never happen. #321.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -200,6 +214,8 @@ jobs:
       # green with the whole suite red. Runs after the build because turbo's `test` task
       # dependsOn ^build.
       - name: Run tests
+        env:
+          FORMS_TEST_REDIS_URL: redis://localhost:6379
         run: npm test
 
       # Product-code mutation gate. Seventeen guards this repo's comments call load-bearing could
