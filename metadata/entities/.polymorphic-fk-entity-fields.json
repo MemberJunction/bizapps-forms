@@ -1,0 +1,24 @@
+[
+  {
+    "_comments": [
+      "Polymorphic foreign key declaration(s) on MJ_BizApps_Forms: Form Entity Binding Records: each payload field sets EntityIDFieldName to its companion EntityID discriminator field."
+    ],
+    "fields": {
+      "Name": "MJ_BizApps_Forms: Form Entity Binding Records"
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "fields": {
+            "EntityID": "@parent:ID",
+            "Name": "TargetRecordID",
+            "EntityIDFieldName": "TargetEntityID"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Entity Binding Records"
+    }
+  }
+]
