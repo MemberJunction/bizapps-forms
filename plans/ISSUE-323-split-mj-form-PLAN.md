@@ -10,12 +10,15 @@
 
 **Spec:** issue #323 body ("Design decided", "Done when", "Out of scope").
 
+> **Amended 2026-10-21 (PR #324 review).** This is the plan as authored; two points changed on the branch. Each is marked where it applies: Task 2 also had to re-point three guard mutants in `scripts/check-guard-mutants.mjs` (commit `fix(scripts): re-point three guard mutants at the CommitLedger`), and the PR carries one behaviour fix outside this plan (`load()` clears `errorText`, pinned by `retry-banner.spec.ts`).
+
 ## Global Constraints
 
 - No behaviour change: no new logic, no changed timing constants (the 250 ms tick, `WELCOME_IMAGE_WAIT_MS`), no changed host event names or payloads, no changed console messages.
 - Do not touch `builder/`, `mj-form.component.html`, `mj-form.component.css`, `core/autosave-controller.ts`, `core/image-prefetch.ts`, `core/welcome-gate.ts`, `core/turnstile-gate.ts`, `packages/CoreEntitiesServer`, `packages/Server`, `metadata/`, `migrations/`.
 - `endEarly`, `sealEarlyEnd`, `trySeal`, `bankPassedSubmitPoints`, Turnstile handlers, host events, `load`, `adoptResume`, `showScreen`, `onSubmit`, `savePartial`, `buildSubmission` stay in the component.
 - Every widget `*.spec.ts` other than `image-prefetch.wiring.spec.ts` stays byte-identical. No `it(...)` in a wiring spec is deleted; an assertion on a moved method body is replaced by a behavioural test in the new class's spec, and the wiring `it` keeps (or gains) the source assertion on the component's call site.
+  *Amended 2026-10-21:* both "no behaviour change" and this rule hold for the three refactor commits only. Review found that a "Try again" after a failed load showed the old error above the reloaded form (pre-existing on `next`). The fix is a separate commit: `load()` clears `errorText`, and a NEW spec, `retry-banner.spec.ts`, covers it. No existing spec was edited.
 - At every commit, in `packages/Angular`: `pnpm test`, `npm run typecheck`, `pnpm run build` pass.
 - Commit titles name the one class: `refactor(widget): extract PrefetchScheduler`, `refactor(widget): extract CommitLedger`, `refactor(widget): extract SubmitTimer`.
 - Comments that explain a moved field or method move with it; comments in the component that named a moved member are updated to the new name.
@@ -63,6 +66,7 @@
 **Files:**
 - Create: `packages/Angular/src/lib/widget/core/commit-ledger.ts`, `core/commit-ledger.spec.ts`
 - Modify: `packages/Angular/src/lib/widget/mj-form.component.ts` (fields at 377-402, `load`, `judgeCommittedAnswers`, `judgedAnswers`, `noticeUnsavedCommit`, `actOnVerdict`, `savePartial`)
+- *Amended 2026-10-21:* also modify `scripts/check-guard-mutants.mjs`. Step 3 changes text that three widget mutant anchors match: `widget/keystroke-verdict-ends-the-form` (the `actOnVerdict` condition), `widget/untouched-commit-saves` (the `JudgedAnswers` body, which moves to `core/commit-ledger.ts`), and `widget/refused-commit-forgets-the-knockout` (it must forget the commit through `this.ledger.Commit(undefined)`). Without this edit, `node --test scripts/check-guard-mutants.spec.mjs` fails and two mutants are NOT APPLIED. The branch did it in its own commit after Task 3.
 
 **Interfaces:**
 - Produces: `export class CommitLedger { Reset(loadedAnswers: string | undefined): void; Commit(key: string | undefined): void; Acknowledge(answersKey: string, result: FormsSaveResponseOutput): void; JudgedAnswers(): string | undefined; VerdictFor(key: string): FormsSaveResponseOutput | undefined; HasUnjudgedCommit(): boolean; IsCommitted(key: string): boolean }`. No Angular import, no side effect.
@@ -112,5 +116,7 @@
 
 - [ ] Check out each of the three commits; run `pnpm test`, `npm run typecheck`, `pnpm run build` in `packages/Angular`.
 - [ ] `git diff origin/next --stat -- packages/Angular/src/lib/widget/*.spec.ts` lists only `image-prefetch.wiring.spec.ts`.
+  *Amended 2026-10-21:* the pathspec `*` also matches across `/`, so the three new `core/*.spec.ts` files are listed too. After the review fix, the new `retry-banner.spec.ts` is listed as well. The check that matters: no existing widget spec other than `image-prefetch.wiring.spec.ts` is modified.
+- [ ] *Amended 2026-10-21:* from the repo root, `node --test scripts/check-guard-mutants.spec.mjs` and `pnpm run lint:guard-mutants` pass (all guards killed). The `packages/Angular` gates do not run either one.
 - [ ] `pnpm run build:widget`, then in the slot: open a published form's `/f/:slug` on the slot API, fill one answer, blur, see "Saved"; submit, reach the ending screen.
 - [ ] Publish-only checks from the repo root: `pnpm run check:release-seed`, `pnpm run check:seed-cadence`.
