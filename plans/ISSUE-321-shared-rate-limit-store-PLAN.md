@@ -1,5 +1,13 @@
 # Shared rate-limit window store (#321) Implementation Plan
 
+> **Status: implemented in PR #322.** Where the shipped code differs from the tasks below, the code
+> wins: a Redis charge is bounded by a 2 s timeout (`REDIS_CHARGE_TIMEOUT_MS`) and a timeout falls back like a throw (Task 3);
+> the store pick logs with `LogError`, not `LogStatus`, when a provider reports
+> `SharedAcrossProcesses` but is not a `RedisLocalStorageProvider` (Task 3); the window goes to
+> `PEXPIRE` as `Math.ceil(windowMs)` (Task 2); and the real-Redis spec skips without
+> `FORMS_TEST_REDIS_URL` only outside CI — with `CI` set it fails, and `turbo.json` declares both
+> variables on the `test` task (Tasks 2 and 4).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `FormsRateLimiter` shares its window counts across API instances through MJ's Redis cache provider when the host has one, and keeps today's per-process store otherwise.

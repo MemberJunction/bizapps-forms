@@ -4,8 +4,9 @@
  * and the properties that matter (nothing charged on a refusal, two hits in one millisecond
  * counting twice, the window boundary) live in that script, where only Redis can run them.
  *
- * Skipped — not failed — without `FORMS_TEST_REDIS_URL`; CI provides one. The few behaviours that
- * never reach Redis run everywhere, against a fake client.
+ * Without `FORMS_TEST_REDIS_URL` the real-Redis block is skipped in a developer's shell, and FAILS
+ * when `CI` is set (the guard test below); CI provides the URL. The few behaviours that never reach
+ * Redis run everywhere, against a fake client.
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';

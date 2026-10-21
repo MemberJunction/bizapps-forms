@@ -148,8 +148,8 @@ jobs:
     timeout-minutes: 30
     # The rate limiter's Redis store is a Lua script, and only a real Redis can run it, so
     # rate-limit.redis-store.spec.ts runs against this service (FORMS_TEST_REDIS_URL on the test
-    # step below). Without the variable the spec skips rather than fails — which is why the variable
-    # lives here and not in a developer's shell: CI is where the skip must never happen. #321.
+    # step below). Without the variable the spec skips in a developer's shell but fails when CI is
+    # set (its guard test), so the variable lives here: CI is where the skip must never happen. #321.
     services:
       redis:
         image: redis:7-alpine
