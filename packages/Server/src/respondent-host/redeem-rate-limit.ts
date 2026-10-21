@@ -78,7 +78,7 @@ export function redeemRateLimitMax(): number {
  * Admits everything when the caller cannot be identified — a deliberate no-op rather than a
  * shared bucket (see the module note), announced once per process rather than taken quietly.
  */
-export function checkRedeemRateLimit(clientIpHash: string | undefined): RateLimitResult {
+export async function checkRedeemRateLimit(clientIpHash: string | undefined): Promise<RateLimitResult> {
   const identity = abuseIdentity(clientIpHash);
   if (!identity) {
     warnOnceIfAbuseKeyingDegraded(clientIpHash);

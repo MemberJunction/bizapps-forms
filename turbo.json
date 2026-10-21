@@ -8,6 +8,12 @@
       "persistent": false
     },
     "test": {
+      // Turbo's strict env mode strips every variable not declared here, so without this the
+      // real-Redis rate-limit spec saw FORMS_TEST_REDIS_URL absent and silently SKIPPED in CI.
+      // `env`, not passThroughEnv: the value belongs in the cache hash, so a run with Redis never
+      // reuses a result from one without. `CI` is declared so the spec can tell "CI, URL missing"
+      // (fail) from a developer's shell (skip) without relying on turbo's built-in passthrough list.
+      "env": ["FORMS_TEST_REDIS_URL", "CI"],
       "outputs": [],
       "cache": true,
       "dependsOn": ["^build"],
