@@ -123,7 +123,7 @@ function makeDeps(config: DepsConfig = {}): { deps: DeviceResumeDeps; rec: Recor
       rec.revokedInvites.push(args);
     },
     scopeOf: () => config.scopeOf ?? ROW_ID,
-    allowRequest: () => config.allow !== false,
+    allowRequest: async () => config.allow !== false,
     cookieFor: (token, maxAge) => `mjf_resume=${token}; Max-Age=${maxAge}`,
     clearCookie: () => 'mjf_resume=; Max-Age=0',
     callerKey: 'ip-hash',
