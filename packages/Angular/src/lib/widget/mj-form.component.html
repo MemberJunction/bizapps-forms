@@ -149,10 +149,13 @@
         answers stay visible, so it reads as "this is being sent" rather than "the page went
         away". aria-live announces it to a screen reader, which otherwise gets no hint at all.
       -->
-      @if (phase() === 'submitting') {
+      <!-- One overlay, two sentences (#248): while a submit or a Next waits for an upload still on
+           the wire it says so, and only once the response itself is on the wire does it say
+           "sending". A second overlay would stack two scrims during the hand-over. -->
+      @if (overlay(); as o) {
         <div class="mjf-sending" role="status" aria-live="polite">
           <span class="mjf-sending__spinner" aria-hidden="true"></span>
-          <p class="mjf-sending__msg">{{ waitMessage() }}</p>
+          <p class="mjf-sending__msg">{{ o === 'saving-file' ? savingFileMessage : waitMessage() }}</p>
         </div>
       }
       @if (definition(); as def) {

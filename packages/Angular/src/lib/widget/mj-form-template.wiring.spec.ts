@@ -89,6 +89,15 @@ describe('the form survives its own submit', () => {
     expect(template()).toMatch(/\[submitting\]="phase\(\) === 'submitting'"/);
   });
 
+  it('renders one overlay from the overlay phase, naming the file wait apart from the send (#248)', () => {
+    const html = template();
+    expect([...html.matchAll(/class="mjf-sending"/g)]).toHaveLength(1);
+    expect(html).toMatch(/@if \(overlay\(\); as o\)\s*\{\s*<div class="mjf-sending"/);
+    expect(html).toMatch(/class="mjf-sending__msg">\{\{ o === 'saving-file' \? savingFileMessage : waitMessage\(\) \}\}</);
+    const ts = stripped(join(__dirname, 'mj-form.component.ts'));
+    expect(ts).toMatch(/protected readonly savingFileMessage = SAVING_FILE_MESSAGE/);
+  });
+
   it('anchors the scrim to the viewport, above the sticky progress bar, and announces it', () => {
     // `absolute` would size it to a ~4000px form and centre the spinner off screen (see the CSS).
     expect(css()).toMatch(/\.mjf-sending\s*\{[^}]*position:\s*fixed/);
