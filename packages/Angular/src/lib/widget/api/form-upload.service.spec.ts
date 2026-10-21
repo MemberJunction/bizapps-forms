@@ -4,7 +4,8 @@ import { deriveUploadUrl } from './forms-api.config';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { uploadErrorMessage } from './form-upload.service';
+import { uploadErrorMessage, uploadFailure } from './form-upload.service';
+import { UploadError } from './form-upload.interface';
 
 describe('deriveUploadUrl', () => {
   it('does not double the slash when the origin has no path', () => {
@@ -110,6 +111,56 @@ describe('uploadErrorMessage', () => {
 
   it('never echoes a blank server message', () => {
     expect(uploadErrorMessage(415, '{"error":"   "}').trim().length).toBeGreaterThan(0);
+  });
+
+  it('tells the respondent to choose a different file when the server gave no reason', () => {
+    expect(uploadErrorMessage(413, '')).toBe('That file was not accepted. Choose a different file.');
+  });
+});
+
+describe('uploadFailure', () => {
+  it('calls a 4xx refused, because the same file will be refused again', () => {
+    const failure = uploadFailure(413, '');
+    expect(failure).toBeInstanceOf(UploadError);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure.kind).toBe('refused');
+    expect(failure.message).toBe('That file was not accepted. Choose a different file.');
+  });
+
+  it('calls a 5xx transient, because the next attempt may well land', () => {
+    expect(uploadFailure(500, '').kind).toBe('transient');
+  });
+
+  it('calls a status-0 failure (no response at all) transient', () => {
+    expect(uploadFailure(0, '').kind).toBe('transient');
+  });
+
+  it('keeps the server sentence as the message', () => {
+    const failure = uploadFailure(415, { error: 'Files of type "text/markdown" are not accepted here.' });
+    expect(failure.kind).toBe('refused');
+    expect(failure.message).toBe('Files of type "text/markdown" are not accepted here.');
+  });
+});
+
+describe('the XHR transport classifies every failure', () => {
+  // Source-level guards for the same reason as the responseText one below: the service takes its
+  // config through inject() in a field initialiser, so it cannot be driven in the node env.
+  const code = readFileSync(join(__dirname, 'form-upload.service.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+
+  it('rejects a non-2xx with uploadFailure, so the store can tell refused from transient', () => {
+    const handler = code.slice(code.indexOf('xhr.onload'), code.indexOf('xhr.onerror'));
+    expect(handler).toMatch(/reject\(uploadFailure\(xhr\.status, xhr\.response\)\)/);
+  });
+
+  it('rejects a network error and an abort as transient', () => {
+    expect(code).toMatch(/xhr\.onerror = [^;]*new UploadError\([^;]*'transient'\)/);
+    expect(code).toMatch(/xhr\.onabort = [^;]*new UploadError\([^;]*'transient'\)/);
+  });
+
+  it('rejects a missing endpoint as refused, since no retry can fix configuration', () => {
+    expect(code).toMatch(/new UploadError\('Uploads are not available for this form\.', 'refused'\)/);
   });
 });
 

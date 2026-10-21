@@ -15,7 +15,7 @@ import { Injectable, inject } from '@angular/core';
 
 import { FORMS_API_CONFIG, deriveUploadUrl } from './forms-api.config';
 import { serverErrorText } from '../../shared/server-error-text';
-import type { IFormsUploadService, UploadedFile, UploadProgress } from './form-upload.interface';
+import { UploadError, type IFormsUploadService, type UploadedFile, type UploadProgress } from './form-upload.interface';
 
 /**
  * Build the multipart body for an upload. Pure + framework-free so the field wiring
@@ -67,9 +67,23 @@ export function uploadErrorMessage(status: number, body: unknown): string {
   // 4xx here is always a judgement about this file — the endpoint's own failures are
   // size, content type, an unknown question, or a closed form. None improve on a retry.
   if (status >= 400 && status < 500) {
-    return 'That file was not accepted. Try a different file.';
+    return 'That file was not accepted. Choose a different file.';
   }
   return 'The upload did not go through. Please try again.';
+}
+
+/**
+ * The rejection for a non-2xx upload response: the respondent's sentence plus which kind of
+ * failure it is.
+ *
+ * The status range that makes {@link uploadErrorMessage} say "choose a different file" is the
+ * same range that makes this `refused` — one judgement (a 4xx is about the file), read twice, so
+ * the sentence and the store's retry decision cannot disagree. Everything else, including the
+ * status 0 a dropped connection reports, is `transient`.
+ */
+export function uploadFailure(status: number, body: unknown): UploadError {
+  const kind = status >= 400 && status < 500 ? 'refused' : 'transient';
+  return new UploadError(uploadErrorMessage(status, body), kind);
 }
 
 /**
@@ -99,8 +113,9 @@ export class FormUploadService implements IFormsUploadService {
 
   /**
    * Upload one file for a FileUpload question. Resolves with the stored file's
-   * metadata (store `fileId` as the answer) or rejects with a friendly Error the
-   * caller can surface inline for retry.
+   * metadata (store `fileId` as the answer) or rejects with an {@link UploadError} whose
+   * `kind` tells the store whether a retry can help. A 2xx whose body cannot be parsed
+   * rejects with a plain `Error`, which the store treats as transient.
    */
   public upload(
     file: File,
@@ -111,7 +126,8 @@ export class FormUploadService implements IFormsUploadService {
   ): Promise<UploadedFile> {
     const url = this.endpoint();
     if (!url) {
-      return Promise.reject(new Error('Uploads are not available for this form.'));
+      // Refused, not transient: a missing endpoint is configuration, and no retry can fix it.
+      return Promise.reject(new UploadError('Uploads are not available for this form.', 'refused'));
     }
     const body = buildUploadFormData(file, distributionSlug, questionId, responseId);
     return this.send(url, body, onProgress);
@@ -149,11 +165,13 @@ export class FormUploadService implements IFormsUploadService {
           // responseType is 'json' throws InvalidStateError, and it throws INSIDE onload —
           // so the promise never settles, the widget sits at "Uploading … 100%" forever,
           // and Submit stays blocked behind an upload the server already answered.
-          reject(new Error(uploadErrorMessage(xhr.status, xhr.response)));
+          reject(uploadFailure(xhr.status, xhr.response));
         }
       };
-      xhr.onerror = (): void => reject(new Error('Upload failed. Check your connection and try again.'));
-      xhr.onabort = (): void => reject(new Error('Upload cancelled.'));
+      // Both transient: no response means nothing was judged, so the next attempt may land.
+      xhr.onerror = (): void =>
+        reject(new UploadError('Upload failed. Check your connection and try again.', 'transient'));
+      xhr.onabort = (): void => reject(new UploadError('Upload cancelled.', 'transient'));
 
       xhr.send(body);
     });
