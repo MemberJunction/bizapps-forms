@@ -30,7 +30,9 @@ import type { AnswerValue, PublishedFormPage, PublishedFormQuestion } from '@mj-
 import { FormRuntime } from '../core/form-runtime';
 import { entryKey, sectionEntries, skippedMessage, type SectionEntry } from '../core/section-content';
 import { steppableSections } from '../core/section-stepper';
+import { StepJudge } from '../core/settled-validation';
 import { clampCursor } from '../core/stepper';
+import { FormUploadStore } from '../core/upload-store';
 import { FormProgressComponent } from './form-progress.component';
 import { FormQuestionComponent } from './questions/form-question.component';
 import { IconComponent } from './icon.component';
@@ -107,6 +109,13 @@ export class FormScrollComponent {
   );
   protected readonly isFirst = computed(() => this.index() === 0);
   protected readonly isLast = computed(() => this.index() >= this.total() - 1);
+
+  /** Judges a section only once its uploads have landed (#248) — and only once per tap. */
+  private readonly stepJudge = new StepJudge(
+    inject(FormUploadStore),
+    () => this.current()?.id ?? null,
+  );
+
   protected readonly progress = computed(() => this.runtime().progress());
   /** Empty on a single-section form: "Section 1 of 1" is a step count nobody needs. */
   protected readonly stepLabel = computed(() =>
@@ -233,8 +242,13 @@ export class FormScrollComponent {
    * Validates the section being LEFT and nothing beyond it: a respondent on section one has not
    * reached section three, and showing them its errors would be answering a question they have
    * not been asked.
+   *
+   * Waits for the section's uploads first (#248): a drawing still on the wire has no answer yet,
+   * and judging it now would call it "required". The visible values are committed BEFORE the
+   * wait — they are what the respondent sees at the tap. A `stale` verdict (a second tap, or
+   * Back during the wait) does nothing; see {@link StepJudge}.
    */
-  protected onNext(): void {
+  protected async onNext(): Promise<void> {
     const page = this.current();
     if (!page) {
       return;
@@ -245,8 +259,11 @@ export class FormScrollComponent {
       return;
     }
     const questions = this.questionsFor(page);
-    this.runtime().touchAll(questions);
-    if (!this.runtime().areValid(questions)) {
+    const verdict = await this.stepJudge.judge(this.runtime(), questions);
+    if (verdict === 'stale') {
+      return;
+    }
+    if (verdict === 'invalid') {
       this.focusFirstInvalidIn(questions);
       return;
     }
@@ -288,18 +305,24 @@ export class FormScrollComponent {
    * Validates the WHOLE visible form, not just the last section. Reaching the last section
    * proves each section validated as it was left, which is a different claim from "the form is
    * valid now" — going Back and clearing a required field is one way to break it.
+   *
+   * And waits for the form's uploads before judging it, as {@link onNext} does for a section.
+   * Both event calls run before the first `await`, so they still act on the live event.
    */
-  protected onSubmit(event?: Event): void {
+  protected async onSubmit(event?: Event): Promise<void> {
     event?.preventDefault();
     event?.stopPropagation();
     this.commitVisibleValues();
     if (!this.isLast()) {
-      this.onNext();
+      await this.onNext();
       return;
     }
     const all = this.runtime().visibleAnswerableQuestions();
-    this.runtime().touchAll(all);
-    if (this.runtime().areValid(all)) {
+    const verdict = await this.stepJudge.judge(this.runtime(), all);
+    if (verdict === 'stale') {
+      return;
+    }
+    if (verdict === 'valid') {
       this.submit.emit();
     } else {
       this.revealFirstInvalid(all);

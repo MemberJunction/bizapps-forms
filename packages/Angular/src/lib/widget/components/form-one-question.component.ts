@@ -20,7 +20,9 @@ import {
 import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
 import { FormRuntime } from '../core/form-runtime';
+import { StepJudge } from '../core/settled-validation';
 import { clampCursor } from '../core/stepper';
+import { FormUploadStore } from '../core/upload-store';
 import { FormProgressComponent } from './form-progress.component';
 import { FormQuestionComponent } from './questions/form-question.component';
 
@@ -81,6 +83,13 @@ export class FormOneQuestionComponent {
   );
   protected readonly isFirst = computed(() => this.index() === 0);
   protected readonly isLast = computed(() => this.index() >= this.total() - 1);
+
+  /** Judges a question only once its upload has landed (#248) — and only once per tap. */
+  private readonly stepJudge = new StepJudge(
+    inject(FormUploadStore),
+    () => this.current()?.id ?? null,
+  );
+
   /**
    * Progress comes from the runtime, the same as Scroll mode.
    *
@@ -150,7 +159,8 @@ export class FormOneQuestionComponent {
 
   /**
    * Touched means "left the field", not "typed in it" — see the note on the scroll renderer.
-   * `onNext` below still marks touched explicitly, because trying to advance IS a commit.
+   * `onNext` below still touches the question (through the judge), because trying to advance IS
+   * a commit.
    */
   protected onBlur(question: PublishedFormQuestion, event: FocusEvent): void {
     // `focusout` bubbles, which is why one binding covers every control a question renders — but
@@ -167,14 +177,30 @@ export class FormOneQuestionComponent {
     this.runtime().markTouched(question.id);
   }
 
-  protected onNext(): void {
+  /**
+   * Validate the current question, then submit (last step) or advance.
+   *
+   * Waits for the question's upload first (#248): a drawing still on the wire has no answer yet,
+   * and judging it now would call it "required". The visible value is committed BEFORE the wait.
+   * A `stale` verdict (a second tap or Enter, or Back during the wait) does nothing; see
+   * {@link StepJudge}.
+   *
+   * The verdict is the runtime's own (`areValid`), the same one Scroll uses — not `errorFor`,
+   * which also counts a server refusal. Those are display-only by design (see
+   * `FormRuntime.showServerErrors`), so a refusal the respondent cannot act on must not lock them
+   * on this step.
+   */
+  protected async onNext(): Promise<void> {
     const q = this.current();
     if (!q) {
       return;
     }
     this.commitVisibleValues();
-    this.runtime().markTouched(q.id);
-    if (this.runtime().errorFor(q)) {
+    const verdict = await this.stepJudge.judge(this.runtime(), [q]);
+    if (verdict === 'stale') {
+      return;
+    }
+    if (verdict === 'invalid') {
       this.focusCurrent();
       return;
     }
@@ -205,7 +231,7 @@ export class FormOneQuestionComponent {
     const target = event.target as HTMLElement | null;
     if (event.key === 'Enter' && target?.tagName !== 'TEXTAREA') {
       event.preventDefault();
-      this.onNext();
+      void this.onNext();
     }
   }
 
