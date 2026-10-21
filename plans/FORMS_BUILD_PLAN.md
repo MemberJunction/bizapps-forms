@@ -344,7 +344,7 @@ and no FK indexes — CodeGen adds those).
 | Known-respondent identity | **bizapps-common** Person/Organization/ContactMethod | `bizapps-common/migrations/B…__Schema_and_Tables.sql` |
 | AI authoring of forms | Patterns from the **Form Builder agent** + deterministic `Create/Modify Interactive Form` actions | `packages/MJCoreEntities/src/engines/interactive-forms.ts` |
 | Promote responses → first-class entity | **Runtime Schema Update (RSU)** pipeline: `SchemaEngine.generateDDL()` → migration → CodeGen → restart; `SchemaEvolution` adds columns over time | `packages/SchemaEngine/src/RuntimeSchemaManager.ts`, `SchemaEvolution.ts`, `MJServer/src/resolvers/RSUResolver.ts` |
-| On-submit automation | **Actions / Agents / AI Prompts** | core framework |
+| On-submit automation | **Actions / Agents / AI Prompts**, reached through Forms' own `FormAutomation` trigger layer, not MJ `EntityAction` bindings (DG-7) | core framework |
 | Reporting | RunView/RunViews, RunQuery, BaseDashboard + AG Grid | core framework |
 
 > **NOTE — do NOT reuse MJ Interactive Forms as the survey schema.** Interactive Forms
@@ -687,6 +687,36 @@ native entities. This is the reporting differentiator no incumbent has.
   Switching the default later is therefore a change of enforcement mechanism, not just of snippet.
 - **DG-6 — Response store shape.** Confirm typed-columns + JSON-fallback on
   `FormResponseAnswer` (recommended) vs. pure-JSON. Affects query/projection ergonomics.
+- **DG-7 — On-submit mechanism: `FormAutomation` only, no `EntityAction` bindings. ✅ DECIDED
+  (2026-10-21, #313).** Forms uses `FormAutomation` for every submission behaviour a form owner
+  configures, and Forms does not author MJ `EntityAction` bindings. A save concern on a
+  non-response Forms entity (`Form`, `FormVersion`, `FormDistribution`) would use `EntityAction` the
+  way the rest of the family does, but no feature needs one today, and that decision is taken when
+  such a feature exists. Nobody adds a third mechanism.
+  *Why:* both mechanisms execute the same MJ Actions and Agents; they differ only in what triggers
+  the run and in what context. `FormAutomation` hides four things behind one setting that
+  `EntityAction` would expose to every binding author: the run uses the published snapshot
+  (`resolveOnSubmitDispatch` in `@mj-biz-apps/forms-entities`), not live rows; the dispatch switches
+  to the automation service principal (`packages/CoreEntitiesServer/src/automation/dispatch-automation.ts`)
+  instead of running as the anonymous respondent who performed the save; the target gets a
+  Forms-shaped input rather than the `FormResponse` row (the canonical answers for an
+  `EntityBinding` target; the response, form, version and distribution IDs, never the answers, for
+  an Action or Agent); and the run is durable through the
+  `FormAutomationEvent` outbox with a per-event ledger and replay. On MJ 6.1.6 an `EntityAction`
+  fires inside `Save()` as the saving user (`GenericDatabaseProvider.ts`, `OnAfterSaveExecute`, no
+  await), `RunMode` defaults to `Inline` so a failure is swallowed, and only the `Validate`
+  invocation can refuse a save. The two residual `EntityAction` cases from the earlier analysis do
+  not hold: `FormVersion.Status` has no review state (its CHECK allows `Draft`, `Published`,
+  `Retired`), and Forms already refuses saves in code through
+  `packages/CoreEntitiesServer/src/entities/entity-refusal.ts` and `ValidateAsync` overrides, with
+  public submissions refused earlier still in `FormSubmissionEngine`.
+  The transition-filter question (whether Forms authors "changed to Complete" `ActionFilter` rows)
+  is **moot** under this decision. If Forms ever adopts a binding, note that bizapps-common ships
+  its own two reusable `ActionFilter` rows under its `metadata/action-filters/`: the family pattern
+  is to author the row in the app, not to wait for MJ to seed it. The superseded analysis (PR #22)
+  is archived at `plans/done/mj-entity-action-workflow-adoption.md` for its verified MJ facts;
+  the operator-facing version of this decision is
+  [`docs/on-submit-automations.md`, "Why not MJ `EntityAction` bindings"](../docs/on-submit-automations.md#why-not-mj-entityaction-bindings).
 
 ---
 
@@ -741,6 +771,12 @@ native entities. This is the reporting differentiator no incumbent has.
 ---
 
 ## 12. Progress Log
+
+- **2026-10-21 — #313: on-submit mechanism decided, `FormAutomation` only (DG-7).** Forms authors no
+  MJ `EntityAction` bindings; the rule and its reason are now `DG-7` in §10, with the operator version
+  in `docs/on-submit-automations.md` ("Why not MJ `EntityAction` bindings"). The PR #22 adoption
+  analysis is archived, header-marked superseded, at `plans/done/mj-entity-action-workflow-adoption.md`.
+  Documentation only: no code, schema or metadata changed.
 
 - **2026-10-19 — MJ 6.1.5 → 6.1.6 (lts-6.1).** Host-tracking pins only (16, root + `apps/MJAPI`);
   the `packages/*` peers and `mjVersionRange` stay at `^6.1.0-edge.6`, which already admits 6.1.6.
