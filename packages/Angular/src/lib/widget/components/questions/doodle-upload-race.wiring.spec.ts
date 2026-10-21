@@ -100,7 +100,7 @@ describe('upload state belongs to a question, not to this component', () => {
     // the retry through `restart(id)`. A field on the component would be the recycled-instance
     // defect again, one indirection further out.
     expect(question()).toMatch(/localFile = computed\(\(\) => this\.upload\(\)\.file\)/);
-    expect(question()).toMatch(/return this\.uploads\.restart\(this\.question\(\)\.id\);/);
+    expect(question()).toMatch(/this\.uploads\.restart\(this\.question\(\)\.id\);/);
   });
 });
 

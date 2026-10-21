@@ -206,6 +206,7 @@ export class FormQuestionComponent {
   }
   protected readonly errorId = computed(() => `${this.inputId()}-error`);
   protected readonly statusId = computed(() => `${this.inputId()}-status`);
+  protected readonly failureId = computed(() => `${this.inputId()}-failure`);
 
   /**
    * Whether the file control's status line currently says anything.
@@ -256,6 +257,11 @@ export class FormQuestionComponent {
     }
     if (this.hasFileStatus()) {
       ids.push(this.statusId());
+    }
+    // `aria-invalid` says the file input is wrong; this says why. Only upload questions ever hold
+    // a failure, and of those only the file input reads this list.
+    if (this.uploadFailure()) {
+      ids.push(this.failureId());
     }
     return ids.length ? ids.join(' ') : null;
   });
@@ -773,7 +779,27 @@ export class FormQuestionComponent {
    * to remember.
    */
   protected retryUpload(): Promise<void> {
-    return this.uploads.restart(this.question().id);
+    const restarted = this.uploads.restart(this.question().id);
+    this.focusQuestion();
+    return restarted;
+  }
+
+  /** "Choose again" on a drawing: the pad's own Clear, so the upload clears through `cleared`. */
+  protected chooseDrawingAgain(pad: DoodlePadComponent): void {
+    pad.clear();
+    this.focusQuestion();
+  }
+
+  /**
+   * Put focus on this question's container.
+   *
+   * For a failure link that takes itself away: once the failure clears, the button that had focus
+   * is gone, and the file input cannot take it while the restarted upload has it disabled. Left
+   * alone, focus falls to the page and a keyboard or screen-reader user starts over from the top.
+   * The container always renders and has `tabindex="-1"`, so it can always take it.
+   */
+  private focusQuestion(): void {
+    this.host.nativeElement.querySelector<HTMLElement>(`#${CSS.escape(this.focusTargetId())}`)?.focus();
   }
 
   /**

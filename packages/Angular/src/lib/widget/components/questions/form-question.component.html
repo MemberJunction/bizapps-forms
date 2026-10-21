@@ -230,7 +230,7 @@
                enough to interrupt. The live region is always rendered and only its content is
                conditional, because a region inserted together with its text is not reliably
                announced. -->
-          <p class="mjf-file__failed" aria-live="polite">
+          <p class="mjf-file__failed" [id]="failureId()" aria-live="polite">
             @if (uploadFailure(); as failure) {
               {{ failure.message }}
               @if (failure.kind === 'refused') {
@@ -435,11 +435,11 @@
           }
           <!-- The same quiet line as a file question. "Choose again" clears the pad itself, which
                emits `cleared` and so clears the upload by the one path Clear already takes. -->
-          <p class="mjf-file__failed" aria-live="polite">
+          <p class="mjf-file__failed" [id]="failureId()" aria-live="polite">
             @if (uploadFailure(); as failure) {
               {{ failure.message }}
               @if (failure.kind === 'refused') {
-                <button type="button" class="mjf-file__failed-link" (click)="pad.clear()">
+                <button type="button" class="mjf-file__failed-link" (click)="chooseDrawingAgain(pad)">
                   Choose again
                 </button>
               } @else {
