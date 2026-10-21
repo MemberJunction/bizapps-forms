@@ -697,8 +697,9 @@ native entities. This is the reporting differentiator no incumbent has.
   the run and in what context. `FormAutomation` hides four things behind one setting that
   `EntityAction` would expose to every binding author: the run uses the published snapshot
   (`resolveOnSubmitDispatch` in `@mj-biz-apps/forms-entities`), not live rows; the dispatch switches
-  to the automation service principal (`packages/CoreEntitiesServer/src/automation/dispatch-automation.ts`)
-  instead of running as the anonymous respondent who performed the save; the target gets a
+  to the least-privilege automation service principal (`packages/CoreEntitiesServer/src/automation/service-principal.ts`,
+  applied in `dispatch-automation.ts`) instead of running as MJ's system user, which is who saves a
+  respondent's `FormResponse` (`FormSubmissionEngine`), and so who a binding would run as; the target gets a
   Forms-shaped input rather than the `FormResponse` row (the canonical answers for an
   `EntityBinding` target; the response, form, version and distribution IDs, never the answers, for
   an Action or Agent); and the run is durable through the

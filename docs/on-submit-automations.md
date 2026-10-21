@@ -192,12 +192,12 @@ and an `EntityAction` binding on `FormResponse` would hand all four to whoever w
 | Hidden by `FormAutomation` | Where it lives |
 |---|---|
 | The run uses the form's **published snapshot**, not the live rows | `resolveOnSubmitDispatch` in `@mj-biz-apps/forms-entities` |
-| The run switches to the **automation service principal**, instead of running as the anonymous respondent whose save triggered it | `packages/CoreEntitiesServer/src/automation/dispatch-automation.ts` |
+| The run switches to the **automation service principal**, whose grants are the ceiling on what a form's steps may do, instead of running as MJ's system user, which is who saves a respondent's `FormResponse` (`FormSubmissionEngine`) | resolved in `packages/CoreEntitiesServer/src/automation/service-principal.ts`, applied in `packages/CoreEntitiesServer/src/automation/dispatch-automation.ts` |
 | The target gets a **Forms-shaped input**, not the raw `FormResponse` row: an `EntityBinding` target gets the canonical answers; an Action or Agent gets the response, form, version and distribution IDs, never the answers (MJ's action log stores parameters unredacted) | the same dispatcher |
 | The run is **durable**: an event in the `FormAutomationEvent` outbox, with a per-event run ledger and replay | `packages/CoreEntitiesServer/src/automation/outbox/`, the `FormAutomationRun` ledger, and `packages/CoreEntitiesServer/src/operations/ReplayAutomationEventServerOperation.ts` for replay |
 
 An `EntityAction` on MJ 6.1.6 has none of this. It fires inside `Save()`, as the user who saved the
-row (`OnAfterSaveExecute` in MJ's `GenericDatabaseProvider.ts`, dispatched without an `await`). Its
+row, which for a respondent's save is MJ's system user (`OnAfterSaveExecute` in MJ's `GenericDatabaseProvider.ts`, dispatched without an `await`). Its
 `RunMode` defaults to `Inline`, so a failed run is swallowed, not retried. Only its `Validate`
 invocation can refuse a save. To catch a completion that follows autosaves, a binding would also
 need an `AfterCreate` row, an `AfterUpdate` row and a "changed to `Complete`" filter.
