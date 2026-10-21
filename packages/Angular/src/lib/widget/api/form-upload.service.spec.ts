@@ -152,8 +152,9 @@ describe('uploadFailure', () => {
 });
 
 describe('the XHR transport classifies every failure', () => {
-  // Source-level guards for the same reason as the responseText one below: the service takes its
-  // config through inject() in a field initialiser, so it cannot be driven in the node env.
+  // Source-level guards, kept alongside the executing transport tests in
+  // form-upload.transport.spec.ts (which drive a fake XHR through the real service): these pin
+  // which constructor each handler rejects with, which the executing tests check only by message.
   const code = readFileSync(join(__dirname, 'form-upload.service.ts'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/[^\n]*/g, '');
@@ -175,9 +176,9 @@ describe('the XHR transport classifies every failure', () => {
 
 describe('the XHR response handler', () => {
   it('reads the parsed body, not responseText', () => {
-    // THE REGRESSION, and it can only be guarded this way here: the service takes
-    // FORMS_API_CONFIG through inject() in a field initialiser, so it cannot be constructed
-    // in the vitest node env to drive a real XHR through.
+    // THE REGRESSION, guarded at the source: the property read is the defect, and a fake XHR
+    // (see form-upload.transport.spec.ts) would only reproduce it if it modelled the browser's
+    // InvalidStateError on responseText — which it does not.
     //
     // Reading `xhr.responseText` while `responseType` is 'json' throws InvalidStateError,
     // and it throws INSIDE onload — so the promise never settled, the widget sat at

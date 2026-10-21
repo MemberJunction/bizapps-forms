@@ -18,6 +18,17 @@ import { serverErrorText } from '../../shared/server-error-text';
 import { UploadError, type IFormsUploadService, type UploadedFile, type UploadProgress } from './form-upload.interface';
 
 /**
+ * How long an upload may go without any sign of life — upload progress, the body finishing, or
+ * response progress — before it is aborted as stalled.
+ *
+ * Without it a dead connection the browser had not noticed fired no event, so the upload never
+ * settled: the store's capped retries never got their turn, and a submit waiting on the file sat
+ * under "Saving your file…" for good. A stall rejects as `transient`, so the store retries it on
+ * its schedule; this bounds each attempt and the schedule bounds the whole wait (#248).
+ */
+export const UPLOAD_STALL_MS = 30_000;
+
+/**
  * Build the multipart body for an upload. Pure + framework-free so the field wiring
  * (which the server matches on) is unit-testable. Field names mirror the WP-B seam:
  * `file`, `distributionSlug`, `questionId`, `responseId`.
@@ -138,42 +149,81 @@ export class FormUploadService implements IFormsUploadService {
     return this.config.uploadUrl || deriveUploadUrl(this.config.graphqlUrl);
   }
 
-  /** XHR POST with upload-progress + typed JSON parsing. */
+  /**
+   * XHR POST with upload-progress + typed JSON parsing, and a stall watchdog.
+   *
+   * Every outcome goes through `settle`, so the first one wins and every one of them stops the
+   * watchdog. That ordering is what lets a stall report itself: the watchdog settles with the stall
+   * error BEFORE aborting, so the `abort` event that follows finds the promise already settled and
+   * its "Upload cancelled." is dropped.
+   */
   private send(url: string, body: FormData, onProgress?: UploadProgress): Promise<UploadedFile> {
     return new Promise<UploadedFile>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      let settled = false;
+      let stallTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const settle = (finish: () => void): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(stallTimer);
+        finish();
+      };
+      /** (Re)start the countdown to declaring the request stalled; called on every sign of life. */
+      const watchForStall = (): void => {
+        if (settled) {
+          return;
+        }
+        clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => {
+          settle(() => reject(new UploadError('The upload stalled. Check your connection and try again.', 'transient')));
+          xhr.abort();
+        }, UPLOAD_STALL_MS);
+      };
+
       xhr.open('POST', url);
       if (this.config.token) {
         xhr.setRequestHeader('Authorization', `Bearer ${this.config.token}`);
       }
       xhr.responseType = 'json';
 
-      if (xhr.upload && onProgress) {
-        xhr.upload.onprogress = (e: ProgressEvent): void =>
-          onProgress(e.lengthComputable && e.total > 0 ? e.loaded / e.total : null);
+      if (xhr.upload) {
+        xhr.upload.onprogress = (e: ProgressEvent): void => {
+          watchForStall();
+          onProgress?.(e.lengthComputable && e.total > 0 ? e.loaded / e.total : null);
+        };
+        // The body is all sent; the server is now storing it, which can be slow but is not a stall.
+        xhr.upload.onload = (): void => watchForStall();
       }
+      xhr.onprogress = (): void => watchForStall();
 
       xhr.onload = (): void => {
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
-            resolve(parseUploadResponse(this.readBody(xhr)));
+            const stored = parseUploadResponse(this.readBody(xhr));
+            settle(() => resolve(stored));
           } catch (err) {
-            reject(err instanceof Error ? err : new Error('Upload failed.'));
+            settle(() => reject(err instanceof Error ? err : new Error('Upload failed.')));
           }
         } else {
           // `xhr.response`, never `xhr.responseText`: reading responseText while
           // responseType is 'json' throws InvalidStateError, and it throws INSIDE onload —
           // so the promise never settles, the widget sits at "Uploading … 100%" forever,
           // and Submit stays blocked behind an upload the server already answered.
-          reject(uploadFailure(xhr.status, xhr.response));
+          settle(() => reject(uploadFailure(xhr.status, xhr.response)));
         }
       };
       // Both transient: no response means nothing was judged, so the next attempt may land.
       xhr.onerror = (): void =>
-        reject(new UploadError('Upload failed. Check your connection and try again.', 'transient'));
-      xhr.onabort = (): void => reject(new UploadError('Upload cancelled.', 'transient'));
+        settle(() => reject(new UploadError('Upload failed. Check your connection and try again.', 'transient')));
+      xhr.onabort = (): void => settle(() => reject(new UploadError('Upload cancelled.', 'transient')));
 
       xhr.send(body);
+      // Armed only once the request is on its way: if `send` throws, the executor rejects and
+      // there is no timer left behind to fire later.
+      watchForStall();
     });
   }
 
