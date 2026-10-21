@@ -389,6 +389,30 @@ describe('FormUploadStore — upload retries a bad moment by itself', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  it('never reports "done" for a file whose answer could not be stored, and releases the wait', async () => {
+    // "done" with no answer behind it is the #248 symptom again: a submit waiting on this
+    // question would wake, read `null`, and send the response without the file.
+    const store = new FormUploadStore();
+    store.connect({
+      setValue: (_questionId, value) => {
+        if (value === 'file-resume') {
+          throw new Error('sink broke');
+        }
+      },
+    });
+    const send = scriptedSend(stored('file-resume'));
+    const uploading = store.upload('q-resume', fileNamed('resume.pdf'), send);
+    let released = false;
+    void store.whenSettled(['q-resume']).then(() => (released = true));
+
+    await expect(uploading).rejects.toThrow('sink broke');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(store.viewFor('q-resume').status).not.toBe('done');
+    expect(store.failureAmong(['q-resume'])).toEqual({ kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE });
+    expect(released).toBe(true);
+  });
+
   it('stores the file id when the first attempt lands', async () => {
     const { store, runtime } = connectedStore();
     const send = scriptedSend(stored('file-resume'));

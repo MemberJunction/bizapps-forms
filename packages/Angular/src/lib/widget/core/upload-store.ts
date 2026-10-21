@@ -344,8 +344,23 @@ export class FormUploadStore {
     if (!current || current.seq !== token.seq) {
       return;
     }
+    // The answer first, the confirmation after it. Written the other way round, a sink that threw
+    // left the record saying "done" over a `null` answer, and released a waiting submit to send
+    // the response without the file — the #248 symptom by another road. On a throw the record
+    // says the file did not save (which also releases the waiters), and the throw goes on up:
+    // it is the widget wired wrong, not a bad moment on the wire.
+    try {
+      this.commit(token.questionId, fileId);
+    } catch (err) {
+      this.write(token.questionId, {
+        ...current,
+        status: 'error',
+        progress: null,
+        failure: { kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE },
+      });
+      throw err;
+    }
     this.write(token.questionId, { ...current, status: 'done', progress: 1, failure: null });
-    this.commit(token.questionId, fileId);
   }
 
   /**
