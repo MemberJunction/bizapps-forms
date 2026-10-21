@@ -47,14 +47,18 @@ function lastShippedDefinition(sproc: string): { file: string; body: string } {
 
 describe('save sprocs return the full base-view row (#315)', () => {
   for (const { sproc, view } of SAVE_SPROCS) {
-    it(`${sproc} ends by selecting every column from ${view}`, () => {
+    it(`${sproc} selects every column from ${view} on every branch`, () => {
       const { file, body } = lastShippedDefinition(sproc);
-      const selects = [...body.matchAll(/^\s*SELECT\s+(.+?)\s+FROM\s+(\S+)/gim)];
-      const closing = selects[selects.length - 1];
-      expect(closing, `${sproc} in ${file} has no SELECT`).toBeDefined();
-      expect(`${closing[1]} FROM ${closing[2]}`, `${sproc} in ${file}`).toBe(
-        `* FROM [\${flyway:defaultSchema}].[${view}]`,
-      );
+      // Every SELECT that starts a line is a result set MJ inserts into @ResultTable — including
+      // spUpdate's `IF @@ROWCOUNT = 0` branch, whose `SELECT TOP 0` still has to match the view's
+      // columns, or an update of a missing row fails with 213 instead of returning nothing.
+      const selects = [...body.matchAll(/^\s*SELECT\s+(?:TOP\s+0\s+)?(.+?)\s+FROM\s+(\S+)/gim)];
+      expect(selects.length, `${sproc} in ${file} has no SELECT`).toBeGreaterThan(0);
+      for (const select of selects) {
+        expect(`${select[1]} FROM ${select[2]}`, `${sproc} in ${file}: ${select[0].trim()}`).toBe(
+          `* FROM [\${flyway:defaultSchema}].[${view}]`,
+        );
+      }
     });
   }
 
