@@ -96,7 +96,7 @@ export function makeDeviceResumeDeps(ctx: ResumeDepsContext): DeviceResumeDeps {
       await revokeInviteById(inviteId, responseId, ctx.systemUser, await ctx.acquireProvider());
     },
     scopeOf: readScopeClaim,
-    allowRequest: (key) => FormsRateLimiter.Instance.charge([{ key, max: RESUME_RATE_MAX }]).allowed,
+    allowRequest: async (key) => (await FormsRateLimiter.Instance.charge([{ key, max: RESUME_RATE_MAX }])).allowed,
     cookieFor: (token, maxAgeSeconds) =>
       buildResumeCookie({ token, slug: ctx.slug, maxAgeSeconds, secure: config.resumeCookieSecure }),
     clearCookie: () => clearResumeCookieHeader(ctx.slug, config.resumeCookieSecure),

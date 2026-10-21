@@ -137,7 +137,7 @@ export class UploadMiddleware extends BaseServerMiddleware {
     // `MJ: Files` row, so the cheapest place to refuse a caller hammering this route is the
     // moment we know who they are — which is on arrival, since the key is their resolved peer
     // IP rather than anything in the (as yet unread) body.
-    if (this.refuseIfRateLimited(req, res)) {
+    if (await this.refuseIfRateLimited(req, res)) {
       return;
     }
 
@@ -200,8 +200,8 @@ export class UploadMiddleware extends BaseServerMiddleware {
    * Returns a boolean rather than throwing because the caller is a route handler that has already
    * written a response by this point; a thrown error there would produce a second one.
    */
-  private refuseIfRateLimited(req: Request, res: Response): boolean {
-    const limit = checkUploadRateLimit({
+  private async refuseIfRateLimited(req: Request, res: Response): Promise<boolean> {
+    const limit = await checkUploadRateLimit({
       clientIpHash: currentRequestIdentity()?.ipHash,
       sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
     });
