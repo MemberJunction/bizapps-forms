@@ -61,8 +61,13 @@ describe('FormsRateLimiter store selection', () => {
     expect(client.eval).toHaveBeenCalledTimes(1);
   });
 
-  it('picks on the first charge, so a provider installed after the limiter exists is still seen', async () => {
-    const limiter = FormsRateLimiter.Instance;
+  it('picks on the first charge, not at construction, so a provider installed after the limiter exists is still seen', async () => {
+    // Construct while MJ's provider is still in-memory, as it is when engines load. The singleton
+    // already exists by now (beforeEach), and resetForTests() would erase a pick its constructor
+    // made, so the constructor is run again here: BaseSingleton returns the process-wide instance,
+    // and a constructor-time pick would see this in-memory provider and keep it.
+    installLocalStorage(new InMemoryLocalStorageProvider());
+    const limiter = new (FormsRateLimiter as unknown as new () => FormsRateLimiter)();
     expect(limiter.activeStoreForTests()).toBeUndefined();
 
     const client = { eval: vi.fn(async () => -1) };
@@ -70,6 +75,7 @@ describe('FormsRateLimiter store selection', () => {
     await limiter.charge(gate);
 
     expect(limiter.activeStoreForTests()).toBeInstanceOf(RedisRateLimitStore);
+    expect(client.eval).toHaveBeenCalledTimes(1);
   });
 
   it('keeps counts in memory, without throwing, when there is no metadata provider yet', async () => {
