@@ -185,10 +185,9 @@ export class FormOneQuestionComponent {
    * A `stale` verdict (a second tap or Enter, or Back during the wait) does nothing; see
    * {@link StepJudge}.
    *
-   * The verdict is the runtime's own (`areValid`), the same one Scroll uses — not `errorFor`,
-   * which also counts a server refusal. Those are display-only by design (see
-   * `FormRuntime.showServerErrors`), so a refusal the respondent cannot act on must not lock them
-   * on this step.
+   * The decision after the wait is `errorFor`, not the judge's verdict: the verdict is
+   * `areValid`, which ignores a server refusal, and this step has always been held by one until
+   * the answer changes. The wait is the only thing #248 changes here.
    */
   protected async onNext(): Promise<void> {
     const q = this.current();
@@ -200,7 +199,7 @@ export class FormOneQuestionComponent {
     if (verdict === 'stale') {
       return;
     }
-    if (verdict === 'invalid') {
+    if (this.runtime().errorFor(q)) {
       this.focusCurrent();
       return;
     }

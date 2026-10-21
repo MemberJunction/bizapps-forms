@@ -107,15 +107,22 @@ describe('OneQuestion — Next waits for the question’s upload', () => {
     const body = onNext();
     expect(body).toMatch(/await this\.stepJudge\.judge\(this\.runtime\(\), \[q\]\)/);
     // Touching is what shows "required"; doing it before the upload lands is the #248 bug.
-    expect(body).not.toMatch(/markTouched\(|touchAll\(|errorFor\(/);
+    const beforeWait = body.slice(0, body.indexOf('await '));
+    expect(beforeWait).not.toMatch(/markTouched\(|touchAll\(|errorFor\(/);
   });
 
-  it('acts on nothing when the verdict is stale, and submits or advances only on a valid one', () => {
+  it('acts on nothing when the verdict is stale', () => {
+    expectInOrder(onNext(), /await this\.stepJudge\.judge/, /=== 'stale'\)\s*\{\s*return;/);
+  });
+
+  it('still lets a server refusal block Next, deciding with errorFor after the wait', () => {
+    // `areValid` (the judge's verdict) ignores server refusals; this step has always been held by
+    // them, and the only change #248 makes here is the wait.
     const body = onNext();
-    expectInOrder(body, /await this\.stepJudge\.judge/, /=== 'stale'\)\s*\{\s*return;/);
-    expectInOrder(body, /=== 'invalid'\)\s*\{\s*this\.focusCurrent\(\);\s*return;/, /isLast\(\)/);
-    expectInOrder(body, /=== 'stale'/, /this\.submit\.emit\(\)/);
-    expectInOrder(body, /=== 'stale'/, /setIndex\(this\.index\(\) \+ 1\)/);
+    expectInOrder(body, /=== 'stale'/, /if \(this\.runtime\(\)\.errorFor\(q\)\)\s*\{\s*this\.focusCurrent\(\);\s*return;/);
+    expectInOrder(body, /errorFor\(q\)/, /isLast\(\)/);
+    expectInOrder(body, /errorFor\(q\)/, /this\.submit\.emit\(\)/);
+    expectInOrder(body, /errorFor\(q\)/, /setIndex\(this\.index\(\) \+ 1\)/);
   });
 
   it('Enter does not leave the waiting promise floating unmarked', () => {
