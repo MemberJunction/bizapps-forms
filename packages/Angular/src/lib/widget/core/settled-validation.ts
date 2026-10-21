@@ -34,9 +34,22 @@ export async function judgeWhenSettled(
   runtime: FormRuntime,
   questions: readonly PublishedFormQuestion[],
 ): Promise<boolean> {
+  await settleUploads(store, questions);
+  return judgeSettled(store, runtime, questions);
+}
+
+/** The waiting half of {@link judgeWhenSettled}: restart spent uploads, then wait for all of them. */
+async function settleUploads(store: FormUploadStore, questions: readonly PublishedFormQuestion[]): Promise<void> {
   const ids = questions.map((question) => question.id);
   store.retryUnsaved(ids);
   await store.whenSettled(ids);
+}
+
+/**
+ * The judging half of {@link judgeWhenSettled}: touch what can be judged and return the verdict.
+ * Split out so {@link StepJudge} can drop a stale verdict BEFORE it touches anything.
+ */
+function judgeSettled(store: FormUploadStore, runtime: FormRuntime, questions: readonly PublishedFormQuestion[]): boolean {
   const judgeable = questions.filter((question) => store.failureAmong([question.id]) === null);
   runtime.touchAll(judgeable);
   return judgeable.length === questions.length && runtime.areValid(questions);
@@ -73,16 +86,21 @@ export type StepVerdict = 'valid' | 'invalid' | 'stale';
  *
  * Two guards, each closing a failure the other does not:
  *
- * - One judgement at a time. A second tap while the first is still waiting is `stale` at once.
- *   Without this, both taps resume on the same step after the upload lands and both advance (or,
- *   on the last step, both emit submit), skipping a step the respondent never saw.
+ * - One judgement at a time PER STEP. A second tap on a step whose judgement is still waiting is
+ *   `stale` at once. Without this, both taps resume on the same step after the upload lands and
+ *   both advance (or, on the last step, both emit submit), skipping a step the respondent never
+ *   saw. Keyed by step, not one flag for the renderer: the scrim blocks the pointer but not the
+ *   keyboard, so a respondent can go Back during the wait, and Next on THAT step must not be
+ *   swallowed by a judgement about the step they left.
  * - Still on the step that was judged. A respondent who taps Back during the wait has moved on;
  *   advancing from wherever they are now would be acting on a verdict about a different screen.
+ *   Checked before anything is touched, so a stale verdict leaves no "required" errors behind on
+ *   the abandoned step.
  *
- * One instance per renderer; it holds the in-flight flag, so it must not be shared.
+ * One instance per renderer; it holds the in-flight steps, so it must not be shared.
  */
 export class StepJudge {
-  private judging = false;
+  private readonly judging = new Set<string | null>();
 
   /** `stepId` reads the renderer's current step — the section or question on screen — or null. */
   public constructor(
@@ -91,19 +109,19 @@ export class StepJudge {
   ) {}
 
   public async judge(runtime: FormRuntime, questions: readonly PublishedFormQuestion[]): Promise<StepVerdict> {
-    if (this.judging) {
+    const judgedStep = this.stepId();
+    if (this.judging.has(judgedStep)) {
       return 'stale';
     }
-    const judgedStep = this.stepId();
-    this.judging = true;
+    this.judging.add(judgedStep);
     try {
-      const valid = await judgeWhenSettled(this.store, runtime, questions);
+      await settleUploads(this.store, questions);
       if (this.stepId() !== judgedStep) {
         return 'stale';
       }
-      return valid ? 'valid' : 'invalid';
+      return judgeSettled(this.store, runtime, questions) ? 'valid' : 'invalid';
     } finally {
-      this.judging = false;
+      this.judging.delete(judgedStep);
     }
   }
 

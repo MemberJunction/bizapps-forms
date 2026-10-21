@@ -220,6 +220,41 @@ describe('StepJudge — a Next that waits can be tapped twice, or walked away fr
     // forward from wherever Back took them.
     expect(await peek(verdict)).toEqual({ done: true, value: 'stale' });
   });
+
+  it('judges the step Back led to at once, while the abandoned step still waits', async () => {
+    const { store, runtime, questions, judge, moveTo } = judgeOnStep('p1');
+    const wire = heldSend();
+    void store.upload('q-doodle', drawing(), wire.send);
+    const doodle = questions.filter((question) => question.id === 'q-doodle');
+    const note = questions.filter((question) => question.id === 'q-note');
+
+    const abandoned = judge.judge(runtime, doodle);
+    moveTo('p0'); // Back, by keyboard: the scrim blocks the pointer, not the form
+    // Next on the earlier step has nothing to wait for. The in-flight judgement belongs to a step
+    // the respondent left, so it must not swallow this one.
+    expect(await peek(judge.judge(runtime, note))).toEqual({ done: true, value: 'valid' });
+
+    wire.resolve('file-drawing');
+    expect(await peek(abandoned)).toEqual({ done: true, value: 'stale' });
+  });
+
+  it('touches nothing on a step the respondent left during the wait', async () => {
+    const { store, runtime, questions, judge, moveTo } = judgeOnStep('p1');
+    const wire = heldSend();
+    void store.upload('q-doodle', drawing(), wire.send);
+    // `q-note` made required so an error would show the moment it is touched.
+    const strict = questions.map((question) => (question.id === 'q-note' ? { ...question, isRequired: true } : question));
+
+    const verdict = judge.judge(runtime, strict);
+    moveTo('p0');
+    wire.resolve('file-drawing');
+
+    expect(await peek(verdict)).toEqual({ done: true, value: 'stale' });
+    // A stale verdict acts on nothing — including marking the old step's fields touched, which
+    // would greet the respondent with "required" errors when they come back to it.
+    expect(runtime.isTouched('q-note')).toBe(false);
+    expect(runtime.isTouched('q-doodle')).toBe(false);
+  });
 });
 
 describe('StepJudge.firstProblemIn — where focus goes after an invalid verdict', () => {
