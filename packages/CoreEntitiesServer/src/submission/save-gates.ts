@@ -252,8 +252,8 @@ export async function findExistingDraft(
 
 /**
  * Whether creating another row no quota bounds (a draft, or a knockout) for this version would breach
- * the hard ceiling — the only DURABLE bound on write abuse: the rate ceilings are per-window and
- * per-process. Fail-CLOSED (a count error refuses); a disabled cap (<= 0) is a no-op.
+ * the hard ceiling — the only DURABLE bound on write abuse: the rate ceilings are per-window (and
+ * per-process without Redis). Fail-CLOSED (a count error refuses); a disabled cap (<= 0) is a no-op.
  */
 export async function draftCeilingRefusal(ctx: SaveGateContext, formVersionId: string): Promise<RespondentSaveResult | undefined> {
   const cap = getPublicSubmitConfig().maxPartialsPerVersion;

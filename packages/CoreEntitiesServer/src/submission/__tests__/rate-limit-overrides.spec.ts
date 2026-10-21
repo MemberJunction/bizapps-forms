@@ -22,26 +22,26 @@ beforeEach(() => {
 });
 
 describe('FormsRateLimiter gate limits', () => {
-  it('applies the max a gate declares instead of the submit-config default', () => {
+  it('applies the max a gate declares instead of the submit-config default', async () => {
     const gate = [{ key: 'upload:1.2.3.4', max: 2 }];
     const now = 1_000;
 
-    expect(FormsRateLimiter.Instance.charge(gate, now).allowed).toBe(true);
-    expect(FormsRateLimiter.Instance.charge(gate, now).allowed).toBe(true);
+    expect((await FormsRateLimiter.Instance.charge(gate, now)).allowed).toBe(true);
+    expect((await FormsRateLimiter.Instance.charge(gate, now)).allowed).toBe(true);
     // Third within the window is refused under the gate's max of 2 — the submit default is 5.
-    const refused = FormsRateLimiter.Instance.charge(gate, now);
+    const refused = await FormsRateLimiter.Instance.charge(gate, now);
     expect(refused.allowed).toBe(false);
     expect(refused.retryAfterMs).toBeGreaterThan(0);
   });
 
-  it('rolls the window forward so a later attempt is admitted again', () => {
+  it('rolls the window forward so a later attempt is admitted again', async () => {
     process.env.FORMS_RATELIMIT_WINDOW_MS = '1000';
     resetPublicSubmitConfigForTests();
     const gate = [{ key: 'upload:5.6.7.8', max: 1 }];
 
-    expect(FormsRateLimiter.Instance.charge(gate, 0).allowed).toBe(true);
-    expect(FormsRateLimiter.Instance.charge(gate, 500).allowed).toBe(false);
+    expect((await FormsRateLimiter.Instance.charge(gate, 0)).allowed).toBe(true);
+    expect((await FormsRateLimiter.Instance.charge(gate, 500)).allowed).toBe(false);
     // Past the 1s window, the earlier hit has aged out.
-    expect(FormsRateLimiter.Instance.charge(gate, 2_000).allowed).toBe(true);
+    expect((await FormsRateLimiter.Instance.charge(gate, 2_000)).allowed).toBe(true);
   });
 });

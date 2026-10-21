@@ -223,9 +223,9 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   //     submit path the whole sequence lives in one function, so `checkEmbedOrigin` genuinely
   //     precedes `charge` (`FormSubmissionEngine.saveResponse`) and a refused request spends no
   //     budget. Here the per-caller window is charged one layer up, in the Express middleware:
-  //     `processUpload` -> `refuseIfRateLimited` (`UploadMiddleware.ts:141`) -> `checkUploadRateLimit`
-  //     -> `FormsRateLimiter.Instance.charge` (`upload-rate-limit.ts:50`), all of it before
-  //     `runUpload` is called at all (`:157`). So an origin refusal here HAS already cost the caller
+  //     `processUpload` -> `refuseIfRateLimited` (`UploadMiddleware.ts`) -> `checkUploadRateLimit`
+  //     -> `FormsRateLimiter.Instance.charge` (`upload-rate-limit.ts`), all of it before
+  //     `runUpload` is called at all. So an origin refusal here HAS already cost the caller
   //     one upload slot (of `FORMS_UPLOAD_IP_MAX`, default 30) whenever a peer address resolved --
   //     `checkUploadRateLimit` no-ops when it cannot derive an identity.
   //

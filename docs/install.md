@@ -219,9 +219,20 @@ source of truth; this table mirrors it):
 | `FORMS_COMPLETION_MAX` | `20` | COMPLETED submissions per window, per (client IP, distribution) — tighter than the save cap because a completion fires on-submit automations. |
 | `FORMS_KNOCKOUT_MAX` | same as `FORMS_COMPLETION_MAX` | Disqualifying submits per window, per (caller, distribution) — its own bucket so a burst of ineligible respondents cannot lock out real completions. |
 | `FORMS_RATELIMIT_WINDOW_MS` | `60000` | Sliding-window length, in ms, for every ceiling above. |
-| `FORMS_RATELIMIT_MAX_KEYS` | `50000` | Buckets the in-memory window store retains before evicting the least-recently-charged. |
+| `FORMS_RATELIMIT_MAX_KEYS` | `50000` | Buckets the per-process window store retains before evicting the least-recently-charged. Not used by the shared Redis store, where each bucket expires one window after its last hit. |
 | `FORMS_SUBMIT_MAX_IN_FLIGHT` | `50` | Simultaneous in-flight submit-pipeline runs, process-wide — bounds concurrency, not rate. |
 | `FORMS_MAX_PARTIALS_PER_VERSION` | `10000` | Durable ceiling on `Partial` + `Disqualified` rows a single published version may accumulate — the only bound here with no per-window reset. |
+
+**Shared or per-process.** When MJAPI runs with `REDIS_URL` set, MJ installs its Redis
+`LocalStorageProvider`, and Forms keeps every window above (submit, autosave, completion, knockout,
+and the redeem, resume and upload caps) in that Redis, so one respondent has one budget however many
+API instances sit behind the load balancer. Without `REDIS_URL` each process keeps its own windows,
+and a deployment of N instances admits about N times each cap. Forms opens no Redis connection of
+its own. If Redis becomes unreachable, each instance counts on its own until Redis answers again and
+logs one error per outage. `FORMS_RATELIMIT_MAX_KEYS` applies only to the per-process store. The
+in-flight caps (`FORMS_SUBMIT_MAX_IN_FLIGHT`, `FORMS_REDEEM_MAX_IN_FLIGHT` and the upload in-flight
+cap) stay per-process by design: they bound one process's sockets, connection pool and memory, and a
+shared count would let an instance that crashed keep its slots for good.
 
 Every per-IP ceiling in that table only bounds what its name says when `FORMS_TRUSTED_PROXY_HOPS`
 is set correctly for the deployment's actual topology — which is why the two subjects share this

@@ -101,8 +101,8 @@ export interface DeviceResumeDeps {
   revokeInvite(args: { inviteId: string; responseId: string }): Promise<void>;
   /** The response a session JWT is scoped to, read from the token this redeem just minted. */
   scopeOf(sessionToken: string): string | undefined;
-  /** False when this caller has spent their budget for these routes. */
-  allowRequest(key: string): boolean;
+  /** Resolves false when this caller has spent their budget for these routes. Async because the limiter's store may be shared (Redis). */
+  allowRequest(key: string): Promise<boolean>;
   /** Cookie writers, closed over the slug and the host's Secure setting by the caller. */
   cookieFor(token: string, maxAgeSeconds: number): string;
   clearCookie(): string;
@@ -132,7 +132,7 @@ export async function runResume(deps: DeviceResumeDeps, args: ResumeArgs): Promi
   if (!rawToken) {
     return { status: 410, reason: 'no-pointer' };
   }
-  if (!deps.allowRequest(`resume:${deps.callerKey}`)) {
+  if (!(await deps.allowRequest(`resume:${deps.callerKey}`))) {
     return { status: 429, reason: 'rate-limited' };
   }
   const distribution = await deps.loadDistribution(args.slug);
@@ -247,7 +247,7 @@ export async function runRemember(deps: DeviceResumeDeps, args: RememberArgs): P
   if (!args.responseId || !args.sessionId.trim()) {
     return { status: 400, reason: 'no-pointer' };
   }
-  if (!deps.allowRequest(`remember:${deps.callerKey}`)) {
+  if (!(await deps.allowRequest(`remember:${deps.callerKey}`))) {
     return { status: 429, reason: 'rate-limited' };
   }
   const distribution = await deps.loadDistribution(args.slug);
