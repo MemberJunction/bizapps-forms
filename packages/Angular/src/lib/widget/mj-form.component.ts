@@ -33,7 +33,6 @@ import {
 import type { FormsSaveResponseInput, FormsSaveResponseOutput } from '@mj-biz-apps/forms-entities';
 import {
   CAPTCHA_NOT_CONFIGURED_MESSAGE,
-  collectLaterImageUrls,
   endingMessage,
   endingRedirectUrl,
   endsWithoutSubmit,
@@ -65,7 +64,8 @@ import { FORMS_API_CONFIG } from './api/forms-api.config';
 import { submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
 import { gateWelcomeScreen } from './core/welcome-gate';
-import { prefetchImages, type PrefetchHandle } from './core/image-prefetch';
+import { prefetchImages } from './core/image-prefetch';
+import { PrefetchScheduler } from './core/prefetch-scheduler';
 import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, NOTHING_TO_SAVE, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
@@ -346,16 +346,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   private responseId: string | undefined;
   private autosave: AutosaveController | null = null;
-  /**
-   * Prefetch of later screens' images (core/image-prefetch.ts). One queue per load: `load()`
-   * cancels it first, and `prefetchGeneration` makes an idle callback scheduled by an EARLIER load
-   * a no-op. A welcome screen with an image starts it from the welcome gate's
-   * `imagesSettled` (core/welcome-gate.ts); every other opening starts it when the browser is idle.
-   */
-  private prefetch: PrefetchHandle | undefined;
-  private prefetchUrls: string[] = [];
-  private prefetchStarted = false;
-  private prefetchGeneration = 0;
+  /** Prefetch of later screens' images; one queue per load (core/prefetch-scheduler.ts). */
+  private readonly prefetcher = new PrefetchScheduler(prefetchImages, () => this.destroyed);
   /** Set on destroy: a `load()` still awaiting the network resumes afterwards and must start nothing. */
   private destroyed = false;
   /** Submit-point pages already banked this fill, so each fires once. Reset on {@link load}. */
@@ -408,12 +400,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
   public ngOnDestroy(): void {
     this.autosave?.dispose();
     this.destroyed = true;
-    this.cancelPrefetch();
+    this.prefetcher.Cancel();
   }
 
   /** Fetch (or accept) the form definition, theme the host, and build the runtime. */
   private async load(): Promise<void> {
-    this.cancelPrefetch();
+    this.prefetcher.Cancel();
     const generation = ++this.loadGeneration;
     this.waitingForWelcomeImage.set(false);
     this.phase.set('loading');
@@ -466,8 +458,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.loadedAnswers = this.draftKeyNow();
       const welcomeImage = opening === 'welcome' ? def.welcomeScreen?.mediaURL?.trim() : undefined;
       const gated = !!welcomeImage;
-      // Plan before holding: prefetchUrls must be set before anything can start the queue.
-      this.planPrefetch(form, opening, gated);
+      // Plan before holding: the plan's URLs must be set before anything can start the queue.
+      this.prefetcher.Plan(form, opening, gated);
       if (welcomeImage) {
         this.holdForWelcomeImages(welcomeImage, generation); // phase stays 'loading' until the gate reveals
       } else {
@@ -607,8 +599,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (this.phase() === 'welcome') {
       this.phase.set('ready');
       // The welcome gate (core/welcome-gate.ts) normally starts the prefetch, but a respondent can
-      // tap Start while a timed-out image still downloads. startPrefetch() runs once per load.
-      this.startPrefetch();
+      // tap Start while a timed-out image still downloads. prefetcher.Start() runs once per load.
+      this.prefetcher.Start();
     }
   }
 
@@ -630,63 +622,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
         this.waitingForWelcomeImage.set(false);
         if (this.phase() === 'loading') this.phase.set('welcome');
       },
-      imagesSettled: () => this.startPrefetch(),
+      imagesSettled: () => this.prefetcher.Start(),
     });
-  }
-
-  /**
-   * Decide when this load's prefetch starts. A welcome screen with an image gets the network to
-   * itself until the welcome gate's `imagesSettled` fires (or the respondent leaves it). In every other case (no welcome
-   * screen, no welcome image, resumed past it), start when the browser is idle.
-   *
-   * Only while intake is still ahead. A resumed, already-submitted response opens on `done` (and a
-   * failed or expired load on `error`/`expired`): the respondent can never see an option or an
-   * ending image there, so downloading up to 12 of them would only compete with what is on screen.
-   */
-  private planPrefetch(form: WidgetForm, opening: WidgetPhase, gated: boolean): void {
-    if (opening !== 'welcome' && opening !== 'ready') {
-      return;
-    }
-    // The live form's ending images are unknown until the server picks the ending, so only the
-    // author's full draft prefetches them.
-    this.prefetchUrls = collectLaterImageUrls({
-      pages: form.render.pages,
-      endScreens: form.kind === 'full' ? form.definition.endScreens : [],
-    });
-    if (gated) {
-      return; // the welcome gate's imagesSettled starts it
-    }
-    this.schedulePrefetchWhenIdle();
-  }
-
-  private schedulePrefetchWhenIdle(): void {
-    const generation = this.prefetchGeneration;
-    const start = (): void => {
-      if (generation === this.prefetchGeneration) {
-        this.startPrefetch();
-      }
-    };
-    if (typeof requestIdleCallback === 'function') {
-      requestIdleCallback(start);
-    } else {
-      setTimeout(start, 0); // Safari does not ship requestIdleCallback by default
-    }
-  }
-
-  private startPrefetch(): void {
-    if (this.destroyed || this.prefetchStarted) {
-      return;
-    }
-    this.prefetchStarted = true;
-    this.prefetch = prefetchImages(this.prefetchUrls);
-  }
-
-  private cancelPrefetch(): void {
-    this.prefetchGeneration++;
-    this.prefetch?.cancel();
-    this.prefetch = undefined;
-    this.prefetchStarted = false;
-    this.prefetchUrls = [];
   }
 
   protected isScroll(): boolean {
