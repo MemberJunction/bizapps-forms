@@ -66,6 +66,7 @@ import { applyStyleTokens } from './core/theming';
 import { gateWelcomeScreen } from './core/welcome-gate';
 import { prefetchImages } from './core/image-prefetch';
 import { PrefetchScheduler } from './core/prefetch-scheduler';
+import { CommitLedger } from './core/commit-ledger';
 import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, NOTHING_TO_SAVE, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
@@ -366,32 +367,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * per autosave would leave a row (plus an audit row) every few seconds of typing.
    */
   private partialAnnounced = false;
-  /**
-   * The answers as they stood at the respondent's last COMMIT (blur / advance), as a payload key —
-   * or `undefined` before the first commit, or while the draft is held.
-   *
-   * The server judges knockouts on every partial save, keystroke autosaves included, and a keystroke
-   * save carries half-typed values (`1` on its way to `18`). So a save's `ended` is acted on only when
-   * the answers it carried are exactly the committed ones: a verdict on finished answers. A keystroke
-   * save that comes back `ended` is remembered ({@link lastAcknowledged}) and acted on if the
-   * respondent then commits those same answers.
-   */
-  private committedAnswers: string | undefined;
-  /**
-   * The last save the server ACCEPTED, with the payload key it carried — so a commit whose answers
-   * the server already judged reuses that verdict rather than sending them again. Tabbing through a
-   * scroll form commits on every blur; without this each one would be another request against the
-   * respondent's autosave budget.
-   */
-  private lastAcknowledged: { readonly answersKey: string; readonly result: FormsSaveResponseOutput } | undefined;
-  /**
-   * The payload key of the answers the form OPENED with — empty on a first sitting, the stored draft
-   * on a resume — which the server already holds (or has nothing of). Until a save is accepted, a save
-   * of exactly these answers has nothing to send (fix round 1): a blur on an untouched field must
-   * not write an empty Partial row, which counts against the per-version draft ceiling and makes the
-   * page mint a device invite.
-   */
-  private loadedAnswers: string | undefined;
+  /** What the respondent has committed versus what the server has judged. */
+  private readonly ledger = new CommitLedger();
 
   public async ngOnInit(): Promise<void> {
     await this.load();
@@ -416,9 +393,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.resumed.set(false);
     this.resumeDropped.set([]);
     this.partialAnnounced = false;
-    this.committedAnswers = undefined;
-    this.lastAcknowledged = undefined;
-    this.loadedAnswers = undefined;
+    this.ledger.Reset(undefined);
     this.saveNotice.set(false);
     try {
       const { form, resume } = await this.loadForm();
@@ -455,7 +430,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.endingEarly = false;
       const opening = this.adoptResume(resume, def, runtime) ?? initialPhaseFor(def);
       // After the resume prefill, so a resumed draft's own answers count as already on the server.
-      this.loadedAnswers = this.draftKeyNow();
+      // A second Reset equals setting the loaded answers alone: nothing can commit or acknowledge since the
+      // first one. `onCommit` is gated on 'ready', and no autosave save can be in flight, because `load()` runs
+      // only from `ngOnInit` and from `retry()` on 'error', which only a failed load reaches.
+      this.ledger.Reset(this.draftKeyNow());
       const welcomeImage = opening === 'welcome' ? def.welcomeScreen?.mediaURL?.trim() : undefined;
       const gated = !!welcomeImage;
       // Plan before holding: the plan's URLs must be set before anything can start the queue.
@@ -721,26 +699,22 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   private async judgeCommittedAnswers(): Promise<void> {
     const key = this.draftKeyNow();
-    this.committedAnswers = key;
+    this.ledger.Commit(key);
     if (key === undefined) {
       return; // held: nothing can be sent until the unstorable answer is fixed
     }
-    if (key === this.judgedAnswers()) {
+    if (key === this.ledger.JudgedAnswers()) {
       // Nothing new: the server already judged exactly these answers (or holds them, untouched).
       // `savePartial` makes the same check, deliberately twice: there it covers every save the
       // controller runs (debounce, checkpoint, retry); here it keeps a no-op commit from going through
       // the controller at all, which would flash "Saving…" for a request never made.
-      if (this.lastAcknowledged) {
-        this.actOnVerdict(this.lastAcknowledged.result, key);
+      const verdict = this.ledger.VerdictFor(key);
+      if (verdict) {
+        this.actOnVerdict(verdict, key);
       }
       return;
     }
     await this.autosave?.flushNow();
-  }
-
-  /** The answers the server already has: the last accepted save's, or — before one — those the form opened with. */
-  private judgedAnswers(): string | undefined {
-    return this.lastAcknowledged?.answersKey ?? this.loadedAnswers;
   }
 
   /**
@@ -749,7 +723,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * the next edit re-saves is not worth interrupting anyone for.
    */
   private noticeUnsavedCommit(): void {
-    if (this.committedAnswers !== undefined && this.committedAnswers !== this.lastAcknowledged?.answersKey) {
+    if (this.ledger.HasUnjudgedCommit()) {
       this.saveNotice.set(true);
     }
   }
@@ -772,7 +746,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * the save that delivered this verdict is still the controller's in-flight save until it returns.
    */
   private actOnVerdict(result: FormsSaveResponseOutput, sentKey: string): void {
-    if (result.Outcome !== 'ended' || sentKey !== this.committedAnswers || this.endingEarly) {
+    if (result.Outcome !== 'ended' || !this.ledger.IsCommitted(sentKey) || this.endingEarly) {
       return;
     }
     void this.endEarly({
@@ -1236,7 +1210,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * `'saved'` for a save the server threw away) and retries it on its own capped backoff.
    *
    * An accepted save is also a VERDICT: the server judged knockouts on these answers. It is
-   * remembered, and acted on when the answers are the committed ones ({@link actOnVerdict}).
+   * remembered in the {@link ledger}, and acted on when the answers are the committed ones ({@link actOnVerdict}).
    */
   private async savePartial(): Promise<string | undefined | typeof NOTHING_TO_SAVE> {
     const form = this.form();
@@ -1260,9 +1234,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
       // Nothing new to send (fix round 1): the server already holds exactly these answers — an
       // untouched form, an edit undone before the debounce fired, or a save of the same answers that
       // already came back (a commit flushed behind an in-flight save that ENDED the form, Minor 3).
-      if (sentKey === this.judgedAnswers()) {
-        if (this.lastAcknowledged) {
-          this.actOnVerdict(this.lastAcknowledged.result, sentKey);
+      if (sentKey === this.ledger.JudgedAnswers()) {
+        const verdict = this.ledger.VerdictFor(sentKey);
+        if (verdict) {
+          this.actOnVerdict(verdict, sentKey);
         }
         return NOTHING_TO_SAVE;
       }
@@ -1287,7 +1262,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.responseId = res.ResponseID;
       this.announceFirstPartial(res.ResponseID);
     }
-    this.lastAcknowledged = { answersKey: sentKey, result: res };
+    this.ledger.Acknowledge(sentKey, res);
     this.saveNotice.set(false);
     this.actOnVerdict(res, sentKey);
     return this.responseTarget();
