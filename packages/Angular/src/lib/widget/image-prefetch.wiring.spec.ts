@@ -9,7 +9,9 @@ import { describe, expect, it } from 'vitest';
  * - one started twice;
  * - one left running after the form reloads;
  * - a welcome image that loses its head start.
- * The queue's behaviour is covered in `core/image-prefetch.spec.ts`.
+ * The queue's behaviour is covered in `core/image-prefetch.spec.ts`; when it starts, and the
+ * stale-callback and disposed rules, in `core/prefetch-scheduler.spec.ts`. What stays here is
+ * that the component calls the scheduler at the right places.
  */
 const strip = (s: string): string => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const read = (file: string): string => strip(readFileSync(join(__dirname, file), 'utf8'));
@@ -39,44 +41,45 @@ describe('welcome image priority — source smoke', () => {
 describe('prefetch lifecycle — source smoke', () => {
   it('load() cancels the previous queue before anything else can start one', () => {
     const load = body(form, 'private async load(): Promise<void>');
-    expect(load).toContain('this.cancelPrefetch()');
-    expect(load.indexOf('this.cancelPrefetch()')).toBeLessThan(load.indexOf('this.planPrefetch(form, opening, gated)'));
+    expect(load).toContain('this.prefetcher.Cancel()');
+    expect(load.indexOf('this.prefetcher.Cancel()')).toBeLessThan(load.indexOf('this.prefetcher.Plan(form, opening, gated)'));
   });
 
   it('ngOnDestroy cancels the queue', () => {
-    expect(body(form, 'public ngOnDestroy(): void')).toContain('this.cancelPrefetch()');
+    expect(body(form, 'public ngOnDestroy(): void')).toContain('this.prefetcher.Cancel()');
   });
 
   it('a load() that resumes after destroy cannot start a queue', () => {
     const destroy = body(form, 'public ngOnDestroy(): void');
     expect(destroy).toContain('this.destroyed = true');
-    expect(destroy.indexOf('this.destroyed = true')).toBeLessThan(destroy.indexOf('this.cancelPrefetch()'));
-    expect(body(form, 'private startPrefetch(): void')).toContain('this.destroyed ||');
+    expect(destroy.indexOf('this.destroyed = true')).toBeLessThan(destroy.indexOf('this.prefetcher.Cancel()'));
+    // The scheduler reads isDisposed() at Start() time, so this wiring carries the rule.
+    expect(form).toContain('new PrefetchScheduler(prefetchImages, () => this.destroyed)');
+    // Replaced: the `this.destroyed ||` slice of startPrefetch -> 'Start after isDisposed() is true does not call prefetchImages'.
   });
 
   it('plans nothing unless intake is still ahead (welcome or ready)', () => {
-    const plan = body(form, 'private planPrefetch(form: WidgetForm, opening: WidgetPhase, gated: boolean): void');
-    expect(plan).toContain(`opening !== 'welcome' && opening !== 'ready'`);
-    expect(plan.indexOf(`opening !== 'welcome' && opening !== 'ready'`)).toBeLessThan(
-      plan.indexOf('this.schedulePrefetchWhenIdle()'),
-    );
+    // Replaced: the opening guard before schedulePrefetchWhenIdle in planPrefetch ->
+    // 'Plan with an opening other than welcome or ready collects no URLs' in core/prefetch-scheduler.spec.ts.
+    expect(body(form, 'private async load(): Promise<void>')).toContain('this.prefetcher.Plan(form, opening, gated)');
   });
 
   it('leaving the welcome screen early still starts the prefetch', () => {
-    expect(body(form, 'protected startIntake(): void')).toContain('this.startPrefetch()');
+    expect(body(form, 'protected startIntake(): void')).toContain('this.prefetcher.Start()');
   });
 
   it('starts at most once per load', () => {
-    const start = body(form, 'private startPrefetch(): void');
-    expect(start).toContain('this.prefetchStarted)');
-    expect(start).toContain('this.prefetchStarted = true');
+    // Replaced: the `prefetchStarted` slices of startPrefetch -> 'Start twice calls prefetchImages once'
+    // in core/prefetch-scheduler.spec.ts.
+    expect(body(form, 'protected startIntake(): void')).toContain('this.prefetcher.Start()');
   });
 
   it('a stale idle callback from an earlier load cannot start a queue', () => {
-    const schedule = body(form, 'private schedulePrefetchWhenIdle(): void');
-    expect(schedule).toContain('const generation = this.prefetchGeneration');
-    expect(schedule).toContain('generation === this.prefetchGeneration');
-    expect(body(form, 'private cancelPrefetch(): void')).toContain('this.prefetchGeneration++');
+    // Replaced: the `prefetchGeneration` slices of schedulePrefetchWhenIdle and cancelPrefetch ->
+    // 'a Cancel before the idle callback fires makes that callback a no-op' and
+    // 'a stale idle callback from an earlier plan cannot start the new plan twice' in core/prefetch-scheduler.spec.ts.
+    const load = body(form, 'private async load(): Promise<void>');
+    expect(load).toContain('this.prefetcher.Cancel()');
   });
 });
 
@@ -85,9 +88,9 @@ describe('welcome gate wiring — source smoke (#291)', () => {
     const show = body(form, 'public showScreen(selection: ShownScreen): void');
     expect(show).toContain('this.waitingForWelcomeImage.set(false)');
   });
-  it('plans the prefetch before holding, so prefetchUrls is set before anything can start the queue', () => {
+  it('plans the prefetch before holding, so the plan\'s URLs are set before anything can start the queue', () => {
     const load = body(form, 'private async load(): Promise<void>');
-    expect(load.indexOf('this.planPrefetch(')).toBeLessThan(load.indexOf('this.holdForWelcomeImages('));
+    expect(load.indexOf('this.prefetcher.Plan(')).toBeLessThan(load.indexOf('this.holdForWelcomeImages('));
   });
   it('gates only a load that opens on a welcome screen with an image', () => {
     const load = body(form, 'private async load(): Promise<void>');
@@ -104,7 +107,7 @@ describe('welcome gate wiring — source smoke (#291)', () => {
     expect(hold).toContain('isCurrent: () => this.isCurrentLoad(generation)');
     expect(body(form, 'private isCurrentLoad(generation: number): boolean')).toContain('!this.destroyed && generation === this.loadGeneration');
     expect(hold).toContain("if (this.phase() === 'loading') this.phase.set('welcome')");
-    expect(hold).toContain('imagesSettled: () => this.startPrefetch()');
+    expect(hold).toContain('imagesSettled: () => this.prefetcher.Start()');
   });
   it('a logo the gate saw fail is marked broken before the reveal, so its bar never paints and then vanishes', () => {
     const hold = body(form, 'private holdForWelcomeImages(welcomeImage: string, generation: number): void');

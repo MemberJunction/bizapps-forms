@@ -33,7 +33,6 @@ import {
 import type { FormsSaveResponseInput, FormsSaveResponseOutput } from '@mj-biz-apps/forms-entities';
 import {
   CAPTCHA_NOT_CONFIGURED_MESSAGE,
-  collectLaterImageUrls,
   endingMessage,
   endingRedirectUrl,
   endsWithoutSubmit,
@@ -65,7 +64,9 @@ import { FORMS_API_CONFIG } from './api/forms-api.config';
 import { submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
 import { gateWelcomeScreen } from './core/welcome-gate';
-import { prefetchImages, type PrefetchHandle } from './core/image-prefetch';
+import { prefetchImages } from './core/image-prefetch';
+import { PrefetchScheduler } from './core/prefetch-scheduler';
+import { CommitLedger } from './core/commit-ledger';
 import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, NOTHING_TO_SAVE, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
@@ -89,6 +90,7 @@ import { IconComponent } from './components/icon.component';
 import { MjLoaderComponent } from './components/mj-loader.component';
 import type { WidgetPhase } from './core/submit-phase';
 import { judgeRedirect, redirectRefusalMessage } from './core/safe-redirect';
+import { SubmitTimer } from './core/submit-timer';
 
 @Component({
   selector: 'mj-form',
@@ -258,18 +260,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
     applyStyleTokens(this.hostRef.nativeElement, resolved);
   }
 
-  /**
-   * How long the in-flight submit has been running, in ms. Zero when nothing is submitting.
-   *
-   * Ticked rather than derived because the message has to change while nothing else does —
-   * the whole point is that the respondent sees the page acknowledge a wait it cannot
-   * shorten. The interval is cleared on every exit path, including failure.
-   */
-  private readonly submitElapsed = signal(0);
-  private submitTicker: ReturnType<typeof setInterval> | null = null;
+  private readonly submitTimer = new SubmitTimer();
 
   /** The reassurance shown under the spinner, escalating if the wait drags on. */
-  protected readonly waitMessage = computed(() => submitWaitMessage(this.submitElapsed()));
+  protected readonly waitMessage = computed(() => submitWaitMessage(this.submitTimer.Elapsed()));
 
   /** The resolved ending screen for the template. */
   protected readonly activeEndingScreen = computed(() => this.endingScreen());
@@ -346,16 +340,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   private responseId: string | undefined;
   private autosave: AutosaveController | null = null;
-  /**
-   * Prefetch of later screens' images (core/image-prefetch.ts). One queue per load: `load()`
-   * cancels it first, and `prefetchGeneration` makes an idle callback scheduled by an EARLIER load
-   * a no-op. A welcome screen with an image starts it from the welcome gate's
-   * `imagesSettled` (core/welcome-gate.ts); every other opening starts it when the browser is idle.
-   */
-  private prefetch: PrefetchHandle | undefined;
-  private prefetchUrls: string[] = [];
-  private prefetchStarted = false;
-  private prefetchGeneration = 0;
+  /** Prefetch of later screens' images; one queue per load (core/prefetch-scheduler.ts). */
+  private readonly prefetcher = new PrefetchScheduler(prefetchImages, () => this.destroyed);
   /** Set on destroy: a `load()` still awaiting the network resumes afterwards and must start nothing. */
   private destroyed = false;
   /** Submit-point pages already banked this fill, so each fires once. Reset on {@link load}. */
@@ -374,32 +360,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * per autosave would leave a row (plus an audit row) every few seconds of typing.
    */
   private partialAnnounced = false;
-  /**
-   * The answers as they stood at the respondent's last COMMIT (blur / advance), as a payload key —
-   * or `undefined` before the first commit, or while the draft is held.
-   *
-   * The server judges knockouts on every partial save, keystroke autosaves included, and a keystroke
-   * save carries half-typed values (`1` on its way to `18`). So a save's `ended` is acted on only when
-   * the answers it carried are exactly the committed ones: a verdict on finished answers. A keystroke
-   * save that comes back `ended` is remembered ({@link lastAcknowledged}) and acted on if the
-   * respondent then commits those same answers.
-   */
-  private committedAnswers: string | undefined;
-  /**
-   * The last save the server ACCEPTED, with the payload key it carried — so a commit whose answers
-   * the server already judged reuses that verdict rather than sending them again. Tabbing through a
-   * scroll form commits on every blur; without this each one would be another request against the
-   * respondent's autosave budget.
-   */
-  private lastAcknowledged: { readonly answersKey: string; readonly result: FormsSaveResponseOutput } | undefined;
-  /**
-   * The payload key of the answers the form OPENED with — empty on a first sitting, the stored draft
-   * on a resume — which the server already holds (or has nothing of). Until a save is accepted, a save
-   * of exactly these answers has nothing to send (fix round 1): a blur on an untouched field must
-   * not write an empty Partial row, which counts against the per-version draft ceiling and makes the
-   * page mint a device invite.
-   */
-  private loadedAnswers: string | undefined;
+  /** What the respondent has committed versus what the server has judged. */
+  private readonly ledger = new CommitLedger();
 
   public async ngOnInit(): Promise<void> {
     await this.load();
@@ -408,12 +370,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
   public ngOnDestroy(): void {
     this.autosave?.dispose();
     this.destroyed = true;
-    this.cancelPrefetch();
+    this.prefetcher.Cancel();
   }
 
   /** Fetch (or accept) the form definition, theme the host, and build the runtime. */
   private async load(): Promise<void> {
-    this.cancelPrefetch();
+    this.prefetcher.Cancel();
     const generation = ++this.loadGeneration;
     this.waitingForWelcomeImage.set(false);
     this.phase.set('loading');
@@ -424,10 +386,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.resumed.set(false);
     this.resumeDropped.set([]);
     this.partialAnnounced = false;
-    this.committedAnswers = undefined;
-    this.lastAcknowledged = undefined;
-    this.loadedAnswers = undefined;
+    this.ledger.Reset(undefined);
     this.saveNotice.set(false);
+    // A failed load's message is for the error page; the form's banner reads the same signal, so a
+    // "Try again" that succeeds would otherwise show the old failure above a form that loaded fine.
+    this.errorText.set('');
     try {
       const { form, resume } = await this.loadForm();
       // The await is where the widget can move on: destroyed by its host, or reloaded by "Try
@@ -463,11 +426,14 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.endingEarly = false;
       const opening = this.adoptResume(resume, def, runtime) ?? initialPhaseFor(def);
       // After the resume prefill, so a resumed draft's own answers count as already on the server.
-      this.loadedAnswers = this.draftKeyNow();
+      // A second Reset equals setting the loaded answers alone: nothing can commit or acknowledge since the
+      // first one. `onCommit` is gated on 'ready', and no autosave save can be in flight, because `load()` runs
+      // only from `ngOnInit` and from `retry()` on 'error', which only a failed load reaches.
+      this.ledger.Reset(this.draftKeyNow());
       const welcomeImage = opening === 'welcome' ? def.welcomeScreen?.mediaURL?.trim() : undefined;
       const gated = !!welcomeImage;
-      // Plan before holding: prefetchUrls must be set before anything can start the queue.
-      this.planPrefetch(form, opening, gated);
+      // Plan before holding: the plan's URLs must be set before anything can start the queue.
+      this.prefetcher.Plan(form, opening, gated);
       if (welcomeImage) {
         this.holdForWelcomeImages(welcomeImage, generation); // phase stays 'loading' until the gate reveals
       } else {
@@ -607,8 +573,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (this.phase() === 'welcome') {
       this.phase.set('ready');
       // The welcome gate (core/welcome-gate.ts) normally starts the prefetch, but a respondent can
-      // tap Start while a timed-out image still downloads. startPrefetch() runs once per load.
-      this.startPrefetch();
+      // tap Start while a timed-out image still downloads. prefetcher.Start() runs once per load.
+      this.prefetcher.Start();
     }
   }
 
@@ -630,63 +596,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
         this.waitingForWelcomeImage.set(false);
         if (this.phase() === 'loading') this.phase.set('welcome');
       },
-      imagesSettled: () => this.startPrefetch(),
+      imagesSettled: () => this.prefetcher.Start(),
     });
-  }
-
-  /**
-   * Decide when this load's prefetch starts. A welcome screen with an image gets the network to
-   * itself until the welcome gate's `imagesSettled` fires (or the respondent leaves it). In every other case (no welcome
-   * screen, no welcome image, resumed past it), start when the browser is idle.
-   *
-   * Only while intake is still ahead. A resumed, already-submitted response opens on `done` (and a
-   * failed or expired load on `error`/`expired`): the respondent can never see an option or an
-   * ending image there, so downloading up to 12 of them would only compete with what is on screen.
-   */
-  private planPrefetch(form: WidgetForm, opening: WidgetPhase, gated: boolean): void {
-    if (opening !== 'welcome' && opening !== 'ready') {
-      return;
-    }
-    // The live form's ending images are unknown until the server picks the ending, so only the
-    // author's full draft prefetches them.
-    this.prefetchUrls = collectLaterImageUrls({
-      pages: form.render.pages,
-      endScreens: form.kind === 'full' ? form.definition.endScreens : [],
-    });
-    if (gated) {
-      return; // the welcome gate's imagesSettled starts it
-    }
-    this.schedulePrefetchWhenIdle();
-  }
-
-  private schedulePrefetchWhenIdle(): void {
-    const generation = this.prefetchGeneration;
-    const start = (): void => {
-      if (generation === this.prefetchGeneration) {
-        this.startPrefetch();
-      }
-    };
-    if (typeof requestIdleCallback === 'function') {
-      requestIdleCallback(start);
-    } else {
-      setTimeout(start, 0); // Safari does not ship requestIdleCallback by default
-    }
-  }
-
-  private startPrefetch(): void {
-    if (this.destroyed || this.prefetchStarted) {
-      return;
-    }
-    this.prefetchStarted = true;
-    this.prefetch = prefetchImages(this.prefetchUrls);
-  }
-
-  private cancelPrefetch(): void {
-    this.prefetchGeneration++;
-    this.prefetch?.cancel();
-    this.prefetch = undefined;
-    this.prefetchStarted = false;
-    this.prefetchUrls = [];
   }
 
   protected isScroll(): boolean {
@@ -784,26 +695,22 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   private async judgeCommittedAnswers(): Promise<void> {
     const key = this.draftKeyNow();
-    this.committedAnswers = key;
+    this.ledger.Commit(key);
     if (key === undefined) {
       return; // held: nothing can be sent until the unstorable answer is fixed
     }
-    if (key === this.judgedAnswers()) {
+    if (key === this.ledger.JudgedAnswers()) {
       // Nothing new: the server already judged exactly these answers (or holds them, untouched).
       // `savePartial` makes the same check, deliberately twice: there it covers every save the
       // controller runs (debounce, checkpoint, retry); here it keeps a no-op commit from going through
       // the controller at all, which would flash "Saving…" for a request never made.
-      if (this.lastAcknowledged) {
-        this.actOnVerdict(this.lastAcknowledged.result, key);
+      const verdict = this.ledger.VerdictFor(key);
+      if (verdict) {
+        this.actOnVerdict(verdict, key);
       }
       return;
     }
     await this.autosave?.flushNow();
-  }
-
-  /** The answers the server already has: the last accepted save's, or — before one — those the form opened with. */
-  private judgedAnswers(): string | undefined {
-    return this.lastAcknowledged?.answersKey ?? this.loadedAnswers;
   }
 
   /**
@@ -812,7 +719,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * the next edit re-saves is not worth interrupting anyone for.
    */
   private noticeUnsavedCommit(): void {
-    if (this.committedAnswers !== undefined && this.committedAnswers !== this.lastAcknowledged?.answersKey) {
+    if (this.ledger.HasUnjudgedCommit()) {
       this.saveNotice.set(true);
     }
   }
@@ -835,7 +742,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * the save that delivered this verdict is still the controller's in-flight save until it returns.
    */
   private actOnVerdict(result: FormsSaveResponseOutput, sentKey: string): void {
-    if (result.Outcome !== 'ended' || sentKey !== this.committedAnswers || this.endingEarly) {
+    if (result.Outcome !== 'ended' || !this.ledger.IsCommitted(sentKey) || this.endingEarly) {
       return;
     }
     void this.endEarly({
@@ -1083,14 +990,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
     await this.autosave?.settle();
     const input = this.buildSubmission(form, rt, false);
-    const startedAt = Date.now();
-    this.startSubmitTicker();
+    this.submitTimer.Start();
     try {
       const res = await this.api.saveResponse(input);
-      this.logSubmitTiming(startedAt, true);
+      this.submitTimer.LogOutcome(true);
       this.applySubmitResult(res);
     } catch (err) {
-      this.logSubmitTiming(startedAt, false);
+      this.submitTimer.LogOutcome(false);
       this.result.set(null);
       // Not a failure to retry from: the session is over, and `ready` would put the respondent
       // back in front of a Submit that can only ever be refused again.
@@ -1104,46 +1010,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.errorText.set(message);
       this.handlePossibleTurnstileFailure(message);
     } finally {
-      this.stopSubmitTicker();
+      this.submitTimer.Stop();
     }
-  }
-
-  /**
-   * Drive the escalating wait message.
-   *
-   * A plain interval rather than anything cleverer because the only requirement is that the
-   * text changes while the page is otherwise frozen; the cost is one timer for the length of
-   * one request, cleared in a `finally` so a thrown submit cannot leave it running.
-   */
-  private startSubmitTicker(): void {
-    this.submitElapsed.set(0);
-    const startedAt = Date.now();
-    this.stopSubmitTicker();
-    this.submitTicker = setInterval(() => this.submitElapsed.set(Date.now() - startedAt), 250);
-  }
-
-  private stopSubmitTicker(): void {
-    if (this.submitTicker !== null) {
-      clearInterval(this.submitTicker);
-      this.submitTicker = null;
-    }
-    this.submitElapsed.set(0);
-  }
-
-  /**
-   * Report where a submit spent its time, in the respondent's own console.
-   *
-   * Round-trip measured from the client, because that is the number the respondent actually
-   * experiences — a server that finishes in 40ms is still a four-second submit if the request
-   * spent the rest of it in flight, and only the client can see the difference. The server
-   * logs its own per-stage breakdown under the same heading, so the two read together.
-   */
-  private logSubmitTiming(startedAt: number, ok: boolean): void {
-    const ms = Date.now() - startedAt;
-    // eslint-disable-next-line no-console -- diagnostic output is the entire purpose here
-    console.info(
-      `[mj-form] submit ${ok ? 'completed' : 'failed'} in ${ms}ms (client round trip; see the API log for the server-side stage breakdown)`,
-    );
   }
 
   /**
@@ -1299,7 +1167,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * `'saved'` for a save the server threw away) and retries it on its own capped backoff.
    *
    * An accepted save is also a VERDICT: the server judged knockouts on these answers. It is
-   * remembered, and acted on when the answers are the committed ones ({@link actOnVerdict}).
+   * remembered in the {@link ledger}, and acted on when the answers are the committed ones ({@link actOnVerdict}).
    */
   private async savePartial(): Promise<string | undefined | typeof NOTHING_TO_SAVE> {
     const form = this.form();
@@ -1323,9 +1191,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
       // Nothing new to send (fix round 1): the server already holds exactly these answers — an
       // untouched form, an edit undone before the debounce fired, or a save of the same answers that
       // already came back (a commit flushed behind an in-flight save that ENDED the form, Minor 3).
-      if (sentKey === this.judgedAnswers()) {
-        if (this.lastAcknowledged) {
-          this.actOnVerdict(this.lastAcknowledged.result, sentKey);
+      if (sentKey === this.ledger.JudgedAnswers()) {
+        const verdict = this.ledger.VerdictFor(sentKey);
+        if (verdict) {
+          this.actOnVerdict(verdict, sentKey);
         }
         return NOTHING_TO_SAVE;
       }
@@ -1350,7 +1219,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.responseId = res.ResponseID;
       this.announceFirstPartial(res.ResponseID);
     }
-    this.lastAcknowledged = { answersKey: sentKey, result: res };
+    this.ledger.Acknowledge(sentKey, res);
     this.saveNotice.set(false);
     this.actOnVerdict(res, sentKey);
     return this.responseTarget();
