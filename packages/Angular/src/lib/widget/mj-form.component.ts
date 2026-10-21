@@ -275,12 +275,17 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * wait on an upload: this component's submit (phase `submitting`) and a renderer's Next (phase
    * still `ready`). Both leave the respondent looking at a button that seemingly did nothing until
    * the file lands, and both need the same answer on screen.
+   *
+   * Only in those two phases, though. A wait can outlive them — a renderer's Next still waiting
+   * when an autosave learns the session expired — and the scrim would then sit over the
+   * session-expired notice, the one surface that tells the respondent what to do next.
    */
   protected readonly overlay = computed<'saving-file' | 'sending' | null>(() => {
-    if (this.uploads.waiting()) {
+    const phase = this.phase();
+    if (this.uploads.waiting() && (phase === 'ready' || phase === 'submitting')) {
       return 'saving-file';
     }
-    return this.phase() === 'submitting' ? 'sending' : null;
+    return phase === 'submitting' ? 'sending' : null;
   });
 
   /** The resolved ending screen for the template. */
@@ -389,6 +394,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.autosave?.dispose();
     this.destroyed = true;
     this.prefetcher.Cancel();
+    // Stops a retry asleep between attempts from re-sending a file for a widget nobody can see.
+    this.uploads.dispose();
   }
 
   /** Fetch (or accept) the form definition, theme the host, and build the runtime. */

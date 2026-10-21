@@ -527,6 +527,37 @@ describe('FormUploadStore — upload retries a bad moment by itself', () => {
     expect(reloaded.valueFor('q-resume')).toBeUndefined();
   });
 
+  it('stops retrying once disposed, and releases whoever was waiting', async () => {
+    const { store } = connectedStore();
+    const send = scriptedSend(transient());
+
+    void store.upload('q-resume', fileNamed('resume.pdf'), send);
+    await vi.advanceTimersByTimeAsync(0);
+    const settled = store.whenSettled();
+
+    // The widget is torn down mid-sleep: nobody is left to read what a retry would store.
+    store.dispose();
+
+    expect(await isSettled(settled)).toBe(true);
+    expect(store.waiting()).toBe(false);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(store.viewFor('q-resume')).toEqual(IDLE_UPLOAD);
+  });
+
+  it('writes nothing to the old runtime when an attempt on the wire lands after dispose', async () => {
+    const { store, runtime } = connectedStore();
+    const wire = heldSend();
+    const done = store.upload('q-resume', fileNamed('resume.pdf'), wire.send);
+
+    store.dispose();
+    wire.resolve('file-late');
+    await done;
+
+    expect(runtime.valueFor('q-resume')).toBeUndefined();
+    expect(store.viewFor('q-resume')).toEqual(IDLE_UPLOAD);
+  });
+
   it('keeps a submit waiting through the retries, and releases it when they are spent', async () => {
     const { store } = connectedStore();
     const send = scriptedSend(transient());

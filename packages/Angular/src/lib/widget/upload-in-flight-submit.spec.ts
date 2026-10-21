@@ -13,6 +13,7 @@ import type { FormsSaveResponseOutput } from '@mj-biz-apps/forms-entities';
 import type { PublishedFormDefinition, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
 import { UploadError, type UploadedFile } from './api/form-upload.interface';
+import { SessionExpiredError } from './api/forms-api.interface';
 import { uploadFailure } from './api/form-upload.service';
 import { UPLOAD_RETRY_DELAYS_MS, UPLOAD_UNSAVED_MESSAGE } from './core/upload-store';
 import { deferred, FakeFormsApi, mountForm, screeningServer, servedAs } from './testing/mj-form-harness';
@@ -183,6 +184,82 @@ describe('submit while an upload is in flight (#248)', () => {
     expect(form.phaseNow).toBe('done');
     expect(api.savesOf('final')).toHaveLength(1);
     expect(finalAnswer(api, 'sig')).toBe('file-sig');
+  });
+
+  it('sends nothing when the respondent reloads the form while the submit waits', async () => {
+    const api = new FakeFormsApi(servedAs(consentForm()), screeningServer);
+    const { form } = await mountForm({ api });
+    form.rt.setValue('name', 'Sam');
+    const oldRuntime = form.rt;
+    form.uploadStore.begin('sig', drawing());
+
+    const submitting = form.submit();
+    await vi.advanceTimersByTimeAsync(0);
+    // "Try again" on a reload mints a new response and a new runtime; the connect releases the wait.
+    form.reload();
+    await submitting;
+
+    expect(form.rt).not.toBe(oldRuntime);
+    expect(api.savesOf('final')).toHaveLength(0);
+    expect(form.phaseNow).toBe('ready');
+  });
+
+  it('sends nothing when the phase left `submitting` while the submit waited', async () => {
+    const api = new FakeFormsApi(servedAs(consentForm()), screeningServer);
+    const { form } = await mountForm({ api });
+    form.rt.setValue('name', 'Sam');
+    const token = form.uploadStore.begin('sig', drawing());
+    const submitting = form.submit();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // A reload whose load is still on the wire: the phase is `loading`, but the old form and its
+    // store records are still in place, so the upload landing is what releases the wait.
+    const reloading = deferred<Awaited<ReturnType<FakeFormsApi['load']>>>();
+    const served = api.load;
+    api.load = () => reloading.promise;
+    form.reload();
+    expect(form.phaseNow).toBe('loading');
+    form.uploadStore.succeed(token, 'file-sig');
+    await submitting;
+
+    expect(api.savesOf('final')).toHaveLength(0);
+    reloading.resolve(await served());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(form.phaseNow).toBe('ready');
+    expect(api.savesOf('final')).toHaveLength(0);
+  });
+
+  it('does not cover the session-expired notice with "saving your file"', async () => {
+    const api = new FakeFormsApi(servedAs(consentForm()), () => {
+      throw new SessionExpiredError();
+    });
+    const { form } = await mountForm({ api });
+    form.rt.setValue('name', 'Sam');
+    await form.submit();
+    expect(form.phaseNow).toBe('expired');
+
+    // A renderer's Next still waiting on a drawing when the session lapsed: the scrim would sit
+    // over the one notice that tells the respondent what to do next.
+    form.uploadStore.begin('sig', drawing());
+    void form.uploadStore.whenSettled(['sig']);
+    expect(form.uploadStore.waiting()).toBe(true);
+
+    expect(form.overlayNow).toBeNull();
+  });
+
+  it('stops retrying an upload once the widget is destroyed', async () => {
+    const api = new FakeFormsApi(servedAs(consentForm()), screeningServer);
+    const { form } = await mountForm({ api });
+    const send = vi.fn((): Promise<UploadedFile> => Promise.reject(new UploadError('network', 'transient')));
+    void form.uploadStore.upload('sig', drawing(), send);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    form.ngOnDestroy();
+    await vi.advanceTimersByTimeAsync(ALL_RETRIES_MS);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(form.uploadStore.waiting()).toBe(false);
   });
 
   it('a failed upload on a question a rule has hidden does not block the submit', async () => {

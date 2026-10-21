@@ -171,8 +171,22 @@ export class FormUploadStore {
    */
   public connect(sink: UploadAnswerSink): void {
     this.sink = sink;
-    this.records.set(new Map());
-    this.releaseSettledWaiters();
+    this.dropRecords();
+  }
+
+  /**
+   * Retire every upload and drop the answer sink, for a widget being torn down.
+   *
+   * The same retirement as {@link connect}: a retry asleep between attempts wakes, finds its record
+   * gone, and stops without calling the transport again; an attempt still on the wire lands on a
+   * superseded token and writes nothing; and every waiter is released. Without it a destroyed
+   * widget kept retrying for up to the whole schedule, and wrote its results into a runtime nobody
+   * renders. Dropping the sink makes a write that somehow got past the token check throw rather
+   * than land.
+   */
+  public dispose(): void {
+    this.sink = null;
+    this.dropRecords();
   }
 
   /** Begin uploading `file` for `questionId`; the returned token is what may write the result. */
@@ -283,7 +297,7 @@ export class FormUploadStore {
    * apart. A retry asleep between attempts is still `uploading`, so a waiter sits through the
    * whole schedule; a newer upload for the same question keeps it waiting, for the newer one. It
    * never rejects and never hangs past the upload it waits on, because every path that ends an
-   * upload — success, failure, clear, reload — goes through `write()` or `connect()`, and both
+   * upload — success, failure, clear, reload, teardown — goes through `write()` or `dropRecords()`, and both
    * re-check the waiters.
    */
   public whenSettled(questionIds?: readonly string[]): Promise<void> {
@@ -420,6 +434,15 @@ export class FormUploadStore {
     return ids.every((questionId) => records.get(questionId)?.status !== 'uploading');
   }
 
+  /**
+   * Forget every record — retiring every token, since each currency check now misses — and
+   * release the waiters, which no remaining record could release later.
+   */
+  private dropRecords(): void {
+    this.records.set(new Map());
+    this.releaseSettledWaiters();
+  }
+
   /** Resolve and drop every waiter whose questions are no longer uploading. */
   private releaseSettledWaiters(): void {
     const waiters = this.waiters();
@@ -456,7 +479,7 @@ export class FormUploadStore {
   /**
    * The only writer of a question's record, which is why the waiters are re-checked here: any
    * change that can end an upload passes through this line, so no `whenSettled` can be left
-   * pending by a path that forgot to release it. (`connect` replaces the whole map and re-checks
+   * pending by a path that forgot to release it. (`dropRecords` replaces the whole map and re-checks
    * on its own.)
    */
   private write(questionId: string, record: UploadRecord): void {
