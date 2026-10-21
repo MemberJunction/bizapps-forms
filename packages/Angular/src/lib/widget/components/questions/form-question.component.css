@@ -364,34 +364,38 @@
   color: var(--mj-status-success, var(--mjf-accent));
 }
 
-.mjf-file__error {
-  margin: 0.5rem 0 0;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+/* A failed upload is one quiet line in the page's own ink (#248): no icon and no error colour.
+   The store has already retried every bad moment it could, so what reaches the respondent is a
+   next step, not an alarm. The region stays rendered while empty (it is a live region), so the
+   spacing applies only when it has something to say. */
+.mjf-file__failed {
+  margin: 0;
   font-size: 0.875rem;
-  color: var(--mjf-status-error);
+  color: var(--mjf-page-ink);
 }
 
-.mjf-file__retry {
+.mjf-file__failed:not(:empty) {
   margin-top: 0.5rem;
+}
+
+/* A text link, not a second button competing with the picker. The min-height keeps the 44px tap
+   target on a link that otherwise sits at text height. */
+.mjf-file__failed-link {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
   min-height: 2.75rem;
-  padding: 0.5rem 1rem;
-  font-family: var(--mjf-font-body);
-  font-size: 0.9375rem;
-  color: var(--mjf-page-ink);
-  background: var(--mjf-choice-bg);
-  border: 1px solid var(--mjf-choice-border);
+  padding: 0 0.25rem;
+  font: inherit;
+  color: var(--mjf-accent);
+  text-decoration: underline;
+  background: none;
+  border: 0;
   border-radius: var(--mjf-input-radius);
   cursor: pointer;
 }
 
-.mjf-file__retry:focus-visible {
+.mjf-file__failed-link:focus-visible {
   outline: none;
-  border-color: var(--mjf-accent);
   box-shadow: var(--mjf-focus-ring);
 }
 

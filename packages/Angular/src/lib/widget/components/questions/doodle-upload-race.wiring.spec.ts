@@ -37,16 +37,38 @@ const stripped = (file: string): string =>
 const question = (): string => stripped('form-question.component.ts');
 const pad = (): string => stripped('doodle-pad.component.ts');
 
+/** The `uploadFile` method body: from its signature to the end of the class. */
+const uploadPath = (): string => {
+  const source = question();
+  const start = source.indexOf('private uploadFile(');
+  if (start < 0) {
+    throw new Error('uploadFile not found in form-question.component.ts');
+  }
+  return source.slice(start);
+};
+
 describe('only the newest upload may write the answer', () => {
-  it('takes a token from the store for every upload', () => {
-    expect(question()).toMatch(/const token = this\.uploads\.begin\(questionId, file\);/);
+  it('hands every upload to the store, which takes the token and owns the supersede decision', () => {
+    // The store runs the transport call it is handed, so both outcomes — and every retry — are
+    // written under the store's own token. Both paths matter: a stale SUCCESS overwrites the good
+    // answer, and a stale FAILURE clears an answer the newer upload just stored correctly.
+    expect(uploadPath()).toMatch(/return this\.uploads\.upload\(questionId, file, \(onProgress\) =>/);
+    expect(uploadPath()).toMatch(/this\.uploader\.upload\(file, slug, questionId, onProgress, responseId\)/);
   });
 
-  it('hands both outcomes to the store, which owns the supersede decision', () => {
-    // Both paths matter: a stale SUCCESS overwrites the good answer, and a stale FAILURE clears
-    // an answer the newer upload just stored correctly.
-    expect(question()).toMatch(/this\.uploads\.succeed\(token, result\.fileId\)/);
-    expect(question()).toMatch(/this\.uploads\.fail\(token, \{ kind: 'unsaved', message \}\)/);
+  it('keeps no token, outcome or progress handling of its own', () => {
+    expect(question()).not.toMatch(/this\.uploads\.begin\(/);
+    expect(question()).not.toMatch(/this\.uploads\.succeed\(/);
+    expect(question()).not.toMatch(/this\.uploads\.fail\(/);
+    expect(question()).not.toMatch(/this\.uploads\.setProgress\(/);
+  });
+
+  it('reads the slug and response id once, before the store can retry', () => {
+    // A retry fires up to a minute later, by which time this recycled instance may be rendering
+    // another question; the call it hands the store must not read the view again.
+    expect(uploadPath()).toMatch(
+      /const slug = this\.distributionSlug\(\);\s*const responseId = this\.responseId\(\) \|\| undefined;\s*return this\.uploads\.upload\(/,
+    );
   });
 
   it('never routes an upload result back through the view', () => {
@@ -55,12 +77,7 @@ describe('only the newest upload may write the answer', () => {
     // component serves the whole deck, so the answer landed on the next question; in Scroll the
     // component is destroyed on leaving the page, so the answer was dropped while the store still
     // showed "done". The upload path must not emit at all.
-    const uploadPath = question().slice(question().indexOf('private async uploadFile'));
-    expect(uploadPath).not.toMatch(/valueChange\.emit/);
-  });
-
-  it('routes progress through the token too, so the bar cannot run backwards', () => {
-    expect(question()).toMatch(/\(fraction\) => this\.uploads\.setProgress\(token, fraction\)/);
+    expect(uploadPath()).not.toMatch(/valueChange\.emit/);
   });
 });
 
@@ -79,10 +96,11 @@ describe('upload state belongs to a question, not to this component', () => {
   });
 
   it('retrieves the file it retries — and the one it repaints — by question, not by remembering it', () => {
-    // One projection, from the store's record for THIS question: `viewFor(...).file`. A field on
-    // the component would be the recycled-instance defect again, one indirection further out.
+    // Both come from the store's record for THIS question: the repaint through `viewFor(...).file`,
+    // the retry through `restart(id)`. A field on the component would be the recycled-instance
+    // defect again, one indirection further out.
     expect(question()).toMatch(/localFile = computed\(\(\) => this\.upload\(\)\.file\)/);
-    expect(question()).toMatch(/const last = this\.localFile\(\);/);
+    expect(question()).toMatch(/return this\.uploads\.restart\(this\.question\(\)\.id\);/);
   });
 });
 
@@ -108,7 +126,7 @@ describe('a multi-stroke drawing stays correct without deferring the export', ()
   it('relies on the store\'s token, not on ordering, for which image wins', () => {
     // This is what makes exporting per stroke safe: the last upload STARTED wins regardless of
     // which arrives first, and that is the most complete drawing.
-    expect(question()).toMatch(/const token = this\.uploads\.begin\(questionId, file\);/);
+    expect(uploadPath()).toMatch(/return this\.uploads\.upload\(questionId, file,/);
   });
 });
 
