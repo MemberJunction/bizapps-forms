@@ -93,6 +93,17 @@ describe('Scroll — Next waits for the section’s uploads', () => {
     expect(body).not.toMatch(/touchAll\(|areValid\(/);
     expectInOrder(body, /=== 'stale'\)\s*\{\s*return;/, /this\.submit\.emit\(\)/);
   });
+
+  it('focuses a failed upload as well as an invalid answer — the judge decides what is a problem', () => {
+    // The judge refuses a question whose upload failed even when it has no validation error (an
+    // optional drawing), and leaves it untouched so "required" does not contradict the quiet
+    // failure line. Finding the target with `errorFor` alone would refuse and then focus nothing.
+    for (const method of ['private focusFirstInvalidIn', 'private revealFirstInvalid']) {
+      const body = methodBody(src(), method);
+      expect(body).toMatch(/this\.stepJudge\.firstProblemIn\(this\.runtime\(\), questions\)/);
+      expect(body).not.toMatch(/errorFor\(/);
+    }
+  });
 });
 
 describe('OneQuestion — Next waits for the question’s upload', () => {
@@ -115,11 +126,16 @@ describe('OneQuestion — Next waits for the question’s upload', () => {
     expectInOrder(onNext(), /await this\.stepJudge\.judge/, /=== 'stale'\)\s*\{\s*return;/);
   });
 
-  it('still lets a server refusal block Next, deciding with errorFor after the wait', () => {
-    // `areValid` (the judge's verdict) ignores server refusals; this step has always been held by
-    // them, and the only change #248 makes here is the wait.
+  it('is held by an invalid verdict OR a server refusal, deciding after the wait', () => {
+    // `areValid` (inside the verdict) ignores server refusals, which have always held this step,
+    // so `errorFor` stays. The verdict is needed too: a failed upload on an optional question has
+    // no `errorFor`, and only the verdict knows it must not be advanced past.
     const body = onNext();
-    expectInOrder(body, /=== 'stale'/, /if \(this\.runtime\(\)\.errorFor\(q\)\)\s*\{\s*this\.focusCurrent\(\);\s*return;/);
+    expectInOrder(
+      body,
+      /=== 'stale'/,
+      /if \(verdict === 'invalid' \|\| this\.runtime\(\)\.errorFor\(q\)\)\s*\{\s*this\.focusCurrent\(\);\s*return;/,
+    );
     expectInOrder(body, /errorFor\(q\)/, /isLast\(\)/);
     expectInOrder(body, /errorFor\(q\)/, /this\.submit\.emit\(\)/);
     expectInOrder(body, /errorFor\(q\)/, /setIndex\(this\.index\(\) \+ 1\)/);

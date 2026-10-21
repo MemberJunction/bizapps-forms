@@ -9,21 +9,56 @@
  * so nothing is touched until there is an answer to judge. The wait is bounded by the store —
  * `whenSettled` resolves on success, on a failure once the capped retries are spent, on a clear
  * and on a reload, and never rejects.
+ *
+ * A question whose upload FAILED is a problem of its own kind. It blocks the step even when it is
+ * optional (a drawing that did not save is not a skipped drawing), and it is never touched: the
+ * question already shows the quiet "Your file did not save…" line, and "This question is
+ * required." beside it would tell a respondent who did draw something that they did not.
  */
 import type { PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
 import type { FormRuntime } from './form-runtime';
 import type { FormUploadStore } from './upload-store';
 
-/** Waits for `questions`' uploads, then marks them touched and returns whether they are all valid. */
+/**
+ * Restarts `questions`' spent uploads, waits for every upload among them, then touches the ones
+ * that have no upload failure and returns whether all of them are valid with none failed.
+ *
+ * The restart is here, not only in mj-form's submit, because pressing Next or Submit again is the
+ * respondent saying "try again" — and for a REQUIRED question the renderer refuses on the empty
+ * answer before any submit is emitted, so a restart that lived only downstream would never run.
+ * mj-form keeps its own for the Scroll last-section Next, which emits submit without judging.
+ */
 export async function judgeWhenSettled(
   store: FormUploadStore,
   runtime: FormRuntime,
   questions: readonly PublishedFormQuestion[],
 ): Promise<boolean> {
-  await store.whenSettled(questions.map((question) => question.id));
-  runtime.touchAll(questions);
-  return runtime.areValid(questions);
+  const ids = questions.map((question) => question.id);
+  store.retryUnsaved(ids);
+  await store.whenSettled(ids);
+  const judgeable = questions.filter((question) => store.failureAmong([question.id]) === null);
+  runtime.touchAll(judgeable);
+  return judgeable.length === questions.length && runtime.areValid(questions);
+}
+
+/**
+ * The first of `questions` the respondent must fix — an upload failure or a validation error — or
+ * null. A pure read; the renderer focuses it after an `invalid` verdict.
+ *
+ * It reads `errorFor`, not the touched-gated `visibleErrorFor`, so it finds a question the judge
+ * deliberately left untouched; and it counts upload failures, which `errorFor` cannot see on an
+ * optional question. Same two facts the verdict is made of, so a refusal always has a target.
+ */
+export function firstProblemIn(
+  store: FormUploadStore,
+  runtime: FormRuntime,
+  questions: readonly PublishedFormQuestion[],
+): PublishedFormQuestion | null {
+  return (
+    questions.find((question) => store.failureAmong([question.id]) !== null || runtime.errorFor(question) !== null) ??
+    null
+  );
 }
 
 /**
@@ -70,5 +105,10 @@ export class StepJudge {
     } finally {
       this.judging = false;
     }
+  }
+
+  /** {@link firstProblemIn} against this judge's store. */
+  public firstProblemIn(runtime: FormRuntime, questions: readonly PublishedFormQuestion[]): PublishedFormQuestion | null {
+    return firstProblemIn(this.store, runtime, questions);
   }
 }

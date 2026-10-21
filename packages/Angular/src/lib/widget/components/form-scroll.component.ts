@@ -335,9 +335,12 @@ export class FormScrollComponent {
    * The old renderer simply called `focus()` on the field, which worked because every section
    * was on screen. With one section rendered at a time the field is usually not in the DOM at
    * all, so focusing it does nothing and the form refuses to submit with no visible reason.
+   *
+   * "Invalid" is the judge's word, not `errorFor`'s: a failed upload on an optional question has no
+   * validation error but still refuses the step (#248), and it must still get the focus.
    */
   private revealFirstInvalid(questions: readonly PublishedFormQuestion[]): void {
-    const first = questions.find((question) => this.runtime().errorFor(question));
+    const first = this.stepJudge.firstProblemIn(this.runtime(), questions);
     if (!first) {
       return;
     }
@@ -357,7 +360,7 @@ export class FormScrollComponent {
   }
 
   private focusFirstInvalidIn(questions: readonly PublishedFormQuestion[]): void {
-    const first = questions.find((question) => this.runtime().errorFor(question));
+    const first = this.stepJudge.firstProblemIn(this.runtime(), questions);
     if (!first) {
       return;
     }

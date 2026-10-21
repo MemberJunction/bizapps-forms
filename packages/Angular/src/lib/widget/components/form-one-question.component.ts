@@ -185,9 +185,11 @@ export class FormOneQuestionComponent {
    * A `stale` verdict (a second tap or Enter, or Back during the wait) does nothing; see
    * {@link StepJudge}.
    *
-   * The decision after the wait is `errorFor`, not the judge's verdict: the verdict is
-   * `areValid`, which ignores a server refusal, and this step has always been held by one until
-   * the answer changes. The wait is the only thing #248 changes here.
+   * The step is held by EITHER an `invalid` verdict or `errorFor`. `errorFor` because the verdict's
+   * `areValid` ignores a server refusal, and this step has always been held by one until the answer
+   * changes. The verdict because only it knows about a failed upload on an optional question, which
+   * has no `errorFor` but must not be advanced past (and is left untouched by the judge, so its
+   * quiet failure line is not contradicted by "required").
    */
   protected async onNext(): Promise<void> {
     const q = this.current();
@@ -199,7 +201,7 @@ export class FormOneQuestionComponent {
     if (verdict === 'stale') {
       return;
     }
-    if (this.runtime().errorFor(q)) {
+    if (verdict === 'invalid' || this.runtime().errorFor(q)) {
       this.focusCurrent();
       return;
     }

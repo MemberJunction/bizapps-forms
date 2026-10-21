@@ -97,7 +97,7 @@ describe('judgeWhenSettled — Next waits for the section’s uploads before jud
     expect(runtime.valueFor('q-doodle')).toBe('file-drawing');
   });
 
-  it('keeps waiting through the retries, then refuses with the required error once they are spent', async () => {
+  it('keeps waiting through the retries, then refuses once they are spent — without calling the drawing "required"', async () => {
     const { store, runtime, questions } = connected();
     const send = vi.fn<UploadSend>(() => Promise.reject(new UploadError('Network down.', 'transient')));
     void store.upload('q-doodle', drawing(), send);
@@ -110,7 +110,51 @@ describe('judgeWhenSettled — Next waits for the section’s uploads before jud
     await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[2]);
 
     expect(await peek(judged)).toEqual({ done: true, value: false });
-    expect(runtime.visibleErrorFor(questions[0])).not.toBeNull();
+    // The quiet "Your file did not save…" line explains this question; "This question is
+    // required." beside it would contradict it — the respondent DID draw something.
+    expect(runtime.isTouched('q-doodle')).toBe(false);
+    expect(runtime.visibleErrorFor(questions[0])).toBeNull();
+  });
+
+  it('refuses a failed upload on an OPTIONAL question too, and still touches the rest', async () => {
+    const { store, runtime, questions } = connected();
+    const optional = questions.map((question) => (question.id === 'q-doodle' ? { ...question, isRequired: false } : question));
+    await store.upload('q-doodle', drawing(), () => Promise.reject(new UploadError('Too big.', 'refused')));
+
+    // Skipping the drawing would be fine; a drawing that failed to save is not a skipped one.
+    expect(await peek(judgeWhenSettled(store, runtime, optional))).toEqual({ done: true, value: false });
+    expect(runtime.isTouched('q-doodle')).toBe(false);
+    expect(runtime.isTouched('q-note')).toBe(true);
+  });
+
+  it('restarts an upload whose retries were spent, waits for it, and passes once it lands', async () => {
+    const { store, runtime, questions } = connected();
+    let online = false;
+    const send = vi.fn<UploadSend>(() =>
+      online ? Promise.resolve(stored('file-drawing')) : Promise.reject(new UploadError('Network down.', 'transient')),
+    );
+    void store.upload('q-doodle', drawing(), send);
+    await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS.reduce((sum, ms) => sum + ms, 0));
+    expect(store.failureAmong(['q-doodle'])?.kind).toBe('unsaved');
+    const attemptsBefore = send.mock.calls.length;
+
+    // Next (or Submit) again is the respondent saying "try again". Without the restart a REQUIRED
+    // drawing is judged empty here, no submit is ever emitted, and nothing downstream can retry it.
+    online = true;
+    const judged = judgeWhenSettled(store, runtime, questions);
+
+    expect(await peek(judged)).toEqual({ done: true, value: true });
+    expect(send).toHaveBeenCalledTimes(attemptsBefore + 1);
+    expect(runtime.valueFor('q-doodle')).toBe('file-drawing');
+  });
+
+  it('does not restart a refused upload — the same bytes get the same verdict', async () => {
+    const { store, runtime, questions } = connected();
+    const send = vi.fn<UploadSend>(() => Promise.reject(new UploadError('Too big.', 'refused')));
+    await store.upload('q-doodle', drawing(), send);
+
+    expect(await peek(judgeWhenSettled(store, runtime, questions))).toEqual({ done: true, value: false });
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it('waits only for the questions it judges', async () => {
@@ -175,5 +219,30 @@ describe('StepJudge — a Next that waits can be tapped twice, or walked away fr
     // Valid, but about a screen the respondent is no longer on: advancing now would move them
     // forward from wherever Back took them.
     expect(await peek(verdict)).toEqual({ done: true, value: 'stale' });
+  });
+});
+
+describe('StepJudge.firstProblemIn — where focus goes after an invalid verdict', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('names a question whose upload failed even when it has no validation error', async () => {
+    const { store, runtime, questions } = connected();
+    const optional = questions.map((question) => (question.id === 'q-doodle' ? { ...question, isRequired: false } : question));
+    await store.upload('q-doodle', drawing(), () => Promise.reject(new UploadError('Too big.', 'refused')));
+    const judge = new StepJudge(store, () => 'p1');
+
+    // `errorFor` is null for an optional, unanswered drawing, so a renderer that looked only at
+    // it would refuse Next and then focus nothing.
+    expect(runtime.errorFor(optional[0])).toBeNull();
+    expect(judge.firstProblemIn(runtime, optional)?.id).toBe('q-doodle');
+  });
+
+  it('names the first question with a validation error, in the order given', () => {
+    const { runtime, questions } = connected();
+    const judge = new StepJudge(new FormUploadStore(), () => 'p1');
+
+    expect(judge.firstProblemIn(runtime, questions)?.id).toBe('q-doodle');
+    expect(judge.firstProblemIn(runtime, questions.filter((q) => q.id === 'q-note'))).toBeNull();
   });
 });
