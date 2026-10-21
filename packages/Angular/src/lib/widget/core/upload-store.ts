@@ -28,6 +28,7 @@ import { computed, signal, type Signal } from '@angular/core';
 import { type AnswerValue } from '@mj-biz-apps/forms-entities/contracts';
 
 import { UploadError, type UploadedFile, type UploadProgress } from '../api/form-upload.interface';
+import { failureDetail } from './failure-detail';
 
 export type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
@@ -196,7 +197,9 @@ export class FormUploadStore {
    * record the sleeper's token points at. A superseded upload stops silently — whatever replaced
    * it owns the question now.
    *
-   * Never rejects: every outcome is written to the record, which is where the widget reads it.
+   * Every transport outcome is written to the record, which is where the widget reads it, so a
+   * failed upload does not reject. The one thing that does is a throw from the answer sink while
+   * storing a successful result: that is a wiring bug, and it propagates rather than being retried.
    */
   public async upload(questionId: string, file: File, send: UploadSend): Promise<void> {
     const token = this.start(questionId, file, send);
@@ -206,21 +209,33 @@ export class FormUploadStore {
       if (!this.isCurrent(token)) {
         return;
       }
+      let stored: UploadedFile;
       try {
-        const stored = await send((fraction) => this.setProgress(token, fraction));
-        this.succeed(token, stored.fileId);
-        return;
+        stored = await send((fraction) => this.setProgress(token, fraction));
       } catch (err) {
         if (err instanceof UploadError && err.kind === 'refused') {
           this.fail(token, { kind: 'refused', message: err.message });
           return;
         }
+        // The respondent sees nothing until the schedule is spent, so this line is the only
+        // trace of a flaky connection — and the only place a non-UploadError bug would show.
+        console.warn(
+          `[mj-forms] upload for question ${questionId} failed on attempt ${attempt} of ${maxAttempts}: ` +
+            failureDetail(err),
+          err,
+        );
         if (attempt === maxAttempts) {
           break;
         }
         this.setProgress(token, null);
         await sleep(UPLOAD_RETRY_DELAYS_MS[attempt - 1]);
+        continue;
       }
+      // Outside the try on purpose: a throw from storing the answer is the widget wired wrong, not
+      // a bad moment on the wire. Retrying it would re-send bytes the server already stored and
+      // hide the bug, so it propagates to the caller instead.
+      this.succeed(token, stored.fileId);
+      return;
     }
     // The cap is spent. `fail` ignores a superseded token, so this cannot overwrite a newer upload.
     this.fail(token, { kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE });
@@ -231,6 +246,10 @@ export class FormUploadStore {
    *
    * A no-op when there is nothing to restart: no record, no file, or a record begun without a
    * transport call (`begin` directly), which this store cannot make again on its own.
+   *
+   * Restarting a question whose upload is still running supersedes the running series: the new
+   * attempt takes a fresh token, and the old series stops at its next currency check (its late
+   * result, if any, is ignored by `succeed`/`fail`).
    */
   public restart(questionId: string): Promise<void> {
     const record = this.records().get(questionId);
@@ -245,7 +264,8 @@ export class FormUploadStore {
    *
    * A `refused` one is left alone on purpose: restarting it would send the same rejected bytes and
    * show the same verdict, after a wait. Fire-and-forget — the caller learns the outcome through
-   * {@link whenSettled} and {@link failureAmong}, and `upload` never rejects.
+   * {@link whenSettled} and {@link failureAmong}. `upload` rejects only on an answer-sink throw
+   * (a wiring bug); left unawaited here, that surfaces as an unhandled rejection, not silence.
    */
   public retryUnsaved(questionIds: readonly string[]): void {
     for (const questionId of questionIds) {

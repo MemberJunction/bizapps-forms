@@ -131,6 +131,15 @@ describe('uploadFailure', () => {
     expect(uploadFailure(500, '').kind).toBe('transient');
   });
 
+  it('draws the refused range at exactly 400-499', () => {
+    // 399 cannot reach here from the XHR path (only non-2xx do, and 3xx are followed), but the
+    // boundary is the function's contract, so pin both edges.
+    expect(uploadFailure(399, '').kind).toBe('transient');
+    expect(uploadFailure(400, '').kind).toBe('refused');
+    expect(uploadFailure(499, '').kind).toBe('refused');
+    expect(uploadFailure(500, '').kind).toBe('transient');
+  });
+
   it('calls a status-0 failure (no response at all) transient', () => {
     expect(uploadFailure(0, '').kind).toBe('transient');
   });

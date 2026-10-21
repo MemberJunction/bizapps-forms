@@ -318,6 +318,19 @@ describe('FormUploadStore — whenSettled', () => {
     expect(store.waiting()).toBe(false);
   });
 
+  it('keeps waiting through a replacement upload, until the newer one settles', async () => {
+    const { store } = connectedStore();
+    const first = store.begin('q-resume', fileNamed('draft.pdf'));
+    const settled = store.whenSettled(['q-resume']);
+
+    const second = store.begin('q-resume', fileNamed('final.pdf'));
+    store.succeed(first, 'file-draft');
+    expect(await isSettled(settled)).toBe(false);
+
+    store.succeed(second, 'file-final');
+    expect(await isSettled(settled)).toBe(true);
+  });
+
   it('waits only for the questions it was asked about', async () => {
     const { store } = connectedStore();
     store.begin('q-resume', fileNamed('resume.pdf'));
@@ -332,8 +345,49 @@ describe('FormUploadStore — whenSettled', () => {
 });
 
 describe('FormUploadStore — upload retries a bad moment by itself', () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    warn.mockRestore();
+  });
+
+  it('logs every transient failure with the question, the attempt and the cause', async () => {
+    const { store } = connectedStore();
+    const send = scriptedSend(new UploadError('Upload cancelled.', 'transient'), stored('file-resume'));
+
+    const running = store.upload('q-resume', fileNamed('resume.pdf'), send);
+    await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[0]);
+    await running;
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0][0]);
+    expect(line).toContain('q-resume');
+    expect(line).toContain('attempt 1');
+    expect(line).toContain('UploadError: Upload cancelled.');
+  });
+
+  it('lets a broken answer sink throw out of upload instead of re-uploading the file', async () => {
+    // A throw from storing the answer is the widget wired wrong, not a bad moment on the wire.
+    // Treating it as transient would re-send bytes the server already stored, and swallow the bug.
+    const store = new FormUploadStore();
+    store.connect({
+      setValue: (_questionId, value) => {
+        if (value === 'file-resume') {
+          throw new Error('sink broke');
+        }
+      },
+    });
+    const send = scriptedSend(stored('file-resume'));
+
+    await expect(store.upload('q-resume', fileNamed('resume.pdf'), send)).rejects.toThrow('sink broke');
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+    expect(send).toHaveBeenCalledTimes(1);
+  });
 
   it('stores the file id when the first attempt lands', async () => {
     const { store, runtime } = connectedStore();
@@ -490,8 +544,15 @@ describe('FormUploadStore — upload retries a bad moment by itself', () => {
 });
 
 describe('FormUploadStore — restart and retryUnsaved', () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    warn.mockRestore();
+  });
 
   /** Run `questionId`'s upload through every retry until it is `unsaved`. */
   async function spendRetries(store: FormUploadStore, questionId: string, send: UploadSend): Promise<void> {
