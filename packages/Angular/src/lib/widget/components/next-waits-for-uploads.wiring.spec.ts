@@ -78,8 +78,8 @@ describe('Scroll — Next waits for the section’s uploads', () => {
   });
 
   it('on the last section still just hands over to the submit', () => {
-    // mj-form's onSubmit waits there (and judges the whole form), so waiting here too would be
-    // a second overlay-less wait in front of it.
+    // mj-form's onSubmit already waits for every visible question's upload (restarting a spent
+    // one and refusing on a failed one), so a wait here would only repeat that wait.
     expect(onNext()).toMatch(/isLast\(\)\)\s*\{\s*this\.submit\.emit\(\);\s*return;/);
   });
 

@@ -172,7 +172,8 @@ describe('uploadFailure', () => {
 describe('the XHR transport classifies every failure', () => {
   // Source-level guards, kept alongside the executing transport tests in
   // form-upload.transport.spec.ts (which drive a fake XHR through the real service): these pin
-  // which constructor each handler rejects with, which the executing tests check only by message.
+  // which call builds each handler's rejection (`uploadFailure` or an inline `UploadError`). The
+  // executing tests check the result — its class, message and kind — not how it was built.
   const code = readFileSync(join(__dirname, 'form-upload.service.ts'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/[^\n]*/g, '');
