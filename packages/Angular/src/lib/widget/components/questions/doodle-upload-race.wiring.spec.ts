@@ -46,7 +46,7 @@ describe('only the newest upload may write the answer', () => {
     // Both paths matter: a stale SUCCESS overwrites the good answer, and a stale FAILURE clears
     // an answer the newer upload just stored correctly.
     expect(question()).toMatch(/this\.uploads\.succeed\(token, result\.fileId\)/);
-    expect(question()).toMatch(/this\.uploads\.fail\(token, message\)/);
+    expect(question()).toMatch(/this\.uploads\.fail\(token, \{ kind: 'unsaved', message \}\)/);
   });
 
   it('never routes an upload result back through the view', () => {

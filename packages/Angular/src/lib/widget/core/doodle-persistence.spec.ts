@@ -151,7 +151,7 @@ describe('the drawing tracks the answer through every outcome', () => {
     const png = drawing();
 
     const token = store.begin('q-draw', png);
-    store.fail(token, 'The upload did not go through. Please try again.');
+    store.fail(token, { kind: 'unsaved', message: 'The upload did not go through. Please try again.' });
 
     expect(runtime.valueFor('q-draw')).toBeUndefined();
     expect(store.viewFor('q-draw').file).toBe(png);

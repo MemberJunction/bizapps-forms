@@ -137,7 +137,7 @@ export class FormQuestionComponent {
   /** Display name of the selected/uploaded file (the stored answer is the fileId). */
   protected readonly uploadFileName = computed(() => this.upload().fileName);
   /** Inline, respondent-facing upload error, or `null`. */
-  protected readonly uploadError = computed(() => this.upload().error);
+  protected readonly uploadError = computed(() => this.upload().failure?.message ?? null);
   /**
    * The file held locally for this question, whatever its upload has done — or `null`.
    *
@@ -795,7 +795,7 @@ export class FormQuestionComponent {
       this.uploads.succeed(token, result.fileId);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Upload failed. Please try again.';
-      this.uploads.fail(token, message);
+      this.uploads.fail(token, { kind: 'unsaved', message });
     }
   }
 }

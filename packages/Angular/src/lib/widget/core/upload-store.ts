@@ -15,12 +15,52 @@
  *
  * One store per widget instance — NOT a `BaseSingleton`. Several forms can be embedded on one
  * host page, and they must not see each other's uploads.
+ *
+ * It also owns an upload's whole life, not just its outcome (#248). A submit that started while a
+ * drawing was on the wire used to send the response without it, because nothing on the submit
+ * path could see the upload, let alone wait for it. So the store runs the transport call it is
+ * handed ({@link FormUploadStore.upload}), retries a bad moment by itself, keeps the call so it
+ * can restart it, and answers {@link FormUploadStore.whenSettled} for whoever must not judge the
+ * answers until the uploads have landed.
  */
-import { signal } from '@angular/core';
+import { computed, signal, type Signal } from '@angular/core';
 
 import { type AnswerValue } from '@mj-biz-apps/forms-entities/contracts';
 
+import { UploadError, type UploadedFile, type UploadProgress } from '../api/form-upload.interface';
+
 export type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
+
+/**
+ * How long to wait before each retry of a transient upload failure; the length is the cap
+ * (three retries, four attempts in all).
+ *
+ * The same schedule as the autosave's private `RETRY_DELAYS_MS`, duplicated on purpose: the two
+ * describe the same judgement about how long a bad moment lasts, but the autosave must not change
+ * in #248, and exporting its constant from here (or this one from there) would couple two
+ * controllers that otherwise know nothing of each other. If one schedule is tuned, tune both.
+ */
+export const UPLOAD_RETRY_DELAYS_MS = [5_000, 15_000, 60_000] as const;
+
+/** What a respondent reads once every retry of an upload has failed. */
+export const UPLOAD_UNSAVED_MESSAGE = 'Your file did not save. Check your connection and try again.';
+
+/**
+ * Why a question's upload ended without a stored file.
+ *
+ * `refused`: the server (or the configuration) rejected the file itself — only a different file
+ * can help. `unsaved`: every retry hit a bad moment — the same file may well land if tried again.
+ */
+export type UploadFailure = { readonly kind: 'refused' | 'unsaved'; readonly message: string };
+
+/**
+ * One transport call for one file, with the question and response already bound in.
+ *
+ * The store is handed the CALL rather than the transport so it can make the call again — on a
+ * retry, or on a restart after the retries were spent — without knowing the slug, the response
+ * id, or which transport is bound.
+ */
+export type UploadSend = (onProgress: UploadProgress) => Promise<UploadedFile>;
 
 /** What a file question renders for its current upload. */
 export interface UploadView {
@@ -29,8 +69,8 @@ export interface UploadView {
   readonly fileName: string;
   /** 0–1 while uploading, or null for an indeterminate phase. */
   readonly progress: number | null;
-  /** Respondent-facing failure text, or null. */
-  readonly error: string | null;
+  /** Why the upload ended without a stored file, or null. Set only while `status` is `'error'`. */
+  readonly failure: UploadFailure | null;
   /**
    * The file itself, for a control that has to RENDER it rather than name it.
    *
@@ -51,7 +91,7 @@ export const IDLE_UPLOAD: UploadView = {
   status: 'idle',
   fileName: '',
   progress: null,
-  error: null,
+  failure: null,
   file: null,
 };
 
@@ -71,9 +111,25 @@ export interface UploadToken {
 interface UploadRecord extends UploadView {
   /** The newest upload started for this question; only it may write. */
   readonly seq: number;
+  /**
+   * The transport call that produced this record, kept so {@link FormUploadStore.restart} can
+   * make it again. Null for an upload begun without one (`begin` directly) and for a cleared
+   * question. Not part of the view: a template has no business calling the transport.
+   */
+  readonly send: UploadSend | null;
 }
 
-const idleRecord = (seq: number, file: File | null): UploadRecord => ({ ...IDLE_UPLOAD, seq, file });
+const idleRecord = (seq: number, file: File | null): UploadRecord => ({ ...IDLE_UPLOAD, seq, file, send: null });
+
+/** A pending {@link FormUploadStore.whenSettled} call. */
+interface SettleWaiter {
+  /** The questions it waits on; null means every question. */
+  readonly questionIds: readonly string[] | null;
+  readonly resolve: () => void;
+}
+
+/** A promise that resolves after `ms`. `setTimeout` so fake timers drive it in tests. */
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Where a file question's answer is written.
@@ -88,6 +144,14 @@ export interface UploadAnswerSink {
 export class FormUploadStore {
   private readonly records = signal<ReadonlyMap<string, UploadRecord>>(new Map());
 
+  private readonly waiters = signal<readonly SettleWaiter[]>([]);
+
+  /**
+   * True while any {@link whenSettled} call is still pending — the submit overlay reads it to say
+   * "Saving your file…" instead of leaving the respondent looking at a button that did nothing.
+   */
+  public readonly waiting: Signal<boolean> = computed(() => this.waiters().length > 0);
+
   private sink: UploadAnswerSink | null = null;
 
   /** Bumped per upload so a superseded one can be recognised even across questions. */
@@ -99,27 +163,129 @@ export class FormUploadStore {
    * Called when the form definition loads, because the runtime does not exist before then. Any
    * records held now describe the PREVIOUS runtime's form, so they go with it — a reload mints a
    * new response id, and a confirmation carried across would name a file that response never had.
+   *
+   * Dropping the records also retires every upload still running for the old form: a retry asleep
+   * between attempts wakes, finds its record gone, and stops. Anyone waiting on those uploads is
+   * released here, because no record is left that could release them later.
    */
   public connect(sink: UploadAnswerSink): void {
     this.sink = sink;
     this.records.set(new Map());
+    this.releaseSettledWaiters();
   }
 
   /** Begin uploading `file` for `questionId`; the returned token is what may write the result. */
   public begin(questionId: string, file: File): UploadToken {
-    const seq = ++this.nextSeq;
-    this.write(questionId, {
-      status: 'uploading',
-      fileName: file.name,
-      progress: 0,
-      error: null,
-      seq,
-      file,
+    return this.start(questionId, file, null);
+  }
+
+  /**
+   * Upload `file` for `questionId` through `send`, retrying a bad moment, and store the result.
+   *
+   * A failure the transport calls `refused` (an {@link UploadError} of that kind) ends the upload
+   * at once: the same bytes get the same verdict, so retrying only delays the respondent learning
+   * they need a different file. Anything else — a transient `UploadError`, or a plain `Error` from
+   * a transport that does not classify — is retried on {@link UPLOAD_RETRY_DELAYS_MS}, because
+   * guessing "refused" would give up on an answer a retry could have saved. Between attempts the
+   * record stays `uploading` with indeterminate progress, so a submit waiting on it keeps waiting
+   * rather than judging a question that is still being worked on. Once the schedule is spent the
+   * upload fails as `unsaved`, which a respondent can restart.
+   *
+   * The currency check before every attempt is what lets a newer upload, a clear, or a reload stop
+   * a retry that is asleep: none of them can cancel a timer they cannot see, but each replaces the
+   * record the sleeper's token points at. A superseded upload stops silently — whatever replaced
+   * it owns the question now.
+   *
+   * Never rejects: every outcome is written to the record, which is where the widget reads it.
+   */
+  public async upload(questionId: string, file: File, send: UploadSend): Promise<void> {
+    const token = this.start(questionId, file, send);
+    // One more attempt than there are delays: the first try, then one retry per delay.
+    const maxAttempts = UPLOAD_RETRY_DELAYS_MS.length + 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (!this.isCurrent(token)) {
+        return;
+      }
+      try {
+        const stored = await send((fraction) => this.setProgress(token, fraction));
+        this.succeed(token, stored.fileId);
+        return;
+      } catch (err) {
+        if (err instanceof UploadError && err.kind === 'refused') {
+          this.fail(token, { kind: 'refused', message: err.message });
+          return;
+        }
+        if (attempt === maxAttempts) {
+          break;
+        }
+        this.setProgress(token, null);
+        await sleep(UPLOAD_RETRY_DELAYS_MS[attempt - 1]);
+      }
+    }
+    // The cap is spent. `fail` ignores a superseded token, so this cannot overwrite a newer upload.
+    this.fail(token, { kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE });
+  }
+
+  /**
+   * Run `questionId`'s upload again with the same file and transport call.
+   *
+   * A no-op when there is nothing to restart: no record, no file, or a record begun without a
+   * transport call (`begin` directly), which this store cannot make again on its own.
+   */
+  public restart(questionId: string): Promise<void> {
+    const record = this.records().get(questionId);
+    if (!record?.file || !record.send) {
+      return Promise.resolve();
+    }
+    return this.upload(questionId, record.file, record.send);
+  }
+
+  /**
+   * Restart every listed question whose upload ended `unsaved`.
+   *
+   * A `refused` one is left alone on purpose: restarting it would send the same rejected bytes and
+   * show the same verdict, after a wait. Fire-and-forget — the caller learns the outcome through
+   * {@link whenSettled} and {@link failureAmong}, and `upload` never rejects.
+   */
+  public retryUnsaved(questionIds: readonly string[]): void {
+    for (const questionId of questionIds) {
+      if (this.records().get(questionId)?.failure?.kind === 'unsaved') {
+        void this.restart(questionId);
+      }
+    }
+  }
+
+  /**
+   * Resolves once none of `questionIds` (default: every question) is `uploading`; at once if none
+   * is now.
+   *
+   * "Settled" is not "succeeded": the caller reads {@link failureAmong} afterwards to tell the two
+   * apart. A retry asleep between attempts is still `uploading`, so a waiter sits through the
+   * whole schedule; a newer upload for the same question keeps it waiting, for the newer one. It
+   * never rejects and never hangs past the upload it waits on, because every path that ends an
+   * upload — success, failure, clear, reload — goes through `write()` or `connect()`, and both
+   * re-check the waiters.
+   */
+  public whenSettled(questionIds?: readonly string[]): Promise<void> {
+    const ids = questionIds ?? null;
+    if (this.isSettled(ids)) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      this.waiters.update((waiters) => [...waiters, { questionIds: ids, resolve }]);
     });
-    // No answer while an upload is in flight: a required FileUpload must not be satisfied by a
-    // file that is not stored yet, and a replacement must not leave the old id standing.
-    this.commit(questionId, null);
-    return { questionId, seq };
+  }
+
+  /** The first failure among `questionIds`, in the order given, or null. A pure read. */
+  public failureAmong(questionIds: readonly string[]): UploadFailure | null {
+    const records = this.records();
+    for (const questionId of questionIds) {
+      const failure = records.get(questionId)?.failure;
+      if (failure) {
+        return failure;
+      }
+    }
+    return null;
   }
 
   /**
@@ -144,7 +310,7 @@ export class FormUploadStore {
     if (!current || current.seq !== token.seq) {
       return;
     }
-    this.write(token.questionId, { ...current, status: 'done', progress: 1, error: null });
+    this.write(token.questionId, { ...current, status: 'done', progress: 1, failure: null });
     this.commit(token.questionId, fileId);
   }
 
@@ -154,12 +320,12 @@ export class FormUploadStore {
    * A superseded token is ignored, and it matters more here than on the success path: clearing
    * the answer on a stale failure wipes the one a NEWER upload had already stored successfully.
    */
-  public fail(token: UploadToken, message: string): void {
+  public fail(token: UploadToken, failure: UploadFailure): void {
     const current = this.records().get(token.questionId);
     if (!current || current.seq !== token.seq) {
       return;
     }
-    this.write(token.questionId, { ...current, status: 'error', progress: null, error: message });
+    this.write(token.questionId, { ...current, status: 'error', progress: null, failure });
     this.commit(token.questionId, null);
   }
 
@@ -200,8 +366,54 @@ export class FormUploadStore {
     if (!record) {
       return IDLE_UPLOAD;
     }
-    const { status, fileName, progress, error, file } = record;
-    return { status, fileName, progress, error, file };
+    const { status, fileName, progress, failure, file } = record;
+    return { status, fileName, progress, failure, file };
+  }
+
+  /** Start a new upload record for `questionId`, superseding any earlier one. */
+  private start(questionId: string, file: File, send: UploadSend | null): UploadToken {
+    const seq = ++this.nextSeq;
+    this.write(questionId, {
+      status: 'uploading',
+      fileName: file.name,
+      progress: 0,
+      failure: null,
+      seq,
+      file,
+      send,
+    });
+    // No answer while an upload is in flight: a required FileUpload must not be satisfied by a
+    // file that is not stored yet, and a replacement must not leave the old id standing.
+    this.commit(questionId, null);
+    return { questionId, seq };
+  }
+
+  /** Is `token` still the newest upload for its question? False once replaced, cleared or reloaded. */
+  private isCurrent(token: UploadToken): boolean {
+    return this.records().get(token.questionId)?.seq === token.seq;
+  }
+
+  /** Is none of `questionIds` (null: every question) uploading? */
+  private isSettled(questionIds: readonly string[] | null): boolean {
+    const records = this.records();
+    const ids = questionIds ?? [...records.keys()];
+    return ids.every((questionId) => records.get(questionId)?.status !== 'uploading');
+  }
+
+  /** Resolve and drop every waiter whose questions are no longer uploading. */
+  private releaseSettledWaiters(): void {
+    const waiters = this.waiters();
+    if (waiters.length === 0) {
+      return;
+    }
+    const settled = waiters.filter((waiter) => this.isSettled(waiter.questionIds));
+    if (settled.length === 0) {
+      return;
+    }
+    this.waiters.set(waiters.filter((waiter) => !settled.includes(waiter)));
+    for (const waiter of settled) {
+      waiter.resolve();
+    }
   }
 
   /**
@@ -221,9 +433,16 @@ export class FormUploadStore {
     this.sink.setValue(questionId, value);
   }
 
+  /**
+   * The only writer of a question's record, which is why the waiters are re-checked here: any
+   * change that can end an upload passes through this line, so no `whenSettled` can be left
+   * pending by a path that forgot to release it. (`connect` replaces the whole map and re-checks
+   * on its own.)
+   */
   private write(questionId: string, record: UploadRecord): void {
     const next = new Map(this.records());
     next.set(questionId, record);
     this.records.set(next);
+    this.releaseSettledWaiters();
   }
 }
