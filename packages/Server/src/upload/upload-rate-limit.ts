@@ -40,7 +40,7 @@ export interface UploadCaller {
  * deliberate no-op rather than a shared bucket, and it is announced once per process rather than
  * taken quietly.
  */
-export function checkUploadRateLimit(caller: UploadCaller): RateLimitResult {
+export async function checkUploadRateLimit(caller: UploadCaller): Promise<RateLimitResult> {
   const identity = abuseIdentity(caller.clientIpHash);
   if (!identity) {
     warnOnceIfAbuseKeyingDegraded(caller.clientIpHash);
