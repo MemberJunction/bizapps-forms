@@ -1,6 +1,6 @@
 ---
-"@mj-biz-apps/forms-core-entities-server": minor
-"@mj-biz-apps/forms-server": minor
+"@mj-biz-apps/forms-core-entities-server": patch
+"@mj-biz-apps/forms-server": patch
 ---
 
 The public rate limits are now shared across API instances when the host runs Redis (#321).
