@@ -1,5 +1,17 @@
 # #248 Submit waits for in-flight uploads — Implementation Plan
 
+> **Superseded in three places by the shipped code — read the code, not this plan, for these:**
+> 1. **Task 4 / Review Focus 2 (the step judge).** The shipped `core/settled-validation.ts` never
+>    touches a question whose upload failed (so no "This question is required." beside the failure
+>    line), and a step whose retries are spent resolves `false` with that quiet line, not with the
+>    required error. The double-tap guard is `StepJudge`'s per-step `judging` set, checked before the
+>    wait; the step-change check after the wait only drops a verdict for a step the respondent left.
+>    A step-change check alone cannot stop two taps that resume on the same step.
+> 2. **Task 1 (the refused range).** `uploadFailure` calls a 4xx `refused` except 408 and 429: the
+>    endpoint's own rate limit (429) and a request timeout judge the moment, not the file, so they are
+>    `transient` and retried.
+> 3. **Global Constraints "Never retry a 4xx"** follows from 2: 408 and 429 are retried.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A submit (or Next) started while a FileUpload/Doodle upload is on the wire waits for it; uploads retry a bad moment by themselves; the two failures a respondent must act on show as one quiet line with a text link.
