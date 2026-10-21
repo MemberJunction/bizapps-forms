@@ -388,6 +388,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.partialAnnounced = false;
     this.ledger.Reset(undefined);
     this.saveNotice.set(false);
+    // A failed load's message is for the error page; the form's banner reads the same signal, so a
+    // "Try again" that succeeds would otherwise show the old failure above a form that loaded fine.
+    this.errorText.set('');
     try {
       const { form, resume } = await this.loadForm();
       // The await is where the widget can move on: destroyed by its host, or reloaded by "Try
