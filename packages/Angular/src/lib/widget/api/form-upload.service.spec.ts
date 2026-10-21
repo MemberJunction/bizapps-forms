@@ -100,6 +100,10 @@ describe('uploadErrorMessage', () => {
   it('does suggest retrying when retrying might genuinely help', () => {
     expect(uploadErrorMessage(500, '')).toMatch(/try again/i);
     expect(uploadErrorMessage(0, '')).toMatch(/try again/i);
+    // 408 and 429 are verdicts on the moment; with no server sentence, "choose a different
+    // file" would send the respondent after a file that was never the problem.
+    expect(uploadErrorMessage(408, '')).toMatch(/try again/i);
+    expect(uploadErrorMessage(429, '')).toMatch(/try again/i);
   });
 
   it('falls back to something readable when the body is not the expected shape', () => {
@@ -131,7 +135,7 @@ describe('uploadFailure', () => {
     expect(uploadFailure(500, '').kind).toBe('transient');
   });
 
-  it('draws the refused range at exactly 400-499', () => {
+  it('draws the refused range inside 400-499 (408 and 429 aside)', () => {
     // 399 cannot reach here from the XHR path (only non-2xx do, and 3xx are followed), but the
     // boundary is the function's contract, so pin both edges.
     expect(uploadFailure(399, '').kind).toBe('transient');
@@ -142,6 +146,20 @@ describe('uploadFailure', () => {
 
   it('calls a status-0 failure (no response at all) transient', () => {
     expect(uploadFailure(0, '').kind).toBe('transient');
+  });
+
+  it('calls the endpoint’s 429 transient: the rate limiter judged the moment, not the file', () => {
+    // UploadMiddleware.refuseIfRateLimited answers an over-budget caller 429 "Too many uploads.
+    // Please wait Ns and try again." Called refused, the drawing was never sent again — the only
+    // link offered erased it, and Submit-again skipped it — though the same bytes land once the
+    // window passes.
+    const failure = uploadFailure(429, { error: 'Too many uploads. Please wait 60s and try again.' });
+    expect(failure.kind).toBe('transient');
+    expect(failure.message).toBe('Too many uploads. Please wait 60s and try again.');
+  });
+
+  it('calls a 408 transient: a request timeout says nothing about the file', () => {
+    expect(uploadFailure(408, '').kind).toBe('transient');
   });
 
   it('keeps the server sentence as the message', () => {

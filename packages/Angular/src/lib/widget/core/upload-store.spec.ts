@@ -14,6 +14,7 @@ import {
   type UploadSend,
 } from './upload-store';
 import { UploadError, type UploadedFile } from '../api/form-upload.interface';
+import { uploadFailure } from '../api/form-upload.service';
 
 const fileNamed = (name: string): File => new File(['x'], name);
 
@@ -490,6 +491,25 @@ describe('FormUploadStore — upload retries a bad moment by itself', () => {
       status: 'error',
       failure: { kind: 'refused', message: 'That file is larger than the 10 MB limit.' },
     });
+  });
+
+  it('retries an upload the rate limiter refused (429), and stores it once the window passes', async () => {
+    // The real classification, not a hand-made UploadError: the bug was in uploadFailure's range.
+    const { store, runtime } = connectedStore();
+    const send = scriptedSend(
+      uploadFailure(429, { error: 'Too many uploads. Please wait 60s and try again.' }),
+      uploadFailure(429, { error: 'Too many uploads. Please wait 55s and try again.' }),
+      uploadFailure(429, { error: 'Too many uploads. Please wait 40s and try again.' }),
+      stored('file-sig'),
+    );
+
+    const running = store.upload('q-resume', fileNamed('doodle.png'), send);
+    await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS.reduce((sum, ms) => sum + ms, 0));
+    await running;
+
+    expect(send).toHaveBeenCalledTimes(4);
+    expect(store.viewFor('q-resume').status).toBe('done');
+    expect(runtime.valueFor('q-resume')).toBe('file-sig');
   });
 
   it('retries a plain Error, because a transport that does not classify must not lose the answer', async () => {

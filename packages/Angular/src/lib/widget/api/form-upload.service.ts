@@ -75,26 +75,36 @@ export function uploadErrorMessage(status: number, body: unknown): string {
   if (fromServer) {
     return fromServer;
   }
-  // 4xx here is always a judgement about this file — the endpoint's own failures are
-  // size, content type, an unknown question, or a closed form. None improve on a retry.
-  if (status >= 400 && status < 500) {
+  if (isVerdictOnFile(status)) {
     return 'That file was not accepted. Choose a different file.';
   }
   return 'The upload did not go through. Please try again.';
 }
 
 /**
+ * Whether a response status judges the FILE, so that only a different file can succeed.
+ *
+ * A 4xx from this endpoint is mostly that — size, content type, an unknown question, a closed
+ * form — but not all of it. 429 is the endpoint's own per-caller rate limit
+ * (`UploadMiddleware.refuseIfRateLimited`, "Too many uploads. Please wait Ns and try again."), and
+ * 408 is a request that timed out; both judge the moment, and the same bytes land once it passes.
+ * Called "refused", a 429'd drawing was never sent again: the only link offered erased it, and
+ * Submit-again skipped it.
+ */
+function isVerdictOnFile(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+/**
  * The rejection for a non-2xx upload response: the respondent's sentence plus which kind of
  * failure it is.
  *
- * The status range that makes {@link uploadErrorMessage} say "choose a different file" is the
- * same range that makes this `refused` — one judgement (a 4xx is about the file), read twice, so
- * the sentence and the store's retry decision cannot disagree. Everything else, including the
- * status 0 a dropped connection reports, is `transient`.
+ * The sentence and the kind read the same judgement ({@link isVerdictOnFile}), so "choose a
+ * different file" and the store's decision not to retry cannot disagree. Everything else,
+ * including a 5xx and the status 0 a dropped connection reports, is `transient`.
  */
 export function uploadFailure(status: number, body: unknown): UploadError {
-  const kind = status >= 400 && status < 500 ? 'refused' : 'transient';
-  return new UploadError(uploadErrorMessage(status, body), kind);
+  return new UploadError(uploadErrorMessage(status, body), isVerdictOnFile(status) ? 'refused' : 'transient');
 }
 
 /**
