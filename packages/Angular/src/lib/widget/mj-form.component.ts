@@ -90,6 +90,7 @@ import { IconComponent } from './components/icon.component';
 import { MjLoaderComponent } from './components/mj-loader.component';
 import type { WidgetPhase } from './core/submit-phase';
 import { judgeRedirect, redirectRefusalMessage } from './core/safe-redirect';
+import { SubmitTimer } from './core/submit-timer';
 
 @Component({
   selector: 'mj-form',
@@ -259,18 +260,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
     applyStyleTokens(this.hostRef.nativeElement, resolved);
   }
 
-  /**
-   * How long the in-flight submit has been running, in ms. Zero when nothing is submitting.
-   *
-   * Ticked rather than derived because the message has to change while nothing else does —
-   * the whole point is that the respondent sees the page acknowledge a wait it cannot
-   * shorten. The interval is cleared on every exit path, including failure.
-   */
-  private readonly submitElapsed = signal(0);
-  private submitTicker: ReturnType<typeof setInterval> | null = null;
+  private readonly submitTimer = new SubmitTimer();
 
   /** The reassurance shown under the spinner, escalating if the wait drags on. */
-  protected readonly waitMessage = computed(() => submitWaitMessage(this.submitElapsed()));
+  protected readonly waitMessage = computed(() => submitWaitMessage(this.submitTimer.Elapsed()));
 
   /** The resolved ending screen for the template. */
   protected readonly activeEndingScreen = computed(() => this.endingScreen());
@@ -994,14 +987,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
     await this.autosave?.settle();
     const input = this.buildSubmission(form, rt, false);
-    const startedAt = Date.now();
-    this.startSubmitTicker();
+    this.submitTimer.Start();
     try {
       const res = await this.api.saveResponse(input);
-      this.logSubmitTiming(startedAt, true);
+      this.submitTimer.LogOutcome(true);
       this.applySubmitResult(res);
     } catch (err) {
-      this.logSubmitTiming(startedAt, false);
+      this.submitTimer.LogOutcome(false);
       this.result.set(null);
       // Not a failure to retry from: the session is over, and `ready` would put the respondent
       // back in front of a Submit that can only ever be refused again.
@@ -1015,46 +1007,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.errorText.set(message);
       this.handlePossibleTurnstileFailure(message);
     } finally {
-      this.stopSubmitTicker();
+      this.submitTimer.Stop();
     }
-  }
-
-  /**
-   * Drive the escalating wait message.
-   *
-   * A plain interval rather than anything cleverer because the only requirement is that the
-   * text changes while the page is otherwise frozen; the cost is one timer for the length of
-   * one request, cleared in a `finally` so a thrown submit cannot leave it running.
-   */
-  private startSubmitTicker(): void {
-    this.submitElapsed.set(0);
-    const startedAt = Date.now();
-    this.stopSubmitTicker();
-    this.submitTicker = setInterval(() => this.submitElapsed.set(Date.now() - startedAt), 250);
-  }
-
-  private stopSubmitTicker(): void {
-    if (this.submitTicker !== null) {
-      clearInterval(this.submitTicker);
-      this.submitTicker = null;
-    }
-    this.submitElapsed.set(0);
-  }
-
-  /**
-   * Report where a submit spent its time, in the respondent's own console.
-   *
-   * Round-trip measured from the client, because that is the number the respondent actually
-   * experiences — a server that finishes in 40ms is still a four-second submit if the request
-   * spent the rest of it in flight, and only the client can see the difference. The server
-   * logs its own per-stage breakdown under the same heading, so the two read together.
-   */
-  private logSubmitTiming(startedAt: number, ok: boolean): void {
-    const ms = Date.now() - startedAt;
-    // eslint-disable-next-line no-console -- diagnostic output is the entire purpose here
-    console.info(
-      `[mj-form] submit ${ok ? 'completed' : 'failed'} in ${ms}ms (client round trip; see the API log for the server-side stage breakdown)`,
-    );
   }
 
   /**
