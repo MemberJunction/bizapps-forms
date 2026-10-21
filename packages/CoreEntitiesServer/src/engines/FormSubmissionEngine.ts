@@ -40,8 +40,9 @@
  *    archived form.
  *
  * Reads that decide the caller's own link run as the respondent (its row filters bind them); reads
- * and writes of responses run as the system user, after `Authorize`, as before. The rate limiter and
- * the in-flight cap are per-process (spec out-of-scope: they stay that way, documented).
+ * and writes of responses run as the system user, after `Authorize`, as before. The rate limiter's
+ * windows are shared through MJ's Redis when the host has one, else per-process (#321); the
+ * in-flight cap is per-process by design.
  */
 import { LogError, LogStatus, RunInEntityTransaction, type DatabaseProviderBase, type UserInfo } from '@memberjunction/core';
 import { BaseSingleton } from '@memberjunction/global';

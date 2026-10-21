@@ -59,7 +59,7 @@
  *                                     will approach this over its life, and reaching it stops
  *                                     new drafts AND new knockout records for that version.
  *                                     The only DURABLE bound here: the caps above are per-window
- *                                     and per-process, so a caller pacing themselves under all of
+ *                                     (and per-process without Redis), so a caller pacing themselves under all of
  *                                     them, or spread across addresses, still accumulates rows
  *                                     forever. This counts what is actually in the table.
  *
