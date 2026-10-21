@@ -1,6 +1,8 @@
 # #248 Submit waits for in-flight uploads — Implementation Plan
 
-> **Superseded in three places by the shipped code — read the code, not this plan, for these:**
+> **Superseded by the shipped code — read the code, not this plan.** The plan was written before
+> the branch's later commits; the places below state a mechanism the code replaced. It also omits
+> what those commits added (the stall watchdog, `dispose()`, the post-wait checks in `onSubmit`).
 > 1. **Task 4 / Review Focus 2 (the step judge).** The shipped `core/settled-validation.ts` never
 >    touches a question whose upload failed (so no "This question is required." beside the failure
 >    line), and a step whose retries are spent resolves `false` with that quiet line, not with the
@@ -11,6 +13,11 @@
 >    endpoint's own rate limit (429) and a request timeout judge the moment, not the file, so they are
 >    `transient` and retried.
 > 3. **Global Constraints "Never retry a 4xx"** follows from 2: 408 and 429 are retried.
+> 4. **Task 2 (`whenSettled`).** `write()` is the only writer of ONE question's record, not of the
+>    records signal: `dropRecords()` (called by `connect()` and `dispose()`) replaces the whole map,
+>    and it re-checks the waiters too.
+> 5. **Task 5 (the overlay).** The overlay is `saving-file` only while the store is waiting AND the
+>    phase is `ready` or `submitting`, so the scrim never covers the session-expired notice.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
