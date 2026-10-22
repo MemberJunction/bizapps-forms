@@ -52,7 +52,8 @@ describe.each(renderModes)('$mode mode asks the bar for both facts', ({ ts, html
     const declaration = source.slice(source.indexOf('readyToSubmit'));
     const body = declaration.slice(0, declaration.indexOf(';'));
 
-    expect(body).toMatch(/wouldSubmitNothing\(\)/);
+    // `nothingToSubmit` wraps `wouldSubmitNothing` and also counts an upload on its way (#328).
+    expect(body).toMatch(/nothingToSubmit\(/);
   });
 
   it('renders no bar at all when the form has nothing to answer', () => {

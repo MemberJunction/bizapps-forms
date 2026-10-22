@@ -1,3 +1,4 @@
+import { computed } from '@angular/core';
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
@@ -698,5 +699,54 @@ describe('FormUploadStore — failureAmong', () => {
     store.begin('q-resume', fileNamed('r.pdf'));
 
     expect(store.failureAmong(['q-resume'])).toBeNull();
+  });
+});
+
+describe('FormUploadStore — hasPendingAmong', () => {
+  it('is true while an upload is in flight', () => {
+    const { store } = connectedStore();
+    store.begin('q-resume', fileNamed('resume.pdf'));
+    expect(store.hasPendingAmong(['q-resume'])).toBe(true);
+  });
+
+  it('is true for an unsaved failure, which a submit can restart', () => {
+    const { store } = connectedStore();
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+    store.fail(token, { kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE });
+    expect(store.hasPendingAmong(['q-resume'])).toBe(true);
+  });
+
+  it('is false for a refused failure: the same bytes get the same verdict', () => {
+    const { store } = connectedStore();
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+    store.fail(token, { kind: 'refused', message: 'Too big.' });
+    expect(store.hasPendingAmong(['q-resume'])).toBe(false);
+  });
+
+  it('is false once the upload has landed', () => {
+    const { store } = connectedStore();
+    store.succeed(store.begin('q-resume', fileNamed('resume.pdf')), 'file-1');
+    expect(store.hasPendingAmong(['q-resume'])).toBe(false);
+  });
+
+  it('is false for a question with no record', () => {
+    const { store } = connectedStore();
+    expect(store.hasPendingAmong(['q-resume'])).toBe(false);
+  });
+
+  it('only looks at the questions it is given', () => {
+    const { store } = connectedStore();
+    store.begin('q-resume', fileNamed('resume.pdf'));
+    expect(store.hasPendingAmong(['q-transcript'])).toBe(false);
+  });
+
+  it('can be tracked by a computed', () => {
+    const { store } = connectedStore();
+    const pending = computed(() => store.hasPendingAmong(['q-resume']));
+    expect(pending()).toBe(false);
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+    expect(pending()).toBe(true);
+    store.succeed(token, 'file-1');
+    expect(pending()).toBe(false);
   });
 });

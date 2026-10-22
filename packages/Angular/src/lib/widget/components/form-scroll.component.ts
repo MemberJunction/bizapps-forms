@@ -30,6 +30,7 @@ import type { AnswerValue, PublishedFormPage, PublishedFormQuestion } from '@mj-
 import { FormRuntime } from '../core/form-runtime';
 import { entryKey, sectionEntries, skippedMessage, type SectionEntry } from '../core/section-content';
 import { steppableSections } from '../core/section-stepper';
+import { nothingToSubmit } from '../core/nothing-to-submit';
 import { StepJudge } from '../core/settled-validation';
 import { clampCursor } from '../core/stepper';
 import { FormUploadStore } from '../core/upload-store';
@@ -110,9 +111,12 @@ export class FormScrollComponent {
   protected readonly isFirst = computed(() => this.index() === 0);
   protected readonly isLast = computed(() => this.index() >= this.total() - 1);
 
+  /** The widget's upload store: shared with the step judge and the ready line (#328). */
+  private readonly uploads = inject(FormUploadStore);
+
   /** Judges a section only once its uploads have landed (#248) — and only once per tap. */
   private readonly stepJudge = new StepJudge(
-    inject(FormUploadStore),
+    this.uploads,
     () => this.current()?.id ?? null,
   );
 
@@ -148,8 +152,9 @@ export class FormScrollComponent {
       this.runtime().isFormValid() &&
       // ...and the submit would actually be ACCEPTED. `isFormValid` only asks whether any field is
       // in error, which nothing is on a form of blank optional questions — so without this the bar
-      // said "You can submit now." beside the #124 banner refusing that exact submit.
-      !this.runtime().wouldSubmitNothing(),
+      // said "You can submit now." beside the #124 banner refusing that exact submit. An upload on
+      // its way counts as an answer, matching the submit gate (#328).
+      !nothingToSubmit(this.runtime(), this.uploads),
   );
 
   constructor() {
