@@ -323,6 +323,24 @@ export class FormUploadStore {
   }
 
   /**
+   * True when any of `questionIds` has an answer on its way: an upload in flight, or one that
+   * ended `unsaved` (a submit restarts those, see {@link retryUnsaved}).
+   *
+   * A `refused` failure does NOT count: the same bytes get the same verdict, so no answer is
+   * coming and a submit must not wait for one. The store holds `null` for a file question until
+   * its upload succeeds, so the "nothing to submit" gate cannot tell a pending file from a blank
+   * question by reading answers; it reads this instead. A pure read of the `records` signal, so a
+   * `computed` that calls it tracks it.
+   */
+  public hasPendingAmong(questionIds: readonly string[]): boolean {
+    const records = this.records();
+    return questionIds.some((questionId) => {
+      const record = records.get(questionId);
+      return record?.status === 'uploading' || record?.failure?.kind === 'unsaved';
+    });
+  }
+
+  /**
    * Record a successful upload AND store its file as the question's answer.
    *
    * The two are one act, which is the point. They used to be two: the store recorded the
