@@ -12,7 +12,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LogError, RunView } from '@memberjunction/core';
-import { FormRecordRefreshCoordinator } from '@memberjunction/ng-base-forms';
+import { BaseFormsModule, FormRecordRefreshCoordinator } from '@memberjunction/ng-base-forms';
 import { FORMS_UI_CSS } from '../shared';
 import { FORMS_ENTITY } from '../shared/entity-names';
 import {
@@ -37,6 +37,7 @@ const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded.";
 @Component({
   selector: 'mjf-person-form-responses-list',
   standalone: true,
+  imports: [BaseFormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @switch (State()) {
@@ -83,12 +84,24 @@ const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded.";
               </thead>
               <tbody>
                 @for (r of Rows(); track r.ResponseID) {
-                  <tr class="is-clickable" (click)="OpenResponse.emit(r.ResponseID)">
+                  <tr
+                    class="is-clickable"
+                    mjRecordLink
+                    [EntityName]="FormResponseEntity"
+                    [RecordID]="r.ResponseID"
+                    [DisplayName]="r.FormName"
+                    [HandleClick]="false"
+                    (click)="OpenResponse.emit(r.ResponseID)">
                     <td>
                       <!-- The button is the keyboard path; the row click is the pointer convenience. -->
                       <button
                         type="button"
                         class="pfr-open"
+                        mjRecordLink
+                        [EntityName]="FormResponseEntity"
+                        [RecordID]="r.ResponseID"
+                        [DisplayName]="r.FormName"
+                        [HandleClick]="false"
                         [attr.aria-label]="'Open response to ' + r.FormName"
                         (click)="$event.stopPropagation(); OpenResponse.emit(r.ResponseID)">
                         {{ r.FormName }}
@@ -172,6 +185,7 @@ export class PersonFormResponsesListComponent implements OnInit, OnChanges {
   @Output() Loaded = new EventEmitter<number>();
   @Output() OpenResponse = new EventEmitter<string>();
 
+  public readonly FormResponseEntity = FORMS_ENTITY.FormResponse;
   public readonly State = signal<ListState>('loading');
   public readonly Rows = signal<PersonFormResponseRow[]>([]);
   public readonly ErrorMessage = signal<string>('');

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { CompositeKey, LogError } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
-import { BaseFormComponent } from '@memberjunction/ng-base-forms';
+import { BaseFormComponent, BaseFormsModule } from '@memberjunction/ng-base-forms';
 import type { mjBizAppsFormsFormResponseEntity } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
 import { FORMS_UI_CSS, failureMessage } from '../shared';
@@ -33,13 +33,31 @@ import { FormsResponseDetailComponent } from './response-detail.component';
   selector: 'mjf-response-form',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsResponseDetailComponent],
+  imports: [FormsResponseDetailComponent, BaseFormsModule],
   template: `
     <div class="mjf-page rf">
       <header class="mjf-page-head">
         <div class="mjf-page-headings">
-          <h2 class="mjf-page-title rf-title">{{ record.Form }}</h2>
-          <p class="mjf-page-sub">Response from {{ respondent }}</p>
+          <h2
+            class="mjf-page-title rf-title"
+            [mjRecordLink]="record"
+            FieldName="FormID"
+            [EntityName]="FormsEntity.Form"
+            [RecordID]="record.FormID"
+            [DisplayName]="record.Form">{{ record.Form }}</h2>
+          <p class="mjf-page-sub">
+            Response from
+            @if (record.RespondentPersonID) {
+              <span
+                [mjRecordLink]="record"
+                FieldName="RespondentPersonID"
+                [EntityName]="'MJ_BizApps_Common: People'"
+                [RecordID]="record.RespondentPersonID"
+                [DisplayName]="respondent">{{ respondent }}</span>
+            } @else {
+              {{ respondent }}
+            }
+          </p>
         </div>
       </header>
 
@@ -70,11 +88,19 @@ import { FormsResponseDetailComponent } from './response-detail.component';
           <dt>Response ID</dt>
           <dd>{{ record.ID }}</dd>
           <dt>Form version ID</dt>
-          <dd>{{ record.FormVersionID }}</dd>
+          <dd
+            [mjRecordLink]="record"
+            FieldName="FormVersionID"
+            [EntityName]="FormsEntity.FormVersion"
+            [RecordID]="record.FormVersionID">{{ record.FormVersionID }}</dd>
           <dt>Anonymous session ID</dt>
           <dd>{{ record.AnonymousSessionID || '—' }}</dd>
           <dt>Respondent person ID</dt>
-          <dd>{{ record.RespondentPersonID || '—' }}</dd>
+          <dd
+            [mjRecordLink]="record"
+            FieldName="RespondentPersonID"
+            [EntityName]="'MJ_BizApps_Common: People'"
+            [RecordID]="record.RespondentPersonID">{{ record.RespondentPersonID || '—' }}</dd>
           <dt>Started at</dt>
           <dd>{{ record.StartedAt || '—' }}</dd>
           <dt>Submitted at</dt>
@@ -135,6 +161,7 @@ import { FormsResponseDetailComponent } from './response-detail.component';
 export class ResponseFormComponent extends BaseFormComponent {
   declare public record: mjBizAppsFormsFormResponseEntity;
 
+  protected readonly FormsEntity = FORMS_ENTITY;
   protected busy = true;
   protected detail: ResponseDetail | null = null;
   protected error: string | null = null;

@@ -20,13 +20,19 @@ import type { ResponseDetail } from './response-models';
 const readResponseDetail = vi.fn<(responseId: string) => Promise<ResponseDetail>>();
 vi.mock('./response-reads', () => ({ readResponseDetail: (responseId: string) => readResponseDetail(responseId) }));
 
-vi.mock('@memberjunction/ng-base-forms', () => ({
-  BaseFormComponent: class BaseFormComponent {
-    async ngOnInit(): Promise<void> {
-      // the real base loads the record; the spec sets it instead
-    }
-  },
-}));
+vi.mock('@memberjunction/ng-base-forms', async () => {
+  const { NgModule } = await import('@angular/core');
+  @NgModule()
+  class BaseFormsModule {}
+  return {
+    BaseFormsModule,
+    BaseFormComponent: class BaseFormComponent {
+      async ngOnInit(): Promise<void> {
+        // the real base loads the record; the spec sets it instead
+      }
+    },
+  };
+});
 
 const { ResponseFormComponent } = await import('./response-form.component');
 

@@ -11,6 +11,7 @@ import {
   inject,
 } from '@angular/core';
 import { FormsReplayAutomationEventOperation } from '@mj-biz-apps/forms-entities';
+import { BaseFormsModule } from '@memberjunction/ng-base-forms';
 import { FORMS_UI_CSS } from '../shared';
 import { FORMS_ENTITY, MJ_CORE_ENTITY } from '../shared/entity-names';
 import { runOperation } from '../shared/remote-operation';
@@ -69,7 +70,7 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
 @Component({
   selector: 'mj-forms-response-detail',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, BaseFormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [ResponseFileDownloadService],
   template: `
@@ -155,6 +156,11 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
                     class="mjf-btn mjf-btn--quiet mjf-btn--sm"
                     [title]="'Open the file record for ' + f.fileName"
                     [attr.aria-label]="'Open the file record for ' + f.fileName"
+                    mjRecordLink
+                    [EntityName]="CoreEntity.File"
+                    [RecordID]="f.fileId"
+                    [DisplayName]="f.fileName"
+                    [HandleClick]="false"
                     (click)="OpenFile(f.fileId)"
                   >
                     <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
@@ -224,10 +230,26 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
                 <span title="Which attempt at the submission's automation event last ran this step. A retry raises it; a replay starts again at 1.">attempt {{ r.deliveryAttempt }}</span>
               </span>
               @if (r.actionExecutionLogId) {
-                <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="OpenActionLog(r)">Action log</button>
+                <button
+                  type="button"
+                  class="mjf-btn mjf-btn--quiet mjf-btn--sm"
+                  mjRecordLink
+                  [EntityName]="CoreEntity.ActionExecutionLog"
+                  [RecordID]="r.actionExecutionLogId"
+                  [DisplayName]="r.automationName"
+                  [HandleClick]="false"
+                  (click)="OpenActionLog(r)">Action log</button>
               }
               @if (r.aiAgentRunId) {
-                <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="OpenAgentRun(r)">Agent run</button>
+                <button
+                  type="button"
+                  class="mjf-btn mjf-btn--quiet mjf-btn--sm"
+                  mjRecordLink
+                  [EntityName]="CoreEntity.AIAgentRun"
+                  [RecordID]="r.aiAgentRunId"
+                  [DisplayName]="r.automationName"
+                  [HandleClick]="false"
+                  (click)="OpenAgentRun(r)">Agent run</button>
               }
               @if (r.automationEventId) {
                 <!-- For an operator: the id to look the attempt up by in the automation outbox. -->
@@ -247,7 +269,14 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
               <span class="mjf-badge" [class]="OutcomeTone(b)">{{ b.outcome }}</span>
               <span class="bind-entity">{{ b.targetEntityName ?? b.targetEntityId }}</span>
               @if (b.targetEntityName && b.targetRecordId) {
-                <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="OpenBoundRecord(b.targetEntityName, b.targetRecordId)">
+                <button
+                  type="button"
+                  class="mjf-btn mjf-btn--quiet mjf-btn--sm"
+                  mjRecordLink
+                  [EntityName]="b.targetEntityName"
+                  [RecordID]="b.targetRecordId"
+                  [HandleClick]="false"
+                  (click)="OpenBoundRecord(b.targetEntityName, b.targetRecordId)">
                   Open record
                 </button>
               }
@@ -421,6 +450,8 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
 export class FormsResponseDetailComponent implements AfterViewInit {
   private readonly downloads = inject(ResponseFileDownloadService);
   private readonly cdr = inject(ChangeDetectorRef);
+
+  public readonly CoreEntity = MJ_CORE_ENTITY;
 
   /** The file currently being fetched, so only its own row shows a spinner. */
   public DownloadingFileId = '';
