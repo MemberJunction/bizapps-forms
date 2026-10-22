@@ -587,8 +587,13 @@ function runFakeQuery(params: RunQueryParams, queries: Record<string, FakeQuery>
   return { QueryID: `query-${name}`, QueryName: name, Success: true, Results: rows, RowCount: rows.length, TotalRowCount: rows.length, ExecutionTime: 0, ErrorMessage: '' };
 }
 
-/** The submit path's quota statement: `UPDATE …FormDistribution SET ResponseCount = ResponseCount + 1 …`. */
-const DISTRIBUTION_SLOT_UPDATE = /UPDATE\s+\S*FormDistribution\S*\s+SET\s+\S*ResponseCount\S*\s*=\s*\S*ResponseCount\S*\s*\+\s*1/i;
+/**
+ * The submit path's quota statement, in either spelling: the SQL Server EXEC of
+ * `spFormDistributionConsumeResponseSlot` (#338), or PostgreSQL's raw
+ * `UPDATE …FormDistribution SET ResponseCount = ResponseCount + 1 …`.
+ */
+const DISTRIBUTION_SLOT_UPDATE =
+  /EXEC\s+\S*\[spFormDistributionConsumeResponseSlot\]|UPDATE\s+\S*FormDistribution\S*\s+SET\s+\S*ResponseCount\S*\s*=\s*\S*ResponseCount\S*\s*\+\s*1/i;
 
 /**
  * Emulate the conditional slot UPDATE against the `distribution` fixture, as the database would: one

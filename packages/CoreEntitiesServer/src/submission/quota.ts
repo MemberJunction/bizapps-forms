@@ -18,6 +18,13 @@
  *
  * Both statements run through `ExecuteSQL` on the SAME provider instance the submit's
  * `RunInEntityTransaction` opened, which is what enlists them in that transaction.
+ *
+ * On SQL Server both are stored procedures (migration V202610222300, #338):
+ * `spFormDistributionConsumeResponseSlot` is the conditional UPDATE and returns its own
+ * `AffectedRows`, and `spFormLockRowForQuota` takes the form-row lock. MJ grants its runtime roles
+ * EXECUTE on procedures and no rights on base tables, so the raw statements were refused for a
+ * roles-only MJAPI login. A lock taken inside the EXEC still belongs to the caller's transaction.
+ * PostgreSQL keeps the raw statements.
  */
 import { LogError } from '@memberjunction/core';
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
@@ -25,6 +32,7 @@ import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { FormSettings, mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
 import { AFFECTED_ROWS_ALIAS, affectedRows } from '../shared/affected-rows.js';
+import { formsProcedureCall } from '../shared/forms-procedure.js';
 
 /**
  * Whether a new completion would exceed the distribution's cap, judged on a row read earlier.
@@ -52,18 +60,7 @@ export async function consumeDistributionSlot(
   distributionId: string,
   contextUser: UserInfo,
 ): Promise<boolean> {
-  const table = tableOf(provider, FORMS_ENTITY.FormDistribution);
-  const q = (name: string): string => provider.QuoteIdentifier(name);
-  const update =
-    `UPDATE ${table} SET ${q('ResponseCount')} = ${q('ResponseCount')} + 1 ` +
-    `WHERE ${q('ID')} = ${quoteSqlString(distributionId)} ` +
-    `AND (${q('MaxResponses')} IS NULL OR ${q('ResponseCount')} < ${q('MaxResponses')})`;
-  const rows = await provider.ExecuteSQL<Record<string, unknown>>(
-    provider.Dialect.AffectedRowCountSQL(update, AFFECTED_ROWS_ALIAS),
-    undefined,
-    undefined,
-    contextUser,
-  );
+  const rows = await provider.ExecuteSQL<Record<string, unknown>>(slotStatement(provider, distributionId), undefined, undefined, contextUser);
   const affected = affectedRows(rows);
   if (affected === undefined) {
     // Refuse (fail closed), but this is a fault, not a full link: say so, or it reads as one.
@@ -74,6 +71,23 @@ export async function consumeDistributionSlot(
     return false;
   }
   return affected === 1;
+}
+
+/**
+ * The slot statement: the procedure on SQL Server, which returns `AffectedRows` itself; on
+ * PostgreSQL the raw conditional UPDATE, wrapped by the dialect to count its rows.
+ */
+function slotStatement(provider: DatabaseProviderBase, distributionId: string): string {
+  if (provider.PlatformKey !== 'postgresql') {
+    return formsProcedureCall(provider, FORMS_ENTITY.FormDistribution, 'spFormDistributionConsumeResponseSlot', { ID: distributionId });
+  }
+  const table = tableOf(provider, FORMS_ENTITY.FormDistribution);
+  const q = (name: string): string => provider.QuoteIdentifier(name);
+  const update =
+    `UPDATE ${table} SET ${q('ResponseCount')} = ${q('ResponseCount')} + 1 ` +
+    `WHERE ${q('ID')} = ${quoteSqlString(distributionId)} ` +
+    `AND (${q('MaxResponses')} IS NULL OR ${q('ResponseCount')} < ${q('MaxResponses')})`;
+  return provider.Dialect.AffectedRowCountSQL(update, AFFECTED_ROWS_ALIAS);
 }
 
 /**
@@ -103,13 +117,11 @@ export async function formQuotaReached(
   if (settings.quota === undefined) {
     return false;
   }
-  const form = tableOf(provider, FORMS_ENTITY.Form);
   const q = (name: string): string => provider.QuoteIdentifier(name);
-  const where = `${q('ID')} = ${quoteSqlString(formId)}`;
   const lock =
     provider.PlatformKey === 'postgresql'
-      ? `SELECT ${q('ID')} FROM ${form} WHERE ${where} FOR UPDATE`
-      : `SELECT ${q('ID')} FROM ${form} WITH (UPDLOCK, HOLDLOCK) WHERE ${where}`;
+      ? `SELECT ${q('ID')} FROM ${tableOf(provider, FORMS_ENTITY.Form)} WHERE ${q('ID')} = ${quoteSqlString(formId)} FOR UPDATE`
+      : formsProcedureCall(provider, FORMS_ENTITY.Form, 'spFormLockRowForQuota', { ID: formId });
   await provider.ExecuteSQL(lock, undefined, undefined, contextUser);
   const result = await provider.RunView(
     {

@@ -43,6 +43,7 @@ import type {
 import { syncFileLinks } from '../file-links/file-links.js';
 import { MJFileLinkGateway } from '../file-links/mj-file-link-gateway.js';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
+import { formsProcedureCall } from '../shared/forms-procedure.js';
 import { isTerminalResponseStatus } from './response-status.js';
 import { stampFormDistribution } from './resume-columns.js';
 import type { ValidatedAnswer } from '@mj-biz-apps/forms-entities';
@@ -589,21 +590,25 @@ async function reconcileDuplicate(
  * until the first commits; its read then runs after that commit, sees the seal, and becomes the
  * idempotent no-op it should be. Proven on SQL Server by `FormSubmissionEngine.integration.spec.ts`.
  *
+ * On SQL Server the lock is `spFormResponseLockRow` (#338): MJ's runtime roles may EXECUTE a
+ * procedure but hold no rights on the base table, and a lock taken inside the EXEC is still held by
+ * the caller's transaction. PostgreSQL keeps the raw `FOR UPDATE`.
+ *
  * A database error propagates: the caller's transaction rolls back on it like any other.
  */
 async function lockResponseRow(provider: DatabaseProviderBase, responseId: string, contextUser: UserInfo): Promise<void> {
+  if (provider.PlatformKey !== 'postgresql') {
+    const lock = formsProcedureCall(provider, FORMS_ENTITY.FormResponse, 'spFormResponseLockRow', { ID: responseId });
+    await provider.ExecuteSQL(lock, undefined, undefined, contextUser);
+    return;
+  }
   const entity = provider.EntityByName(FORMS_ENTITY.FormResponse);
   if (!entity) {
     throw new Error(`"${FORMS_ENTITY.FormResponse}" is not in this host's metadata, so response ${responseId} cannot be locked.`);
   }
   const q = (name: string): string => provider.QuoteIdentifier(name);
   const table = provider.QuoteSchemaAndView(entity.SchemaName, entity.BaseTable);
-  const where = `${q('ID')} = ${quoteSqlString(responseId)}`;
-  const sql =
-    provider.PlatformKey === 'postgresql'
-      ? `SELECT ${q('ID')} FROM ${table} WHERE ${where} FOR UPDATE`
-      : `SELECT ${q('ID')} FROM ${table} WITH (UPDLOCK, HOLDLOCK) WHERE ${where}`;
-  await provider.ExecuteSQL(sql, undefined, undefined, contextUser);
+  await provider.ExecuteSQL(`SELECT ${q('ID')} FROM ${table} WHERE ${q('ID')} = ${quoteSqlString(responseId)} FOR UPDATE`, undefined, undefined, contextUser);
 }
 
 /** UPDATE/PROMOTE an existing parent FormResponse row in place; returns it or a failure. */
