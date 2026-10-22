@@ -23,8 +23,9 @@
  * `SubmittedAt` and never counts toward a quota — the respondent was screened out, not finished.
  * See {@link statusFor} / {@link countsCompletion}.
  *
- * All entity objects are created via `provider.GetEntityObject<T>(name, contextUser)`
- * (never `new`), passing the anonymous `contextUser`. Every `Save()`/`Delete()` boolean is
+ * All entity objects are created via `provider.GetEntityObject<T>(name, contextUser)` (never `new`),
+ * and the `contextUser` the caller passes is MJ's system user, supplied by `FormSubmissionEngine`
+ * after the operation's `Authorize` has admitted the anonymous respondent. Every `Save()`/`Delete()` boolean is
  * checked; on failure `LatestResult.CompleteMessage` (per CLAUDE.md) goes to the server log and
  * the caller gets {@link SAVE_FAILED_MESSAGE} — the diagnostic is for the operator, never for the
  * respondent. The answer typed columns mirror the `FormAnswerInput` transport exactly.

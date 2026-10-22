@@ -15,8 +15,9 @@
  * distributions of the same published version shares a version, which is acceptable for
  * Phase-1 dedupe (the durable guard is still the per-distribution quota).
  *
- * All reads go through the per-request provider with the anonymous `contextUser`; RunView
- * results are checked for `.Success` (RunView never throws). Callers decide fail-open vs
+ * All reads go through the per-request provider as MJ's system user, the elevated reader the
+ * engine supplies, because the respondent's read grant is row-filtered to its own response;
+ * RunView results are checked for `.Success` (RunView never throws). Callers decide fail-open vs
  * fail-closed from the returned `ok` flag.
  */
 import type { UserInfo } from '@memberjunction/core';
@@ -165,7 +166,8 @@ export async function findResponseById(
  *
  * Keyed on `FormVersionID`, not a distribution id, because `FormResponse` carries no distribution
  * FK — the same key dedupe and same-session upsert already use. Runs under the elevated principal
- * (the anonymous respondent cannot READ responses). `count_only` returns `TotalRowCount` without
+ * because the anonymous respondent's read grant is row-filtered to its own response, so it could
+ * never count anyone else's drafts. `count_only` returns `TotalRowCount` without
  * materializing rows. Fail-CLOSED: on a count error we report the cap as reached so a database blip
  * cannot become an unbounded-write hole (the caller turns that into a refused partial, which the
  * widget silently retries — autosave is fail-soft).
