@@ -1559,16 +1559,16 @@ interface EarlyEnding {
   readonly result?: FormsSaveResponseOutput;
 }
 
-/**
- * A key for an answers payload, equal exactly when two payloads carry the same answers in the same
- * order — which they do when built from the same runtime state, because the payload walks the
- * settled questions in document order.
- */
 /** The ids of the questions the respondent can see and answer: what a submit is judged on. */
 function visibleIdsOf(rt: FormRuntime): string[] {
   return rt.visibleAnswerableQuestions().map((question) => question.id);
 }
 
+/**
+ * A key for an answers payload, equal exactly when two payloads carry the same answers in the same
+ * order — which they do when built from the same runtime state, because the payload walks the
+ * settled questions in document order.
+ */
 function answersKey(answers: FormsSaveResponseInput['Answers']): string {
   return JSON.stringify(answers);
 }
