@@ -55,6 +55,7 @@ import {
 } from './input-mode';
 import { compositeAnswer, readCompositeParts, sameAnswer, scalarAnswer } from './control-answer';
 import { DoodlePadComponent, type DoodleExportSink } from './doodle-pad.component';
+import { doodleExportSink } from './doodle-export-sink';
 import { IconComponent } from '../icon.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
 
@@ -639,33 +640,20 @@ export class FormQuestionComponent {
   // --- Doodle --------------------------------------------------------------
 
   /**
-   * The pad's exports, wired to the upload store by the subject each one names.
+   * The pad's exports, wired to the upload store by the subject each one names (#333) — see
+   * {@link doodleExportSink} for what each call does and why a retired reservation drops its file.
    *
-   * `started` reserves the question, so Next and Submit wait on a drawing still being encoded
-   * instead of advancing past it (#333). `delivered` hands the file to the ordinary file-answer
-   * path, whose upload supersedes the reservation; `released` ends a reservation that produced no
-   * file, with the pad's own token, so a stale one is ignored.
-   *
-   * Every call is keyed by the subject the pad passed, never by `this.question()`. The pad calls
-   * these after an await — often after this component is destroyed, or, in OneQuestion mode,
-   * re-pointed at the next Doodle question, where reading the current question filed the first
-   * one's drawing as the second one's answer. They reach only the store and the uploader, which
-   * are widget-level and outlive this component.
+   * The upload is stored against the subject the capture names, never `this.question()`: the pad
+   * calls this after an await, often after this component is destroyed or, in OneQuestion mode,
+   * re-pointed at the next Doodle question. It reaches only the store and the uploader, which are
+   * widget-level and outlive this component.
    */
-  protected readonly doodleExports: DoodleExportSink<UploadToken> = {
-    started: (subject) => this.uploads.reserve(subject),
-    delivered: async (capture, reservation) => {
-      // A teardown (`dispose`) or reload (`connect`) during the encode retired the reservation.
-      // The export is dropped then, as the old `output()` emit was: after a teardown there is no
-      // answer sink to commit to, and after a reload this drawing belongs to a response that no
-      // longer exists. A newer stroke or Clear retires it too, but the pad's claim stops those first.
-      if (!this.uploads.isCurrent(reservation)) {
-        return;
-      }
+  protected readonly doodleExports: DoodleExportSink<UploadToken> = doodleExportSink(
+    this.uploads,
+    async (capture) => {
       await this.uploadFile(capture.file, capture.subject);
     },
-    released: (reservation) => this.uploads.release(reservation),
-  };
+  );
 
   protected onDoodleCleared(): void {
     // `clear` also retires the running upload. Without that, a respondent who draws, dislikes it

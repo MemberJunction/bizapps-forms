@@ -110,30 +110,40 @@ describe('every export ends in exactly one of delivered or released', () => {
 });
 
 describe('the question component wires the callbacks to the store, by the subject the pad passed', () => {
-  const sink = (): string => blockAfter(question(), 'protected readonly doodleExports');
+  // The sink's logic lives in `doodle-export-sink.ts`, a plain function this suite can RUN —
+  // `doodle-export-sink.spec.ts` drives its delivery guard against a real store. What is left to
+  // check here is the binding: the component hands that function the store and an upload keyed by
+  // the capture's own subject.
+  const binding = (): string => blockAfter(question(), 'protected readonly doodleExports');
+  const sinkModule = (): string => stripped('doodle-export-sink.ts');
+
+  it('binds the pad to doodleExportSink over the widget store, uploading by the capture subject', () => {
+    expect(question()).toMatch(
+      /protected readonly doodleExports: DoodleExportSink<UploadToken> = doodleExportSink\(\s*this\.uploads,\s*async \(capture\) => \{/,
+    );
+    expect(binding()).toMatch(/^\{\s*await this\.uploadFile\(capture\.file, capture\.subject\);\s*\}$/);
+  });
 
   it('reserves on start, uploads on delivery, and releases on release', () => {
-    expect(sink()).toMatch(/started: \(subject\) => this\.uploads\.reserve\(subject\)/);
-    expect(sink()).toMatch(/this\.uploadFile\(capture\.file, capture\.subject\)/);
-    expect(sink()).toMatch(/released: \(reservation\) => this\.uploads\.release\(reservation\)/);
+    expect(sinkModule()).toMatch(/started: \(subject\) => uploads\.reserve\(subject\)/);
+    expect(sinkModule()).toMatch(/released: \(reservation\) => uploads\.release\(reservation\)/);
   });
 
   it('uploads a delivery only while its reservation is still current', () => {
     // A store `dispose()` (teardown) or `connect()` (reload) inside the encode window retires the
     // reservation. Uploading anyway would throw "no answer sink" after a teardown, or file the old
-    // drawing into the new runtime after a reload.
+    // drawing into the new runtime after a reload. The guard must RETURN before the upload: a
+    // check whose body does nothing reads the same to a weaker assertion.
     expect(pad()).toMatch(/sink\.delivered\(\{[\s\S]{0,200}\},\s*reservation\);/);
-    const delivered = sink().slice(sink().indexOf('delivered:'));
-    expect(delivered).toMatch(/^delivered: async \(capture, reservation\) =>/);
-    const check = delivered.indexOf('this.uploads.isCurrent(reservation)');
-    const upload = delivered.indexOf('this.uploadFile(capture.file, capture.subject)');
-    expect(check).toBeGreaterThan(-1);
-    expect(upload).toBeGreaterThan(check);
+    expect(sinkModule()).toMatch(
+      /delivered: async \(capture, reservation\) => \{\s*if \(!uploads\.isCurrent\(reservation\)\) \{\s*return;\s*\}\s*await upload\(capture\);\s*\}/,
+    );
   });
 
   it('never reads the question the view is bound to now', () => {
     // The callbacks run after an await, when a recycled or re-pointed component may be rendering
-    // another question.
-    expect(sink()).not.toMatch(/this\.question\(\)/);
+    // another question. The sink module has no access to one at all.
+    expect(binding()).not.toMatch(/this\.question\(\)/);
+    expect(sinkModule()).not.toMatch(/question\(\)/);
   });
 });

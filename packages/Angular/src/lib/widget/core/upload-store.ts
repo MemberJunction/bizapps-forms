@@ -494,10 +494,11 @@ export class FormUploadStore {
    * Is `token` still the newest upload for its question? False once replaced, cleared, reloaded
    * ({@link connect}) or torn down ({@link dispose}). A pure read.
    *
-   * Public for the question component's doodle wiring: a drawing's export finishes after an await,
-   * and by then the widget may have been torn down or reloaded. Its reservation is what knows that,
-   * so the delivery asks here before it uploads. Uploading anyway would throw "no answer sink" after
-   * a teardown, or file the old drawing into the new runtime after a reload.
+   * Public for the doodle export sink (`components/questions/doodle-export-sink.ts`): a drawing's
+   * export finishes after an await, and by then the widget may have been torn down or reloaded.
+   * Its reservation is what knows that, so the delivery asks here before it uploads. Uploading
+   * anyway would throw "no answer sink" after a teardown, or file the old drawing into the new
+   * runtime after a reload.
    */
   public isCurrent(token: UploadToken): boolean {
     return this.records().get(token.questionId)?.seq === token.seq;
