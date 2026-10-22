@@ -804,4 +804,45 @@ describe('FormUploadStore — reserve and release', () => {
     // Committing null clears the answer; the runtime reads a cleared answer as undefined.
     expect(runtime.valueFor('q-resume')).toBeUndefined();
   });
+
+  it('a reservation is current once taken', () => {
+    const { store } = connectedStore();
+    expect(store.isCurrent(store.reserve('q-resume'))).toBe(true);
+  });
+
+  it('a reservation is not current after a second reserve', () => {
+    const { store } = connectedStore();
+    const first = store.reserve('q-resume');
+    store.reserve('q-resume');
+    expect(store.isCurrent(first)).toBe(false);
+  });
+
+  it('a reservation is not current after clear', () => {
+    const { store } = connectedStore();
+    const token = store.reserve('q-resume');
+    store.clear('q-resume');
+    expect(store.isCurrent(token)).toBe(false);
+  });
+
+  it('a reservation is not current after dispose', () => {
+    const { store } = connectedStore();
+    const token = store.reserve('q-resume');
+    store.dispose();
+    expect(store.isCurrent(token)).toBe(false);
+  });
+
+  it('a reservation is not current after connect to a new runtime', () => {
+    const { store } = connectedStore();
+    const token = store.reserve('q-resume');
+    store.connect(runtimeFor(uploadForm()));
+    expect(store.isCurrent(token)).toBe(false);
+  });
+
+  it('a reservation is not current once an upload supersedes it', () => {
+    const { store } = connectedStore();
+    const token = store.reserve('q-resume');
+    // A send that never settles: the upload only has to start, which is synchronous.
+    void store.upload('q-resume', fileNamed('doodle.png'), () => new Promise<UploadedFile>(() => undefined));
+    expect(store.isCurrent(token)).toBe(false);
+  });
 });

@@ -82,7 +82,9 @@ export interface UploadView {
    * widget renders from the answer it is given; this is what lets the pad do the same.
    *
    * It doubles as the file a failed upload is retried with. One field, because it is one fact:
-   * the artifact this question's answer is made of, for as long as the answer stands.
+   * the artifact this question's answer is made of, for as long as the answer stands. The one
+   * time it is null over a pending record is a reservation ({@link FormUploadStore.reserve}): the
+   * drawing is still being made, so there is no file yet.
    */
   readonly file: File | null;
 }
@@ -335,8 +337,8 @@ export class FormUploadStore {
    * apart. A retry asleep between attempts is still `uploading`, so a waiter sits through the
    * whole schedule; a newer upload for the same question keeps it waiting, for the newer one. It
    * never rejects and never hangs past the upload it waits on, because every path that ends an
-   * upload — success, failure, clear, reload, teardown — goes through `write()` or `dropRecords()`, and both
-   * re-check the waiters.
+   * upload — success, failure, release, clear, reload, teardown — goes through `write()` or
+   * `dropRecords()`, and both re-check the waiters.
    */
   public whenSettled(questionIds?: readonly string[]): Promise<void> {
     const ids = questionIds ?? null;
@@ -488,8 +490,16 @@ export class FormUploadStore {
     return { questionId, seq };
   }
 
-  /** Is `token` still the newest upload for its question? False once replaced, cleared or reloaded. */
-  private isCurrent(token: UploadToken): boolean {
+  /**
+   * Is `token` still the newest upload for its question? False once replaced, cleared, reloaded
+   * ({@link connect}) or torn down ({@link dispose}). A pure read.
+   *
+   * Public for the question component's doodle wiring: a drawing's export finishes after an await,
+   * and by then the widget may have been torn down or reloaded. Its reservation is what knows that,
+   * so the delivery asks here before it uploads. Uploading anyway would throw "no answer sink" after
+   * a teardown, or file the old drawing into the new runtime after a reload.
+   */
+  public isCurrent(token: UploadToken): boolean {
     return this.records().get(token.questionId)?.seq === token.seq;
   }
 

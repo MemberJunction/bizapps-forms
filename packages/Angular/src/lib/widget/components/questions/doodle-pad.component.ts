@@ -692,10 +692,10 @@ export class DoodlePadComponent {
   /**
    * Wipe the pad and tell the parent the answer is gone.
    *
-   * Superseding is half the work. The parent retires the running UPLOAD, which is not the same
-   * thing: an export still encoding has not started its upload yet, so there is nothing there to
-   * retire — it would begin a fresh one afterwards and commit the drawing the respondent has
-   * just withdrawn, leaving a stored drawing under an empty pad.
+   * Superseding is half the work. The parent's `clear` retires what the store holds — the running
+   * upload, or the reservation of an export still encoding — but it cannot stop that export: the
+   * encode would still finish and deliver, and the delivery would start a fresh upload and commit
+   * the drawing the respondent has just withdrawn, leaving a stored drawing under an empty pad.
    */
   public clear(): void {
     this.captures.supersede();
@@ -849,10 +849,8 @@ export class DoodlePadComponent {
       if (!this.captures.mayEmit(claim)) {
         return;
       }
-      sink.delivered({
-        subject: claim.subject,
-        file: new File([blob], 'doodle.png', { type: 'image/png' }),
-      });
+      const file = new File([blob], 'doodle.png', { type: 'image/png' });
+      sink.delivered({ subject: claim.subject, file }, reservation);
       delivered = true;
     } finally {
       if (!delivered) {
@@ -872,8 +870,12 @@ export class DoodlePadComponent {
 export interface DoodleExportSink<R> {
   /** An export began for `subject`. Called synchronously, before the export awaits anything. */
   started(subject: string): R;
-  /** The export produced a file. Ends the export; `released` will not follow. */
-  delivered(capture: DoodleCapture): void;
+  /**
+   * The export produced a file. Ends the export; `released` will not follow. Gets back the
+   * reservation `started` returned, so the parent can drop a file whose reservation was retired
+   * (the widget torn down or reloaded) while it encoded.
+   */
+  delivered(capture: DoodleCapture, reservation: R): void;
   /** The export ended without a file (failed, superseded, or no canvas). Ends the export. */
   released(reservation: R): void;
 }

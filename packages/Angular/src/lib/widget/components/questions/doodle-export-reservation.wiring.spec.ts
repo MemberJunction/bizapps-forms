@@ -105,7 +105,7 @@ describe('every export ends in exactly one of delivered or released', () => {
     }
     expect(tryAt).toBeGreaterThan(-1);
     // The flag is set only after the hand-over returns, so a throw from it still releases.
-    expect(body).toMatch(/sink\.delivered\(\{[\s\S]{0,200}\}\);\s*delivered = true;/);
+    expect(body).toMatch(/sink\.delivered\(\{[\s\S]{0,200}\},\s*reservation\);\s*delivered = true;/);
   });
 });
 
@@ -116,6 +116,19 @@ describe('the question component wires the callbacks to the store, by the subjec
     expect(sink()).toMatch(/started: \(subject\) => this\.uploads\.reserve\(subject\)/);
     expect(sink()).toMatch(/this\.uploadFile\(capture\.file, capture\.subject\)/);
     expect(sink()).toMatch(/released: \(reservation\) => this\.uploads\.release\(reservation\)/);
+  });
+
+  it('uploads a delivery only while its reservation is still current', () => {
+    // A store `dispose()` (teardown) or `connect()` (reload) inside the encode window retires the
+    // reservation. Uploading anyway would throw "no answer sink" after a teardown, or file the old
+    // drawing into the new runtime after a reload.
+    expect(pad()).toMatch(/sink\.delivered\(\{[\s\S]{0,200}\},\s*reservation\);/);
+    const delivered = sink().slice(sink().indexOf('delivered:'));
+    expect(delivered).toMatch(/^delivered: async \(capture, reservation\) =>/);
+    const check = delivered.indexOf('this.uploads.isCurrent(reservation)');
+    const upload = delivered.indexOf('this.uploadFile(capture.file, capture.subject)');
+    expect(check).toBeGreaterThan(-1);
+    expect(upload).toBeGreaterThan(check);
   });
 
   it('never reads the question the view is bound to now', () => {

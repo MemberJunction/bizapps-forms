@@ -142,8 +142,9 @@ export class FormQuestionComponent {
    * The file held locally for this question, whatever its upload has done — or `null`.
    *
    * "Local" is the distinction that matters, and the reason it is not called `uploadedFile`: the
-   * file is here from the moment it is chosen or drawn, while it is uploading, and after an
-   * upload has failed. Only {@link answerRecorded} says a file is stored. What this is for is
+   * file is here from the moment it is chosen or its drawing is exported, while it is uploading,
+   * and after an upload has failed. A reservation holds none: while a drawing is still being
+   * exported the question is pending but has no file yet. Only {@link answerRecorded} says a file is stored. What this is for is
    * rendering — the doodle pad repaints itself from it after Angular destroys the control. (A
    * retry does not read it: the store restarts from its own record.) Read from the store, keyed
    * by question id, for the same reason every other
@@ -653,7 +654,14 @@ export class FormQuestionComponent {
    */
   protected readonly doodleExports: DoodleExportSink<UploadToken> = {
     started: (subject) => this.uploads.reserve(subject),
-    delivered: async (capture) => {
+    delivered: async (capture, reservation) => {
+      // A teardown (`dispose`) or reload (`connect`) during the encode retired the reservation.
+      // The export is dropped then, as the old `output()` emit was: after a teardown there is no
+      // answer sink to commit to, and after a reload this drawing belongs to a response that no
+      // longer exists. A newer stroke or Clear retires it too, but the pad's claim stops those first.
+      if (!this.uploads.isCurrent(reservation)) {
+        return;
+      }
       await this.uploadFile(capture.file, capture.subject);
     },
     released: (reservation) => this.uploads.release(reservation),
