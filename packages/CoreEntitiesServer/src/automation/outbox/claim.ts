@@ -22,19 +22,27 @@
  * REPLAY is the third write, and the only one with no lease: it re-queues a `DeadLetter` event, fenced
  * on that status, so an event that is not dead-lettered is left untouched.
  *
- * The PostgreSQL branches have not been run against a database: `migrations-pg/` stops at v0.8.x, so
- * no PostgreSQL host has this table yet.
+ * ON SQL SERVER EACH WRITE IS A PROCEDURE (#338, migration V202610222300): spFormAutomationEventClaim,
+ * spFormAutomationEventSettle, spFormAutomationEventRenewLease and spFormAutomationEventReplay. MJ
+ * grants its runtime roles EXECUTE on procedures and no rights on base tables, so the raw statements
+ * were refused for a roles-only MJAPI login. The statements' shapes now live in that migration, and
+ * `shared/__tests__/guarded-write-sprocs.migration.spec.ts` pins them; the fenced procedures return
+ * `AffectedRows` themselves, so only the PostgreSQL UPDATEs are wrapped to count their rows.
  *
- * Both go through `ExecuteSQL` with the database's clock, never the process's: leases compare times
- * written by different API instances, and only the database has one clock for all of them.
+ * The PostgreSQL branches keep their raw statements, and have not been run against a database:
+ * `migrations-pg/` stops at v0.8.x, so no PostgreSQL host has this table yet.
  *
- * Raw SQL bypasses BaseEntity, so no entity event fires for these writes; every RunView that reads
+ * Every write uses the database's clock, never the process's: leases compare times written by
+ * different API instances, and only the database has one clock for all of them.
+ *
+ * Raw SQL and the procedures bypass BaseEntity, so no entity event fires for these writes; every RunView that reads
  * `FormAutomationEvent` passes `BypassCache: true` for that reason.
  */
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../../shared/entity-names.js';
 import { AFFECTED_ROWS_ALIAS, affectedRows } from '../../shared/affected-rows.js';
+import { formsProcedureCall } from '../../shared/forms-procedure.js';
 import { isGuid } from '../../shared/guid.js';
 import type { ResponseSubmittedTrigger } from './response-submitted-event.js';
 
@@ -43,6 +51,9 @@ export const DRAIN_BATCH_SIZE = 5;
 
 /** How long a claim holds an event before another drain may reclaim it. */
 export const LEASE_SECONDS = 120;
+
+/** A lease's new expiry, from the database's clock (PostgreSQL; the SQL Server procedures take {@link LEASE_SECONDS}). */
+const POSTGRES_LEASE_EXPIRY = `now() + interval '${LEASE_SECONDS} seconds'`;
 
 /** `FormAutomationEvent.LockedBy` is NVARCHAR(100). */
 const MAX_WORKER_ID_LENGTH = 100;
@@ -87,42 +98,35 @@ async function claimDueEvents(provider: DatabaseProviderBase, workerId: string, 
   if (workerId.length === 0 || workerId.length > MAX_WORKER_ID_LENGTH) {
     throw new Error(`A drain's worker id must be 1-${MAX_WORKER_ID_LENGTH} characters to fit FormAutomationEvent.LockedBy; got ${workerId.length}.`);
   }
-  const rows = await provider.ExecuteSQL<Record<string, unknown>>(claimStatement(provider, workerId, responseId), undefined, undefined, contextUser);
+  const claim = isPostgres(provider)
+    ? postgresClaimStatement(provider, workerId, responseId)
+    : formsProcedureCall(provider, FORMS_ENTITY.FormAutomationEvent, 'spFormAutomationEventClaim', {
+        WorkerID: workerId,
+        FormResponseID: responseId ?? null,
+        BatchSize: DRAIN_BATCH_SIZE,
+        LeaseSeconds: LEASE_SECONDS,
+      });
+  const rows = await provider.ExecuteSQL<Record<string, unknown>>(claim, undefined, undefined, contextUser);
   return (rows ?? []).map(readClaimed);
 }
 
-/** The claim, in the provider's dialect. */
-function claimStatement(provider: DatabaseProviderBase, workerId: string, responseId: string | undefined): string {
+/** The claim on PostgreSQL: one UPDATE over a `FOR UPDATE SKIP LOCKED` subquery, RETURNING the rows. */
+function postgresClaimStatement(provider: DatabaseProviderBase, workerId: string, responseId: string | undefined): string {
   const q = (name: string): string => provider.QuoteIdentifier(name);
   const table = eventTable(provider);
-  const pg = provider.PlatformKey === 'postgresql';
-  const now = pg ? 'now()' : 'SYSDATETIMEOFFSET()';
   const due =
-    `((e.${q('Status')} = 'Pending' AND (e.${q('AttemptCount')} = 0 OR e.${q('NextAttemptAt')} <= ${now})) OR (e.${q('Status')} = 'Running' AND e.${q('LockedUntil')} < ${now}))` +
+    `((e.${q('Status')} = 'Pending' AND (e.${q('AttemptCount')} = 0 OR e.${q('NextAttemptAt')} <= now())) OR (e.${q('Status')} = 'Running' AND e.${q('LockedUntil')} < now()))` +
     (responseId ? ` AND e.${q('FormResponseID')} = ${quoteSqlString(responseId)}` : '') +
     ` AND NOT EXISTS (SELECT 1 FROM ${table} o WHERE o.${q('FormResponseID')} = e.${q('FormResponseID')}` +
     ` AND o.${q('Status')} IN ('Pending', 'Running')` +
     ` AND (o.${q('__mj_CreatedAt')} < e.${q('__mj_CreatedAt')} OR (o.${q('__mj_CreatedAt')} = e.${q('__mj_CreatedAt')} AND o.${q('ID')} < e.${q('ID')})))`;
-  const order = `e.${q('__mj_CreatedAt')}, e.${q('ID')}`;
-  const lease = leaseExpiry(provider);
   const set =
-    `${q('Status')} = 'Running', ${q('LockedBy')} = ${quoteSqlString(workerId)}, ${q('LockedUntil')} = ${lease}, ` +
-    `${q('AttemptCount')} = ${q('AttemptCount')} + 1, ${q('__mj_UpdatedAt')} = ${now}`;
+    `${q('Status')} = 'Running', ${q('LockedBy')} = ${quoteSqlString(workerId)}, ${q('LockedUntil')} = ${POSTGRES_LEASE_EXPIRY}, ` +
+    `${q('AttemptCount')} = ${q('AttemptCount')} + 1, ${q('__mj_UpdatedAt')} = now()`;
   const columns = ['ID', 'FormResponseID', 'Trigger', 'PartialSaveKey', 'AttemptCount', 'IsReplay'];
-  if (pg) {
-    return (
-      `UPDATE ${table} SET ${set} WHERE ${q('ID')} IN (SELECT e.${q('ID')} FROM ${table} e WHERE ${due} ` +
-      `ORDER BY ${order} LIMIT ${DRAIN_BATCH_SIZE} FOR UPDATE SKIP LOCKED) RETURNING ${columns.map(q).join(', ')}`
-    );
-  }
-  // OUTPUT … INTO a table variable, then read it back: CodeGen gives the table an `__mj_UpdatedAt`
-  // trigger, and SQL Server refuses a bare OUTPUT clause on a table with an enabled trigger.
   return (
-    `DECLARE @claimed TABLE (${q('ID')} UNIQUEIDENTIFIER, ${q('FormResponseID')} UNIQUEIDENTIFIER, ${q('Trigger')} NVARCHAR(20), ` +
-    `${q('PartialSaveKey')} NVARCHAR(64), ${q('AttemptCount')} INT, ${q('IsReplay')} BIT); ` +
-    `WITH due AS (SELECT TOP (${DRAIN_BATCH_SIZE}) e.* FROM ${table} e WITH (UPDLOCK, READPAST, ROWLOCK) WHERE ${due} ORDER BY ${order}) ` +
-    `UPDATE due SET ${set} OUTPUT ${columns.map((c) => `inserted.${q(c)}`).join(', ')} INTO @claimed; ` +
-    `SELECT ${columns.map(q).join(', ')} FROM @claimed;`
+    `UPDATE ${table} SET ${set} WHERE ${q('ID')} IN (SELECT e.${q('ID')} FROM ${table} e WHERE ${due} ` +
+    `ORDER BY e.${q('__mj_CreatedAt')}, e.${q('ID')} LIMIT ${DRAIN_BATCH_SIZE} FOR UPDATE SKIP LOCKED) RETURNING ${columns.map(q).join(', ')}`
   );
 }
 
@@ -133,24 +137,30 @@ async function settleEvent(
   settlement: EventSettlement,
   contextUser: UserInfo,
 ): Promise<boolean> {
+  const what = `Settling automation event ${eventId} as ${settlement.status}`;
+  if (!isPostgres(provider)) {
+    const settle = formsProcedureCall(provider, FORMS_ENTITY.FormAutomationEvent, 'spFormAutomationEventSettle', {
+      ID: eventId,
+      WorkerID: workerId,
+      Status: settlement.status,
+      LastError: settlement.lastError,
+      RetryAfterSeconds: settlement.status === 'Pending' ? settlement.retryAfterSeconds : null,
+    });
+    return (await affectedOne(provider, settle, contextUser, what)) === 1;
+  }
   const q = (name: string): string => provider.QuoteIdentifier(name);
-  const pg = provider.PlatformKey === 'postgresql';
-  const now = pg ? 'now()' : 'SYSDATETIMEOFFSET()';
-  const next =
-    settlement.status === 'Pending'
-      ? `, ${q('NextAttemptAt')} = ${pg ? `now() + interval '${settlement.retryAfterSeconds} seconds'` : `DATEADD(SECOND, ${settlement.retryAfterSeconds}, SYSDATETIMEOFFSET())`}`
-      : '';
+  const next = settlement.status === 'Pending' ? `, ${q('NextAttemptAt')} = now() + interval '${settlement.retryAfterSeconds} seconds'` : '';
   const update =
     `UPDATE ${eventTable(provider)} SET ${q('Status')} = ${quoteSqlString(settlement.status)}${next}, ` +
     `${q('LastError')} = ${settlement.lastError === null ? 'NULL' : quoteSqlString(settlement.lastError)}, ` +
-    `${q('CompletedAt')} = ${settlement.status === 'Pending' ? 'NULL' : now}, ` +
+    `${q('CompletedAt')} = ${settlement.status === 'Pending' ? 'NULL' : 'now()'}, ` +
     `${q('LockedBy')} = NULL, ${q('LockedUntil')} = NULL, ` +
     // A replay stays marked across a retry: if its first attempt retries before any step ran, the
     // next attempt must still reopen the steps the dead letter closed.
-    (settlement.status === 'Pending' ? '' : `${q('IsReplay')} = ${pg ? 'false' : '0'}, `) +
-    `${q('__mj_UpdatedAt')} = ${now} ` +
-    `WHERE ${leaseHeldBy(provider, eventId, workerId)}`;
-  return (await affectedOne(provider, update, contextUser, `Settling automation event ${eventId} as ${settlement.status}`)) === 1;
+    (settlement.status === 'Pending' ? '' : `${q('IsReplay')} = false, `) +
+    `${q('__mj_UpdatedAt')} = now() ` +
+    `WHERE ${postgresLeaseHeldBy(provider, eventId, workerId)}`;
+  return (await affectedOne(provider, counted(provider, update), contextUser, what)) === 1;
 }
 
 /**
@@ -165,38 +175,53 @@ export async function replayDeadLetteredEvent(provider: DatabaseProviderBase, ev
   if (!isGuid(eventId)) {
     throw new Error(`Replaying an automation event needs an event id; got ${JSON.stringify(eventId)}.`);
   }
+  const what = `Replaying automation event ${eventId}`;
+  if (!isPostgres(provider)) {
+    const replay = formsProcedureCall(provider, FORMS_ENTITY.FormAutomationEvent, 'spFormAutomationEventReplay', { ID: eventId });
+    return (await affectedOne(provider, replay, contextUser, what)) === 1;
+  }
   const q = (name: string): string => provider.QuoteIdentifier(name);
-  const pg = provider.PlatformKey === 'postgresql';
-  const now = pg ? 'now()' : 'SYSDATETIMEOFFSET()';
   const update =
-    `UPDATE ${eventTable(provider)} SET ${q('Status')} = 'Pending', ${q('AttemptCount')} = 0, ${q('IsReplay')} = ${pg ? 'true' : '1'}, ` +
-    `${q('NextAttemptAt')} = ${now}, ${q('LastError')} = NULL, ${q('CompletedAt')} = NULL, ${q('__mj_UpdatedAt')} = ${now} ` +
+    `UPDATE ${eventTable(provider)} SET ${q('Status')} = 'Pending', ${q('AttemptCount')} = 0, ${q('IsReplay')} = true, ` +
+    `${q('NextAttemptAt')} = now(), ${q('LastError')} = NULL, ${q('CompletedAt')} = NULL, ${q('__mj_UpdatedAt')} = now() ` +
     `WHERE ${q('ID')} = ${quoteSqlString(eventId)} AND ${q('Status')} = 'DeadLetter'`;
-  return (await affectedOne(provider, update, contextUser, `Replaying automation event ${eventId}`)) === 1;
+  return (await affectedOne(provider, counted(provider, update), contextUser, what)) === 1;
 }
 
 /** Push this worker's lease out by {@link LEASE_SECONDS} again; a run in flight calls it on a timer. */
 async function renewLease(provider: DatabaseProviderBase, eventId: string, workerId: string, contextUser: UserInfo): Promise<boolean> {
+  const what = `Renewing the lease on automation event ${eventId}`;
+  if (!isPostgres(provider)) {
+    const renew = formsProcedureCall(provider, FORMS_ENTITY.FormAutomationEvent, 'spFormAutomationEventRenewLease', {
+      ID: eventId,
+      WorkerID: workerId,
+      LeaseSeconds: LEASE_SECONDS,
+    });
+    return (await affectedOne(provider, renew, contextUser, what)) === 1;
+  }
   const q = (name: string): string => provider.QuoteIdentifier(name);
-  const update =
-    `UPDATE ${eventTable(provider)} SET ${q('LockedUntil')} = ${leaseExpiry(provider)} ` +
-    `WHERE ${leaseHeldBy(provider, eventId, workerId)}`;
-  return (await affectedOne(provider, update, contextUser, `Renewing the lease on automation event ${eventId}`)) === 1;
+  const update = `UPDATE ${eventTable(provider)} SET ${q('LockedUntil')} = ${POSTGRES_LEASE_EXPIRY} WHERE ${postgresLeaseHeldBy(provider, eventId, workerId)}`;
+  return (await affectedOne(provider, counted(provider, update), contextUser, what)) === 1;
 }
 
-/** The fence every write after the claim carries: the event is still Running, under THIS worker. */
-function leaseHeldBy(provider: DatabaseProviderBase, eventId: string, workerId: string): string {
+function isPostgres(provider: DatabaseProviderBase): boolean {
+  return provider.PlatformKey === 'postgresql';
+}
+
+/** The fence every PostgreSQL write after the claim carries: the event is still Running, under THIS worker. */
+function postgresLeaseHeldBy(provider: DatabaseProviderBase, eventId: string, workerId: string): string {
   const q = (name: string): string => provider.QuoteIdentifier(name);
   return `${q('ID')} = ${quoteSqlString(eventId)} AND ${q('Status')} = 'Running' AND ${q('LockedBy')} = ${quoteSqlString(workerId)}`;
 }
 
-function leaseExpiry(provider: DatabaseProviderBase): string {
-  return provider.PlatformKey === 'postgresql' ? `now() + interval '${LEASE_SECONDS} seconds'` : `DATEADD(SECOND, ${LEASE_SECONDS}, SYSDATETIMEOFFSET())`;
+/** A raw PostgreSQL UPDATE that also reports its affected-row count. The SQL Server procedures report their own. */
+function counted(provider: DatabaseProviderBase, update: string): string {
+  return provider.Dialect.AffectedRowCountSQL(update, AFFECTED_ROWS_ALIAS);
 }
 
-/** Run a fenced UPDATE and read its affected-row count; an unreadable count is a fault, named by `what`. */
-async function affectedOne(provider: DatabaseProviderBase, update: string, contextUser: UserInfo, what: string): Promise<number> {
-  const rows = await provider.ExecuteSQL<Record<string, unknown>>(provider.Dialect.AffectedRowCountSQL(update, AFFECTED_ROWS_ALIAS), undefined, undefined, contextUser);
+/** Run a fenced write that reports `AffectedRows`, and read the count; an unreadable count is a fault, named by `what`. */
+async function affectedOne(provider: DatabaseProviderBase, statement: string, contextUser: UserInfo, what: string): Promise<number> {
+  const rows = await provider.ExecuteSQL<Record<string, unknown>>(statement, undefined, undefined, contextUser);
   const affected = affectedRows(rows);
   if (affected === undefined) {
     throw new Error(`${what} returned no readable affected-row count.`);

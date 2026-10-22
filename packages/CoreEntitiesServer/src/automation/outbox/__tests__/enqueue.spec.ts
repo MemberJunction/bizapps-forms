@@ -60,11 +60,21 @@ describe('OUTBOX_RESPONSE_SUBMITTED.Publish', () => {
 
     await OUTBOX_RESPONSE_SUBMITTED.Publish(payload(), db.provider, makeContextUser());
 
+    // SQL Server: the procedure (#338); its UPDATE is pinned by guarded-write-sprocs.migration.spec.ts.
+    const pull = db.statements.find((st) => /spFormAutomationEventBringPartialsForward/.test(st.sql));
+    expect(pull?.sql).toBe(`EXEC [__mj_BizAppsForms].[spFormAutomationEventBringPartialsForward] @FormResponseID = '${RESPONSE}'`);
+  });
+
+  it('brings the waiting partials forward with the raw UPDATE on PostgreSQL, only those still waiting', async () => {
+    const db = makeFakeProvider({ platform: 'postgresql', tables: { [EVENTS]: [] } });
+
+    await OUTBOX_RESPONSE_SUBMITTED.Publish(payload(), db.provider, makeContextUser());
+
     const pull = db.statements.find((st) => /UPDATE/.test(st.sql));
-    expect(pull?.sql).toMatch(/SET \[NextAttemptAt\] = SYSDATETIMEOFFSET\(\)/);
-    expect(pull?.sql).toMatch(new RegExp(`\\[FormResponseID\\] = '${RESPONSE}' AND \\[Trigger\\] = 'OnPartial' AND \\[Status\\] = 'Pending'`));
+    expect(pull?.sql).toMatch(/SET "NextAttemptAt" = now\(\)/);
+    expect(pull?.sql).toContain(`"FormResponseID" = '${RESPONSE}' AND "Trigger" = 'OnPartial' AND "Status" = 'Pending'`);
     // Only rows still waiting: one already due keeps its NextAttemptAt, so it keeps its place.
-    expect(pull?.sql).toMatch(/AND \[NextAttemptAt\] > SYSDATETIMEOFFSET\(\)$/);
+    expect(pull?.sql).toMatch(/AND "NextAttemptAt" > now\(\)$/);
   });
 
   it('pulls nothing forward for a partial save', async () => {
@@ -72,7 +82,7 @@ describe('OUTBOX_RESPONSE_SUBMITTED.Publish', () => {
 
     await OUTBOX_RESPONSE_SUBMITTED.Publish(payload({ Trigger: 'OnPartial', PartialSaveKey: 'k' }), db.provider, makeContextUser());
 
-    expect(db.statements.filter((st) => /UPDATE/.test(st.sql))).toEqual([]);
+    expect(db.statements.filter((st) => /UPDATE|BringPartialsForward/.test(st.sql))).toEqual([]);
   });
 
   it('throws naming the response when the save fails, so the save\'s transaction rolls back', async () => {
