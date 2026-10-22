@@ -10,7 +10,9 @@
 -- outbox sweep's scheduled job type and job (#306); the `Form Automation Failed` notification type
 -- (#311); and two action params. Updated, because metadata/ moved and the ids already ship: the
 -- `Form Response` name field and the four response foreign keys kept off the name join (#306); the
--- `TargetRecordID` polymorphic link (#325); one entity flag; the Form Respondent role and two action
+-- `TargetRecordID` polymorphic link (#325); the four `RelatedRecordCollection` definitions (Pages,
+-- Screens, Questions, Options) #303 declared on existing relationships, which no migration writes;
+-- one entity flag; the Form Respondent role and two action
 -- descriptions (#306 review); the Form Designer template text and params; the usual no-op view.
 -- `migrations-teardown/V001` already lists every new root, so `mj app remove` needs no change.
 --
