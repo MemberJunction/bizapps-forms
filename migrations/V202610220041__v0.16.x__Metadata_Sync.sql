@@ -2,7 +2,7 @@
 --
 -- ONE seed per release (#105). v0.15.1 released every earlier seed, so this is a DELTA beside them and
 -- folds in no retired per-PR seed. `npm run check:seed-cadence` asked for it: 52 record files moved
--- since v0.15.1. `npm run check:release-seed` named 41 declared ids that no migration carried.
+-- since v0.15.1. `npm run check:release-seed` named 44 declared ids that no migration carried.
 --
 -- WHAT IT SEEDS. Created: the 20 `Forms.*` Remote Operations and their category (#303, #311); the
 -- three reporting queries with their category, fields, parameters, entities and permissions; the
