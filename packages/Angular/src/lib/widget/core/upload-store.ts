@@ -115,7 +115,8 @@ interface UploadRecord extends UploadView {
   /**
    * The transport call that produced this record, kept so {@link FormUploadStore.restart} can
    * make it again. Null for an upload begun without one (`begin` directly) and for a cleared
-   * question. Not part of the view: a template has no business calling the transport.
+   * question, and for a reservation ({@link FormUploadStore.reserve}), which has no file yet.
+   * Not part of the view: a template has no business calling the transport.
    */
   readonly send: UploadSend | null;
 }
@@ -191,7 +192,43 @@ export class FormUploadStore {
 
   /** Begin uploading `file` for `questionId`; the returned token is what may write the result. */
   public begin(questionId: string, file: File): UploadToken {
-    return this.start(questionId, file, null);
+    return this.start(questionId, { file, fileName: file.name, progress: 0, send: null });
+  }
+
+  /**
+   * Hold `questionId` as pending while its file is still being MADE, before there is anything to
+   * upload (#333).
+   *
+   * The doodle pad exports its PNG asynchronously after pointer-up, and only then calls
+   * {@link upload}. Next and Submit wait only on records the store knows about, so in that gap
+   * the question looked idle: the step was judged, and the response sent, without a drawing the
+   * respondent had just finished. A reservation closes the gap by being a record like any other
+   * upload: `uploading`, so {@link whenSettled} waits on it and {@link hasPendingAmong} counts it.
+   *
+   * It carries no file and no transport call, so there is nothing for {@link restart} to send and
+   * the view shows an indeterminate phase. Like `begin`, it commits `null` as the answer — a
+   * previous drawing's file id must not stand while a replacement is being made — and it takes a
+   * fresh token, so it supersedes whatever was running for the question. The upload that follows
+   * supersedes the reservation in turn, which is the normal way a reservation ends; the caller
+   * only {@link release}s one that produced no upload.
+   */
+  public reserve(questionId: string): UploadToken {
+    return this.start(questionId, { file: null, fileName: 'doodle.png', progress: null, send: null });
+  }
+
+  /**
+   * End a reservation that produced no upload (an export that failed or was cancelled).
+   *
+   * Writes the question idle, which releases anyone waiting on it. It never commits an answer: a
+   * reservation held no file, and the answer was already cleared when it was taken. A stale token
+   * is a no-op, because a newer upload, reservation, clear or reload now owns the question —
+   * releasing late must not undo what replaced it, such as a stored file.
+   */
+  public release(token: UploadToken): void {
+    if (!this.isCurrent(token)) {
+      return;
+    }
+    this.write(token.questionId, idleRecord(token.seq, null));
   }
 
   /**
@@ -216,7 +253,7 @@ export class FormUploadStore {
    * storing a successful result: that is a wiring bug, and it propagates rather than being retried.
    */
   public async upload(questionId: string, file: File, send: UploadSend): Promise<void> {
-    const token = this.start(questionId, file, send);
+    const token = this.start(questionId, { file, fileName: file.name, progress: 0, send });
     // One more attempt than there are delays: the first try, then one retry per delay.
     const maxAttempts = UPLOAD_RETRY_DELAYS_MS.length + 1;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -259,7 +296,8 @@ export class FormUploadStore {
    * Run `questionId`'s upload again with the same file and transport call.
    *
    * A no-op when there is nothing to restart: no record, no file, or a record begun without a
-   * transport call (`begin` directly), which this store cannot make again on its own.
+   * transport call (`begin` directly, or a reservation), which this store cannot make again on
+   * its own.
    *
    * Restarting a question whose upload is still running supersedes the running series: the new
    * attempt takes a fresh token, and the old series stops at its next currency check (its late
@@ -438,17 +476,12 @@ export class FormUploadStore {
   }
 
   /** Start a new upload record for `questionId`, superseding any earlier one. */
-  private start(questionId: string, file: File, send: UploadSend | null): UploadToken {
+  private start(
+    questionId: string,
+    fields: { file: File | null; fileName: string; progress: number | null; send: UploadSend | null },
+  ): UploadToken {
     const seq = ++this.nextSeq;
-    this.write(questionId, {
-      status: 'uploading',
-      fileName: file.name,
-      progress: 0,
-      failure: null,
-      seq,
-      file,
-      send,
-    });
+    this.write(questionId, { status: 'uploading', failure: null, seq, ...fields });
     // No answer while an upload is in flight: a required FileUpload must not be satisfied by a
     // file that is not stored yet, and a replacement must not leave the old id standing.
     this.commit(questionId, null);

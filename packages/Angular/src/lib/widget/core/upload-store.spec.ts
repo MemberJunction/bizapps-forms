@@ -750,3 +750,58 @@ describe('FormUploadStore — hasPendingAmong', () => {
     expect(pending()).toBe(false);
   });
 });
+
+describe('FormUploadStore — reserve and release', () => {
+  it('counts a reservation as pending', () => {
+    const { store } = connectedStore();
+    store.reserve('q-resume');
+    expect(store.hasPendingAmong(['q-resume'])).toBe(true);
+  });
+
+  it('release of a stale token is a no-op', () => {
+    const { store } = connectedStore();
+    const first = store.reserve('q-resume');
+    store.reserve('q-resume');
+    store.release(first);
+    expect(store.viewFor('q-resume').status).toBe('uploading');
+  });
+
+  it('release of the current token writes idle and resolves whenSettled', async () => {
+    const { store } = connectedStore();
+    const token = store.reserve('q-resume');
+    const settled = vi.fn();
+    void store.whenSettled(['q-resume']).then(settled);
+    store.release(token);
+    await Promise.resolve();
+    expect(settled).toHaveBeenCalled();
+    expect(store.viewFor('q-resume').status).toBe('idle');
+  });
+
+  it('clear after reserve resolves whenSettled', async () => {
+    const { store } = connectedStore();
+    store.reserve('q-resume');
+    const settled = vi.fn();
+    void store.whenSettled(['q-resume']).then(settled);
+    store.clear('q-resume');
+    await Promise.resolve();
+    expect(settled).toHaveBeenCalled();
+  });
+
+  it('dispose after reserve resolves whenSettled', async () => {
+    const { store } = connectedStore();
+    store.reserve('q-resume');
+    const settled = vi.fn();
+    void store.whenSettled(['q-resume']).then(settled);
+    store.dispose();
+    await Promise.resolve();
+    expect(settled).toHaveBeenCalled();
+  });
+
+  it('reserve commits null over a stored answer', () => {
+    const { store, runtime } = connectedStore();
+    store.succeed(store.begin('q-resume', fileNamed('resume.pdf')), 'file-1');
+    store.reserve('q-resume');
+    // Committing null clears the answer; the runtime reads a cleared answer as undefined.
+    expect(runtime.valueFor('q-resume')).toBeUndefined();
+  });
+});
