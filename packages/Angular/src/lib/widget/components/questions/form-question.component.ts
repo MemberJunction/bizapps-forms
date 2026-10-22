@@ -44,7 +44,7 @@ import {
 import { NgTemplateOutlet } from '@angular/common';
 
 import { FORMS_UPLOAD_SERVICE } from '../../api/form-upload.interface';
-import { FormUploadStore, type UploadStatus } from '../../core/upload-store';
+import { FormUploadStore, type UploadStatus, type UploadToken } from '../../core/upload-store';
 import {
   autocompleteFor,
   compositeAutocompleteFor,
@@ -54,7 +54,8 @@ import {
   inputTypeFor,
 } from './input-mode';
 import { compositeAnswer, readCompositeParts, sameAnswer, scalarAnswer } from './control-answer';
-import { DoodlePadComponent, type DoodleCapture } from './doodle-pad.component';
+import { DoodlePadComponent, type DoodleExportSink } from './doodle-pad.component';
+import { doodleExportSink } from './doodle-export-sink';
 import { IconComponent } from '../icon.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
 
@@ -142,8 +143,9 @@ export class FormQuestionComponent {
    * The file held locally for this question, whatever its upload has done — or `null`.
    *
    * "Local" is the distinction that matters, and the reason it is not called `uploadedFile`: the
-   * file is here from the moment it is chosen or drawn, while it is uploading, and after an
-   * upload has failed. Only {@link answerRecorded} says a file is stored. What this is for is
+   * file is here from the moment it is chosen or its drawing is exported, while it is uploading,
+   * and after an upload has failed. A reservation holds none: while a drawing is still being
+   * exported the question is pending but has no file yet. Only {@link answerRecorded} says a file is stored. What this is for is
    * rendering — the doodle pad repaints itself from it after Angular destroys the control. (A
    * retry does not read it: the store restarts from its own record.) Read from the store, keyed
    * by question id, for the same reason every other
@@ -638,16 +640,20 @@ export class FormQuestionComponent {
   // --- Doodle --------------------------------------------------------------
 
   /**
-   * A drawing takes the ordinary file-answer path from here.
+   * The pad's exports, wired to the upload store by the subject each one names (#333) — see
+   * {@link doodleExportSink} for what each call does and why a retired reservation drops its file.
    *
-   * Stored against the question the capture NAMES, not against `this.question()`. The export
-   * finishes after the gesture, and this handler is routed by the view — in OneQuestion mode one
-   * pad serves consecutive Doodle questions, so reading the current question here filed the
-   * first one's drawing as the second one's answer.
+   * The upload is stored against the subject the capture names, never `this.question()`: the pad
+   * calls this after an await, often after this component is destroyed or, in OneQuestion mode,
+   * re-pointed at the next Doodle question. It reaches only the store and the uploader, which are
+   * widget-level and outlive this component.
    */
-  protected async onDoodleDrawn(capture: DoodleCapture): Promise<void> {
-    await this.uploadFile(capture.file, capture.subject);
-  }
+  protected readonly doodleExports: DoodleExportSink<UploadToken> = doodleExportSink(
+    this.uploads,
+    async (capture) => {
+      await this.uploadFile(capture.file, capture.subject);
+    },
+  );
 
   protected onDoodleCleared(): void {
     // `clear` also retires the running upload. Without that, a respondent who draws, dislikes it

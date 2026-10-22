@@ -1148,6 +1148,15 @@ export const MUTANTS = [
     suite: 'packages/Angular',
     killedBy: ['src/lib/widget/core/form-runtime.spec.ts'],
   },
+  {
+    name: 'widget/doodle-delivery-after-retirement',
+    behaviour: 'a drawing that finishes encoding after its reservation was retired (widget torn down, form reloaded, pad cleared) is dropped, never uploaded into a dead or new response (#333)',
+    file: 'packages/Angular/src/lib/widget/components/questions/doodle-export-sink.ts',
+    find: '      if (!uploads.isCurrent(reservation)) {',
+    replace: '      if (false && !uploads.isCurrent(reservation)) {',
+    suite: 'packages/Angular',
+    killedBy: ['src/lib/widget/components/questions/doodle-export-sink.spec.ts'],
+  },
   // --- respondent widget on Forms.SaveResponse (#303 Task 10c): who ends the form, and when -----
   {
     name: 'widget/partial-autosave-skips-the-hold',
