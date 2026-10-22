@@ -162,15 +162,41 @@ Provide a clean, strongly-typed server service in `@mj-biz-apps/forms-core-entit
 4. `RecordEmbeddedFormSubmission(params: { formId?: string; distributionSlug?: string; answers: readonly FormAnswerInput[]; respondentPersonId?: string | null; preboundRecords?: ReadonlyArray<{ targetEntityName: string; targetRecordId: string }>; metadata?: { ipHash?: string; userAgent?: string }; contextUser: UserInfo }): Promise<{ formResponseId: string; respondentPersonId: string | null }>`
    - Runs `FormSubmissionEngine` to persist the completed `FormResponse` and `FormResponseAnswer` rows (storing **all** questions canonically, both bound and unbound), pre-stamping `RespondentPersonID` if `Orders` has already resolved/created the buyer or attendee `Person` (so `Forms: Upsert Respondent Person` reuses that exact `PersonID` per `docs/on-submit-automations.md`), records `FormEntityBindingRecord` ledger entries for any `preboundRecords` already materialized by the host (or updates the target record via `executeBinding`), and enqueues the `FormAutomationEvent` outbox drain.
 
+### A4. MJ-Idiomatic Extensibility: `FormType`, `FormCategory` Integration, & Metadata-Driven `FormQuestionType` with `@RegisterClass` Drivers
+Make `bizapps-forms` 100% extensible the MemberJunction way—via metadata tables paired with `DriverClass` and `@RegisterClass` / `MJGlobal.Instance.ClassFactory`—while keeping all schema changes strictly additive per the Publish-Then-No-Breaking-Changes Policy:
+
+1. **`FormCategory` (`ParentID` Tree) + `FormType` (`DriverClass`) Separation:**
+   - `MJ_BizApps_Forms: Form Categories` (`__mj_BizAppsForms.FormCategory`) already exists with `ID`, `Name`, `Description`, `ParentID` (self-FK), and `IconClass` for hierarchical folder organization.
+   - Add **`MJ_BizApps_Forms: Form Types` (`__mj_BizAppsForms.FormType`)** to drive behavioral archetypes (`General`, `CheckoutIntake`, `EventRegistration`, `ScoredAssessment`, `CredentialApplication`):
+     - Columns: `ID`, `Name`, `Code`, `Description`, `IconClass`, `DriverClass` (`nvarchar(255) NULL`), `DefaultCategoryID` (FK to `FormCategory.ID`), `DefaultRenderMode` (`'Scroll' | 'OneQuestion'`), `SupportsScoring` (`bit`), `SupportsEntityBinding` (`bit`), `SupportsStandaloneDistribution` (`bit`), `RequiredTargetEntities` (`nvarchar(max) NULL` JSON), `DefaultSettings` (`nvarchar(max) NULL` JSON), `IsActive`, `DisplayOrder`.
+     - Add `FormTypeID uniqueidentifier NULL REFERENCES __mj_BizAppsForms.FormType(ID)` to `__mj_BizAppsForms.Form` (backfilled to the seeded `'General'` `FormType`).
+   - Create **`BaseFormTypeDriver`** (resolved via `MJGlobal.Instance.ClassFactory.CreateInstance(BaseFormTypeDriver, formType.DriverClass)`):
+     - Hooks: `ValidateForPublish(ctx)`, `ResolvePrefillAnswers(ctx)`, `ValidateSubmission(ctx)`, and `OnAfterSubmit(ctx)`.
+     - Built-in drivers: `StandardFormTypeDriver`, `ScoredAssessmentFormTypeDriver`, plus downstream drivers like `OrdersCheckoutFormTypeDriver` in `bizapps-orders`.
+
+2. **Extensible `FormQuestionType` Metadata Entity + Pluggable Question Drivers (`@RegisterClass`):**
+   - Refactor the hardcoded 25-entry `QUESTION_TYPE_BEHAVIOR` table in `packages/Entities/src/contracts/question-types.ts` and the 25-case `@switch` in `FormQuestionComponent` into metadata + `ClassFactory` drivers:
+   - Add **`MJ_BizApps_Forms: Form Question Types` (`__mj_BizAppsForms.FormQuestionType`)**:
+     - Columns: `ID`, `Code`, `Name`, `Description`, `PaletteGroup`, `IconClass`, `IsAnswerable`, `OptionMode` (`'none' | 'values' | 'images' | 'matrix'`), `AnswerColumn` (`'text' | 'numeric' | 'boolean' | 'date' | 'json' | 'file'`), `AnalysisKind` (`'choice' | 'numeric' | 'boolean' | 'text' | 'composite' | 'none'`), `InsightRole`, `IsMultiValued`, `IsOrdered`, `DriverClass` (`BaseFormQuestionTypeDriver`), `ControlDriverClass` (`BaseFormQuestionControl`), `BuilderEditorDriverClass` (`BaseFormQuestionSettingsEditor`), `CompositeFields` (`nvarchar(max) NULL` JSON), `DefaultSettings`, `SettingsSchema`, `IsSystem`, `IsActive`, `Sequence`.
+     - Seed all 25 built-in question types with deterministic UUIDs.
+     - Add `QuestionTypeID uniqueidentifier NULL REFERENCES __mj_BizAppsForms.FormQuestionType(ID)` to `__mj_BizAppsForms.FormQuestion` (backfilled from `QuestionType`), relax the closed `CK_FormQuestion_QuestionType` CHECK constraint so downstream apps can register new question types, and keep `FormQuestion.QuestionType` synced with `FormQuestionType.Code` in `FormQuestionEntityServer`.
+     - Freeze resolved `QuestionTypeBehavior` into published `FormVersion` snapshots so historical versions remain self-describing.
+   - Create **`FormQuestionTypeEngine extends BaseSingleton<FormQuestionTypeEngine>`** to cache `FormQuestionType` metadata.
+   - Create **`BaseFormQuestionTypeDriver`** (`@RegisterClass(BaseFormQuestionTypeDriver, '<Code>')`) for server/shared validation (`ValidateAnswer`), normalization (`NormalizeForStorage`), composite sub-field extraction (`ExtractSubField`), and export formatting (`FormatForExport`).
+   - Create **`BaseFormQuestionControl`** (`@RegisterClass(BaseFormQuestionControl, '<ControlDriverClass>')`) in `@mj-biz-apps/forms-ng` so `<mjf-form-question>` resolves and mounts question controls via `MJGlobal.Instance.ClassFactory` (refactoring the built-in 25 controls into registered classes and allowing any BizApp to plug in custom question controls).
+
+3. **`BaseFormDistributionClaimProvider` via `@RegisterClass`:**
+   - Add `BaseFormDistributionClaimProvider` in `@mj-biz-apps/forms-core-entities-server` discovered via `MJGlobal.Instance.ClassFactory.GetAllRegistrations(BaseFormDistributionClaimProvider)` (retaining a fallback read of `__mjBizAppsForms.distributionClaimProviders.v1` for backward compatibility).
+
 ---
 
 ## 4. Workstream B — Orders Consumption Side (`bizapps-orders`)
 **Assignee:** Boston (`@bg-BC`)
 
-### B1. Package & App Dependency Wiring
+### B1. Package, App Dependency & ClassFactory Plugin Wiring
 - Add `mj-bizapps-forms` to `bizapps-orders/mj-app.json` dependencies.
 - Add `@mj-biz-apps/forms-entities`, `@mj-biz-apps/forms-core-entities-server`, and `@mj-biz-apps/forms-ng` to the corresponding `bizapps-orders` packages (`orders-entities`, `orders-core-entities-server`, `orders-server`, `orders-ng`).
-- Register `Orders` as a claim provider in `__mjBizAppsForms.distributionClaimProviders.v1` at server startup (`packages/Server/src/`) so any `FormDistribution` attached to a `CheckoutWidget` displays `"used by Orders"` in the Forms Builder's Distribute tab (`docs/distribution-claims.md`).
+- Register `OrdersDistributionClaimProvider` (`@RegisterClass(BaseFormDistributionClaimProvider, 'Orders')`) and `OrdersCheckoutFormTypeDriver` (`@RegisterClass(BaseFormTypeDriver, 'OrdersCheckoutFormTypeDriver')`) so `Orders` plugs into `Forms` via MJ's `ClassFactory`.
 
 ### B2. Schema, Configuration & Two-Tier Materialization Linkage
 - **Checkout Widget Configuration (`CheckoutWidgetConfiguration`):**
@@ -212,6 +238,7 @@ Provide a clean, strongly-typed server service in `@mj-biz-apps/forms-core-entit
   - `validateAndFocus()` syncs DOM autofill values, awaits pending uploads, marks fields touched, and focuses the first invalid control.
   - `copyAnswersFrom()` copies answers cleanly across `FormRuntime` instances and triggers conditional visibility recalculation on the target runtime.
   - `FormEmbeddedHostService` validates answers against published snapshots, extracts mapped `FormEntityBinding` field values for target entities, and records submissions with pre-resolved `RespondentPersonID` + `FormEntityBindingRecord` ledger entries + outbox drain.
+  - `FormType` (`BaseFormTypeDriver`), `FormQuestionType` (`BaseFormQuestionTypeDriver` & `BaseFormQuestionControl`), and `BaseFormDistributionClaimProvider` resolve via `MJGlobal.Instance.ClassFactory` (`@RegisterClass`), with all 25 built-in question types seeded in metadata and refactored into registered drivers.
 - [ ] **Orders Checkout Integration Specs (`@bg-BC`):**
   - `POST /checkout/initialize` returns the published `intakeForm` render definition.
   - `<mj-checkout-widget>` renders `<mjf-form-embed>` in both single-unit and multi-unit (`perUnit`) modes, blocks checkout submission when form answers are invalid, and submits settled `FormAnswerInput[]`.
