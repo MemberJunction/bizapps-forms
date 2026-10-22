@@ -71,6 +71,8 @@
   public readonly exportSink = input.required<DoodleExportSink<unknown>>();
   ```
   Method syntax on purpose (bivariant params) so a `DoodleExportSink<UploadToken>` binds.
+
+  *Amended 2026-10-22 (PR #335, 761abda):* what shipped is `delivered(capture: DoodleCapture, reservation: R): void`. The pad hands back the reservation `started` returned, together with the file, so the parent can drop a file whose reservation was retired while it encoded.
 - In `form-question.component.ts`:
   ```ts
   protected readonly doodleExports: DoodleExportSink<UploadToken> = {
@@ -81,8 +83,11 @@
   ```
   Template: `[exportSink]="doodleExports"` replaces `(drawn)="onDoodleDrawn($event)"`.
 
+  *Amended 2026-10-22 (PR #335, 761abda and gauntlet review):* the block above is the plan as authored, not what shipped. `delivered` takes `(capture, reservation)` and returns early when `uploads.isCurrent(reservation)` is false, so an export that ends after a teardown (`dispose`) or a reload (`connect`) is dropped: after a teardown there is no answer sink, and after a reload the drawing belongs to a response that no longer exists. Otherwise it uploads with `await this.uploadFile(capture.file, capture.subject)`. `onDoodleDrawn` was removed. In review the sink moved to a plain function, `doodleExportSink(uploads, upload)` in `components/questions/doodle-export-sink.ts`, so `doodle-export-sink.spec.ts` can run its delivery guard against a real `FormUploadStore`. The component binds `doodleExports = doodleExportSink(this.uploads, async (capture) => { await this.uploadFile(capture.file, capture.subject); })`, and `scripts/check-guard-mutants.mjs` holds the guard as `widget/doodle-delivery-after-retirement`.
+
 - [ ] **Step 1:** wiring spec already red (7/8).
 - [ ] **Step 2: Implement `emitPng`.** First statements, before any await: `const claim = ...; const sink = this.exportSink(); const reservation = sink.started(claim.subject); let delivered = false; try { ...existing body...; sink.delivered({ subject: claim.subject, file }); delivered = true; } finally { if (!delivered) { sink.released(reservation); } }`. Callers (`onPointerUp`, `undo`) unchanged: `void this.emitPng();`.
+  *Amended 2026-10-22 (PR #335, 761abda):* the delivery that shipped is `sink.delivered({ subject: claim.subject, file }, reservation);`, which hands back the reservation (see the amended interface above).
 - [ ] **Step 3:** Update the pad's `onPointerUp` comment and the `drawn` doc to describe the callback (an output emit after destroy is dropped; a function call is not).
 - [ ] **Step 4:** `npx vitest run src/lib/widget/components/questions` → PASS (incl. `pad-captures.spec.ts` unchanged).
 - [ ] **Step 5:** `pnpm run typecheck` at repo root → PASS.
@@ -93,3 +98,4 @@
 - [ ] `npx vitest run` in `packages/Angular`; `pnpm run typecheck`; `pnpm run lint:ui`; `pnpm run check:release-seed`; `pnpm run check:seed-cadence`.
 - [ ] `git diff --quiet origin/next HEAD -- <pad-captures.spec.ts>` and `<settled-validation.spec.ts>`.
 - [ ] `pnpm run build:widget`, then `node agent/live-repro.mjs 1500` and `0` against the slot (`:4502/f/doodle-scroll`): one `POST /forms/upload`, no NG0953, thank-you ending; newest Doodle answer row holds a file id.
+  *Amended 2026-10-22 (PR #335 gauntlet):* `agent/live-repro.mjs` was the implementer's run-local script and is not in the repo. To repeat the check, follow the live repro steps in issue #333 (Playwright, a `toBlob` delay of 1500 ms and of 0 ms, against `/f/doodle-scroll`).
