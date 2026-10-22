@@ -5,6 +5,7 @@ import { BaseFormComponent, BaseFormsModule } from '@memberjunction/ng-base-form
 import type { mjBizAppsFormsFormResponseEntity } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
 import { FORMS_UI_CSS, failureMessage } from '../shared';
+import { FormsRecordLinkBridgeDirective } from '../shared/record-link-bridge.directive';
 import { readResponseDetail } from './response-reads';
 import type { ResponseDetail, ResponseRecordLink } from './response-models';
 import { FormsResponseDetailComponent } from './response-detail.component';
@@ -33,7 +34,7 @@ import { FormsResponseDetailComponent } from './response-detail.component';
   selector: 'mjf-response-form',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsResponseDetailComponent, BaseFormsModule],
+  imports: [FormsResponseDetailComponent, BaseFormsModule, FormsRecordLinkBridgeDirective],
   template: `
     <div class="mjf-page rf">
       <header class="mjf-page-head">

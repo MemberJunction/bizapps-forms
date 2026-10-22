@@ -14,6 +14,7 @@ import { FormsReplayAutomationEventOperation } from '@mj-biz-apps/forms-entities
 import { BaseFormsModule } from '@memberjunction/ng-base-forms';
 import { FORMS_UI_CSS } from '../shared';
 import { FORMS_ENTITY, MJ_CORE_ENTITY } from '../shared/entity-names';
+import { FormsRecordLinkBridgeDirective } from '../shared/record-link-bridge.directive';
 import { runOperation } from '../shared/remote-operation';
 // Deep import on purpose: the widget barrel would pull the whole respondent widget into Explorer;
 // this file and its glyph table import nothing but @angular/core.
@@ -70,7 +71,7 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
 @Component({
   selector: 'mj-forms-response-detail',
   standalone: true,
-  imports: [IconComponent, BaseFormsModule],
+  imports: [IconComponent, BaseFormsModule, FormsRecordLinkBridgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [ResponseFileDownloadService],
   template: `

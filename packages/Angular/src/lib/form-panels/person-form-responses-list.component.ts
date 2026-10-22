@@ -15,6 +15,7 @@ import { LogError, RunView } from '@memberjunction/core';
 import { BaseFormsModule, FormRecordRefreshCoordinator } from '@memberjunction/ng-base-forms';
 import { FORMS_UI_CSS } from '../shared';
 import { FORMS_ENTITY } from '../shared/entity-names';
+import { FormsRecordLinkBridgeDirective } from '../shared/record-link-bridge.directive';
 import {
   BuildPersonFormResponsesFilter,
   PERSON_FORM_RESPONSE_FIELDS,
@@ -37,7 +38,7 @@ const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded.";
 @Component({
   selector: 'mjf-person-form-responses-list',
   standalone: true,
-  imports: [BaseFormsModule],
+  imports: [BaseFormsModule, FormsRecordLinkBridgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @switch (State()) {
