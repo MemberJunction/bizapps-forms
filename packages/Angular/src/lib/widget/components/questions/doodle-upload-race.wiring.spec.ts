@@ -244,9 +244,9 @@ describe('nothing that finishes late may speak for a pad that has moved on', () 
   });
 
   it('sends the subject with the file rather than letting the view choose one', () => {
-    // `output()` is routed by whatever the template is bound to when it fires, which after an
-    // await is not reliably the question the drawing was made on.
-    expect(pad()).toMatch(/this\.drawn\.emit\(\{\s*subject: claim\.subject,/);
+    // The export ends after an await, when the view is not reliably bound to the question the
+    // drawing was made on.
+    expect(pad()).toMatch(/sink\.delivered\(\{\s*subject: claim\.subject,/);
     expect(question()).toMatch(/await this\.uploadFile\(capture\.file, capture\.subject\);/);
   });
 });

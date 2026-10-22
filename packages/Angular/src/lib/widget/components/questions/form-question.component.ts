@@ -44,7 +44,7 @@ import {
 import { NgTemplateOutlet } from '@angular/common';
 
 import { FORMS_UPLOAD_SERVICE } from '../../api/form-upload.interface';
-import { FormUploadStore, type UploadStatus } from '../../core/upload-store';
+import { FormUploadStore, type UploadStatus, type UploadToken } from '../../core/upload-store';
 import {
   autocompleteFor,
   compositeAutocompleteFor,
@@ -54,7 +54,7 @@ import {
   inputTypeFor,
 } from './input-mode';
 import { compositeAnswer, readCompositeParts, sameAnswer, scalarAnswer } from './control-answer';
-import { DoodlePadComponent, type DoodleCapture } from './doodle-pad.component';
+import { DoodlePadComponent, type DoodleExportSink } from './doodle-pad.component';
 import { IconComponent } from '../icon.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
 
@@ -638,16 +638,26 @@ export class FormQuestionComponent {
   // --- Doodle --------------------------------------------------------------
 
   /**
-   * A drawing takes the ordinary file-answer path from here.
+   * The pad's exports, wired to the upload store by the subject each one names.
    *
-   * Stored against the question the capture NAMES, not against `this.question()`. The export
-   * finishes after the gesture, and this handler is routed by the view — in OneQuestion mode one
-   * pad serves consecutive Doodle questions, so reading the current question here filed the
-   * first one's drawing as the second one's answer.
+   * `started` reserves the question, so Next and Submit wait on a drawing still being encoded
+   * instead of advancing past it (#333). `delivered` hands the file to the ordinary file-answer
+   * path, whose upload supersedes the reservation; `released` ends a reservation that produced no
+   * file, with the pad's own token, so a stale one is ignored.
+   *
+   * Every call is keyed by the subject the pad passed, never by `this.question()`. The pad calls
+   * these after an await — often after this component is destroyed, or, in OneQuestion mode,
+   * re-pointed at the next Doodle question, where reading the current question filed the first
+   * one's drawing as the second one's answer. They reach only the store and the uploader, which
+   * are widget-level and outlive this component.
    */
-  protected async onDoodleDrawn(capture: DoodleCapture): Promise<void> {
-    await this.uploadFile(capture.file, capture.subject);
-  }
+  protected readonly doodleExports: DoodleExportSink<UploadToken> = {
+    started: (subject) => this.uploads.reserve(subject),
+    delivered: async (capture) => {
+      await this.uploadFile(capture.file, capture.subject);
+    },
+    released: (reservation) => this.uploads.release(reservation),
+  };
 
   protected onDoodleCleared(): void {
     // `clear` also retires the running upload. Without that, a respondent who draws, dislikes it

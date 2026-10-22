@@ -316,15 +316,22 @@ export class DoodlePadComponent {
    */
   public readonly recorded = input<boolean>(false);
   /**
-   * Emitted once a stroke settles, carrying the drawing AND the subject it was drawn on.
+   * Where each export reports its life: when it starts, and how it ends.
    *
-   * The subject travels with the file because the export finishes later than the gesture that
-   * started it, and an `output()` is routed by whatever the view is bound to when it fires. In
-   * OneQuestion mode one pad instance serves consecutive Doodle questions, so a respondent
-   * who advances while `toBlob` is still encoding had the first question's drawing stored as the
-   * SECOND question's answer. Naming the subject here is what makes that impossible to express.
+   * Functions the parent hands in rather than an `output()`, because the export outlives the
+   * gesture and often the component. Next and Submit destroy the section while `toBlob` is still
+   * encoding; an `output()` emit after destruction is dropped with NG0953, and the drawing with
+   * it, under a pad that said "Drawn.". A function the parent passed in is still callable then.
+   * And `started` is how Next learns there is anything to wait for at all: it is called before
+   * the export's first await, so from the moment the pen lifts the store holds a record for it.
+   *
+   * The subject travels with the capture because the export finishes later than the gesture
+   * that started it, and the parent's view is routed by whatever it is bound to when the export
+   * ends. In OneQuestion mode one pad instance serves consecutive Doodle questions, so a
+   * respondent who advances mid-encode had the first question's drawing stored as the SECOND
+   * question's answer. Naming the subject here is what makes that impossible to express.
    */
-  public readonly drawn = output<DoodleCapture>();
+  public readonly exportSink = input.required<DoodleExportSink<unknown>>();
   /** Emitted when the respondent clears the pad, or undoes back to an empty one. */
   public readonly cleared = output<void>();
   /**
@@ -489,12 +496,11 @@ export class DoodlePadComponent {
     // A settle timer looks like the obvious improvement here — a drawing is many strokes and
     // each one starts its own upload — and it was tried. It cannot be made safe. The
     // window it opens is real time in which the pad already reads "Drawn." and the respondent
-    // can tap Next or Submit, which destroys this component with the export still pending; and it
-    // cannot be flushed on the way out, because `output()` registers its OWN destroy hook in a
-    // field initializer that runs BEFORE any hook a constructor adds, so by then `emit()` only
-    // logs "Unexpected emit for destroyed OutputRef" and returns. `emitPng` is async besides, so
-    // the emit lands after destruction regardless. The respondent would be left with a null answer
-    // under a pad that says "Drawn." — a worse bug than the one being optimised away.
+    // can tap Next or Submit, which destroys this component with no export yet started — so
+    // nothing has reserved the question in the upload store, Next does not wait, and nothing is
+    // left to flush on the way out. The respondent would be left with a null answer under a pad
+    // that says "Drawn." — a worse bug than the one being optimised away. Exporting at once is
+    // what lets `emitPng` report `started` in this very turn, before Next can be tapped.
     //
     // Correctness does not depend on coalescing anyway: every upload carries a generation stamp
     // (see FormQuestionComponent.uploadFile), so the LAST one started wins no matter which
@@ -799,40 +805,77 @@ export class DoodlePadComponent {
    * `toBlob` on the live canvas would export the strokes over transparency, and a dark-ink
    * drawing on a transparent background disappears entirely against a dark viewer. Compositing
    * onto the paper colour first makes the artifact self-contained.
+   *
+   * EVERY EXPORT IS RESERVED, AND EVERY RESERVATION ENDS. `started` runs before the first await,
+   * so the question is `uploading` in the store in the same turn as the pointer-up (or undo) that
+   * called this. Every path out then ends in exactly one of `delivered` or `released`: the
+   * `finally` releases unless the hand-over returned, which covers the no-canvas exits, a failed
+   * encode, a superseded export and any throw. An orphaned reservation would hold Next for ever.
+   *
+   * `released` gets back the reservation `started` returned, not the subject. Two quick strokes
+   * mean export 1 can end (superseded) after export 2 has reserved the same question; releasing
+   * by subject would free export 2's reservation and let Next through mid-encode. Handing back
+   * export 1's own, now stale, reservation lets the store recognise it and ignore it.
    */
   private async emitPng(): Promise<void> {
     const claim = this.captures.claim(this.subject());
-    const canvas = this.pad()?.nativeElement;
-    if (!canvas) {
-      return;
-    }
-    const flat = document.createElement('canvas');
-    flat.width = canvas.width;
-    flat.height = canvas.height;
-    const ctx = flat.getContext('2d');
-    if (!ctx) {
-      return;
-    }
-    ctx.fillStyle = getComputedStyle(canvas).backgroundColor;
-    ctx.fillRect(0, 0, flat.width, flat.height);
-    ctx.drawImage(canvas, 0, 0);
+    const sink = this.exportSink();
+    const reservation = sink.started(claim.subject);
+    let delivered = false;
+    try {
+      const canvas = this.pad()?.nativeElement;
+      if (!canvas) {
+        return;
+      }
+      const flat = document.createElement('canvas');
+      flat.width = canvas.width;
+      flat.height = canvas.height;
+      const ctx = flat.getContext('2d');
+      if (!ctx) {
+        return;
+      }
+      ctx.fillStyle = getComputedStyle(canvas).backgroundColor;
+      ctx.fillRect(0, 0, flat.width, flat.height);
+      ctx.drawImage(canvas, 0, 0);
 
-    const blob = await new Promise<Blob | null>((resolve) => flat.toBlob(resolve, 'image/png'));
-    if (!blob) {
-      console.warn(
-        `[mj-form] the browser could not encode the drawing made for "${claim.subject}", so ` +
-          'this stroke was not stored. The respondent can draw again.',
-      );
-      return;
+      const blob = await new Promise<Blob | null>((resolve) => flat.toBlob(resolve, 'image/png'));
+      if (!blob) {
+        console.warn(
+          `[mj-form] the browser could not encode the drawing made for "${claim.subject}", so ` +
+            'this stroke was not stored. The respondent can draw again.',
+        );
+        return;
+      }
+      if (!this.captures.mayEmit(claim)) {
+        return;
+      }
+      sink.delivered({
+        subject: claim.subject,
+        file: new File([blob], 'doodle.png', { type: 'image/png' }),
+      });
+      delivered = true;
+    } finally {
+      if (!delivered) {
+        sink.released(reservation);
+      }
     }
-    if (!this.captures.mayEmit(claim)) {
-      return;
-    }
-    this.drawn.emit({
-      subject: claim.subject,
-      file: new File([blob], 'doodle.png', { type: 'image/png' }),
-    });
   }
+}
+
+/**
+ * The parent's side of an export: told when one starts, and how it ends.
+ *
+ * Generic over the reservation so the pad never learns what the store's token is; it only hands
+ * back what `started` gave it. Method syntax on purpose: method parameters are checked
+ * bivariantly, so a `DoodleExportSink<UploadToken>` binds to the pad's `DoodleExportSink<unknown>`.
+ */
+export interface DoodleExportSink<R> {
+  /** An export began for `subject`. Called synchronously, before the export awaits anything. */
+  started(subject: string): R;
+  /** The export produced a file. Ends the export; `released` will not follow. */
+  delivered(capture: DoodleCapture): void;
+  /** The export ended without a file (failed, superseded, or no canvas). Ends the export. */
+  released(reservation: R): void;
 }
 
 /** One finished capture: the drawing, and the subject it was made for. */
