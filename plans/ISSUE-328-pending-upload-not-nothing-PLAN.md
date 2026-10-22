@@ -1,5 +1,17 @@
 # #328: a pending upload is not "nothing to submit" — Implementation Plan
 
+> **Superseded in two places by the shipped code — read the code, not this plan, for these:**
+> 1. **Architecture and Task 3 (`clearNothingToSubmitIfAnswered`).** The method is now
+>    `clearResolvedRefusal` in `mj-form.component.ts`, and it has two rules, not one predicate swap.
+>    The #124 sentence clears once `nothingToSubmit(rt, this.uploads)` is false, as planned. An
+>    upload failure's sentence clears only once no visible question has a failed upload
+>    (`failureAmong`), so answering another question does not clear it.
+> 2. **Task 3 Step 3 ("swap both reads").** A swap alone does not give the refused-upload test its
+>    message. The gate's refusal (`refuseWithNothingToSubmit`) reads `failureAmong` and names a
+>    refused upload, and both the gate and `uploadsLanded` raise that message through
+>    `refuseWithUploadFailure`, which records it in `uploadFailureShown` so the clear rule above can
+>    recognise it.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A Submit whose only answer is a file still `uploading` (or `unsaved`) falls through to the upload wait instead of being refused with the nothing-to-submit sentence, and both renderers' "You can submit now" line agrees.
