@@ -136,3 +136,48 @@ describe('#328: the nothing-to-submit refusal and the uploads behind it', () => 
     expect(form.bannerText).toBe('That file type is not allowed.');
   });
 });
+
+/** The signature pad beside an optional text question. */
+function signatureAndNameForm(): PublishedFormDefinition {
+  const form = signatureOnlyForm();
+  return {
+    ...form,
+    pages: [{ ...form.pages[0], questions: [
+      ...form.pages[0].questions,
+      { id: 'name', type: 'ShortText', prompt: 'name', isRequired: false, displayOrder: 2, options: [] },
+    ] }],
+  };
+}
+
+describe('#328 cross-review: an upload failure in the banner clears only once the failure is gone', () => {
+  it('keeps the refused sentence when another question is answered but the refused upload still stands', async () => {
+    const api = new FakeFormsApi(servedAs(signatureAndNameForm()), screeningServer);
+    const { form } = await mountForm({ api });
+    const token = form.uploadStore.begin('sig', drawing());
+    form.uploadStore.fail(token, { kind: 'refused', message: 'That file type is not allowed.' });
+    await form.submit();
+    expect(form.bannerText).toBe('That file type is not allowed.');
+
+    form.rt.setValue('name', 'Sam');
+    form.progress();
+
+    expect(form.bannerText).toBe('That file type is not allowed.');
+  });
+
+  it('clears a refusal raised by the upload wait once a new upload begins', async () => {
+    const api = new FakeFormsApi(servedAs(signatureOnlyForm()), screeningServer);
+    const { form } = await mountForm({ api });
+    const token = form.uploadStore.begin('sig', drawing());
+    const submitting = form.submit();
+    await vi.advanceTimersByTimeAsync(0);
+    form.uploadStore.fail(token, { kind: 'refused', message: 'That file type is not allowed.' });
+    await submitting;
+    expect(form.bannerText).toBe('That file type is not allowed.');
+    expect(form.phaseNow).toBe('ready');
+
+    form.uploadStore.begin('sig', drawing());
+    form.commit();
+
+    expect(form.bannerText).toBe('');
+  });
+});
