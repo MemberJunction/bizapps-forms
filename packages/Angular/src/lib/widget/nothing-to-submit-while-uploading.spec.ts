@@ -109,4 +109,30 @@ describe('#328: the nothing-to-submit refusal and the uploads behind it', () => 
     expect(form.phaseNow).toBe('ready');
     expect(api.savesOf('final')).toHaveLength(0);
   });
+
+  it('clears the refused-upload sentence once a new upload is on its way', async () => {
+    const api = new FakeFormsApi(servedAs(signatureOnlyForm()), screeningServer);
+    const { form } = await mountForm({ api });
+    const token = form.uploadStore.begin('sig', drawing());
+    form.uploadStore.fail(token, { kind: 'refused', message: 'That file type is not allowed.' });
+    await form.submit();
+    expect(form.bannerText).toBe('That file type is not allowed.');
+
+    form.uploadStore.begin('sig', drawing());
+    form.commit();
+
+    expect(form.bannerText).toBe('');
+  });
+
+  it('keeps the refused-upload sentence while nothing is on its way', async () => {
+    const api = new FakeFormsApi(servedAs(signatureOnlyForm()), screeningServer);
+    const { form } = await mountForm({ api });
+    const token = form.uploadStore.begin('sig', drawing());
+    form.uploadStore.fail(token, { kind: 'refused', message: 'That file type is not allowed.' });
+    await form.submit();
+
+    form.progress();
+
+    expect(form.bannerText).toBe('That file type is not allowed.');
+  });
 });

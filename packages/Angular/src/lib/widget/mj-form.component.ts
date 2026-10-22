@@ -146,6 +146,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   protected readonly isHeroPhase = computed(() => this.phase() === 'welcome' || this.phase() === 'done');
   protected readonly errorText = signal<string>('');
+  /**
+   * The sentence the nothing-to-submit gate last put in the banner, or '' when it has not (#328).
+   * The gate shows either the #124 sentence or a refused upload's own message, so "the banner is
+   * the gate's refusal" cannot be read off one fixed string; this records it as a fact instead.
+   */
+  private gateRefusal = '';
   /** What this widget holds: the live projection, or the author's full draft (see the class header). */
   private readonly form = signal<WidgetForm | null>(null);
   /** What every surface renders, whichever kind of form it is. */
@@ -647,7 +653,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Drop the #124 refusal once the respondent has answered something.
+   * Drop the nothing-to-submit gate's refusal once the respondent has answered something. The
+   * banner is the gate's when it is the #124 sentence (the server's copy included) or exactly the
+   * sentence the gate last raised ({@link gateRefusal}, which may be a refused upload's message).
    *
    * An upload the respondent has started counts as answering (#328): an upload start fires no
    * event of its own, so their next keystroke, blur or Next is what clears the stale refusal.
@@ -660,12 +668,16 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * exists to catch what the client missed, so the respondent would be left with a failed submit and nothing on screen. It
    * would also re-mount the `role="alert"` node every time the condition came back, re-announcing
    * mid-edit with no submit attempt in between. Cleared once, it stays cleared until something
-   * raises it again.
+   * raises it again. A refused upload's sentence clears only once `nothingToSubmit` is false, so an
+   * event with nothing new on its way leaves it standing.
    */
   private clearNothingToSubmitIfAnswered(): void {
     const rt = this.runtime();
-    if (this.errorText() === NOTHING_TO_SUBMIT_MESSAGE && rt !== null && !nothingToSubmit(rt, this.uploads)) {
+    const banner = this.errorText();
+    const isGates = banner === NOTHING_TO_SUBMIT_MESSAGE || (this.gateRefusal !== '' && banner === this.gateRefusal);
+    if (isGates && rt !== null && !nothingToSubmit(rt, this.uploads)) {
       this.errorText.set('');
+      this.gateRefusal = '';
     }
   }
 
@@ -985,8 +997,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
     // Nothing-to-submit gate (#124). The server refuses a completion that would store nothing on a
     // form that DID ask something, so sending one costs the respondent a round trip to be told what
-    // the widget already knows — and every other validation rule here answers inline. Same sentence
-    // as the server's, from the shared contract, so the two cannot drift into disagreeing about it.
+    // the widget already knows — and every other validation rule here answers inline. For a form
+    // with nothing to store the sentence is the server's own, from the shared contract, so the two
+    // cannot drift into disagreeing about it; a refused upload is named instead (see
+    // refuseWithNothingToSubmit).
     //
     // BEFORE the captcha gate, deliberately: this refusal costs the respondent nothing to act on,
     // while a challenge costs them work. Ordered the other way, someone who answered nothing solves
@@ -1017,6 +1031,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // the pending debounce too, and is fail-soft.
     this.phase.set('submitting');
     this.errorText.set('');
+    this.gateRefusal = '';
     // A no-op in Preview, which has no autosave controller.
     await this.autosave?.settle();
     // Before the Preview branch too: Preview's mock uploads take time, and an author testing the
@@ -1091,13 +1106,17 @@ export class MjFormComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Raise the #124 refusal and take the respondent to it.
+   * Raise the gate's refusal and take the respondent to it: the #124 sentence, or — when a visible
+   * question's upload was refused — that upload's own message, which is what the respondent can act
+   * on.
    *
    * Rendering alone is not answering them: the banner is at the top of the shell and Submit is at
    * the bottom of a scroll-mode form, so a press produced no visible change whatever for a sighted
    * respondent looking at the button. Focus both moves the viewport and announces, which is what
    * the widget's other blocked path (`onNext` -> `touchAll`) achieves by annotating the offending
-   * field — an option this refusal does not have, because no single field is at fault.
+   * field. That option is missing for the #124 sentence, where no single field is at fault; for a
+   * refused upload one field IS at fault, but the banner still takes focus because it is the one
+   * place both cases render.
    */
   private refuseWithNothingToSubmit(rt: FormRuntime): void {
     // A refused upload is the real reason nothing would be stored, and the one the respondent can
@@ -1105,7 +1124,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // something else was answered. Any failure reaching this gate is `refused`, because an
     // `unsaved` upload counts as pending and never gets here.
     const refused = this.uploads.failureAmong(rt.visibleAnswerableQuestions().map((q) => q.id));
-    this.errorText.set(refused?.message ?? NOTHING_TO_SUBMIT_MESSAGE);
+    this.gateRefusal = refused?.message ?? NOTHING_TO_SUBMIT_MESSAGE;
+    this.errorText.set(this.gateRefusal);
     this.focusBanner();
   }
 
