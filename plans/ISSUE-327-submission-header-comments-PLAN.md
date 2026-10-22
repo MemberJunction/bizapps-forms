@@ -37,14 +37,14 @@ None — this is a comment-only change to two module headers with no executable 
 - Consumes: none (comment-only update)
 - Produces: accurate module header comments in `persistence.ts` and `response-lookup.ts`
 
-- [ ] **Step 1: Confirm the repro on `next` before editing**
+- [x] **Step 1: Confirm the repro on `next` before editing**
 
 Run:
 - `sed -n 26,27p packages/CoreEntitiesServer/src/submission/persistence.ts`
 - `sed -n 18,19p packages/CoreEntitiesServer/src/submission/response-lookup.ts`
 Expected: Both headers still say `anonymous \`contextUser\``.
 
-- [ ] **Step 2: Rewrite the `contextUser` sentence in `persistence.ts` and `response-lookup.ts`**
+- [x] **Step 2: Rewrite the `contextUser` sentence in `persistence.ts` and `response-lookup.ts`**
 
 1. In `packages/CoreEntitiesServer/src/submission/persistence.ts`, replace lines 26-27:
    ```ts
@@ -72,7 +72,7 @@ Expected: Both headers still say `anonymous \`contextUser\``.
    ```
    Keep the `fail-closed from the returned \`ok\` flag.` line unchanged.
 
-- [ ] **Step 3: Verify all Done-when conditions, build, and tests**
+- [x] **Step 3: Verify all Done-when conditions, build, and tests**
 
 Run:
 - `grep -n -F -f <anon-pattern-file> packages/CoreEntitiesServer/src/submission/persistence.ts` (must print nothing)
@@ -84,6 +84,6 @@ Run:
 - `cd packages/CoreEntitiesServer && pnpm run build && pnpm test`
 Expected: All done-when checks pass, every changed line under `packages` is a `*` comment line, build and unit tests pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Commit `packages/CoreEntitiesServer/src/submission/persistence.ts` and `packages/CoreEntitiesServer/src/submission/response-lookup.ts` with `git commit -F <msg-file>`.

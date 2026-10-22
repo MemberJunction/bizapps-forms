@@ -15,8 +15,9 @@
  * distributions of the same published version shares a version, which is acceptable for
  * Phase-1 dedupe (the durable guard is still the per-distribution quota).
  *
- * All reads go through the per-request provider with the anonymous `contextUser`; RunView
- * results are checked for `.Success` (RunView never throws). Callers decide fail-open vs
+ * All reads go through the per-request provider as MJ's system user, the elevated reader the
+ * engine supplies, because the respondent's read grant is row-filtered to its own response;
+ * RunView results are checked for `.Success` (RunView never throws). Callers decide fail-open vs
  * fail-closed from the returned `ok` flag.
  */
 import type { UserInfo } from '@memberjunction/core';
