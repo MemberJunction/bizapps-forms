@@ -166,7 +166,8 @@ export async function findResponseById(
  *
  * Keyed on `FormVersionID`, not a distribution id, because `FormResponse` carries no distribution
  * FK — the same key dedupe and same-session upsert already use. Runs under the elevated principal
- * (the anonymous respondent cannot READ responses). `count_only` returns `TotalRowCount` without
+ * because the anonymous respondent's read grant is row-filtered to its own response, so it could
+ * never count anyone else's drafts. `count_only` returns `TotalRowCount` without
  * materializing rows. Fail-CLOSED: on a count error we report the cap as reached so a database blip
  * cannot become an unbounded-write hole (the caller turns that into a refused partial, which the
  * widget silently retries — autosave is fail-soft).
