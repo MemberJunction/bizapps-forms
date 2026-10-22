@@ -52,13 +52,15 @@ import {
 } from '@mj-biz-apps/forms-entities';
 import { addViolations, refuse, refuseIfUnvalidated, tracksStoredValues, type RuleViolation } from '../entities/entity-refusal.js';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
+import { procedureCallInSchema } from '../shared/forms-procedure.js';
 import { getMagicLinkProvisioningConfig } from './config.js';
 import { MagicLinkMinterRegistry, type IAnonymousMagicLinkMinter, type InviteWriteHost } from './minter.js';
 import { runProvisioning, DISTRIBUTION_ENTITY_NAME, type MintedLink } from './provision-runner.js';
 
 /**
  * The SERVER-OWNED columns as the store holds them right now: the credential pair, and the
- * completion counter that submit advances with a raw conditional `UPDATE` (`submission/quota.ts`).
+ * completion counter that submit advances with a conditional `UPDATE` outside this entity
+ * (`submission/quota.ts`; a procedure on SQL Server).
  */
 type StoredServerColumns = Pick<
   mjBizAppsFormsFormDistributionEntityType,
@@ -431,7 +433,7 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    * Lock this row, and make this save carry the server-owned columns THE STORE holds, not the ones
    * this instance loaded — one statement for all three.
    *
-   * The count: submit advances `ResponseCount` with a raw conditional `UPDATE`, never through this
+   * The count: submit advances `ResponseCount` with a conditional `UPDATE`, never through this
    * entity, so every loaded copy of the row is behind it. Written back from a copy loaded when the
    * builder opened, the counter went DOWN and `MaxResponses` could be exceeded (final review I2). The
    * stored value is carried on every update, whoever saves.
@@ -486,14 +488,12 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
     try {
       // Built inside the try: a provider whose quoting throws takes the same fail-soft path as a
       // failed read, rather than throwing out of the save.
-      const q = (name: string): string => provider.QuoteIdentifier(name);
-      const table = provider.QuoteSchemaAndView(this.EntityInfo.SchemaName, this.EntityInfo.BaseTable);
-      const columns = `${q('MagicLinkInviteID')}, ${q('PublicLinkToken')}, ${q('ResponseCount')}`;
-      const where = `${q('ID')} = ${quoteSqlString(this.ID)}`;
       const sql =
         provider.PlatformKey === 'postgresql'
-          ? `SELECT ${columns} FROM ${table} WHERE ${where} FOR UPDATE`
-          : `SELECT ${columns} FROM ${table} WITH (UPDLOCK, HOLDLOCK) WHERE ${where}`;
+          ? this.postgresLockedReadStatement(provider)
+          : // The procedure (#338) holds the UPDLOCK, HOLDLOCK: MJ's runtime roles may EXECUTE it
+            // but hold no rights on the base table. On this provider, so inside the save's transaction.
+            procedureCallInSchema(provider, this.EntityInfo.SchemaName, 'spFormDistributionReadServerColumnsLocked', { ID: this.ID });
       const rows = await provider.ExecuteSQL<StoredServerColumns>(sql, undefined, undefined, this.ContextCurrentUser);
       const row = rows[0];
       if (!row) {
@@ -508,6 +508,13 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
     } catch (e) {
       return { failure: e instanceof Error ? e.message : String(e) };
     }
+  }
+
+  /** PostgreSQL's locked re-read: the raw `SELECT … FOR UPDATE` on the base table. */
+  private postgresLockedReadStatement(provider: RowLockHost): string {
+    const q = (name: string): string => provider.QuoteIdentifier(name);
+    const table = provider.QuoteSchemaAndView(this.EntityInfo.SchemaName, this.EntityInfo.BaseTable);
+    return `SELECT ${q('MagicLinkInviteID')}, ${q('PublicLinkToken')}, ${q('ResponseCount')} FROM ${table} WHERE ${q('ID')} = ${quoteSqlString(this.ID)} FOR UPDATE`;
   }
 
   /**

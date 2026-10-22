@@ -244,9 +244,11 @@ export function formsWorld(
  */
 function storedCredentialRead(world: () => FakeProvider | undefined): FakeSqlScript {
   return {
-    match: /SELECT \[MagicLinkInviteID\], \[PublicLinkToken\]/,
+    // The SQL Server spelling is a call of the locked-read procedure (#338), the id in `@ID = '…'`;
+    // a raw SELECT names it `[ID] = '…'`.
+    match: /spFormDistributionReadServerColumnsLocked|SELECT \[MagicLinkInviteID\], \[PublicLinkToken\]/,
     rows: (sql) => {
-      const id = /\[ID\] = '((?:[^']|'')*)'/.exec(sql)?.[1]?.replace(/''/g, "'");
+      const id = /(?:@ID|\[ID\]) = '((?:[^']|'')*)'/.exec(sql)?.[1]?.replace(/''/g, "'");
       const row = (world()?.tables[DISTRIBUTIONS] ?? []).find((candidate) => candidate.ID === id);
       return row ? [{ MagicLinkInviteID: row.MagicLinkInviteID ?? null, PublicLinkToken: row.PublicLinkToken ?? null }] : [];
     },

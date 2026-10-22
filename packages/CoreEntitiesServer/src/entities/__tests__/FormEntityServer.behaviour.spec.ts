@@ -290,9 +290,10 @@ describe('a rolled-back archive leaves no invite write behind (fix round 1, revi
   function archiveWithRealDistributions(config: Partial<FakeProviderConfig> = {}) {
     let db!: FakeProvider;
     const credentialRead = {
-      match: /UPDLOCK/,
+      // The distribution's locked re-read of its stored credential (spFormDistributionReadServerColumnsLocked).
+      match: /spFormDistributionReadServerColumnsLocked/,
       rows: (sql: string) => {
-        const id = /\[ID\] = '([^']+)'/.exec(sql)?.[1];
+        const id = /@ID = '([^']+)'/.exec(sql)?.[1];
         const row = db.tables[DISTRIBUTIONS].find((d) => d.ID === id);
         return row ? [{ MagicLinkInviteID: row.MagicLinkInviteID, PublicLinkToken: row.PublicLinkToken }] : [];
       },
