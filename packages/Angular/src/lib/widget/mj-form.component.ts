@@ -71,6 +71,7 @@ import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, NOTHING_TO_SAVE, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
 import { FormUploadStore } from './core/upload-store';
+import { nothingToSubmit } from './core/nothing-to-submit';
 import { passedSubmitPoints } from './core/partial-submit-point';
 import { initialPhaseFor, outcomeForResult, resumedPhaseFor, shouldIgnoreSubmit } from './core/submit-phase';
 import { prefillFromResume } from './core/resume-prefill';
@@ -648,6 +649,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /**
    * Drop the #124 refusal once the respondent has answered something.
    *
+   * An upload the respondent has started counts as answering (#328): an upload start fires no
+   * event of its own, so their next keystroke, blur or Next is what clears the stale refusal.
+   *
    * A ONE-WAY transition driven by their own action, deliberately, rather than a view-level
    * suppression of the sentence. Suppressing it in the view would also blank the SERVER's copy of
    * the same message whenever the two predicates disagree — the client settles visibility to a
@@ -659,7 +663,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * raises it again.
    */
   private clearNothingToSubmitIfAnswered(): void {
-    if (this.errorText() === NOTHING_TO_SUBMIT_MESSAGE && this.runtime()?.wouldSubmitNothing() === false) {
+    const rt = this.runtime();
+    if (this.errorText() === NOTHING_TO_SUBMIT_MESSAGE && rt !== null && !nothingToSubmit(rt, this.uploads)) {
       this.errorText.set('');
     }
   }
@@ -991,8 +996,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // BEFORE the phase flip below, also deliberately: this is a refusal to START, not a failed
     // submit, so the form must stay exactly where it was rather than settling the autosave and
     // rebuilding its children for a request that is never sent.
-    if (rt.wouldSubmitNothing()) {
-      this.refuseWithNothingToSubmit();
+    //
+    // An upload still on its way (uploading, or `unsaved`) is an answer on its way, so a submit
+    // whose only answers are uploads passes this gate and reaches the upload wait (`uploadsLanded`),
+    // which waits for them or restarts them (#328). A `refused` upload is not on its way: the
+    // gate refuses, and names it (see refuseWithNothingToSubmit).
+    if (nothingToSubmit(rt, this.uploads)) {
+      this.refuseWithNothingToSubmit(rt);
       return;
     }
     // Captcha gate: when required, block final submit until the challenge is solved.
@@ -1089,8 +1099,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * the widget's other blocked path (`onNext` -> `touchAll`) achieves by annotating the offending
    * field — an option this refusal does not have, because no single field is at fault.
    */
-  private refuseWithNothingToSubmit(): void {
-    this.errorText.set(NOTHING_TO_SUBMIT_MESSAGE);
+  private refuseWithNothingToSubmit(rt: FormRuntime): void {
+    // A refused upload is the real reason nothing would be stored, and the one the respondent can
+    // act on ("Choose again"), so it is named here: the same sentence `uploadsLanded` shows when
+    // something else was answered. Any failure reaching this gate is `refused`, because an
+    // `unsaved` upload counts as pending and never gets here.
+    const refused = this.uploads.failureAmong(rt.visibleAnswerableQuestions().map((q) => q.id));
+    this.errorText.set(refused?.message ?? NOTHING_TO_SUBMIT_MESSAGE);
     this.focusBanner();
   }
 

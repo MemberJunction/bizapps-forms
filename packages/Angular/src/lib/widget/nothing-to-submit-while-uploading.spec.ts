@@ -1,6 +1,6 @@
 import '@angular/compiler';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
+import { NOTHING_TO_SUBMIT_MESSAGE, type PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 import { UploadError, type UploadedFile } from './api/form-upload.interface';
 import { UPLOAD_RETRY_DELAYS_MS, UPLOAD_UNSAVED_MESSAGE } from './core/upload-store';
 import { FakeFormsApi, mountForm, screeningServer, servedAs } from './testing/mj-form-harness';
@@ -70,5 +70,43 @@ describe('#328: the only answer is a file still uploading', () => {
     expect(send).toHaveBeenCalledTimes(before + 1);
     expect(form.phaseNow).toBe('done');
     expect(api.savesOf('final')).toHaveLength(1);
+  });
+});
+
+describe('#328: the nothing-to-submit refusal and the uploads behind it', () => {
+  it.each([['commit', (f: { commit(): void }) => f.commit()], ['progress', (f: { progress(): void }) => f.progress()]] as const)(
+    'clears the refusal once an upload begins (%s)',
+    async (_name, fire) => {
+      const api = new FakeFormsApi(servedAs(signatureOnlyForm()), screeningServer);
+      const { form } = await mountForm({ api });
+      await form.submit();
+      expect(form.bannerText).toBe(NOTHING_TO_SUBMIT_MESSAGE);
+
+      form.uploadStore.begin('sig', drawing());
+      fire(form as never);
+
+      expect(form.bannerText).toBe('');
+    },
+  );
+
+  it('still refuses a blank form with no upload at all', async () => {
+    const api = new FakeFormsApi(servedAs(signatureOnlyForm()), screeningServer);
+    const { form } = await mountForm({ api });
+    await form.submit();
+    expect(form.bannerText).toBe(NOTHING_TO_SUBMIT_MESSAGE);
+    expect(api.savesOf('final')).toHaveLength(0);
+  });
+
+  it('a refused upload is still refused with its own message', async () => {
+    const api = new FakeFormsApi(servedAs(signatureOnlyForm()), screeningServer);
+    const { form } = await mountForm({ api });
+    const token = form.uploadStore.begin('sig', drawing());
+    form.uploadStore.fail(token, { kind: 'refused', message: 'That file type is not allowed.' });
+
+    await form.submit();
+
+    expect(form.bannerText).toBe('That file type is not allowed.');
+    expect(form.phaseNow).toBe('ready');
+    expect(api.savesOf('final')).toHaveLength(0);
   });
 });
