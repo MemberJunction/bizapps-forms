@@ -50,7 +50,7 @@ describe.each([
   });
 
   it('keys the judge on the step on screen', () => {
-    expect(src()).toMatch(/new StepJudge\(\s*inject\(FormUploadStore\),\s*\(\) => this\.current\(\)\?\.id \?\? null,?\s*\)/);
+    expect(src()).toMatch(/new StepJudge\(\s*this\.uploads,\s*\(\) => this\.current\(\)\?\.id \?\? null,?\s*\)/);
   });
 });
 
