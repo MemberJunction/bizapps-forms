@@ -425,7 +425,7 @@
             [drawing]="localFile()"
             [recorded]="answerRecorded()"
             [pen]="pen()"
-            (drawn)="onDoodleDrawn($event)"
+            [exportSink]="doodleExports"
             (cleared)="onDoodleCleared()"
           />
           @if (uploadStatus() === 'uploading') {
