@@ -25,6 +25,15 @@
  */
 export const STILL_WORKING_AFTER_MS = 2500;
 
+/**
+ * The line under the spinner while a submit (or Next) waits for an upload still on the wire (#248).
+ *
+ * Its own sentence, not "Sending your response…": nothing has been sent yet, and on a slow link
+ * the file wait can outlast the escalation above, which would then tell the respondent their
+ * response is still sending when it has not left the page.
+ */
+export const SAVING_FILE_MESSAGE = 'Saving your file…';
+
 /** The line to show under the spinner, given how long the submit has been running. */
 export function submitWaitMessage(elapsedMs: number): string {
   return elapsedMs >= STILL_WORKING_AFTER_MS

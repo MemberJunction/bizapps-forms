@@ -17,7 +17,7 @@
  * each `<ng-template>` is a branch, everything else is shared. A direct reference such as
  * `labelId()` must be bound as `[id]` in its own branch or in the shared region. `describedBy()`
  * is a composite whose members are each runtime-gated inside the computed (`statusId()` only
- * ever joins it for a FileUpload), so its members need only be bound somewhere in the template
+ * ever joins it for a FileUpload, `failureId()` only for an upload that failed), so its members need only be bound somewhere in the template
  * — the live DOM check for that runs in the smoke test. HTML comments are stripped before every
  * assertion: the template explains this same decision in prose, and a guard that matches its
  * own documentation proves nothing.
@@ -90,7 +90,7 @@ function producersOf(expression: string): string[] {
 
 describe('every ARIA idref in the question template resolves within its own branch', () => {
   it('reads the describedBy members out of the component, so the expansion cannot rot silently', () => {
-    expect(describedByMembers).toEqual(['helpId()', 'errorId()', 'statusId()']);
+    expect(describedByMembers).toEqual(['helpId()', 'errorId()', 'statusId()', 'failureId()']);
   });
 
   it('gives the shared label the id that grouped controls are named by, with the prompt inside it', () => {

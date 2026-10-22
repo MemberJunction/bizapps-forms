@@ -10,7 +10,7 @@
  *
  * Specs that use this must `import '@angular/compiler'` first (see vitest.config.ts).
  */
-import { ElementRef, Injector, runInInjectionContext } from '@angular/core';
+import { ElementRef, Injector, inject, runInInjectionContext } from '@angular/core';
 import { SIGNAL } from '@angular/core/primitives/signals';
 import type { FormsSaveResponseInput, FormsSaveResponseOutput, FormsRespondentEnding } from '@mj-biz-apps/forms-entities';
 import {
@@ -62,8 +62,19 @@ export class FakeFormsApi implements IFormsApiService {
 
 /** The component with its template-facing members opened up. */
 export class MjFormHarness extends MjFormComponent {
+  /**
+   * The upload store this widget's question components write through. Injected rather than read off
+   * the component: the harness is built in the same injection context, so this is the very instance
+   * the component holds, and the component's own field stays private.
+   */
+  public readonly uploadStore = inject(FormUploadStore);
+
   public get phaseNow(): string {
     return this.phase();
+  }
+  /** What the submit overlay is showing: 'saving-file', 'sending', or nothing. */
+  public get overlayNow(): 'saving-file' | 'sending' | null {
+    return this.overlay();
   }
   public get rt(): FormRuntime {
     const rt = this.runtime();

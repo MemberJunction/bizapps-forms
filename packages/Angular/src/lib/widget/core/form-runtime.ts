@@ -235,12 +235,12 @@ export class FormRuntime {
   }
 
   /** True when every supplied list of questions currently validates. */
-  public areValid(questions: PublishedFormQuestion[]): boolean {
+  public areValid(questions: readonly PublishedFormQuestion[]): boolean {
     return questions.every((q) => this.problemFor(q) === undefined);
   }
 
   /** Mark a set of questions touched (e.g. on a failed next/submit) to surface errors. */
-  public touchAll(questions: PublishedFormQuestion[]): void {
+  public touchAll(questions: readonly PublishedFormQuestion[]): void {
     const next = new Set(this.touched());
     for (const q of questions) {
       next.add(q.id);

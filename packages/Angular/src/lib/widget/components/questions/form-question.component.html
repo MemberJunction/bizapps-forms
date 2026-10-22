@@ -225,15 +225,25 @@
             }
           </p>
 
-          @if (uploadStatus() === 'error') {
-            <p class="mjf-file__error" role="alert">
-              <mjf-icon name="triangle-exclamation" />
-              {{ uploadError() }}
-            </p>
-            <button type="button" class="mjf-file__retry" (click)="retryUpload()">
-              <mjf-icon name="rotate-right" /> Retry upload
-            </button>
-          }
+          <!-- One quiet line for the two failures a respondent must act on; the store has already
+               retried every bad moment it could. Polite, not an alert: nothing here is urgent
+               enough to interrupt. The live region is always rendered and only its content is
+               conditional, because a region inserted together with its text is not reliably
+               announced. -->
+          <p class="mjf-file__failed" [id]="failureId()" aria-live="polite">
+            @if (uploadFailure(); as failure) {
+              {{ failure.message }}
+              @if (failure.kind === 'refused') {
+                <button type="button" class="mjf-file__failed-link" (click)="chooseAgain(fileInput)">
+                  Choose again
+                </button>
+              } @else {
+                <button type="button" class="mjf-file__failed-link" (click)="retryUpload()">
+                  Try again
+                </button>
+              }
+            }
+          </p>
         }
         @case ('PictureChoice') {
           <div class="mjf-pics" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
@@ -409,6 +419,7 @@
                at the next question without destroying it, and both must put the right drawing
                back. See the component for what each binding closes. -->
           <mjf-doodle-pad
+            #pad
             [label]="q.prompt"
             [subject]="q.id"
             [drawing]="localFile()"
@@ -422,15 +433,22 @@
               <mjf-icon name="spinner" spin /> Saving drawing…
             </p>
           }
-          @if (uploadStatus() === 'error') {
-            <p class="mjf-file__error" role="alert">
-              <mjf-icon name="triangle-exclamation" />
-              {{ uploadError() }}
-            </p>
-            <button type="button" class="mjf-file__retry" (click)="retryUpload()">
-              <mjf-icon name="rotate-right" /> Retry
-            </button>
-          }
+          <!-- The same quiet line as a file question. "Choose again" clears the pad itself, which
+               emits `cleared` and so clears the upload by the one path Clear already takes. -->
+          <p class="mjf-file__failed" [id]="failureId()" aria-live="polite">
+            @if (uploadFailure(); as failure) {
+              {{ failure.message }}
+              @if (failure.kind === 'refused') {
+                <button type="button" class="mjf-file__failed-link" (click)="chooseDrawingAgain(pad)">
+                  Choose again
+                </button>
+              } @else {
+                <button type="button" class="mjf-file__failed-link" (click)="retryUpload()">
+                  Try again
+                </button>
+              }
+            }
+          </p>
         }
         @default {
           <!-- ShortText · Email · Phone · Website · Date · Time -->

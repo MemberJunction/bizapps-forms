@@ -15,7 +15,18 @@ import { Injectable, inject } from '@angular/core';
 
 import { FORMS_API_CONFIG, deriveUploadUrl } from './forms-api.config';
 import { serverErrorText } from '../../shared/server-error-text';
-import type { IFormsUploadService, UploadedFile, UploadProgress } from './form-upload.interface';
+import { UploadError, type IFormsUploadService, type UploadedFile, type UploadProgress } from './form-upload.interface';
+
+/**
+ * How long an upload may go without any sign of life — upload progress, the body finishing, or
+ * response progress — before it is aborted as stalled.
+ *
+ * Without it a dead connection the browser had not noticed fired no event, so the upload never
+ * settled: the store's capped retries never got their turn, and a submit waiting on the file sat
+ * under "Saving your file…" for good. A stall rejects as `transient`, so the store retries it on
+ * its schedule; this bounds each attempt and the schedule bounds the whole wait (#248).
+ */
+export const UPLOAD_STALL_MS = 30_000;
 
 /**
  * Build the multipart body for an upload. Pure + framework-free so the field wiring
@@ -64,12 +75,36 @@ export function uploadErrorMessage(status: number, body: unknown): string {
   if (fromServer) {
     return fromServer;
   }
-  // 4xx here is always a judgement about this file — the endpoint's own failures are
-  // size, content type, an unknown question, or a closed form. None improve on a retry.
-  if (status >= 400 && status < 500) {
-    return 'That file was not accepted. Try a different file.';
+  if (isVerdictOnFile(status)) {
+    return 'That file was not accepted. Choose a different file.';
   }
   return 'The upload did not go through. Please try again.';
+}
+
+/**
+ * Whether a response status judges the FILE, so that only a different file can succeed.
+ *
+ * A 4xx from this endpoint is mostly that — size, content type, an unknown question, a closed
+ * form — but not all of it. 429 is the endpoint's own per-caller rate limit
+ * (`UploadMiddleware.refuseIfRateLimited`, "Too many uploads. Please wait Ns and try again."), and
+ * 408 is a request that timed out; both judge the moment, and the same bytes land once it passes.
+ * Called "refused", a 429'd drawing was never sent again: the only link offered erased it, and
+ * Submit-again skipped it.
+ */
+function isVerdictOnFile(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+/**
+ * The rejection for a non-2xx upload response: the respondent's sentence plus which kind of
+ * failure it is.
+ *
+ * The sentence and the kind read the same judgement ({@link isVerdictOnFile}), so "choose a
+ * different file" and the store's decision not to retry cannot disagree. Everything else,
+ * including a 5xx and the status 0 a dropped connection reports, is `transient`.
+ */
+export function uploadFailure(status: number, body: unknown): UploadError {
+  return new UploadError(uploadErrorMessage(status, body), isVerdictOnFile(status) ? 'refused' : 'transient');
 }
 
 /**
@@ -99,8 +134,9 @@ export class FormUploadService implements IFormsUploadService {
 
   /**
    * Upload one file for a FileUpload question. Resolves with the stored file's
-   * metadata (store `fileId` as the answer) or rejects with a friendly Error the
-   * caller can surface inline for retry.
+   * metadata (store `fileId` as the answer) or rejects with an {@link UploadError} whose
+   * `kind` tells the store whether a retry can help. A 2xx whose body cannot be parsed
+   * rejects with a plain `Error`, which the store treats as transient.
    */
   public upload(
     file: File,
@@ -111,7 +147,8 @@ export class FormUploadService implements IFormsUploadService {
   ): Promise<UploadedFile> {
     const url = this.endpoint();
     if (!url) {
-      return Promise.reject(new Error('Uploads are not available for this form.'));
+      // Refused, not transient: a missing endpoint is configuration, and no retry can fix it.
+      return Promise.reject(new UploadError('Uploads are not available for this form.', 'refused'));
     }
     const body = buildUploadFormData(file, distributionSlug, questionId, responseId);
     return this.send(url, body, onProgress);
@@ -122,40 +159,81 @@ export class FormUploadService implements IFormsUploadService {
     return this.config.uploadUrl || deriveUploadUrl(this.config.graphqlUrl);
   }
 
-  /** XHR POST with upload-progress + typed JSON parsing. */
+  /**
+   * XHR POST with upload-progress + typed JSON parsing, and a stall watchdog.
+   *
+   * Every outcome goes through `settle`, so the first one wins and every one of them stops the
+   * watchdog. That ordering is what lets a stall report itself: the watchdog settles with the stall
+   * error BEFORE aborting, so the `abort` event that follows finds the promise already settled and
+   * its "Upload cancelled." is dropped.
+   */
   private send(url: string, body: FormData, onProgress?: UploadProgress): Promise<UploadedFile> {
     return new Promise<UploadedFile>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      let settled = false;
+      let stallTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const settle = (finish: () => void): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(stallTimer);
+        finish();
+      };
+      /** (Re)start the countdown to declaring the request stalled; called on every sign of life. */
+      const watchForStall = (): void => {
+        if (settled) {
+          return;
+        }
+        clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => {
+          settle(() => reject(new UploadError('The upload stalled. Check your connection and try again.', 'transient')));
+          xhr.abort();
+        }, UPLOAD_STALL_MS);
+      };
+
       xhr.open('POST', url);
       if (this.config.token) {
         xhr.setRequestHeader('Authorization', `Bearer ${this.config.token}`);
       }
       xhr.responseType = 'json';
 
-      if (xhr.upload && onProgress) {
-        xhr.upload.onprogress = (e: ProgressEvent): void =>
-          onProgress(e.lengthComputable && e.total > 0 ? e.loaded / e.total : null);
+      if (xhr.upload) {
+        xhr.upload.onprogress = (e: ProgressEvent): void => {
+          watchForStall();
+          onProgress?.(e.lengthComputable && e.total > 0 ? e.loaded / e.total : null);
+        };
+        // The body is all sent; the server is now storing it, which can be slow but is not a stall.
+        xhr.upload.onload = (): void => watchForStall();
       }
+      xhr.onprogress = (): void => watchForStall();
 
       xhr.onload = (): void => {
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
-            resolve(parseUploadResponse(this.readBody(xhr)));
+            const stored = parseUploadResponse(this.readBody(xhr));
+            settle(() => resolve(stored));
           } catch (err) {
-            reject(err instanceof Error ? err : new Error('Upload failed.'));
+            settle(() => reject(err instanceof Error ? err : new Error('Upload failed.')));
           }
         } else {
           // `xhr.response`, never `xhr.responseText`: reading responseText while
           // responseType is 'json' throws InvalidStateError, and it throws INSIDE onload —
           // so the promise never settles, the widget sits at "Uploading … 100%" forever,
           // and Submit stays blocked behind an upload the server already answered.
-          reject(new Error(uploadErrorMessage(xhr.status, xhr.response)));
+          settle(() => reject(uploadFailure(xhr.status, xhr.response)));
         }
       };
-      xhr.onerror = (): void => reject(new Error('Upload failed. Check your connection and try again.'));
-      xhr.onabort = (): void => reject(new Error('Upload cancelled.'));
+      // Both transient: no response means nothing was judged, so the next attempt may land.
+      xhr.onerror = (): void =>
+        settle(() => reject(new UploadError('Upload failed. Check your connection and try again.', 'transient')));
+      xhr.onabort = (): void => settle(() => reject(new UploadError('Upload cancelled.', 'transient')));
 
       xhr.send(body);
+      // Armed only once the request is on its way: if `send` throws, the executor rejects and
+      // there is no timer left behind to fire later.
+      watchForStall();
     });
   }
 

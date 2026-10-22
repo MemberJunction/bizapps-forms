@@ -4,7 +4,8 @@ import { deriveUploadUrl } from './forms-api.config';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { uploadErrorMessage } from './form-upload.service';
+import { uploadErrorMessage, uploadFailure } from './form-upload.service';
+import { UploadError } from './form-upload.interface';
 
 describe('deriveUploadUrl', () => {
   it('does not double the slash when the origin has no path', () => {
@@ -99,6 +100,10 @@ describe('uploadErrorMessage', () => {
   it('does suggest retrying when retrying might genuinely help', () => {
     expect(uploadErrorMessage(500, '')).toMatch(/try again/i);
     expect(uploadErrorMessage(0, '')).toMatch(/try again/i);
+    // 408 and 429 are verdicts on the moment; with no server sentence, "choose a different
+    // file" would send the respondent after a file that was never the problem.
+    expect(uploadErrorMessage(408, '')).toMatch(/try again/i);
+    expect(uploadErrorMessage(429, '')).toMatch(/try again/i);
   });
 
   it('falls back to something readable when the body is not the expected shape', () => {
@@ -111,13 +116,88 @@ describe('uploadErrorMessage', () => {
   it('never echoes a blank server message', () => {
     expect(uploadErrorMessage(415, '{"error":"   "}').trim().length).toBeGreaterThan(0);
   });
+
+  it('tells the respondent to choose a different file when the server gave no reason', () => {
+    expect(uploadErrorMessage(413, '')).toBe('That file was not accepted. Choose a different file.');
+  });
+});
+
+describe('uploadFailure', () => {
+  it('calls a 4xx refused, because the same file will be refused again', () => {
+    const failure = uploadFailure(413, '');
+    expect(failure).toBeInstanceOf(UploadError);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure.kind).toBe('refused');
+    expect(failure.message).toBe('That file was not accepted. Choose a different file.');
+  });
+
+  it('calls a 5xx transient, because the next attempt may well land', () => {
+    expect(uploadFailure(500, '').kind).toBe('transient');
+  });
+
+  it('draws the refused range inside 400-499 (408 and 429 aside)', () => {
+    // 399 cannot reach here from the XHR path (only non-2xx do, and 3xx are followed), but the
+    // boundary is the function's contract, so pin both edges.
+    expect(uploadFailure(399, '').kind).toBe('transient');
+    expect(uploadFailure(400, '').kind).toBe('refused');
+    expect(uploadFailure(499, '').kind).toBe('refused');
+    expect(uploadFailure(500, '').kind).toBe('transient');
+  });
+
+  it('calls a status-0 failure (no response at all) transient', () => {
+    expect(uploadFailure(0, '').kind).toBe('transient');
+  });
+
+  it('calls the endpoint’s 429 transient: the rate limiter judged the moment, not the file', () => {
+    // UploadMiddleware.refuseIfRateLimited answers an over-budget caller 429 "Too many uploads.
+    // Please wait Ns and try again." Called refused, the drawing was never sent again — the only
+    // link offered erased it, and Submit-again skipped it — though the same bytes land once the
+    // window passes.
+    const failure = uploadFailure(429, { error: 'Too many uploads. Please wait 60s and try again.' });
+    expect(failure.kind).toBe('transient');
+    expect(failure.message).toBe('Too many uploads. Please wait 60s and try again.');
+  });
+
+  it('calls a 408 transient: a request timeout says nothing about the file', () => {
+    expect(uploadFailure(408, '').kind).toBe('transient');
+  });
+
+  it('keeps the server sentence as the message', () => {
+    const failure = uploadFailure(415, { error: 'Files of type "text/markdown" are not accepted here.' });
+    expect(failure.kind).toBe('refused');
+    expect(failure.message).toBe('Files of type "text/markdown" are not accepted here.');
+  });
+});
+
+describe('the XHR transport classifies every failure', () => {
+  // Source-level guards, kept alongside the executing transport tests in
+  // form-upload.transport.spec.ts (which drive a fake XHR through the real service): these pin
+  // which call builds each handler's rejection (`uploadFailure` or an inline `UploadError`). The
+  // executing tests check the result — its class, message and kind — not how it was built.
+  const code = readFileSync(join(__dirname, 'form-upload.service.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+
+  it('rejects a non-2xx with uploadFailure, so the store can tell refused from transient', () => {
+    const handler = code.slice(code.indexOf('xhr.onload'), code.indexOf('xhr.onerror'));
+    expect(handler).toMatch(/reject\(uploadFailure\(xhr\.status, xhr\.response\)\)/);
+  });
+
+  it('rejects a network error and an abort as transient', () => {
+    expect(code).toMatch(/xhr\.onerror = [^;]*new UploadError\([^;]*'transient'\)/);
+    expect(code).toMatch(/xhr\.onabort = [^;]*new UploadError\([^;]*'transient'\)/);
+  });
+
+  it('rejects a missing endpoint as refused, since no retry can fix configuration', () => {
+    expect(code).toMatch(/new UploadError\('Uploads are not available for this form\.', 'refused'\)/);
+  });
 });
 
 describe('the XHR response handler', () => {
   it('reads the parsed body, not responseText', () => {
-    // THE REGRESSION, and it can only be guarded this way here: the service takes
-    // FORMS_API_CONFIG through inject() in a field initialiser, so it cannot be constructed
-    // in the vitest node env to drive a real XHR through.
+    // THE REGRESSION, guarded at the source: the property read is the defect, and a fake XHR
+    // (see form-upload.transport.spec.ts) would only reproduce it if it modelled the browser's
+    // InvalidStateError on responseText — which it does not.
     //
     // Reading `xhr.responseText` while `responseType` is 'json' throws InvalidStateError,
     // and it throws INSIDE onload — so the promise never settled, the widget sat at

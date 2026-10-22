@@ -61,7 +61,7 @@ import { endingScreenFrom } from './core/server-ending';
 import { failureDetail } from './core/failure-detail';
 import { fullForm, projectionForm, type WidgetForm, type WidgetRenderDefinition } from './core/widget-form';
 import { FORMS_API_CONFIG } from './api/forms-api.config';
-import { submitWaitMessage } from './core/submit-progress';
+import { SAVING_FILE_MESSAGE, submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
 import { gateWelcomeScreen } from './core/welcome-gate';
 import { prefetchImages } from './core/image-prefetch';
@@ -265,6 +265,29 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /** The reassurance shown under the spinner, escalating if the wait drags on. */
   protected readonly waitMessage = computed(() => submitWaitMessage(this.submitTimer.Elapsed()));
 
+  /** The line under the spinner while an upload is still on the wire (#248). */
+  protected readonly savingFileMessage = SAVING_FILE_MESSAGE;
+
+  /**
+   * What the overlay is covering the form for, or null when it is not shown.
+   *
+   * `saving-file` comes first and is read off the upload store, not the phase, because two paths
+   * wait on an upload: this component's submit (phase `submitting`) and a renderer's Next (phase
+   * still `ready`). Both leave the respondent looking at a button that seemingly did nothing until
+   * the file lands, and both need the same answer on screen.
+   *
+   * Only in those two phases, though. A wait can outlive them — a renderer's Next still waiting
+   * when an autosave learns the session expired — and the scrim would then sit over the
+   * session-expired notice, the one surface that tells the respondent what to do next.
+   */
+  protected readonly overlay = computed<'saving-file' | 'sending' | null>(() => {
+    const phase = this.phase();
+    if (this.uploads.waiting() && (phase === 'ready' || phase === 'submitting')) {
+      return 'saving-file';
+    }
+    return phase === 'submitting' ? 'sending' : null;
+  });
+
   /** The resolved ending screen for the template. */
   protected readonly activeEndingScreen = computed(() => this.endingScreen());
 
@@ -371,6 +394,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.autosave?.dispose();
     this.destroyed = true;
     this.prefetcher.Cancel();
+    // Stops a retry asleep between attempts from re-sending a file for a widget nobody can see.
+    this.uploads.dispose();
   }
 
   /** Fetch (or accept) the form definition, theme the host, and build the runtime. */
@@ -982,13 +1007,19 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // the pending debounce too, and is fail-soft.
     this.phase.set('submitting');
     this.errorText.set('');
+    // A no-op in Preview, which has no autosave controller.
+    await this.autosave?.settle();
+    // Before the Preview branch too: Preview's mock uploads take time, and an author testing the
+    // form should see the same wait a respondent would.
+    if (!(await this.uploadsLanded(form, rt))) {
+      return;
+    }
     if (form.kind === 'full') {
       // Preview sends nothing: the author's draft is resolved here, locally, by the same contracts
       // function the server runs on a live submit (DW13 / #75).
       this.applyPreviewSubmit(form);
       return;
     }
-    await this.autosave?.settle();
     const input = this.buildSubmission(form, rt, false);
     this.submitTimer.Start();
     try {
@@ -1012,6 +1043,41 @@ export class MjFormComponent implements OnInit, OnDestroy {
     } finally {
       this.submitTimer.Stop();
     }
+  }
+
+  /**
+   * Wait for the uploads of every question the respondent can see, and say whether the submit may
+   * go on (#248).
+   *
+   * The store commits a file question's answer only when its upload lands, so a submit built while
+   * one is on the wire sends that question unanswered — silently, which is how a consent form went
+   * in without its signature. Waiting closes that.
+   *
+   * Visible answerable questions only: an upload on a question a rule has since hidden is not part
+   * of what gets judged, so neither its wait nor its failure may hold the submit. An `unsaved` one
+   * is restarted first, because pressing Submit again is the respondent saying "try again"; a
+   * `refused` one is not, because the same bytes get the same verdict.
+   *
+   * False means stop: either an upload ended in a failure (the phase goes back to `ready` and its
+   * sentence is put in the banner, the same way the #124 refusal is), or the widget moved on while
+   * it waited — a lapsed session set `expired`, or a reload replaced the form — and this submit
+   * describes a form that is no longer on screen.
+   */
+  private async uploadsLanded(form: WidgetForm, rt: FormRuntime): Promise<boolean> {
+    const ids = rt.visibleAnswerableQuestions().map((question) => question.id);
+    this.uploads.retryUnsaved(ids);
+    await this.uploads.whenSettled(ids);
+    if (this.phase() !== 'submitting' || this.form() !== form || this.runtime() !== rt) {
+      return false;
+    }
+    const failure = this.uploads.failureAmong(ids);
+    if (failure) {
+      this.phase.set('ready');
+      this.errorText.set(failure.message);
+      this.focusBanner();
+      return false;
+    }
+    return true;
   }
 
   /**

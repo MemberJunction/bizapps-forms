@@ -44,7 +44,7 @@ import {
 import { NgTemplateOutlet } from '@angular/common';
 
 import { FORMS_UPLOAD_SERVICE } from '../../api/form-upload.interface';
-import { FormUploadStore } from '../../core/upload-store';
+import { FormUploadStore, type UploadStatus } from '../../core/upload-store';
 import {
   autocompleteFor,
   compositeAutocompleteFor,
@@ -77,9 +77,6 @@ function prefersReducedMotion(): boolean {
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
 }
-
-/** UI state of a FileUpload control. */
-type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
 @Component({
   selector: 'mjf-form-question',
@@ -136,16 +133,20 @@ export class FormQuestionComponent {
   protected readonly uploadProgress = computed(() => this.upload().progress);
   /** Display name of the selected/uploaded file (the stored answer is the fileId). */
   protected readonly uploadFileName = computed(() => this.upload().fileName);
-  /** Inline, respondent-facing upload error, or `null`. */
-  protected readonly uploadError = computed(() => this.upload().error);
+  /**
+   * Why this question's upload ended without a file, or `null`. Both the sentence and the kind
+   * come from the store — the kind decides which link the quiet line offers.
+   */
+  protected readonly uploadFailure = computed(() => this.upload().failure);
   /**
    * The file held locally for this question, whatever its upload has done — or `null`.
    *
    * "Local" is the distinction that matters, and the reason it is not called `uploadedFile`: the
    * file is here from the moment it is chosen or drawn, while it is uploading, and after an
    * upload has failed. Only {@link answerRecorded} says a file is stored. What this is for is
-   * rendering — the doodle pad repaints itself from it after Angular destroys the control —
-   * and retrying. Read from the store, keyed by question id, for the same reason every other
+   * rendering — the doodle pad repaints itself from it after Angular destroys the control. (A
+   * retry does not read it: the store restarts from its own record.) Read from the store, keyed
+   * by question id, for the same reason every other
    * upload fact is: this component instance is recycled across questions and cannot be trusted
    * to still be the one the file belongs to.
    */
@@ -205,6 +206,7 @@ export class FormQuestionComponent {
   }
   protected readonly errorId = computed(() => `${this.inputId()}-error`);
   protected readonly statusId = computed(() => `${this.inputId()}-status`);
+  protected readonly failureId = computed(() => `${this.inputId()}-failure`);
 
   /**
    * Whether the file control's status line currently says anything.
@@ -255,6 +257,11 @@ export class FormQuestionComponent {
     }
     if (this.hasFileStatus()) {
       ids.push(this.statusId());
+    }
+    // `aria-invalid` says the file input is wrong; this says why. Only upload questions ever hold
+    // a failure, and of those only the file input reads this list.
+    if (this.uploadFailure()) {
+      ids.push(this.failureId());
     }
     return ids.length ? ids.join(' ') : null;
   });
@@ -765,37 +772,68 @@ export class FormQuestionComponent {
     await this.uploadFile(file, this.question().id);
   }
 
-  /** Re-run the upload for the previously-selected file after a failure. */
-  protected async retryUpload(): Promise<void> {
-    const last = this.localFile();
-    if (last) {
-      await this.uploadFile(last, this.question().id);
-    }
+  /**
+   * "Try again" after the store's retries are spent: run the same file through the same call.
+   *
+   * The store kept both, keyed by this question, so there is nothing for this recycled instance
+   * to remember.
+   */
+  protected retryUpload(): Promise<void> {
+    const restarted = this.uploads.restart(this.question().id);
+    this.focusQuestion();
+    return restarted;
+  }
+
+  /** "Choose again" on a drawing: the pad's own Clear, so the upload clears through `cleared`. */
+  protected chooseDrawingAgain(pad: DoodlePadComponent): void {
+    pad.clear();
+    this.focusQuestion();
   }
 
   /**
-   * Upload one file to the anonymous `/forms/upload` endpoint.
+   * Put focus on this question's container.
    *
-   * The result does NOT travel back through `valueChange`, and that is the whole point. An output
-   * is routed by the view: `(valueChange)="onValueChange(q, $event)"` writes to whichever question
-   * the template is bound to at the moment it fires, which after an `await` is no longer reliably
-   * the question the upload was for. The store commits the answer under the token's own question
-   * id instead — see `succeed` for the two ways that went wrong.
+   * For a failure link that takes itself away: once the failure clears, the button that had focus
+   * is gone, and the file input cannot take it while the restarted upload has it disabled. Left
+   * alone, focus falls to the page and a keyboard or screen-reader user starts over from the top.
+   * The container always renders and has `tabindex="-1"`, so it can always take it.
    */
-  private async uploadFile(file: File, questionId: string): Promise<void> {
-    const token = this.uploads.begin(questionId, file);
-    try {
-      const result = await this.uploader.upload(
-        file,
-        this.distributionSlug(),
-        questionId,
-        (fraction) => this.uploads.setProgress(token, fraction),
-        this.responseId() || undefined,
-      );
-      this.uploads.succeed(token, result.fileId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Upload failed. Please try again.';
-      this.uploads.fail(token, message);
-    }
+  private focusQuestion(): void {
+    this.host.nativeElement.querySelector<HTMLElement>(`#${CSS.escape(this.focusTargetId())}`)?.focus();
+  }
+
+  /**
+   * "Choose again" after the server refused the file: start the question over at the picker.
+   *
+   * The value is reset because a file input fires `change` only when its selection changes, so
+   * a respondent who picks the same path again (say, after shrinking the file on disk) would
+   * otherwise get no response at all. Focus goes to the picker because the link that had it is
+   * gone once the failure clears.
+   */
+  protected chooseAgain(input: HTMLInputElement): void {
+    this.uploads.clear(this.question().id);
+    input.value = '';
+    input.focus();
+  }
+
+  /**
+   * Upload one file to the anonymous `/forms/upload` endpoint, through the store.
+   *
+   * The store runs the call, retries a bad moment, and commits the answer under the question id
+   * the upload was started for. The result does NOT travel back through `valueChange`, and that
+   * is the whole point: an output is routed by the view — `(valueChange)="onValueChange(q,
+   * $event)"` writes to whichever question the template is bound to when it fires — which after
+   * an `await` is no longer reliably the question the upload was for. See the store's `succeed`
+   * for the two ways that went wrong.
+   *
+   * The slug and response id are read here, once, for the same reason: a retry runs up to a
+   * minute later, when this instance may be rendering another question.
+   */
+  private uploadFile(file: File, questionId: string): Promise<void> {
+    const slug = this.distributionSlug();
+    const responseId = this.responseId() || undefined;
+    return this.uploads.upload(questionId, file, (onProgress) =>
+      this.uploader.upload(file, slug, questionId, onProgress, responseId),
+    );
   }
 }
