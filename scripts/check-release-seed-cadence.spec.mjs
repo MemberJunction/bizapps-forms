@@ -255,6 +255,78 @@ withGitRepo(
     check('a .mj-sync.json-only change owes no seed', r.problems.length === 0, JSON.stringify(r.changed));
 }
 
+// ---------------------------------------------------------------------------------------------
+// STALE SEED: metadata/ moved AFTER the release seed was generated (#319 review). Cases 21-25.
+// One unreleased seed satisfies "a seed exists", so before these cases an edit merged after the
+// seed passed both release checks and reached no host.
+// ---------------------------------------------------------------------------------------------
+
+/** The stubbed boundary plus what changed under metadata/ since each unreleased seed's last commit. */
+const stateAfter = (tag, released, current, metadataChanged, metadataChangedAfter) => () => ({
+    tag, released, current, metadataChanged, metadataChangedAfter,
+});
+
+// 21. The failure: a record edited after the seed.
+{
+    const r = findUnshippedMetadataDrift('/x', stateAfter('v0.10.0', [A], [A, B], [REC], { [B]: [REC] }));
+    check('a record file changed AFTER the release seed fails', r.problems.length === 1, JSON.stringify(r.problems));
+    check('  …and names the changed file', r.problems[0]?.includes(REC));
+    check('  …and names the seed that is now stale', r.problems[0]?.includes(B));
+}
+
+// 22. Not records: README, .mj-sync.json and push by-products changed after the seed owe nothing.
+{
+    const r = findUnshippedMetadataDrift('/x', stateAfter('v0.10.0', [A], [A, B], [REC], {
+        [B]: ['metadata/README.md', 'metadata/actions/.mj-sync.json', 'metadata/sql_logging/x.sql'],
+    }));
+    check('only non-record files changed after the seed is a pass', r.problems.length === 0, JSON.stringify(r.problems));
+}
+
+// 23. An uncommitted seed (README step 6) is the engineer's current generation, not a stale one.
+{
+    const r = findUnshippedMetadataDrift('/x', stateAfter('v0.10.0', [A], [A, B], [REC], { [B]: null }));
+    check('an uncommitted seed is not judged stale', r.problems.length === 0, JSON.stringify(r.problems));
+}
+
+// 24. Real git: seed committed, THEN a record edited (committed, and again uncommitted).
+withGitRepo(
+    (root, git) => {
+        mkdirSync(join(root, 'metadata', 'roles'), { recursive: true });
+        writeFileSync(join(root, 'metadata', 'roles', '.roles.json'), '[{"fields":{"Description":"v1"}}]\n');
+        writeFileSync(join(root, 'migrations', A), '-- released\n');
+        git('add', '-A'); git('commit', '-qm', 'release'); git('tag', 'v0.10.0');
+        writeFileSync(join(root, 'metadata', 'roles', '.roles.json'), '[{"fields":{"Description":"v2"}}]\n');
+        writeFileSync(join(root, 'migrations', B), '-- the release seed, generated from v2\n');
+        git('add', '-A'); git('commit', '-qm', 'seed');
+        writeFileSync(join(root, 'metadata', 'roles', '.roles.json'), '[{"fields":{"Description":"v3"}}]\n');
+        git('add', '-A'); git('commit', '-qm', 'a metadata PR merged after the seed');
+    },
+    (root) => {
+        const s = readReleaseState(root);
+        check('real git: reports metadata changed after the seed', JSON.stringify(s.metadataChangedAfter?.[B]) === JSON.stringify(['metadata/roles/.roles.json']), JSON.stringify(s.metadataChangedAfter));
+        const d = findUnshippedMetadataDrift(root);
+        check('real git: an edit committed after the seed fails drift', d.problems.length === 1, JSON.stringify(d.problems));
+    },
+);
+
+// 25. Real git: the edit came BEFORE the seed, so the seed carries it — the good release.
+withGitRepo(
+    (root, git) => {
+        mkdirSync(join(root, 'metadata', 'roles'), { recursive: true });
+        writeFileSync(join(root, 'metadata', 'roles', '.roles.json'), '[{"fields":{"Description":"v1"}}]\n');
+        writeFileSync(join(root, 'migrations', A), '-- released\n');
+        git('add', '-A'); git('commit', '-qm', 'release'); git('tag', 'v0.10.0');
+        writeFileSync(join(root, 'metadata', 'roles', '.roles.json'), '[{"fields":{"Description":"v2"}}]\n');
+        git('add', '-A'); git('commit', '-qm', 'metadata PR');
+        writeFileSync(join(root, 'migrations', B), '-- the release seed, generated from v2\n');
+        git('add', '-A'); git('commit', '-qm', 'seed');
+    },
+    (root) => {
+        const d = findUnshippedMetadataDrift(root);
+        check('real git: an edit the seed already carries is a pass', d.problems.length === 0, JSON.stringify(d.problems));
+    },
+);
+
 // 17. The CLI is what CI reads: exit code and report text.
 {
     let code = 0, out = '';

@@ -9,6 +9,15 @@
     "relatedEntities": {
       "MJ: Entity Fields": [
         {
+          "_comments": [
+            "The primaryKey lookup is what makes this an UPDATE of the CodeGen-owned TargetRecordID row.",
+            "Without it MetadataSync treats a related record as a create (#319, v0.16 seed generation):",
+            "the push emitted spCreateEntityField with no Name and a NULL EntityID and failed the run,",
+            "and on MJ_ATS_Dev the field was never written at all. Same shape as .entities.json."
+          ],
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=TargetRecordID&EntityID=@parent:ID"
+          },
           "fields": {
             "EntityID": "@parent:ID",
             "Name": "TargetRecordID",

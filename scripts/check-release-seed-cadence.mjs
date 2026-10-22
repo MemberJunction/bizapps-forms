@@ -25,7 +25,9 @@
  *                                  came back.
  *   findUnshippedMetadataDrift   — `metadata/` moved since the last release tag, so a seed is
  *                                  OWED. Zero unreleased seeds is then a release that silently
- *                                  ships none of it.
+ *                                  ships none of it — and so is a seed committed BEFORE a
+ *                                  record file last changed: it exists, but it cannot carry an
+ *                                  edit that was made after it.
  *
  * WHY THE SECOND RULE EARNS ITS KEEP, when coverage already reads `metadata/`. Coverage compares
  * declared **ids** against shipped SQL, so it is structurally blind to an EDITED record whose id
@@ -128,8 +130,21 @@ export function readReleaseState(repoRoot) {
 
     const migrationsDir = join(repoRoot, 'migrations');
     const current = existsSync(migrationsDir) ? readdirSync(migrationsDir) : [];
+    const released = listMigrations(tag);
 
-    return { tag, released: listMigrations(tag), current, metadataChanged };
+    // For each migration the tag does not hold: which metadata/ files differ between the commit that
+    // last touched it and the working tree, i.e. what moved AFTER it was written. `null` when it is
+    // not committed yet (README step 6), because then it is the generation in progress, not history.
+    const releasedSet = new Set(released);
+    const metadataChangedAfter = {};
+    for (const file of current.filter((f) => !releasedSet.has(f))) {
+        const commit = git(repoRoot, ['log', '-1', '--format=%H', '--', `migrations/${file}`]).trim();
+        metadataChangedAfter[file] = commit
+            ? git(repoRoot, ['diff', '--name-only', commit, '--', 'metadata/']).split('\n').map((f) => f.trim()).filter(Boolean)
+            : null;
+    }
+
+    return { tag, released, current, metadataChanged, metadataChangedAfter };
 }
 
 export function findUnconsolidatedSeedDeltas(repoRoot = REPO_ROOT, readState = readReleaseState) {
@@ -208,6 +223,20 @@ export function findUnshippedMetadataDrift(repoRoot = REPO_ROOT, readState = rea
                 '  record keeps its id. Generate the consolidated seed (migrations/README.md) — the push emits\n' +
                 '  spUpdate* for edited records by construction, which is the half no id check can see.',
         );
+    }
+    // A seed EXISTING is not the same as a seed CARRYING metadata/: a record edited after the seed was
+    // generated passes the rule above and coverage alike, and reaches no host (#319 review). A stub
+    // boundary without `metadataChangedAfter`, or an uncommitted seed (`null`), has nothing to judge.
+    for (const seed of unreleasedSeeds) {
+        const after = (state.metadataChangedAfter?.[seed] ?? []).filter(isRecordPath).sort();
+        if (after.length > 0) {
+            problems.push(
+                `${after.length} metadata record file(s) changed after the release seed ${seed} was last committed, so it does not carry them.\n` +
+                    after.map((f) => `      ${f}`).join('\n') +
+                    '\n\n  Regenerate the consolidated seed from the current metadata/ (migrations/README.md) and\n' +
+                    '  commit it again; a seed generated before an edit cannot ship that edit.',
+            );
+        }
     }
     return { problems, tag: state.tag, changed };
 }
