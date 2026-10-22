@@ -692,10 +692,12 @@ export class DoodlePadComponent {
   /**
    * Wipe the pad and tell the parent the answer is gone.
    *
-   * Superseding is half the work. The parent's `clear` retires what the store holds — the running
-   * upload, or the reservation of an export still encoding — but it cannot stop that export: the
-   * encode would still finish and deliver, and the delivery would start a fresh upload and commit
-   * the drawing the respondent has just withdrawn, leaving a stored drawing under an empty pad.
+   * Two things stop an export still encoding from storing the drawing the respondent has just
+   * withdrawn. Superseding here stops it first: the export finds its claim stale and releases
+   * instead of delivering. The parent's `clear` retires what the store holds — the running upload,
+   * or that export's reservation — so a delivery that got past the claim would still be dropped by
+   * the export sink, which uploads only while its reservation is current. Superseding also stops a
+   * repaint still decoding from painting the stored image back over the empty pad.
    */
   public clear(): void {
     this.captures.supersede();
