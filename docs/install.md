@@ -125,6 +125,21 @@ Beyond the `magicLink` block in the [README](../README.md#-install-into-a-host-a
   the operator runbook: [`local-host.md` §5](local-host.md#5-host-requirements-since-303-the-automation-outbox-and-read_committed_snapshot)
   and [Operating the automation outbox](local-host.md#operating-the-automation-outbox).
 
+### The MJAPI database login needs only MJ's three roles
+
+The SQL login MJAPI connects with needs membership of `cdp_Developer`, `cdp_Integration` and
+`cdp_UI`, and nothing more: not `db_owner`, and no rights on any Forms table. Those roles get
+`SELECT` on views and `EXECUTE` on procedures only, so every write Forms makes outside an entity
+save — the response-slot count, the row locks on a submit and the automation-outbox claim, settle,
+renew and replay — runs as a stored procedure granted to `cdp_Developer` and `cdp_Integration`
+(since #338; before it, a roles-only login refused every submit with "Something went wrong while
+submitting your response"). Do not grant table rights to make something work; a refusal on a
+`__mj_BizAppsForms` table is a Forms defect to report.
+
+A host with `MJ: Entity Field Permissions` rows on an entity that a Forms automation binds to must
+add a row for the `Forms Automation Runner` role on that entity, or the automation fails with MJ's
+"Field … does not exist on entity … or you do not have access to it".
+
 ---
 
 ## 6. Only two placeholders may appear in shipped SQL

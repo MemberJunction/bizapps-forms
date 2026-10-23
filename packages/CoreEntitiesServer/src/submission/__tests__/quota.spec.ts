@@ -18,21 +18,61 @@ import { consumeDistributionSlot, formQuotaReached } from '../quota.js';
 
 const USER = { ID: 'system-user' } as unknown as UserInfo;
 
+/** Every statement the stub was sent, in order. */
+let sent: string[] = [];
+
 /** Just the provider surface the quota checks touch. */
-function provider(opts: { affected?: Record<string, unknown>[]; count?: Partial<RunViewResult> }): DatabaseProviderBase {
+function provider(opts: {
+  affected?: Record<string, unknown>[];
+  count?: Partial<RunViewResult>;
+  platform?: 'sqlserver' | 'postgresql';
+}): DatabaseProviderBase {
+  const pg = opts.platform === 'postgresql';
   const stub = {
-    PlatformKey: 'sqlserver',
-    EntityByName: (name: string) => ({ SchemaName: '__mj_BizAppsForms', BaseTable: name.split(': ').pop() }),
-    QuoteIdentifier: (name: string) => `[${name}]`,
-    QuoteSchemaAndView: (schema: string, table: string) => `[${schema}].[${table}]`,
-    Dialect: { AffectedRowCountSQL: (sql: string) => sql },
-    ExecuteSQL: async () => opts.affected ?? [],
+    PlatformKey: opts.platform ?? 'sqlserver',
+    EntityByName: (name: string) => ({ SchemaName: '__mj_BizAppsForms', BaseTable: name.split(': ').pop()?.replace(/\s+/g, '').replace(/s$/, '') }),
+    QuoteIdentifier: (name: string) => (pg ? `"${name}"` : `[${name}]`),
+    QuoteSchemaAndView: (schema: string, table: string) => (pg ? `"${schema}"."${table}"` : `[${schema}].[${table}]`),
+    // Marks the wrap, so a test can tell a counted raw UPDATE from a bare one.
+    Dialect: { AffectedRowCountSQL: (sql: string, alias: string) => `WITH counted AS (${sql}) SELECT count(*) AS "${alias}"` },
+    ExecuteSQL: async (sql: string) => {
+      sent.push(sql);
+      return opts.affected ?? [];
+    },
     RunView: async () => ({ Success: true, TotalRowCount: 0, Results: [], ...opts.count }),
   };
   return stub as unknown as DatabaseProviderBase;
 }
 
-beforeEach(() => logError.mockReset());
+beforeEach(() => {
+  logError.mockReset();
+  sent = [];
+});
+
+describe('the statements each platform runs (#338)', () => {
+  it('SQL Server takes the slot through its procedure, which returns the count itself (no wrap)', async () => {
+    await consumeDistributionSlot(provider({ affected: [{ AffectedRows: 1 }] }), "dist-o'1", USER);
+    expect(sent).toEqual(["EXEC [__mj_BizAppsForms].[spFormDistributionConsumeResponseSlot] @ID = 'dist-o''1'"]);
+  });
+
+  it('PostgreSQL keeps the raw conditional UPDATE, wrapped to count its rows', async () => {
+    await consumeDistributionSlot(provider({ affected: [{ AffectedRows: 1 }], platform: 'postgresql' }), 'dist-1', USER);
+    expect(sent).toEqual([
+      'WITH counted AS (UPDATE "__mj_BizAppsForms"."FormDistribution" SET "ResponseCount" = "ResponseCount" + 1 ' +
+        `WHERE "ID" = 'dist-1' AND ("MaxResponses" IS NULL OR "ResponseCount" < "MaxResponses")) SELECT count(*) AS "AffectedRows"`,
+    ]);
+  });
+
+  it('SQL Server locks the form row through its procedure', async () => {
+    await formQuotaReached(provider({}), 'form-1', { quota: 3 }, USER);
+    expect(sent).toEqual(["EXEC [__mj_BizAppsForms].[spFormLockRowForQuota] @ID = 'form-1'"]);
+  });
+
+  it('PostgreSQL keeps the raw FOR UPDATE lock', async () => {
+    await formQuotaReached(provider({ platform: 'postgresql' }), 'form-1', { quota: 3 }, USER);
+    expect(sent).toEqual([`SELECT "ID" FROM "__mj_BizAppsForms"."Form" WHERE "ID" = 'form-1' FOR UPDATE`]);
+  });
+});
 
 describe('consumeDistributionSlot', () => {
   it('takes the slot when the UPDATE reports one row', async () => {
