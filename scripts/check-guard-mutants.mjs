@@ -362,11 +362,13 @@ export const MUTANTS = [
   {
     name: 'hook/row-lock-dropped',
     behaviour: 'the credential re-read takes an update lock, so a second writer of the row waits its turn',
-    file: 'packages/CoreEntitiesServer/src/magic-link/FormDistributionEntityServer.ts',
-    find: '          : `SELECT ${columns} FROM ${table} WITH (UPDLOCK, HOLDLOCK) WHERE ${where}`;',
-    replace: '          : `SELECT ${columns} FROM ${table} WHERE ${where}`;',
+    // On SQL Server the locked re-read is spFormDistributionReadServerColumnsLocked (#338), so the
+    // lock hint lives in the migration, not in FormDistributionEntityServer.ts.
+    file: 'migrations/V202610222300__v0.16.x__Roles_Only_Guarded_Write_Sprocs.sql',
+    find: '    SELECT [MagicLinkInviteID], [PublicLinkToken], [ResponseCount] FROM [${flyway:defaultSchema}].[FormDistribution] WITH (UPDLOCK, HOLDLOCK) WHERE [ID] = @ID;',
+    replace: '    SELECT [MagicLinkInviteID], [PublicLinkToken], [ResponseCount] FROM [${flyway:defaultSchema}].[FormDistribution] WHERE [ID] = @ID;',
     suite: 'packages/CoreEntitiesServer',
-    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
+    killedBy: ['src/shared/__tests__/guarded-write-sprocs.migration.spec.ts'],
   },
   {
     name: 'hook/origins-grammar-neutralised',
@@ -539,11 +541,12 @@ export const MUTANTS = [
   {
     name: 'claim/first-attempt-waits-on-host-clock',
     behaviour: "a never-attempted event is due at once, so an API host whose clock runs ahead of the database cannot hide a final from its post-commit drain",
-    file: 'packages/CoreEntitiesServer/src/automation/outbox/claim.ts',
-    find: "(e.${q('AttemptCount')} = 0 OR e.${q('NextAttemptAt')} <= ${now})",
-    replace: "(1 = 0 OR e.${q('NextAttemptAt')} <= ${now})",
+    // On SQL Server the claim is spFormAutomationEventClaim (#338): the due rule lives in the migration.
+    file: 'migrations/V202610222300__v0.16.x__Roles_Only_Guarded_Write_Sprocs.sql',
+    find: '(e.[AttemptCount] = 0 OR e.[NextAttemptAt] <= SYSDATETIMEOFFSET())',
+    replace: '(1 = 0 OR e.[NextAttemptAt] <= SYSDATETIMEOFFSET())',
     suite: 'packages/CoreEntitiesServer',
-    killedBy: ['src/automation/outbox/__tests__/claim.spec.ts'],
+    killedBy: ['src/shared/__tests__/guarded-write-sprocs.migration.spec.ts'],
   },
   {
     name: 'drain/partial-save-dead-letters',
