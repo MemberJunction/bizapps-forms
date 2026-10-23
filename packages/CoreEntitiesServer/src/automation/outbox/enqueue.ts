@@ -13,7 +13,7 @@
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 import { quoteSqlString, type mjBizAppsFormsFormAutomationEventEntity } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../../shared/entity-names.js';
-import { formsProcedureCall } from '../../shared/forms-procedure.js';
+import { procedureCallInSchema } from '../../shared/forms-procedure.js';
 import { responseSubmittedPayloadRefusal, type ResponseSubmittedPayload } from './response-submitted-event.js';
 
 /** The one call the submit path makes on the outbox — a seam, so the engine's specs need no table. */
@@ -63,16 +63,16 @@ async function enqueueResponseSubmitted(payload: ResponseSubmittedPayload, provi
  * save's transaction. PostgreSQL keeps the raw UPDATE.
  */
 async function bringWaitingPartialsForward(responseId: string, provider: DatabaseProviderBase, contextUser: UserInfo): Promise<void> {
-  if (provider.PlatformKey !== 'postgresql') {
-    const call = formsProcedureCall(provider, FORMS_ENTITY.FormAutomationEvent, 'spFormAutomationEventBringPartialsForward', { FormResponseID: responseId });
-    await provider.ExecuteSQL(call, undefined, undefined, contextUser);
-    return;
-  }
-  const q = (name: string): string => provider.QuoteIdentifier(name);
   const entity = provider.EntityByName(FORMS_ENTITY.FormAutomationEvent);
   if (!entity) {
     throw new Error(`"${FORMS_ENTITY.FormAutomationEvent}" is not in this host's metadata, so response ${responseId}'s automations cannot be queued.`);
   }
+  if (provider.PlatformKey !== 'postgresql') {
+    const call = procedureCallInSchema(provider, entity.SchemaName, 'spFormAutomationEventBringPartialsForward', { FormResponseID: responseId });
+    await provider.ExecuteSQL(call, undefined, undefined, contextUser);
+    return;
+  }
+  const q = (name: string): string => provider.QuoteIdentifier(name);
   await provider.ExecuteSQL(
     `UPDATE ${provider.QuoteSchemaAndView(entity.SchemaName, entity.BaseTable)} SET ${q('NextAttemptAt')} = now() ` +
       `WHERE ${q('FormResponseID')} = ${quoteSqlString(responseId)} AND ${q('Trigger')} = 'OnPartial' AND ${q('Status')} = 'Pending' AND ${q('NextAttemptAt')} > now()`,

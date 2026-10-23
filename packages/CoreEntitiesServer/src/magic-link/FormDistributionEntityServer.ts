@@ -68,9 +68,10 @@ type StoredServerColumns = Pick<
 >;
 
 /**
- * The provider surface a save needs to lock the row it is about to write: raw SQL on the provider's
- * own connection (so the lock is taken inside the transaction it opened), the quoting that names
- * the table, and the dialect that decides how a row lock is spelled.
+ * The provider surface a save needs to lock the row it is about to write: `ExecuteSQL` on the
+ * provider's own connection (so the lock is taken inside the transaction it opened), the quoting
+ * that names the procedure or table, and the dialect that picks the statement — the
+ * `spFormDistributionReadServerColumnsLocked` call on SQL Server, a raw `FOR UPDATE` on PostgreSQL.
  */
 type RowLockHost = IEntityDataProvider &
   Pick<DatabaseProviderBase, 'ExecuteSQL' | 'QuoteIdentifier' | 'QuoteSchemaAndView' | 'PlatformKey'>;
@@ -155,7 +156,7 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    * bizapps-forms#104 exists to remove, produced by the act of rotating. So an update runs as one
    * transaction on the row's own provider whose FIRST statement locks the row
    * ({@link adoptStoredServerColumns}); a second writer's lock waits until the first commits, then
-   * reads what the first one landed. Submit's raw slot `UPDATE` takes the same row lock, so it
+   * reads what the first one landed. Submit's conditional slot `UPDATE` (a procedure on SQL Server) takes the same row lock, so it
    * queues behind this turn too. The hook's own re-entrant save runs inside the transaction
    * already held, so it neither opens another nor locks again.
    *

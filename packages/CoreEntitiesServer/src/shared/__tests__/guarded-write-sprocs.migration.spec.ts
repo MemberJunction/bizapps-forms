@@ -119,9 +119,10 @@ describe('#338 guarded-write procedures migration', () => {
       "AND NOT EXISTS (SELECT 1 FROM [${flyway:defaultSchema}].[FormAutomationEvent] o WHERE o.[FormResponseID] = e.[FormResponseID] AND o.[Status] IN ('Pending', 'Running') AND (o.[__mj_CreatedAt] < e.[__mj_CreatedAt] OR (o.[__mj_CreatedAt] = e.[__mj_CreatedAt] AND o.[ID] < e.[ID])))",
     );
     expect(body).toContain('ORDER BY e.[__mj_CreatedAt], e.[ID]');
-    expect(body).toContain('[LockedBy] = @WorkerID');
+    expect(body).toContain("SET [Status] = 'Running', [LockedBy] = @WorkerID");
     expect(body).toContain('[LockedUntil] = DATEADD(SECOND, @LeaseSeconds, SYSDATETIMEOFFSET())');
     expect(body).toContain('[AttemptCount] = [AttemptCount] + 1');
+    expect(body).toContain('[__mj_UpdatedAt] = SYSDATETIMEOFFSET()');
     expect(body).toMatch(
       /OUTPUT inserted\.\[ID\], inserted\.\[FormResponseID\], inserted\.\[Trigger\], inserted\.\[PartialSaveKey\], inserted\.\[AttemptCount\], inserted\.\[IsReplay\]\s+INTO @claimed;/,
     );
@@ -152,11 +153,15 @@ describe('#338 guarded-write procedures migration', () => {
     expect(body).toContain('SELECT @@ROWCOUNT AS [AffectedRows];');
   });
 
-  it('settle: the lease fence, the three Pending CASE arms, and the missing-retry guard', () => {
+  it('settle: the lease fence, the plain SETs, the lease clear, the three Pending CASE arms, and the missing-retry guard', () => {
     const body = bodyOf(code, 'spFormAutomationEventSettle');
     expect(body).toContain('@LastError NVARCHAR(MAX) = NULL');
     expect(body).toContain('@RetryAfterSeconds INT = NULL');
     expect(body).toContain("WHERE [ID] = @ID AND [Status] = 'Running' AND [LockedBy] = @WorkerID");
+    expect(body).toContain('SET [Status] = @Status,');
+    expect(body).toContain('[LastError] = @LastError,');
+    expect(body).toContain('[LockedBy] = NULL, [LockedUntil] = NULL,');
+    expect(body).toContain('[__mj_UpdatedAt] = SYSDATETIMEOFFSET()');
     expect(body).toContain("[NextAttemptAt] = CASE WHEN @Status = 'Pending' THEN DATEADD(SECOND, @RetryAfterSeconds, SYSDATETIMEOFFSET()) ELSE [NextAttemptAt] END");
     expect(body).toContain("[CompletedAt] = CASE WHEN @Status = 'Pending' THEN NULL ELSE SYSDATETIMEOFFSET() END");
     expect(body).toContain("[IsReplay] = CASE WHEN @Status = 'Pending' THEN [IsReplay] ELSE 0 END");
@@ -171,14 +176,26 @@ describe('#338 guarded-write procedures migration', () => {
     expect(body).toContain('SELECT @@ROWCOUNT AS [AffectedRows];');
   });
 
-  it('replay: fenced on DeadLetter', () => {
+  it('replay: fenced on DeadLetter, and resets all seven columns', () => {
     const body = bodyOf(code, 'spFormAutomationEventReplay');
     expect(body).toContain("WHERE [ID] = @ID AND [Status] = 'DeadLetter'");
+    for (const clause of [
+      "[Status] = 'Pending'",
+      '[AttemptCount] = 0',
+      '[IsReplay] = 1',
+      '[NextAttemptAt] = SYSDATETIMEOFFSET()',
+      '[LastError] = NULL',
+      '[CompletedAt] = NULL',
+      '[__mj_UpdatedAt] = SYSDATETIMEOFFSET()',
+    ]) {
+      expect(body).toContain(clause);
+    }
     expect(body).toContain('SELECT @@ROWCOUNT AS [AffectedRows];');
   });
 
   it('bring-forward: only this response’s waiting OnPartial events', () => {
     const body = bodyOf(code, 'spFormAutomationEventBringPartialsForward');
+    expect(body).toContain(`UPDATE ${SCHEMA}.[FormAutomationEvent] SET [NextAttemptAt] = SYSDATETIMEOFFSET()`);
     expect(body).toContain(
       "WHERE [FormResponseID] = @FormResponseID AND [Trigger] = 'OnPartial' AND [Status] = 'Pending' AND [NextAttemptAt] > SYSDATETIMEOFFSET()",
     );

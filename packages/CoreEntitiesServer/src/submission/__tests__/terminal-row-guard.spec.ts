@@ -104,6 +104,16 @@ describe('updateResponse takes the row before it judges it', () => {
     expect(lock?.sql).toBe(`EXEC [__mj_BizAppsForms].[spFormResponseLockRow] @ID = '${responseId}'`);
   });
 
+  it('names the response it could not lock when FormResponse is missing from metadata (SQL Server)', async () => {
+    const { fake, responseId } = contextFor('Partial');
+    const real = fake.provider.EntityByName;
+    fake.provider.EntityByName = (name: string) => (name === 'MJ_BizApps_Forms: Form Responses' ? undefined : real(name));
+
+    await expect(persistSubmission(fake.provider, inputsFor(responseId), makeContextUser())).rejects.toThrow(
+      new RegExp(`response ${responseId} cannot be locked`),
+    );
+  });
+
   it('spells the lock FOR UPDATE on PostgreSQL', async () => {
     const responseId = '33333333-4444-4555-8666-777777777777';
     const fake = makeFakeProvider({

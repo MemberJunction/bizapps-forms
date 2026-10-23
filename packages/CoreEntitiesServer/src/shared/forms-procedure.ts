@@ -43,7 +43,8 @@ export function formsProcedureCall(
 
 /**
  * {@link formsProcedureCall} for a caller that already holds the entity's schema name — an entity
- * server subclass reading its own `EntityInfo`, whose provider is typed without `EntityByName`.
+ * server subclass reading its own `EntityInfo`, whose provider is typed without `EntityByName`, or
+ * a caller that looks the entity up itself so its missing-metadata error can name the record.
  */
 export function procedureCallInSchema(
   provider: Pick<DatabaseProviderBase, 'QuoteSchemaAndView'>,
@@ -64,8 +65,9 @@ function renderParam(procedure: string, name: string, value: ProcedureParamValue
     return 'NULL';
   }
   if (typeof value === 'number') {
-    if (!Number.isInteger(value)) {
-      throw new Error(`${procedure}: parameter @${name} must be an integer; got ${String(value)}.`);
+    // Safe integers only: a larger one (1e21) stringifies as `1e+21`, which T-SQL does not parse.
+    if (!Number.isSafeInteger(value)) {
+      throw new Error(`${procedure}: parameter @${name} must be a safe integer; got ${String(value)}.`);
     }
     return String(value);
   }

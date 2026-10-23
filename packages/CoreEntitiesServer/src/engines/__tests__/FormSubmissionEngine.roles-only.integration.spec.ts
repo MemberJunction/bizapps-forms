@@ -14,6 +14,13 @@
  * engine, the outbox store and the staff save run on — and the global provider while the tests run,
  * so a path that falls back to it runs as the roles too.
  *
+ * THE LOGIN IS CHECKED BEFORE ANYTHING RUNS. A `db_owner` or `sysadmin` login (the `.env` one, say)
+ * may write the base tables directly, so with it every test here passes even if a path is raw SQL
+ * again — the spec would prove nothing. So `openWorld` first asks the database, AS the roles login,
+ * whether it is `db_owner` or `sysadmin`, or may UPDATE `FormDistribution` / `FormAutomationEvent`
+ * or SELECT `FormResponse`; if it can do any of that, the run stops with an error naming the login
+ * and what it holds, before a fixture is built.
+ *
  * OPT-IN. Skipped unless all three of these are set:
  *  - `FORMS_INTEGRATION_DB` — the repo `.env` names a sandbox database with the Forms migrations;
  *  - `FORMS_INTEGRATION_ROLES_USERNAME` and `FORMS_INTEGRATION_ROLES_PASSWORD` — a SQL login that is a
@@ -38,7 +45,7 @@ import '../../index.js'; // registers the entity server subclasses the fixture b
 import { SetProvider, UserInfo, type DatabaseProviderBase } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import { FormAuthoringEngine } from '../FormAuthoringEngine.js';
-import { FormSubmissionEngine } from '../FormSubmissionEngine.js';
+import { FormSubmissionEngine, QUOTA_REACHED_MESSAGE } from '../FormSubmissionEngine.js';
 import { FormsRateLimiter } from '../../submission/rate-limit.js';
 import { replayDeadLetteredEvent, sqlOutboxStore } from '../../automation/outbox/claim.js';
 import type { RespondentSaveRequest } from '../../submission/save-request.js';
@@ -52,8 +59,8 @@ const ENABLED = Boolean(process.env.FORMS_INTEGRATION_DB && ROLES_USERNAME && RO
 /** These specs assert what a save WROTE and drive the outbox by hand; the post-commit drain would race them. */
 const NO_DRAIN = (): void => undefined;
 
-/** The form-level quota the quota fixture's published snapshot carries. */
-const FORM_QUOTA = 5;
+/** The form-level quota the quota fixture's published snapshot carries: one, so a second final is refused. */
+const FORM_QUOTA_OF_ONE = 1;
 
 interface Fixture {
   formId: string;
@@ -115,37 +122,121 @@ async function buildFixture(admin: DatabaseProviderBase, system: UserInfo, label
   return { formId: built.formId, versionId: version.Results[0].ID, questionId: question.Results[0].ID };
 }
 
-async function openWorld(): Promise<World> {
-  process.loadEnvFile(fileURLToPath(new URL('../../../../../.env', import.meta.url)));
-  const admin = await openProvider(process.env.DB_USERNAME, process.env.DB_PASSWORD);
-  SetProvider(admin.provider);
-  await UserCache.Instance.Refresh(admin.provider);
-  const system = UserCache.Instance.GetSystemUser();
-  if (!system) {
-    throw new Error(`No system user in ${process.env.DB_DATABASE}; the roles-only spec needs MJ's core data.`);
-  }
-  const plain = await buildFixture(admin.provider, system, 'plain');
-  const quota = await buildFixture(admin.provider, system, 'quota');
-  // The submit reads FormSettings from the published snapshot; the blueprint has no quota knob.
-  await admin.provider.ExecuteSQL(
-    `UPDATE __mj_BizAppsForms.FormVersion SET DefinitionSnapshot = JSON_MODIFY(DefinitionSnapshot, '$.settings.quota', ${FORM_QUOTA}) WHERE ID = '${quota.versionId}'`,
+/** What the roles login may do, as the database reports it to that login. 1 means yes. */
+interface LoginRights {
+  LoginName: string;
+  IsDbOwner: number | null;
+  IsSysadmin: number | null;
+  CanUpdateFormDistribution: number | null;
+  CanUpdateFormAutomationEvent: number | null;
+  CanSelectFormResponse: number | null;
+}
+
+/**
+ * Throws unless `roles` is really restricted (see the header). It runs AS that login, so the answer
+ * is about its own rights. `HAS_PERMS_BY_NAME` can answer NULL for a table the login cannot even
+ * see; that is no permission too, so only a 1 counts as a right.
+ */
+async function assertRolesOnlyLogin(roles: DatabaseProviderBase, system: UserInfo): Promise<void> {
+  const [rights] = await roles.ExecuteSQL<LoginRights>(
+    `SELECT SUSER_SNAME() AS LoginName, IS_ROLEMEMBER('db_owner') AS IsDbOwner, IS_SRVROLEMEMBER('sysadmin') AS IsSysadmin, ` +
+      `HAS_PERMS_BY_NAME('__mj_BizAppsForms.FormDistribution', 'OBJECT', 'UPDATE') AS CanUpdateFormDistribution, ` +
+      `HAS_PERMS_BY_NAME('__mj_BizAppsForms.FormAutomationEvent', 'OBJECT', 'UPDATE') AS CanUpdateFormAutomationEvent, ` +
+      `HAS_PERMS_BY_NAME('__mj_BizAppsForms.FormResponse', 'OBJECT', 'SELECT') AS CanSelectFormResponse`,
     undefined,
     undefined,
     system,
   );
-  const roles = await openProvider(ROLES_USERNAME, ROLES_PASSWORD);
-  SetProvider(roles.provider);
-  return {
-    admin: admin.provider,
-    roles: roles.provider,
-    system,
-    plain,
-    quota,
-    close: async () => {
-      await roles.pool.close();
-      await admin.pool.close();
-    },
-  };
+  if (!rights) {
+    throw new Error(`The rights check for FORMS_INTEGRATION_ROLES_USERNAME=${ROLES_USERNAME} returned no row.`);
+  }
+  const held = [
+    rights.IsDbOwner === 1 && 'db_owner',
+    rights.IsSysadmin === 1 && 'sysadmin',
+    rights.CanUpdateFormDistribution === 1 && 'UPDATE on __mj_BizAppsForms.FormDistribution',
+    rights.CanUpdateFormAutomationEvent === 1 && 'UPDATE on __mj_BizAppsForms.FormAutomationEvent',
+    rights.CanSelectFormResponse === 1 && 'SELECT on __mj_BizAppsForms.FormResponse',
+  ].filter((right): right is string => typeof right === 'string');
+  if (held.length > 0) {
+    throw new Error(
+      `FORMS_INTEGRATION_ROLES_USERNAME=${ROLES_USERNAME} (login ${rights.LoginName}) is not a roles-only login: it holds ${held.join(', ')}. ` +
+        'With table rights a raw base-table statement succeeds, so this spec would pass without proving anything. ' +
+        'Use a login that is a member of only cdp_Developer, cdp_Integration and cdp_UI (see this file\'s header).',
+    );
+  }
+}
+
+/**
+ * Both providers, the roles login proven restricted, then the fixtures. The check comes before any
+ * fixture so a wrong login leaves nothing behind; if anything throws part-way, the fixtures built
+ * so far are deleted and every pool opened is closed before the error propagates.
+ */
+async function openWorld(): Promise<World> {
+  process.loadEnvFile(fileURLToPath(new URL('../../../../../.env', import.meta.url)));
+  const pools: Pool[] = [];
+  const builtFormIds: string[] = [];
+  let admin: DatabaseProviderBase | undefined;
+  let system: UserInfo | undefined;
+  try {
+    const adminConnection = await openProvider(process.env.DB_USERNAME, process.env.DB_PASSWORD);
+    pools.push(adminConnection.pool);
+    admin = adminConnection.provider;
+    const rolesConnection = await openProvider(ROLES_USERNAME, ROLES_PASSWORD);
+    pools.push(rolesConnection.pool);
+    SetProvider(admin);
+    await UserCache.Instance.Refresh(admin);
+    system = UserCache.Instance.GetSystemUser();
+    if (!system) {
+      throw new Error(`No system user in ${process.env.DB_DATABASE}; the roles-only spec needs MJ's core data.`);
+    }
+    await assertRolesOnlyLogin(rolesConnection.provider, system);
+
+    const plain = await buildFixture(admin, system, 'plain');
+    builtFormIds.push(plain.formId);
+    const quota = await buildFixture(admin, system, 'quota');
+    builtFormIds.push(quota.formId);
+    // The submit reads FormSettings from the published snapshot; the blueprint has no quota knob.
+    await admin.ExecuteSQL(
+      `UPDATE __mj_BizAppsForms.FormVersion SET DefinitionSnapshot = JSON_MODIFY(DefinitionSnapshot, '$.settings.quota', ${FORM_QUOTA_OF_ONE}) WHERE ID = '${quota.versionId}'`,
+      undefined,
+      undefined,
+      system,
+    );
+    SetProvider(rolesConnection.provider);
+    return {
+      admin,
+      roles: rolesConnection.provider,
+      system,
+      plain,
+      quota,
+      close: () => closePools(pools),
+    };
+  } catch (error) {
+    const unwindFailures: unknown[] = [];
+    if (admin && system && builtFormIds.length > 0) {
+      await deleteForms(admin, system, builtFormIds).catch((cleanupError: unknown) => unwindFailures.push(cleanupError));
+    }
+    await closePools(pools).catch((closeError: unknown) => unwindFailures.push(closeError));
+    if (unwindFailures.length > 0) {
+      throw new AggregateError([error, ...unwindFailures], `openWorld failed (${String(error)}), and undoing its partial setup failed too.`);
+    }
+    throw error;
+  }
+}
+
+/** Closes every pool, newest first, even when one close fails; then rethrows the first failure. */
+async function closePools(pools: Pool[]): Promise<void> {
+  const failures: unknown[] = [];
+  for (const pool of [...pools].reverse()) {
+    try {
+      await pool.close();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`Closing the roles-only spec's connection pools failed: ${String(failures[0])}`, { cause: failures[0] });
+  }
 }
 
 /** A new Active link on `fixture`, created by the `.env` login. */
@@ -213,8 +304,9 @@ async function savedResponse(w: World): Promise<string> {
   return request.clientResponseId!.toLowerCase();
 }
 
-async function deleteEverything(w: World): Promise<void> {
-  for (const formId of [w.plain.formId, w.quota.formId]) {
+/** Deletes every row the spec wrote under `formIds`, as the `.env` login. */
+async function deleteForms(admin: DatabaseProviderBase, system: UserInfo, formIds: string[]): Promise<void> {
+  for (const formId of formIds) {
     const statements = [
       `DELETE run FROM __mj_BizAppsForms.FormAutomationRun run JOIN __mj_BizAppsForms.FormResponse r ON r.ID = run.FormResponseID WHERE r.FormID = '${formId}'`,
       `DELETE e FROM __mj_BizAppsForms.FormAutomationEvent e JOIN __mj_BizAppsForms.FormResponse r ON r.ID = e.FormResponseID WHERE r.FormID = '${formId}'`,
@@ -230,7 +322,7 @@ async function deleteEverything(w: World): Promise<void> {
       `DELETE FROM __mj_BizAppsForms.Form WHERE ID = '${formId}'`,
     ];
     for (const statement of statements) {
-      await asAdmin(w, statement);
+      await admin.ExecuteSQL(statement, undefined, undefined, system);
     }
   }
 }
@@ -245,7 +337,7 @@ describe.skipIf(!ENABLED)('the submit path and the outbox on a roles-only login 
       return;
     }
     try {
-      await deleteEverything(world);
+      await deleteForms(world.admin, world.system, [world.plain.formId, world.quota.formId]);
     } finally {
       await world.close();
       world = undefined;
@@ -282,15 +374,22 @@ describe.skipIf(!ENABLED)('the submit path and the outbox on a roles-only login 
     expect(await responseCount(w, link.id)).toBe(1);
   }, 60_000);
 
-  it('a final on a form with FormSettings.quota set takes the form lock and completes', async () => {
+  it('a form with FormSettings.quota of 1 takes the form lock: the first final completes, a second is refused for the quota', async () => {
+    // The link is unlimited, so only the form-level quota can refuse the second final — and it can
+    // only say QUOTA_REACHED if the quota was read and the locked count ran as the roles login (a
+    // refused lock would surface as the generic submit failure instead).
     const w = world!;
-    FormsRateLimiter.Instance.resetForTests();
     const link = await issueLink(w, w.quota, null);
-    const request = finalSave(w.quota, link.slug, 'quota');
+    const user = respondentFor(w, link.id);
 
-    const result = await FormSubmissionEngine.Instance.SaveResponse(request, w.roles, respondentFor(w, link.id), { kick: NO_DRAIN });
+    FormsRateLimiter.Instance.resetForTests();
+    const first = await FormSubmissionEngine.Instance.SaveResponse(finalSave(w.quota, link.slug, 'quota-first'), w.roles, user, { kick: NO_DRAIN });
+    expect(first, JSON.stringify(first.errors)).toMatchObject({ success: true, status: 'Complete' });
 
-    expect(result, JSON.stringify(result.errors)).toMatchObject({ success: true, status: 'Complete' });
+    FormsRateLimiter.Instance.resetForTests();
+    const second = await FormSubmissionEngine.Instance.SaveResponse(finalSave(w.quota, link.slug, 'quota-second'), w.roles, user, { kick: NO_DRAIN });
+    expect(second.success, JSON.stringify(second)).toBe(false);
+    expect(second.errors[0]?.message).toBe(QUOTA_REACHED_MESSAGE);
     expect(await responseCount(w, link.id)).toBe(1);
   }, 60_000);
 

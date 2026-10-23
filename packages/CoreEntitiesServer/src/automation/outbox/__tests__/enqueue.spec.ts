@@ -65,6 +65,16 @@ describe('OUTBOX_RESPONSE_SUBMITTED.Publish', () => {
     expect(pull?.sql).toBe(`EXEC [__mj_BizAppsForms].[spFormAutomationEventBringPartialsForward] @FormResponseID = '${RESPONSE}'`);
   });
 
+  it('names the response when the events entity is missing from metadata, so the procedure cannot be called', async () => {
+    const db = world();
+    const real = db.provider.EntityByName;
+    db.provider.EntityByName = (name: string) => (name === EVENTS ? undefined : real(name));
+
+    await expect(OUTBOX_RESPONSE_SUBMITTED.Publish(payload(), db.provider, makeContextUser())).rejects.toThrow(
+      new RegExp(`response ${RESPONSE}'s automations cannot be queued`),
+    );
+  });
+
   it('brings the waiting partials forward with the raw UPDATE on PostgreSQL, only those still waiting', async () => {
     const db = makeFakeProvider({ platform: 'postgresql', tables: { [EVENTS]: [] } });
 

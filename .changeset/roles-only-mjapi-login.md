@@ -6,8 +6,8 @@
 ---
 
 Forms now works on a host whose MJAPI database login holds only MJ's three roles, `cdp_Developer`,
-`cdp_Integration` and `cdp_UI` (#338). Before, every respondent final submit and partial save failed
-with "Something went wrong while submitting your response", and the automation outbox could not
+`cdp_Integration` and `cdp_UI` (#338). Before, every respondent final submit, and every partial save
+after a response's first, failed with "Something went wrong while submitting your response", and the automation outbox could not
 claim, settle, renew or replay an event: those paths ran raw SQL against Forms base tables, and MJ's
 roles get `SELECT` on views and `EXECUTE` on procedures, never table rights. A `db_owner` login, as on
 most dev boxes, never showed it.

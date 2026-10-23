@@ -40,6 +40,8 @@ describe('formsProcedureCall', () => {
     ['a fraction', 1.5],
     ['NaN', Number.NaN],
     ['Infinity', Number.POSITIVE_INFINITY],
+    // An integer, but String() renders it `1e+21`, which is not T-SQL.
+    ['an unsafe integer (1e21)', 1e21],
   ])('throws naming the parameter when a number is %s', (_label, value) => {
     expect(() => formsProcedureCall(provider, FORMS_ENTITY.Form, 'spX', { BatchSize: value })).toThrow(/BatchSize/);
   });
