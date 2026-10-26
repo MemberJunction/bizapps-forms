@@ -302,26 +302,62 @@ describe('SaveResponse — the beforeCommit seam (#339)', () => {
     expect(seamed.transactions).toEqual(plain.transactions);
   });
 
-  it('is awaited after the read-time checks and before the transaction opens', async () => {
+  it('is awaited: no transaction begins until the seam settles', async () => {
     const fake = fakeFor({ distribution: makeDistribution({ MaxResponses: 5, ResponseCount: 0 }) });
-    const atSeam: { transactions: string[]; slotTaken: boolean }[] = [];
+    let open!: () => void;
+    const opened = new Promise<void>((r) => (open = r));
+    let arrived!: () => void;
+    const atSeam = new Promise<void>((r) => (arrived = r));
+    let settled = false;
+
+    const saving = saveThroughEngine(
+      {
+        ...ctxFor(fake),
+        beforeCommit: async () => {
+          arrived();
+          await opened;
+        },
+      },
+      ADULT,
+    ).finally(() => (settled = true));
+    await atSeam;
+    // Give an un-awaited seam every chance to let the save run on into its transaction.
+    for (let turn = 0; turn < 5; turn++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+
+    expect(fake.transactions).toEqual([]);
+    expect(settled).toBe(false);
+    open();
+    expect((await saving).success).toBe(true);
+    expect(fake.transactions).toEqual(['begin', 'commit']);
+  });
+
+  it('runs after every read-time check: no read happens between the seam and the transaction', async () => {
+    // A new draft (no row yet, not a completion) runs every read-time gate, the draft ceiling included.
+    const fake = fakeFor({ distribution: makeDistribution({ MaxResponses: 5, ResponseCount: 0 }) });
+    const reads = (): number => fake.viewCalls.length + fake.queryCalls.length + fake.statements.length;
+    let readsAtSeam = -1;
+    let readsAtBegin = -1;
+    const begin = fake.provider.BeginEntityTransaction!.bind(fake.provider);
+    fake.provider.BeginEntityTransaction = async () => {
+      readsAtBegin = reads();
+      return begin();
+    };
 
     const result = await saveThroughEngine(
       {
         ...ctxFor(fake),
         beforeCommit: async () => {
-          atSeam.push({
-            transactions: [...fake.transactions],
-            slotTaken: fake.statements.some((s) => /spFormDistributionConsumeResponseSlot/.test(s.sql)),
-          });
+          readsAtSeam = reads();
         },
       },
-      ADULT,
+      { ...ADULT, partial: true },
     );
 
     expect(result.success).toBe(true);
-    expect(atSeam).toEqual([{ transactions: [], slotTaken: false }]);
-    expect(fake.transactions).toEqual(['begin', 'commit']);
+    expect(readsAtSeam).toBeGreaterThan(0);
+    expect(readsAtSeam).toBe(readsAtBegin);
   });
 
   it('is never reached by a save the quota pre-check refuses', async () => {

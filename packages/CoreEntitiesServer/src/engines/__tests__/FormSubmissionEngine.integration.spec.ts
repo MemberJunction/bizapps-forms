@@ -3,13 +3,19 @@
  * cannot prove because both are claims about what the database does:
  *  - DW9: two concurrent final saves on a link with `MaxResponses = 1` yield one success and one
  *    quota refusal, and `ResponseCount` ends at 1 — and the refusal comes from the conditional
- *    UPDATE. The spec forces that order from inside the engine with the `beforeCommit` seam: both
- *    saves read `ResponseCount` 0 and pass the read-time pre-check, then the first enters its
- *    transaction and holds it open at the publish, and only then does the second enter its own — so
- *    the only thing left that can refuse it is the UPDATE;
+ *    UPDATE. The spec forces the order: both saves read `ResponseCount` 0 and pass the read-time
+ *    pre-check (held at the engine's `beforeCommit` seam), the first takes the slot and holds its
+ *    transaction open at the publish, and the first is released only once the second's transaction
+ *    is open and has sent its first statement — so the two transactions overlap, and the only thing
+ *    left that can refuse the second is the UPDATE;
  *  - promotion of ONE draft by two concurrent finals (review finding 2) takes ONE slot and queues ONE
- *    message: both read the draft as Partial, the first seals it inside its held transaction, and the
- *    second, let in after, finds it sealed;
+ *    message: both read the draft as Partial before either transaction opens; the first then takes
+ *    the row lock (`lockResponseRow`) and is held right there, before it writes anything; the second
+ *    asks for the same row inside its own transaction; only then is the first released. With the
+ *    lock, the second waits, reads the row after the first commits, and finds it sealed. Without it,
+ *    the second reads Partial while the first is held and promotes it too; its second final event is
+ *    then refused by `UQ_FormAutomationEvent_Final`, and the retry fails instead of answering with
+ *    the sealed row — which this test fails on (verified by deleting the lock, 5 runs of 5);
  *  - DW10: a final save writes the response and its `FormAutomationEvent` in ONE transaction — a
  *    forced failure AFTER the event is written leaves neither the response nor the event;
  *  - final review I2: a distribution copy loaded BEFORE a submission (the builder's), saved after it,
@@ -20,7 +26,9 @@
  * (connection from the repo `.env`) with the Forms migrations applied, the `FormAutomationEvent`
  * outbox included. The login needs `db_owner` of that database and no server-level permission:
  * the spec never reads another session's state (#339 — it used to poll a server-wide DMV for the
- * blocked save, which shows other sessions only to a login holding `VIEW SERVER STATE`). Run it with:
+ * blocked save, which shows other sessions only to a login holding `VIEW SERVER STATE`). It orders
+ * the two saves from their own side instead: the `beforeCommit` seam, and {@link watchStatements}
+ * on each save's own provider instance. Run it with:
  *
  *   cd packages/CoreEntitiesServer && FORMS_INTEGRATION_DB=1 npx vitest run src/engines/__tests__/FormSubmissionEngine.integration.spec.ts
  *
@@ -220,6 +228,47 @@ function door(): Door {
   };
 }
 
+/** What {@link watchStatements} reports about one provider instance's transaction. */
+interface StatementWatch {
+  /** Resolves when the instance SENDS its first statement inside a transaction — its transaction is open. */
+  readonly firstInTransactionSent: Promise<void>;
+  /** Resolves when that first statement has RETURNED (and the instance then waits for `hold`, if given). */
+  readonly firstInTransactionDone: Promise<void>;
+}
+
+/**
+ * Watch the statements one save's OWN provider instance sends, through its public `ExecuteSQL` and
+ * `TransactionDepth` — so a test can order two saves at statement boundaries inside their
+ * transactions without reading another session's state, which a `db_owner`-only login cannot (#339).
+ * With `hold`, the instance pauses right after its first in-transaction statement returns, keeping
+ * whatever that statement locked, until `hold` resolves. Install it on a fresh independent instance
+ * only: the wrapper lives until the instance is released.
+ */
+function watchStatements(provider: DatabaseProviderBase, hold?: Promise<void>): StatementWatch {
+  let sent!: () => void;
+  let done!: () => void;
+  const firstInTransactionSent = new Promise<void>((r) => (sent = r));
+  const firstInTransactionDone = new Promise<void>((r) => (done = r));
+  let seen = false;
+  const original = provider.ExecuteSQL;
+  provider.ExecuteSQL = async function <T>(...args: Parameters<DatabaseProviderBase['ExecuteSQL']>): Promise<T[]> {
+    const isFirst = !seen && provider.TransactionDepth > 0;
+    if (isFirst) {
+      seen = true;
+      sent();
+    }
+    const rows = (await original.apply(provider, args)) as T[];
+    if (isFirst) {
+      done();
+      if (hold) {
+        await hold;
+      }
+    }
+    return rows;
+  };
+  return { firstInTransactionSent, firstInTransactionDone };
+}
+
 async function deleteEverything(w: World): Promise<void> {
   const statements = [
     `DELETE run FROM __mj_BizAppsForms.FormAutomationRun run JOIN __mj_BizAppsForms.FormResponse r ON r.ID = run.FormResponseID WHERE r.FormID = '${w.formId}'`,
@@ -272,6 +321,7 @@ describe.skipIf(!ENABLED)('FormSubmissionEngine on SQL Server (DW9, DW10)', () =
     try {
       const requestA = finalSave(w, link.slug, 'session-a');
       const requestB = finalSave(w, link.slug, 'session-b');
+      const watchB = watchStatements(second);
       const a = FormSubmissionEngine.Instance.SaveResponse(requestA, first, user, { queue: heldQueue(gate, firstReachedPublish), kick: NO_DRAIN, beforeCommit: doorA.seam });
       const b = FormSubmissionEngine.Instance.SaveResponse(requestB, second, user, { kick: NO_DRAIN, beforeCommit: doorB.seam });
       // Both have read ResponseCount 0 and passed the pre-check; neither has a transaction yet.
@@ -280,7 +330,10 @@ describe.skipIf(!ENABLED)('FormSubmissionEngine on SQL Server (DW9, DW10)', () =
       doorA.open();
       await reached;
       // B enters its transaction past a pre-check it already passed: only the UPDATE can refuse it.
+      // A is released only once B's transaction is open and its first statement is on the wire, so
+      // the two transactions overlap rather than run one after the other.
       doorB.open();
+      await watchB.firstInTransactionSent;
       release();
       const [resultA, resultB] = await Promise.all([a, b]);
 
@@ -330,20 +383,23 @@ describe.skipIf(!ENABLED)('FormSubmissionEngine on SQL Server (DW9, DW10)', () =
     const [first, second] = await Promise.all([w.provider.CreateIndependentInstance(), w.provider.CreateIndependentInstance()]);
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    let firstReachedPublish!: () => void;
-    const reached = new Promise<void>((r) => (firstReachedPublish = r));
     const doorA = door();
     const doorB = door();
     try {
+      const watchA = watchStatements(first, gate);
+      const watchB = watchStatements(second);
       // Both — B a retry of the same submit — read the draft as Partial and pass every read-time check.
-      const a = FormSubmissionEngine.Instance.SaveResponse(draft, first, user, { queue: heldQueue(gate, firstReachedPublish), kick: NO_DRAIN, beforeCommit: doorA.seam });
+      const a = FormSubmissionEngine.Instance.SaveResponse(draft, first, user, { kick: NO_DRAIN, beforeCommit: doorA.seam });
       const b = FormSubmissionEngine.Instance.SaveResponse(draft, second, user, { kick: NO_DRAIN, beforeCommit: doorB.seam });
       await Promise.all([doorA.reached, doorB.reached]);
-      // A promotes the draft and holds its transaction open at the publish; B, let in after, must
-      // find it sealed and not promote it too.
+      // A's first statement in its transaction is the row lock; A is held right after it, before it
+      // has read the row's status or written anything.
       doorA.open();
-      await reached;
+      await watchA.firstInTransactionDone;
+      // B asks for the same row inside its own transaction while A holds the lock. With the lock B
+      // waits here; without it B reads Partial now and promotes the row a second time.
       doorB.open();
+      await watchB.firstInTransactionSent;
       release();
       const [resultA, resultB] = await Promise.all([a, b]);
 
