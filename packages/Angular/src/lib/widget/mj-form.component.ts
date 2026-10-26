@@ -71,6 +71,7 @@ import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, NOTHING_TO_SAVE, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
 import { FormUploadStore, type UploadFailure } from './core/upload-store';
+import { progressReportingSink } from './core/progress-reporting-sink';
 import { nothingToSubmit } from './core/nothing-to-submit';
 import { passedSubmitPoints } from './core/partial-submit-point';
 import { initialPhaseFor, outcomeForResult, resumedPhaseFor, shouldIgnoreSubmit } from './core/submit-phase';
@@ -436,8 +437,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.form.set(form);
       const runtime = new FormRuntime(form);
       this.runtime.set(runtime);
-      // File answers are committed by the store, not by a view event — see `FormUploadStore.succeed`.
-      this.uploads.connect(runtime);
+      // File answers are committed by the store, not by a view event — see `FormUploadStore.succeed` —
+      // so no `valueChange` reaches `onProgress` for them. The sink reports progress at the commit
+      // instead, or the draft would miss the file until another field blurred (F4).
+      this.uploads.connect(progressReportingSink(runtime, () => this.onProgress()));
       this.autosave?.dispose();
       // Preview never autosaves: the draft it renders is the author's, and nothing about it may be
       // sent to the respondent API. Every autosave entry point no-ops on a null controller.
