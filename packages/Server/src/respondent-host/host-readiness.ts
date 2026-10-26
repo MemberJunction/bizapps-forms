@@ -364,7 +364,8 @@ export function assessDatabaseReadiness(inputs: DatabaseReadinessInputs): string
 
 /**
  * Throw, naming the flag, when the operator opted in with {@link REQUIRE_READ_COMMITTED_SNAPSHOT_ENV}
- * and the database has a readiness problem. Opt-in because failing closed by default would stop
+ * and the database has a readiness problem — including an unknown state (a failed probe), which
+ * also refuses: an operator who asked to be refused wants it verified, not assumed. Opt-in because failing closed by default would stop
  * every existing deployment that has not switched the setting on; mirrors
  * `FORMS_REQUIRE_SESSION_HASH_SALT`.
  */

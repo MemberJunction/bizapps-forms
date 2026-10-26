@@ -330,7 +330,14 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
    *
    * The probe itself never throws: a failed read is logged with what was being read and reported to
    * the assessment as an unknown state, so it is neither swallowed nor allowed to take down an
-   * MJAPI that also serves other apps. The opt-in refusal is thrown from outside that guard.
+   * MJAPI that also serves other apps.
+   *
+   * The opt-in refusal ends the PROCESS (exit code 1) rather than throwing. A throw from this hook
+   * only rejects `createMJServer`'s promise, which the host prints and moves on from; the port never
+   * opens, but the open database pool keeps node alive — a live PID that serves nothing and that a
+   * supervisor cannot tell from a healthy start. `FORMS_REQUIRE_SESSION_HASH_SALT` does not need
+   * this because it runs at module load, where a throw fails the import; this check needs a live
+   * provider, so it cannot move there.
    */
   private async reportDatabaseReadiness(): Promise<void> {
     const probe = await this.probeReadCommittedSnapshot();
@@ -339,7 +346,12 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     for (const reason of reasons) {
       LogError(`[Forms] Database is NOT ready for concurrent authoring: ${reason}`);
     }
-    refuseBootOnDatabaseReadiness(reasons);
+    try {
+      refuseBootOnDatabaseReadiness(reasons);
+    } catch (e) {
+      LogError(e instanceof Error ? e.message : String(e));
+      process.exit(1);
+    }
   }
 
   /** The probe's reading, or `undefined` on PostgreSQL where there is nothing to ask. */

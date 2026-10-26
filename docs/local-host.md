@@ -156,7 +156,7 @@ What a host needs:
   scan) through the other's uncommitted rows; with RCSI **off** that is a deadlock, and the author
   sees "Could not read the form's pages; nothing was published". MJAPI says so at boot — one
   `[Forms] Database is NOT ready for concurrent authoring` error line on SQL Server when it is off
-  — and `FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT=true` makes that boot fail instead (off by default,
+  — and `FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT=true` makes that boot fail instead — the process logs the refusal and exits with code 1, and a probe that cannot read the setting refuses too (off by default,
   so no upgrade breaks).
 
   The pair that first showed it is a **lock order**. Saving a `FormDistribution` takes `UPDLOCK, HOLDLOCK`

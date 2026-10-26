@@ -118,10 +118,46 @@ describe('RespondentHostMiddleware boot — database readiness', () => {
     expect(rcsiLogs().some((l) => l.includes('could not be read'))).toBe(true);
   });
 
-  it('refuses to boot, naming the flag, when the operator opted in and the setting is off', async () => {
+  // A throw out of ConfigureExpressApp only rejects the host's createMJServer promise, which the
+  // harness merely prints; the open DB pool then keeps a live process that serves nothing. So the
+  // refusal must end the process itself. `process.exit` is stubbed: the real one must never run here.
+  it('ends the process with exit code 1, logging the flag, when the operator opted in and the setting is off', async () => {
     process.env[FLAG] = 'true';
     probeReturns(false);
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    try {
+      await new RespondentHostMiddleware().ConfigureExpressApp(express());
 
-    await expect(new RespondentHostMiddleware().ConfigureExpressApp(express())).rejects.toThrow(FLAG);
+      expect(exit).toHaveBeenCalledTimes(1);
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(logError.mock.calls.map((c) => String(c[0])).some((l) => l.startsWith('[Forms]') && l.includes(FLAG) && l.includes('Refusing to boot'))).toBe(true);
+    } finally {
+      exit.mockRestore();
+    }
+  });
+
+  it('also refuses when the opt-in flag is set and the probe failed, since the state is unknown', async () => {
+    process.env[FLAG] = 'true';
+    executeSql.mockRejectedValue(new Error('permission denied'));
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    try {
+      await new RespondentHostMiddleware().ConfigureExpressApp(express());
+
+      expect(exit).toHaveBeenCalledWith(1);
+    } finally {
+      exit.mockRestore();
+    }
+  });
+
+  it('does not exit when the flag is not set, even with the setting off', async () => {
+    probeReturns(false);
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    try {
+      await new RespondentHostMiddleware().ConfigureExpressApp(express());
+
+      expect(exit).not.toHaveBeenCalled();
+    } finally {
+      exit.mockRestore();
+    }
   });
 });
