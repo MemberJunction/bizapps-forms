@@ -23,15 +23,87 @@ const ON_SUBMIT_ACTIONS: Record<string, string> = {
   'Forms: Analyze Written Responses': 'analyze-written-responses.action.ts',
 };
 
-/** The ways these sources produce a code: `ResultCode: 'X'`, a ternary after it, `fail(msg, 'X')`. */
-function codesReturnedBy(source: string): Set<string> {
-  const codes = new Set<string>();
-  for (const m of source.matchAll(/ResultCode:\s*(?:[^'\n,]*\?\s*)?'([A-Z_]+)'(?:\s*:\s*'([A-Z_]+)')?/g)) {
-    codes.add(m[1]);
-    if (m[2]) codes.add(m[2]);
+/** Index just past the string/template literal that opens at `start`. Template `${}` is skipped as opaque. */
+function skipLiteral(src: string, start: number): number {
+  const quote = src[start];
+  let i = start + 1;
+  while (i < src.length && src[i] !== quote) {
+    i += src[i] === '\\' ? 2 : 1;
   }
-  for (const m of source.matchAll(/,\s*'([A-Z_]+)',?\s*\)/g)) {
-    codes.add(m[1]);
+  return i + 1;
+}
+
+/** The text of the last argument of the call whose `(` is at `open`, or undefined if unbalanced. */
+function lastArgumentOf(src: string, open: number): string | undefined {
+  let depth = 0;
+  let argStart = open + 1;
+  let lastNonEmpty = '';
+  for (let i = open; i < src.length; ) {
+    const c = src[i];
+    if (c === "'" || c === '"' || c === '`') {
+      i = skipLiteral(src, i);
+      continue;
+    }
+    if (c === '(' || c === '[' || c === '{') depth++;
+    if (c === ')' || c === ']' || c === '}') {
+      depth--;
+      if (depth === 0) {
+        const tail = src.slice(argStart, i).trim();
+        return tail || lastNonEmpty;
+      }
+    }
+    if (c === ',' && depth === 1) {
+      lastNonEmpty = src.slice(argStart, i).trim() || lastNonEmpty;
+      argStart = i + 1;
+    }
+    i++;
+  }
+  return undefined;
+}
+
+/** `Success: true|false` of the object literal a `ResultCode:` at `at` belongs to (nearest preceding one in its `return`). */
+function successBefore(src: string, at: number): boolean | undefined {
+  const statement = src.slice(Math.max(0, src.lastIndexOf('return', at)), at);
+  const all = [...statement.matchAll(/Success:\s*(true|false)/g)];
+  const last = all[all.length - 1];
+  return last ? last[1] === 'true' : undefined;
+}
+
+/**
+ * Every code a source returns, with the `Success` value it is returned together with. Throws, naming
+ * the file and the text, on any shape it cannot read: a partly blind extractor would let a code slip
+ * past the pin without a failure.
+ */
+function codesReturnedBy(file: string, source: string): Map<string, Set<boolean>> {
+  const codes = new Map<string, Set<boolean>>();
+  const add = (code: string, success: boolean): void => {
+    codes.set(code, (codes.get(code) ?? new Set<boolean>()).add(success));
+  };
+
+  for (const m of source.matchAll(/ResultCode:\s*/g)) {
+    const at = m.index ?? 0;
+    const rest = source.slice(at + m[0].length);
+    const literal = /^'([A-Z_]+)'/.exec(rest);
+    const ternary = /^[^'\n?:]+\?\s*'([A-Z_]+)'\s*:\s*'([A-Z_]+)'/.exec(rest);
+    if (/^resultCode\b/.test(rest)) continue; // the `fail` helper forwarding its parameter; callers are checked below
+    const found = literal ? [literal[1]] : ternary ? [ternary[1], ternary[2]] : undefined;
+    if (!found) {
+      throw new Error(`${file}: cannot read the value after "ResultCode:" in: ${rest.slice(0, 60).split('\n')[0]}`);
+    }
+    const success = successBefore(source, at);
+    if (success === undefined) {
+      throw new Error(`${file}: no "Success: true|false" before "ResultCode: ${found.join(' / ')}"`);
+    }
+    found.forEach((c) => add(c, success));
+  }
+
+  for (const m of source.matchAll(/(?<!function\s)\bfail\(/g)) {
+    const arg = lastArgumentOf(source, (m.index ?? 0) + m[0].length - 1);
+    const literal = arg ? /^'([A-Z_]+)'$/.exec(arg) : null;
+    if (!literal) {
+      throw new Error(`${file}: the last argument of a fail( call is not a string-literal code: ${arg ?? '(unbalanced call)'}`);
+    }
+    add(literal[1], false);
   }
   return codes;
 }
@@ -56,7 +128,7 @@ describe('on-submit action result codes', () => {
 
   for (const [actionName, file] of Object.entries(ON_SUBMIT_ACTIONS)) {
     describe(actionName, () => {
-      const returned = codesReturnedBy(readFileSync(`${HERE}${file}`, 'utf8'));
+      const returned = codesReturnedBy(file, readFileSync(`${HERE}${file}`, 'utf8'));
       const rows = declared.get(actionName) ?? [];
       const declaredNames = new Set(rows.map((r) => r.ResultCode));
 
@@ -65,17 +137,27 @@ describe('on-submit action result codes', () => {
       });
 
       it('declares every code the source returns', () => {
-        expect([...returned].filter((c) => !declaredNames.has(c)).sort()).toEqual([]);
+        expect([...returned.keys()].filter((c) => !declaredNames.has(c)).sort()).toEqual([]);
       });
 
       it('declares no code the source never returns', () => {
         expect([...declaredNames].filter((c) => !returned.has(c)).sort()).toEqual([]);
       });
 
-      it('declares each code once, and marks only SUCCESS and SKIPPED as successes', () => {
+      it('declares each code once', () => {
         expect(rows.length).toBe(declaredNames.size);
+      });
+
+      it('returns no code both with Success true and with Success false', () => {
+        const ambiguous = [...returned].filter(([, successes]) => successes.size > 1).map(([code]) => code);
+        expect(ambiguous).toEqual([]);
+      });
+
+      it('marks IsSuccess as the Success value the action returns with that code', () => {
         for (const row of rows) {
-          expect(row.IsSuccess, row.ResultCode).toBe(row.ResultCode === 'SUCCESS' || row.ResultCode === 'SKIPPED');
+          const successes = returned.get(row.ResultCode);
+          if (!successes || successes.size !== 1) continue; // reported by the two checks above
+          expect(row.IsSuccess, `${actionName}: ${row.ResultCode}`).toBe([...successes][0]);
         }
       });
     });

@@ -403,8 +403,8 @@
           "fields": {
             "ActionID": "@parent:ID",
             "ResultCode": "NOT_SENT",
-            "IsSuccess": false,
-            "Description": "The configured sender declined or could not deliver the email (the default logging sender never delivers)."
+            "IsSuccess": true,
+            "Description": "The action succeeded but sent nothing: the configured sender declined or could not deliver the email (the default logging sender never delivers)."
           },
           "primaryKey": {
             "ID": "1789ADFE-2CA8-4B6D-922C-D5E80DF183DF"
