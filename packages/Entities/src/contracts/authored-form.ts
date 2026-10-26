@@ -124,6 +124,12 @@ export interface AuthoredPageNode {
  *
  * `screens` sits BESIDE `pages`, not inside it: a screen has no page, no position among
  * questions and no answer, so no helper that walks questions can reach one by accident.
+ *
+ * ORDER INVARIANT: `pages`, each page's `questions` and each question's `options` are in display
+ * order (`DisplayOrder`, ties by id). Every producer owes it (the builder's load, the server's
+ * publish `readDraft`); readers rely on it without re-sorting — `ruleInventoryFormOf` takes array
+ * order as reading order, so a tree in database (GUID) order makes it refuse rules that read an
+ * earlier question.
  */
 export interface AuthoredFormTree {
   readonly form: AuthoredFormRow;

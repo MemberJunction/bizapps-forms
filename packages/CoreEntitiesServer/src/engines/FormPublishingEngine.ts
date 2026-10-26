@@ -212,6 +212,9 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
    * has written. A failed read refuses: publishing around a gap (no automations, no live version to
    * retire, version 1 again) is a silent downgrade. The one exception is the style, which degrades
    * to the defaults exactly as the builder's publish did — a theme is not worth a refusal.
+   *
+   * None of the reads carries an `OrderBy`: SQL cannot promise a tie order, so display order is
+   * settled once, in memory, by {@link assembleTree} (`AuthoredFormTree` owes it to its readers).
    */
   private async readDraft(formId: string, provider: DatabaseProviderBase, user: UserInfo): Promise<PublishDraft> {
     const byForm = `FormID=${quoteSqlString(formId)}`;
@@ -397,7 +400,7 @@ function styleOrDefault(result: RunViewResult<unknown> | undefined, styleId: str
  * page at all has nowhere to put one: refused, by name.
  */
 function placePagelessQuestions(questions: readonly QuestionRow[], pages: readonly AuthoredPageRow[], formId: string): QuestionRead[] {
-  const first = [...pages].sort((a, b) => a.DisplayOrder - b.DisplayOrder || a.ID.toLowerCase().localeCompare(b.ID.toLowerCase()))[0];
+  const first = [...pages].sort(byDisplayOrderThenId)[0];
   return questions.map((question) => {
     if (question.PageID) {
       return { ...question, PageID: question.PageID };
@@ -409,8 +412,15 @@ function placePagelessQuestions(questions: readonly QuestionRow[], pages: readon
   });
 }
 
+/** Display order, ties by id (case-insensitive, like every id comparison here) so the order is total. */
+function byDisplayOrderThenId(a: { DisplayOrder: number; ID: string }, b: { DisplayOrder: number; ID: string }): number {
+  return a.DisplayOrder - b.DisplayOrder || a.ID.toLowerCase().localeCompare(b.ID.toLowerCase());
+}
+
 /**
- * The flat rows as the tree the contracts builder and rule gate take. Ids are compared
+ * The flat rows as the tree the contracts builder and rule gate take, in display order (the
+ * invariant `AuthoredFormTree` documents): the rule gate reads array order as reading order, so a
+ * tree in database order refuses rules that read an earlier question. Ids are compared
  * case-insensitively: SQL Server returns uniqueidentifiers upper-case, and a foreign key written by
  * a client may not be.
  */
@@ -426,11 +436,11 @@ function assembleTree(
   const questionsByPage = groupBy(questions, (q) => key(q.PageID));
   return {
     form,
-    pages: pages.map((page) => ({
+    pages: [...pages].sort(byDisplayOrderThenId).map((page) => ({
       entity: page,
-      questions: (questionsByPage.get(key(page.ID)) ?? []).map((question) => ({
+      questions: [...(questionsByPage.get(key(page.ID)) ?? [])].sort(byDisplayOrderThenId).map((question) => ({
         entity: question,
-        options: optionsByQuestion.get(key(question.ID)) ?? [],
+        options: [...(optionsByQuestion.get(key(question.ID)) ?? [])].sort(byDisplayOrderThenId),
       })),
     })),
     screens,
