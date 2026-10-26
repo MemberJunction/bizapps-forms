@@ -25,6 +25,7 @@
 import {
   foldQuestionId,
   isAnswerableQuestionType,
+  matrixAxisOf,
   OFF_LIST_LABEL,
   parseJsonObject,
   type FormQuestionType,
@@ -184,11 +185,6 @@ function numericAggregate(type: FormQuestionType, rows: readonly ValueCountRow[]
   return aggregate;
 }
 
-/** The axis an option is on; absent is a row, as the contract says. */
-function axisOf(option: PublishedFormQuestionOption): 'Row' | 'Column' {
-  return option.matrixAxis ?? 'Row';
-}
-
 /**
  * A Matrix as cell counts: every authored row x column in option order (zeros included), then any
  * cell naming a row or column the author never offered, under {@link OFF_LIST_LABEL}. A response
@@ -196,8 +192,8 @@ function axisOf(option: PublishedFormQuestionOption): 'Row' | 'Column' {
  */
 function matrixCard(question: PublishedFormQuestion, answers: readonly InsightAnswerRow[]): FormsQuestionBreakdown {
   const byOrder = [...question.options].sort((a, b) => a.displayOrder - b.displayOrder);
-  const rows = byOrder.filter((option) => axisOf(option) === 'Row');
-  const columns = byOrder.filter((option) => axisOf(option) === 'Column');
+  const rows = byOrder.filter((option) => matrixAxisOf(option) === 'Row');
+  const columns = byOrder.filter((option) => matrixAxisOf(option) === 'Column');
   const rowValues = new Set(rows.map((option) => option.value));
   const columnValues = new Set(columns.map((option) => option.value));
   const counts = new Map<string, number>();
