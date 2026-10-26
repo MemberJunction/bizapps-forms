@@ -290,7 +290,8 @@ describe('Forms: Upsert Respondent Person', () => {
     // deployment writing every Person as all-nulls looked identical to a healthy one (#60): the
     // form collected no name in this fixture, so these prove the email-derived fallbacks land.
     expect(state.personOnCreate.FirstName).toBe('newperson');
-    expect(state.personOnCreate.LastName).toBe('(unknown)');
+    // Empty, never a placeholder: People requires the column to hold a value, not a name (F13).
+    expect(state.personOnCreate.LastName).toBe('');
     // The response was stamped + saved with the new person's id.
     expect(state.formResponse.RespondentPersonID).toBe('person-new');
     expect(outValue(params, 'PersonID')).toBe('person-new');

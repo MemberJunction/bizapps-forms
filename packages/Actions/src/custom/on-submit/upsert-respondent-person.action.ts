@@ -212,10 +212,13 @@ async function createPerson(
 ): Promise<{ person: mjBizAppsCommonPersonEntity } | { error: string }> {
   const person = await provider.GetEntityObject<mjBizAppsCommonPersonEntity>(PERSON_ENTITY, contextUser);
   person.NewRecord();
-  // FirstName / LastName are required on People; derive sensible fallbacks from email.
+  // People requires both columns to hold a value, not a name. FirstName falls back to the email
+  // local part (real data the respondent gave us). LastName falls back to '' — never a
+  // placeholder: a literal like "(unknown)" is written into a shared table and leaks into every
+  // other app's search, mail-merge and header (F13).
   const fallback = email.split('@')[0];
   person.FirstName = identity.firstName ?? fallback;
-  person.LastName = identity.lastName ?? '(unknown)';
+  person.LastName = identity.lastName ?? '';
   person.Email = email;
   if (identity.phone) {
     person.Phone = identity.phone;
