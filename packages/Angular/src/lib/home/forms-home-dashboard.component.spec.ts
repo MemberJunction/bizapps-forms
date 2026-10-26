@@ -505,3 +505,52 @@ describe('FormsHomeDashboardComponent — Archive asks first (F11)', () => {
     );
   });
 });
+
+describe('FormsHomeDashboardComponent — focus after the Archive question closes (F11, WCAG 2.4.3)', () => {
+  const live: FormSummaryRow = { ...draftRow };
+  const archivedOnly: FormSummaryRow = { ...draftRow, status: 'Closed' };
+
+  /** The template's focus targets, replaced by recorders (the node env renders no DOM). */
+  function withTargets(component: FormsHomeDashboardComponent): string[] {
+    const focused: string[] = [];
+    const target = (name: string, rowId?: string) => ({ nativeElement: { focus: () => focused.push(name), dataset: { rowId } } });
+    const triggers = [target('trigger form-1', 'form-1'), target('trigger form-2', 'form-2')];
+    const surface = component as unknown as { archiveTriggers: unknown; pageTitle: unknown };
+    surface.archiveTriggers = { find: (pred: (r: (typeof triggers)[number]) => boolean) => triggers.find(pred) };
+    surface.pageTitle = target('title');
+    return focused;
+  }
+
+  it("Cancel puts focus back on that row's Archive icon", () => {
+    const component = makeComponent(homeService({}));
+    const focused = withTargets(component);
+    void component.requestArchive(live);
+
+    component.cancelArchive();
+
+    expect(focused).toEqual(['trigger form-1']);
+  });
+
+  it('after a confirmed archive that removes the row, focus goes to the page title, not body', async () => {
+    const component = makeComponent(homeService({ loadForms: async () => [] }));
+    const focused = withTargets(component);
+    await component.loadForms();
+    void component.requestArchive(live);
+
+    await component.confirmArchive(live);
+
+    expect(focused).toEqual(['title']);
+  });
+
+  it('after a confirmed archive that leaves the row visible, focus returns to its icon', async () => {
+    const component = makeComponent(homeService({ loadForms: async () => [archivedOnly] }));
+    const focused = withTargets(component);
+    component.showArchived = true;
+    await component.loadForms();
+    void component.requestArchive(live);
+
+    await component.confirmArchive(live);
+
+    expect(focused).toEqual(['trigger form-1']);
+  });
+});

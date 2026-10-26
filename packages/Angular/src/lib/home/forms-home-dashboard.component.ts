@@ -4,7 +4,9 @@ import {
   Component,
   ElementRef,
   inject,
+  QueryList,
   ViewChild,
+  ViewChildren,
 } from '@angular/core';
 import { DatePipe, Location } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -134,6 +136,14 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   private set archiveConfirmButton(ref: ElementRef<HTMLButtonElement> | undefined) {
     ref?.nativeElement.focus();
   }
+
+  /** Every row's Archive/Restore icon, found by `data-row-id` when focus has to return to one. */
+  @ViewChildren('archiveTrigger')
+  private archiveTriggers?: QueryList<ElementRef<HTMLButtonElement>>;
+
+  /** Stable focus target (`tabindex="-1"`) for when the row that held focus is gone. */
+  @ViewChild('pageTitle')
+  private pageTitle?: ElementRef<HTMLElement>;
 
   /** Unregisters the {@link watchForReturn} listener; released on destroy. */
   private stopWatchingUrl?: () => void;
@@ -354,11 +364,32 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   public async confirmArchive(row: FormSummaryRow): Promise<void> {
     this.confirmingArchive = null;
     await this.toggleArchive(row);
+    // The row usually leaves the list (archived forms are hidden); focus must not fall to <body>.
+    if (this.visibleForms.some((r) => r.id === row.id)) {
+      this.focusArchiveTrigger(row.id);
+    } else {
+      this.pageTitle?.nativeElement.focus();
+    }
   }
 
   public cancelArchive(): void {
+    const rowId = this.confirmingArchive;
     this.confirmingArchive = null;
     this.cdr.markForCheck();
+    if (rowId) {
+      this.focusArchiveTrigger(rowId);
+    }
+  }
+
+  /**
+   * Gives focus back to a row's Archive/Restore icon once the confirm that replaced it is gone
+   * (WCAG 2.4.3: a keyboard user otherwise restarts Tab from the top of the page). The icon is
+   * re-created by the view update, so render synchronously first; `detectChanges` is the one way
+   * to know the element exists before asking for it.
+   */
+  private focusArchiveTrigger(rowId: string): void {
+    this.cdr.detectChanges();
+    this.archiveTriggers?.find((t) => t.nativeElement.dataset['rowId'] === rowId)?.nativeElement.focus();
   }
 
   /**

@@ -1,7 +1,7 @@
 <div class="mjf-page">
   <header class="mjf-page-head">
     <div class="mjf-page-headings">
-      <h1 class="mjf-page-title">Forms</h1>
+      <h1 class="mjf-page-title" #pageTitle tabindex="-1">Forms</h1>
       <p class="mjf-page-sub">{{ summaryLine }}</p>
     </div>
     <div class="mjf-page-actions">
@@ -170,6 +170,8 @@
                   </div>
                 } @else {
                   <button
+                    #archiveTrigger
+                    [attr.data-row-id]="row.id"
                     type="button"
                     class="mjf-btn mjf-btn--quiet mjf-btn--icon mjf-btn--sm"
                     [class.home-archive]="!isArchived(row)"
