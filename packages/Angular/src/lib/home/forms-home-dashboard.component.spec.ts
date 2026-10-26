@@ -9,6 +9,7 @@
  */
 import '@angular/compiler';
 import { ChangeDetectorRef, Injector, runInInjectionContext } from '@angular/core';
+import { Location } from '@angular/common';
 import { NavigationService } from '@memberjunction/ng-shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FormsHomeDashboardComponent } from './forms-home-dashboard.component';
@@ -30,9 +31,22 @@ function homeService(overrides: Partial<HomeServiceSurface>): HomeServiceSurface
   };
 }
 
-function makeComponent(service: HomeServiceSurface): FormsHomeDashboardComponent {
+/** A `Location` whose URL changes the test fires by hand; counts live subscriptions. */
+function fakeLocation() {
+  const listeners = new Set<(url: string, state: unknown) => void>();
+  const location = {
+    onUrlChange: (fn: (url: string, state: unknown) => void) => {
+      listeners.add(fn);
+      return () => void listeners.delete(fn);
+    },
+  };
+  return { location, navigate: (url: string) => listeners.forEach((fn) => fn(url, null)), live: () => listeners.size };
+}
+
+function makeComponent(service: HomeServiceSurface, location: object = fakeLocation().location): FormsHomeDashboardComponent {
   const injector = Injector.create({
     providers: [
+      { provide: Location, useValue: location },
       { provide: FormsHomeService, useValue: service },
       // The failure paths under test never reach navigation; an empty double satisfies the injector.
       { provide: NavigationService, useValue: {} },
@@ -377,5 +391,45 @@ describe('FormsHomeDashboardComponent — reloads heard from elsewhere, and a hu
     expect(component.forms).toEqual([]);
     expect(component.loading).toBe(false);
     component.ngOnDestroy();
+  });
+});
+
+describe('FormsHomeDashboardComponent — re-reads when navigated back to (F10)', () => {
+  const initDashboard = (c: FormsHomeDashboardComponent): void => (c as unknown as { initDashboard(): void }).initDashboard();
+
+  function counting() {
+    let reads = 0;
+    const service = homeService({ loadForms: async () => { reads += 1; return []; } });
+    return { service, reads: () => reads };
+  }
+
+  it('reads once when the URL returns to the Forms home, and not for another route', async () => {
+    const { service, reads } = counting();
+    const url = fakeLocation();
+    const component = makeComponent(service, url.location);
+    initDashboard(component);
+
+    url.navigate('/app/forms/Responses%20%26%20Analytics');
+    await new Promise((settled) => setTimeout(settled, 0));
+    expect(reads()).toBe(0);
+
+    url.navigate('/app/forms/Forms');
+    await vi.waitFor(() => expect(reads()).toBe(1));
+    component.ngOnDestroy();
+  });
+
+  it('stops listening once destroyed', async () => {
+    const { service, reads } = counting();
+    const url = fakeLocation();
+    const component = makeComponent(service, url.location);
+    initDashboard(component);
+    expect(url.live()).toBe(1);
+
+    component.ngOnDestroy();
+    url.navigate('/app/forms');
+    await new Promise((settled) => setTimeout(settled, 0));
+
+    expect(url.live()).toBe(0);
+    expect(reads()).toBe(0);
   });
 });

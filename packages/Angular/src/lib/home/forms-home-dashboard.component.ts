@@ -4,7 +4,7 @@ import {
   Component,
   inject,
 } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { DatePipe, Location } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { BaseDashboard } from '@memberjunction/ng-shared';
 import type { ResourceData } from '@memberjunction/core-entities';
@@ -18,6 +18,7 @@ import { CoalescedLoad } from '../shared/coalesced-load';
 import { FormsHomeService } from './forms-home.service';
 import { FORMS_HOME_CSS } from './forms-home-dashboard.styles';
 import { totalResponses } from './home-aggregations';
+import { isFormsHomeUrl } from './home-route';
 import {
   HOME_ACTION,
   HOME_ENTITY,
@@ -99,6 +100,7 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
 export class FormsHomeDashboardComponent extends BaseDashboard {
   private readonly data = inject(FormsHomeService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly location = inject(Location);
 
   public loading = false;
   public busy = false;
@@ -115,6 +117,8 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
 
   /** MJGlobal subscription behind {@link watchForFormChanges}; released on destroy. */
   private formChanges?: FormsWriteSubscription;
+  /** Unregisters the {@link watchForReturn} listener; released on destroy. */
+  private stopWatchingUrl?: () => void;
 
   public async GetResourceDisplayName(_data: ResourceData): Promise<string> {
     return 'Forms';
@@ -125,7 +129,34 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   }
 
   protected initDashboard(): void {
-    // Nothing to set up beyond the injected service.
+    this.watchForReturn();
+  }
+
+  /**
+   * Re-read when the user navigates back to this page.
+   *
+   * The Explorer wrapper calls `Refresh()` once, at mount, and a respondent's `FormResponse` is
+   * written server-side, so nothing in this browser hears it: the response counts shown after a
+   * trip to another tab were the ones read at mount (F10). `Location.onUrlChange` fires on every
+   * pushState the Explorer router makes; when the new URL is this dashboard's own route
+   * ({@link isFormsHomeUrl}: `/app/forms`, `/app/forms/Forms`) the list is read again.
+   * `@angular/router` is not a dependency of this package, hence `Location`. `loadForms` is
+   * coalesced, so a navigation during a read queues one follow-up, never a second read.
+   *
+   * Deliberately not done: polling or a push channel. A count that changes while this page is on
+   * screen still waits for the next visit or a host Refresh.
+   */
+  private watchForReturn(): void {
+    if (this.stopWatchingUrl) {
+      return;
+    }
+    this.stopWatchingUrl = this.location.onUrlChange((url) => {
+      if (!isFormsHomeUrl(url)) {
+        return;
+      }
+      // Not floating: the coalescer never rejects, and `readForms` shows its own failure.
+      void this.loadForms();
+    });
   }
 
   /**
@@ -163,6 +194,8 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   public ngOnDestroy(): void {
     this.formChanges?.unsubscribe();
     this.formChanges = undefined;
+    this.stopWatchingUrl?.();
+    this.stopWatchingUrl = undefined;
   }
 
   /**
