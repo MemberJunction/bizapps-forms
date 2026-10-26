@@ -38,6 +38,7 @@
 import { randomUUID } from 'node:crypto';
 import { resolveSlug, buildAnswers } from './lib/fixture.mjs';
 import { requireOperation } from './lib/operations.mjs';
+import { redeemHostPage } from './lib/host-page.mjs';
 import { requireDbEnv, sql } from './lib/sqlcmd.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
@@ -83,15 +84,7 @@ async function runOperation(token, sessionId, operationKey, input) {
 
 /** Mint a fresh anonymous session by fetching the public host page, as a real respondent does. */
 async function newAnonymousSession() {
-  const res = await fetch(`${BASE}/f/${SLUG}`);
-  if (res.status !== 200) {
-    throw new Error(`GET /f/${SLUG} returned ${res.status} — is the distribution published with a PublicLinkToken?`);
-  }
-  const token = (await res.text()).match(/data-token="([^"]+)"/)?.[1];
-  if (!token) {
-    throw new Error('host page carried no anonymous session token');
-  }
-  return token;
+  return (await redeemHostPage(BASE, SLUG)).token;
 }
 
 /** A refusal that came from the rate limiter, which is not a result this script can interpret. */

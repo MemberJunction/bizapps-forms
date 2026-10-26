@@ -53,6 +53,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { sessionIdFor } from './lib/session.mjs';
+import { redeemHostPage } from './lib/host-page.mjs';
 import { buildAnswers, resolveSlug } from './lib/fixture.mjs';
 import { definitionQuestions, executeOperation, firstSaveError, saveResponse } from './lib/operations.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
@@ -156,19 +157,15 @@ async function main() {
   console.log(`Respondent-scope smoke test\n  target : ${BASE}\n  slug   : ${SLUG}\n`);
 
   // A real redeemed session, exactly as a respondent gets one. Everything below rides this token.
-  const pageRes = await fetch(`${BASE}/f/${SLUG}`);
-  if (pageRes.status !== 200) {
+  let token;
+  try {
+    ({ token } = await redeemHostPage(BASE, SLUG));
+  } catch (err) {
+    // The helper names the cause; the 409/503 gloss is the part only this suite knows.
     console.error(
-      `\nSMOKE ERROR: GET /f/${SLUG} returned ${pageRes.status}. 409 means either that the ` +
-        'distribution has no PublicLinkToken or that its form has no Published version; 503 means ' +
-        'its OpenAt is in the future (bizapps-forms#118). The page body says which.',
+      `\nSMOKE ERROR: ${err.message}. A 409 means either that the distribution has no PublicLinkToken ` +
+        'or that its form has no Published version; a 503 means its OpenAt is in the future (bizapps-forms#118).',
     );
-    process.exit(1);
-  }
-  const html = await pageRes.text();
-  const token = (html.match(/data-token="([^"]+)"/) || [])[1];
-  if (!token) {
-    console.error('\nSMOKE ERROR: the host page carried no anonymous session token.');
     process.exit(1);
   }
   pass('anonymous session redeemed from the public host page');

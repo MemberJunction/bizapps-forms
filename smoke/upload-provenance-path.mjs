@@ -12,6 +12,7 @@
  *   set -a && . ./.env && set +a && node smoke/upload-provenance-path.mjs
  */
 import { firstSaveError, getRespondentForm, saveResponse } from './lib/operations.mjs';
+import { redeemHostPage } from './lib/host-page.mjs';
 import { buildAnswers, resolveFormId, resolveSlug } from './lib/fixture.mjs';
 import { sql } from './lib/sqlcmd.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
@@ -29,10 +30,7 @@ const fail = (m, d) => { failures++; console.error(`  FAIL  ${m}${d ? `\n       
 const check = (cond, m, d) => (cond ? pass(m) : fail(m, d));
 
 async function session() {
-  const html = await (await fetch(`${BASE}/f/${SLUG}`)).text();
-  const token = (html.match(/data-token="([^"]+)"/) || [])[1];
-  if (!token) throw new Error('no anonymous session token');
-  return token;
+  return (await redeemHostPage(BASE, SLUG)).token;
 }
 
 /**
