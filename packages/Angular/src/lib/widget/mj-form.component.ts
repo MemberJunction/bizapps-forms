@@ -51,8 +51,10 @@ import {
 } from '@mj-biz-apps/forms-entities/contracts';
 
 import {
+  API_UNREACHABLE_LOAD_MESSAGE,
   FORM_UNAVAILABLE_MESSAGE,
   FORMS_API_SERVICE,
+  FormsApiUnreachableError,
   FormUnavailableError,
   SessionExpiredError,
 } from './api/forms-api.interface';
@@ -508,6 +510,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
         // the reason is for whoever opens the console.
         console.warn(`[mj-form] ${err.reason}`);
         this.fail(FORM_UNAVAILABLE_MESSAGE);
+        return;
+      }
+      if (err instanceof FormsApiUnreachableError) {
+        // The error's own sentence promises "your answers are still here", which is false on a first
+        // load where nothing was entered; the load page gets its own wording.
+        console.warn(`[mj-form] the form could not be loaded: ${failureDetail(err)}`);
+        this.fail(API_UNREACHABLE_LOAD_MESSAGE);
         return;
       }
       this.fail(err instanceof Error ? err.message : 'Failed to load the form.');

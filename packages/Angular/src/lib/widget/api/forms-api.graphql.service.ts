@@ -199,6 +199,8 @@ export class FormsGraphQLApiService implements IFormsApiService {
     } catch (err) {
       // `fetch` rejects only when no response arrived; every HTTP status resolves. The browser's
       // TypeError text differs per engine and means nothing to a respondent, so it goes to `reason`.
+      // No AbortSignal is passed today, so every rejection here means no response arrived; any
+      // future timeout/abort must re-throw its AbortError before this mapping.
       throw new FormsApiUnreachableError(failureDetail(err));
     }
     // Read the body BEFORE judging the status. An expired session arrives as a 401 whose body

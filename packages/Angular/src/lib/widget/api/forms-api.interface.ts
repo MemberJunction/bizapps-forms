@@ -114,6 +114,12 @@ export const RESPONSE_NOT_SAVED_MESSAGE = 'Something went wrong while submitting
 export const API_UNREACHABLE_MESSAGE = "You appear to be offline. Your answers are still here — try again when you're connected.";
 
 /**
+ * The same condition on the first load of the form, where nothing has been entered yet, so
+ * {@link API_UNREACHABLE_MESSAGE}'s promise that answers are kept would be false.
+ */
+export const API_UNREACHABLE_LOAD_MESSAGE = 'You appear to be offline. Check your connection and try again.';
+
+/**
  * `Forms.GetRespondentForm` was refused, or served a definition the widget cannot render.
  *
  * `message` is always {@link FORM_UNAVAILABLE_MESSAGE}, which is what the respondent sees; `reason`
