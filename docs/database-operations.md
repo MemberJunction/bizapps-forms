@@ -324,6 +324,12 @@ FORMS_INTEGRATION_DB=1 npx vitest run \
   src/engines/__tests__/FormAuthoringEngine.integration.spec.ts
 ```
 
+The sandbox must have `READ_COMMITTED_SNAPSHOT ON` (a host requirement, see
+[`local-host.md` §5](local-host.md#5-host-requirements-since-303-the-automation-outbox-and-read_committed_snapshot)),
+and the specs are run **together, in parallel**, on purpose: vitest runs the four files at once, so
+they double as a concurrency check. With RCSI off the same command produced seven deadlock errors
+and three failed specs; with it on, none.
+
 | # | Guarantee | Where it is proven |
 |---|---|---|
 | 1 | **DW9** — concurrent final saves never exceed `MaxResponses`; the refusal comes from the conditional slot `UPDATE` | `FormSubmissionEngine.integration.spec.ts`, both DW9 cases |

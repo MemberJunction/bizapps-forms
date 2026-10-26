@@ -316,3 +316,67 @@ export function assessRespondentReadiness(inputs: RespondentReadinessInputs): st
   ];
   return verdicts.flatMap((v) => (v.ready === false ? [v.reason] : []));
 }
+
+/** Opt-in env flag: `true` refuses to boot when {@link assessDatabaseReadiness} finds a reason. */
+export const REQUIRE_READ_COMMITTED_SNAPSHOT_ENV = 'FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT';
+
+/** What {@link assessDatabaseReadiness} needs from the database, as probed at boot. */
+export interface DatabaseReadinessInputs {
+  dialect: 'sqlserver' | 'postgres';
+  /** `sys.databases.is_read_committed_snapshot_on`; `null` when the probe failed (and was logged). */
+  readCommittedSnapshotOn: boolean | null;
+  /** `DB_NAME()`, so the fix can be pasted as written. Absent when the probe failed. */
+  databaseName?: string;
+}
+
+/**
+ * Every reason the DATABASE is not ready for concurrent authoring — empty when it is.
+ *
+ * Forms' structural saves, publish and clone each read through rows another author's open
+ * transaction has just written. Under SQL Server's default READ COMMITTED those reads block on the
+ * other transaction's key locks while it blocks on ours: a deadlock, which the author sees as a
+ * bare "Could not read the form's pages; nothing was published". With READ_COMMITTED_SNAPSHOT the
+ * reads use row versions and never wait. That makes it a host requirement for ANY two concurrent
+ * authoring transactions (#303), not only for a share link racing an archive — and nothing else
+ * enforces it, so this is where it is asked. It is not a migration because switching it needs
+ * exclusive access to the database, which only the host can grant. PostgreSQL is always MVCC.
+ */
+export function assessDatabaseReadiness(inputs: DatabaseReadinessInputs): string[] {
+  if (inputs.dialect === 'postgres' || inputs.readCommittedSnapshotOn === true) {
+    return [];
+  }
+  if (inputs.readCommittedSnapshotOn === null) {
+    return [
+      `whether this database has READ_COMMITTED_SNAPSHOT on could not be read (see the error above), ` +
+        `so the deadlock protection concurrent authoring needs is unverified. Check it with ` +
+        `SELECT is_read_committed_snapshot_on FROM sys.databases WHERE name = DB_NAME().`,
+    ];
+  }
+  const database = inputs.databaseName ?? '<database>';
+  return [
+    `this database has READ_COMMITTED_SNAPSHOT off, so two authors publishing, cloning or saving ` +
+      `structure at the same time can deadlock each other; the author sees "Could not read the ` +
+      `form's pages; nothing was published". Run ALTER DATABASE [${database}] SET ` +
+      `READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE; (needs exclusive access, so it is a host ` +
+      `step). Set ${REQUIRE_READ_COMMITTED_SNAPSHOT_ENV}=true to refuse to boot without it.`,
+  ];
+}
+
+/**
+ * Throw, naming the flag, when the operator opted in with {@link REQUIRE_READ_COMMITTED_SNAPSHOT_ENV}
+ * and the database has a readiness problem. Opt-in because failing closed by default would stop
+ * every existing deployment that has not switched the setting on; mirrors
+ * `FORMS_REQUIRE_SESSION_HASH_SALT`.
+ */
+export function refuseBootOnDatabaseReadiness(
+  reasons: string[],
+  env: Record<string, string | undefined> = process.env,
+): void {
+  if (reasons.length === 0 || (env[REQUIRE_READ_COMMITTED_SNAPSHOT_ENV] ?? '').trim().toLowerCase() !== 'true') {
+    return;
+  }
+  throw new Error(
+    `[Forms] ${REQUIRE_READ_COMMITTED_SNAPSHOT_ENV}=true but the database is not ready: ${reasons.join(' ')} ` +
+      `Refusing to boot. Fix the database, or unset ${REQUIRE_READ_COMMITTED_SNAPSHOT_ENV} to boot anyway.`,
+  );
+}

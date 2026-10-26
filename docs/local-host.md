@@ -150,7 +150,16 @@ What a host needs:
   SELECT is_read_committed_snapshot_on FROM sys.databases WHERE name = '<your database>';  -- 1
   ```
 
-  RCSI matters to Forms for a **lock order**. Saving a `FormDistribution` takes `UPDLOCK, HOLDLOCK`
+  RCSI matters to Forms for **any two concurrent authoring transactions**, not only the one pair
+  below. Two authors publishing, cloning or saving structure at once each hold exclusive key locks
+  on their own new rows and read `vwFormPages` (or the clone's `COUNT(*) FROM Form WHERE Name = …`
+  scan) through the other's uncommitted rows; with RCSI **off** that is a deadlock, and the author
+  sees "Could not read the form's pages; nothing was published". MJAPI says so at boot — one
+  `[Forms] Database is NOT ready for concurrent authoring` error line on SQL Server when it is off
+  — and `FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT=true` makes that boot fail instead (off by default,
+  so no upgrade breaks).
+
+  The pair that first showed it is a **lock order**. Saving a `FormDistribution` takes `UPDLOCK, HOLDLOCK`
   on the link row and then reads its form; archiving a form (`Forms.ArchiveForm`) writes the form and
   then closes its links, which is the opposite order. With RCSI **off**, the reads block on the
   writers and the two can deadlock; SQL Server picks a victim and rolls it back cleanly (nothing
