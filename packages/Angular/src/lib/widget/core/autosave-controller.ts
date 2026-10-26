@@ -13,6 +13,9 @@
  *     capped backoff (`RETRY_DELAYS_MS`) — once the cap is spent the status stays `'error'`, the
  *     host is told (`AutosaveHooks.onRetriesSpent`), and the next edit re-arms the normal debounce (not another backoff retry — `failedAttempts`
  *     resets only on a success), and a final submit carries every answer anyway.
+ *   - told when the network is back: `resume()` is the host's "the road reopened" signal. It re-sends
+ *     a failed save at once and restarts the backoff, so a failing flush re-enters the capped
+ *     schedule from its first delay rather than from where the last run stopped.
  *
  * Framework-free (takes injected `setTimeout`/`clearTimeout`) so it is unit-testable
  * with fake timers and no Angular. The component wires it to signals + the API.
@@ -167,6 +170,22 @@ export class AutosaveController {
     }
     this.flush();
     await this.inFlightSave;
+  }
+
+  /**
+   * The host's "the road reopened" signal (the browser's `online` event). Re-sends a save that
+   * failed — whether a backoff retry is still pending or the cap is already spent — without waiting
+   * for the respondent's next edit. The backoff restarts from its first delay, so if this flush
+   * fails too it re-enters the capped schedule. A no-op when the last save did not fail (nothing to
+   * recover) or after {@link dispose}.
+   */
+  public resume(): void {
+    if (this.disposed || this.settledStatus !== 'error') {
+      return;
+    }
+    this.clearTimer();
+    this.failedAttempts = 0;
+    this.flush();
   }
 
   /** Stop all activity; a controller is dead after this. */

@@ -371,6 +371,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   private responseId: string | undefined;
   private autosave: AutosaveController | null = null;
+  /** The `online` handler while registered — kept so ngOnDestroy removes the same function. */
+  private onlineListener: (() => void) | null = null;
   /** Prefetch of later screens' images; one queue per load (core/prefetch-scheduler.ts). */
   private readonly prefetcher = new PrefetchScheduler(prefetchImages, () => this.destroyed);
   /** Set on destroy: a `load()` still awaiting the network resumes afterwards and must start nothing. */
@@ -395,10 +397,28 @@ export class MjFormComponent implements OnInit, OnDestroy {
   private readonly ledger = new CommitLedger();
 
   public async ngOnInit(): Promise<void> {
+    this.listenForNetwork();
     await this.load();
   }
 
+  /**
+   * A save that failed while the network was down is re-sent the moment the browser says it is back,
+   * instead of at the next backoff tick or the respondent's next edit. Registered once per widget
+   * (not per load) and guarded for non-browser hosts.
+   */
+  private listenForNetwork(): void {
+    if (typeof window === 'undefined' || this.onlineListener) {
+      return;
+    }
+    this.onlineListener = () => this.autosave?.resume();
+    window.addEventListener('online', this.onlineListener);
+  }
+
   public ngOnDestroy(): void {
+    if (this.onlineListener && typeof window !== 'undefined') {
+      window.removeEventListener('online', this.onlineListener);
+    }
+    this.onlineListener = null;
     this.autosave?.dispose();
     this.destroyed = true;
     this.prefetcher.Cancel();
