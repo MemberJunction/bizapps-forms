@@ -41,6 +41,8 @@ export interface EngineSaveContext {
   queue?: ResponseSubmittedQueue;
   /** The post-commit drain; defaults to a no-op so a spec never starts a real drain. */
   kick?: (responseId: string) => void;
+  /** Awaited after the read-time checks and before the transaction; absent by default, as in production. */
+  beforeCommit?: () => Promise<void>;
 }
 
 /** One save — the old `PipelineSubmission`: `partial: true` is an autosave, absent is the final submit. */
@@ -80,6 +82,7 @@ export function saveThroughEngine(ctx: EngineSaveContext, submission: EngineSave
       revokeInvites: ctx.defaultRevoke ? undefined : (ctx.revokeInvites ?? (async () => undefined)),
       queue: ctx.queue ?? recordingQueue(),
       kick: ctx.kick ?? (() => undefined),
+      beforeCommit: ctx.beforeCommit,
     },
   );
 }

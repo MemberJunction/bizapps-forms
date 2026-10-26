@@ -290,6 +290,51 @@ describe('SaveResponse — the quota is decided by the conditional UPDATE, insid
   });
 });
 
+describe('SaveResponse — the beforeCommit seam (#339)', () => {
+  it('adds no SQL: a save with a no-op seam issues exactly the statements a save without one does', async () => {
+    const plain = fakeFor({ distribution: makeDistribution({ MaxResponses: 5, ResponseCount: 0 }) });
+    const seamed = fakeFor({ distribution: makeDistribution({ MaxResponses: 5, ResponseCount: 0 }) });
+
+    await saveThroughEngine(ctxFor(plain), ADULT);
+    await saveThroughEngine({ ...ctxFor(seamed), beforeCommit: async () => undefined }, ADULT);
+
+    expect(seamed.statements.map((s) => s.sql)).toEqual(plain.statements.map((s) => s.sql));
+    expect(seamed.transactions).toEqual(plain.transactions);
+  });
+
+  it('is awaited after the read-time checks and before the transaction opens', async () => {
+    const fake = fakeFor({ distribution: makeDistribution({ MaxResponses: 5, ResponseCount: 0 }) });
+    const atSeam: { transactions: string[]; slotTaken: boolean }[] = [];
+
+    const result = await saveThroughEngine(
+      {
+        ...ctxFor(fake),
+        beforeCommit: async () => {
+          atSeam.push({
+            transactions: [...fake.transactions],
+            slotTaken: fake.statements.some((s) => /spFormDistributionConsumeResponseSlot/.test(s.sql)),
+          });
+        },
+      },
+      ADULT,
+    );
+
+    expect(result.success).toBe(true);
+    expect(atSeam).toEqual([{ transactions: [], slotTaken: false }]);
+    expect(fake.transactions).toEqual(['begin', 'commit']);
+  });
+
+  it('is never reached by a save the quota pre-check refuses', async () => {
+    const fake = fakeFor({ distribution: makeDistribution({ MaxResponses: 1, ResponseCount: 1 }) });
+    const seam = vi.fn(async () => undefined);
+
+    const result = await saveThroughEngine({ ...ctxFor(fake), beforeCommit: seam }, ADULT);
+
+    expect(result.errors[0]?.message).toBe(QUOTA_REACHED_MESSAGE);
+    expect(seam).not.toHaveBeenCalled();
+  });
+});
+
 describe('SaveResponse — one transaction', () => {
   it('a failure part-way through leaves no response, no answers and no slot taken', async () => {
     const fake = fakeFor({ distribution: makeDistribution({ MaxResponses: 5, ResponseCount: 0 }), failSaveFor: 'MJ_BizApps_Forms: Form Response Answers' });

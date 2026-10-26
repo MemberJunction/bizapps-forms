@@ -3,13 +3,13 @@
  * cannot prove because both are claims about what the database does:
  *  - DW9: two concurrent final saves on a link with `MaxResponses = 1` yield one success and one
  *    quota refusal, and `ResponseCount` ends at 1 — and the refusal comes from the conditional
- *    UPDATE: the second save is held until it is BLOCKED by the first's open transaction, by which
- *    time it has already read `ResponseCount` 0 (READ_COMMITTED_SNAPSHOT) and passed the read-time
- *    pre-check — so the only thing left that can refuse it is the UPDATE. (Where it first blocks is
- *    the database's business — its response INSERT's foreign-key check on the link row the first
- *    save holds — not necessarily the UPDATE itself.);
+ *    UPDATE. The spec forces that order from inside the engine with the `beforeCommit` seam: both
+ *    saves read `ResponseCount` 0 and pass the read-time pre-check, then the first enters its
+ *    transaction and holds it open at the publish, and only then does the second enter its own — so
+ *    the only thing left that can refuse it is the UPDATE;
  *  - promotion of ONE draft by two concurrent finals (review finding 2) takes ONE slot and queues ONE
- *    message: the second waits on the draft row's update lock and finds it sealed;
+ *    message: both read the draft as Partial, the first seals it inside its held transaction, and the
+ *    second, let in after, finds it sealed;
  *  - DW10: a final save writes the response and its `FormAutomationEvent` in ONE transaction — a
  *    forced failure AFTER the event is written leaves neither the response nor the event;
  *  - final review I2: a distribution copy loaded BEFORE a submission (the builder's), saved after it,
@@ -18,7 +18,9 @@
  *
  * OPT-IN. Skipped unless `FORMS_INTEGRATION_DB` is set, because it needs the sandbox database
  * (connection from the repo `.env`) with the Forms migrations applied, the `FormAutomationEvent`
- * outbox included. Run it with:
+ * outbox included. The login needs `db_owner` of that database and no server-level permission:
+ * the spec never reads another session's state (#339 — it used to poll a server-wide DMV for the
+ * blocked save, which shows other sessions only to a login holding `VIEW SERVER STATE`). Run it with:
  *
  *   cd packages/CoreEntitiesServer && FORMS_INTEGRATION_DB=1 npx vitest run src/engines/__tests__/FormSubmissionEngine.integration.spec.ts
  *
@@ -47,10 +49,6 @@ import { FORMS_ENTITY } from '../../shared/entity-names.js';
 import type { mjBizAppsFormsFormAutomationRunEntity, mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
 
 const ENABLED = Boolean(process.env.FORMS_INTEGRATION_DB);
-
-/** How many times to look for the second save blocked on the first's row lock before giving up. */
-const MAX_BLOCK_POLLS = 50;
-const BLOCK_POLL_MS = 100;
 
 /** These specs assert what a save WROTE; the post-commit drain would go on to run the events. */
 const NO_DRAIN = (): void => undefined;
@@ -184,36 +182,42 @@ async function responsesWithId(w: World, responseId: string): Promise<number> {
 }
 
 /**
- * A queue that publishes for real, then waits for `gate` before letting its transaction commit —
- * reporting the session id its transaction runs on, so a probe can look for requests IT blocks.
+ * A queue that publishes for real, reports that it got there, then waits for `gate` before letting
+ * its transaction commit — so everything the save wrote before the publish is held, uncommitted.
  */
-function heldQueue(gate: Promise<void>, reached: (spid: number) => void): ResponseSubmittedQueue {
+function heldQueue(gate: Promise<void>, reached: () => void): ResponseSubmittedQueue {
   return {
     Publish: async (payload, provider, user) => {
       await OUTBOX_RESPONSE_SUBMITTED.Publish(payload, provider, user);
-      const [row] = await provider.ExecuteSQL<{ spid: number }>('SELECT @@SPID AS spid', undefined, undefined, user);
-      reached(row.spid);
+      reached();
       await gate;
     },
   };
 }
 
 /**
- * Wait until a request is blocked by session `holder` — the held save's transaction, so a request
- * blocked by anything else in a shared sandbox cannot satisfy it — or fail, by name.
+ * A door on the engine's `beforeCommit` seam: `reached` resolves when the save arrives at it (past
+ * every read-time check, no transaction open yet), and the save waits there until `open()`.
  */
-async function waitForBlockedRequest(w: World, holder: number): Promise<void> {
-  for (let attempt = 1; attempt <= MAX_BLOCK_POLLS; attempt++) {
-    const blocked = await scalar<{ n: number }>(
-      w,
-      `SELECT COUNT(*) AS n FROM sys.dm_exec_requests WHERE blocking_session_id = ${Number(holder)} AND database_id = DB_ID()`,
-    );
-    if (blocked[0].n > 0) {
-      return;
-    }
-    await new Promise((r) => setTimeout(r, BLOCK_POLL_MS));
-  }
-  throw new Error(`The second save never blocked on the first's row lock within ${MAX_BLOCK_POLLS * BLOCK_POLL_MS}ms.`);
+interface Door {
+  readonly seam: () => Promise<void>;
+  readonly reached: Promise<void>;
+  readonly open: () => void;
+}
+
+function door(): Door {
+  let open!: () => void;
+  let arrive!: () => void;
+  const opened = new Promise<void>((r) => (open = r));
+  const reached = new Promise<void>((r) => (arrive = r));
+  return {
+    seam: async () => {
+      arrive();
+      await opened;
+    },
+    reached,
+    open,
+  };
 }
 
 async function deleteEverything(w: World): Promise<void> {
@@ -261,19 +265,22 @@ describe.skipIf(!ENABLED)('FormSubmissionEngine on SQL Server (DW9, DW10)', () =
     const [first, second] = await Promise.all([w.provider.CreateIndependentInstance(), w.provider.CreateIndependentInstance()]);
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    let firstReachedPublish!: (spid: number) => void;
-    const reached = new Promise<number>((r) => (firstReachedPublish = r));
+    let firstReachedPublish!: () => void;
+    const reached = new Promise<void>((r) => (firstReachedPublish = r));
+    const doorA = door();
+    const doorB = door();
     try {
       const requestA = finalSave(w, link.slug, 'session-a');
       const requestB = finalSave(w, link.slug, 'session-b');
+      const a = FormSubmissionEngine.Instance.SaveResponse(requestA, first, user, { queue: heldQueue(gate, firstReachedPublish), kick: NO_DRAIN, beforeCommit: doorA.seam });
+      const b = FormSubmissionEngine.Instance.SaveResponse(requestB, second, user, { kick: NO_DRAIN, beforeCommit: doorB.seam });
+      // Both have read ResponseCount 0 and passed the pre-check; neither has a transaction yet.
+      await Promise.all([doorA.reached, doorB.reached]);
       // A takes the slot and holds its transaction open at the publish.
-      const a = FormSubmissionEngine.Instance.SaveResponse(requestA, first, user, { queue: heldQueue(gate, firstReachedPublish), kick: NO_DRAIN });
-      const holder = await reached;
-      // B reads ResponseCount 0 (A has not committed; READ_COMMITTED_SNAPSHOT) and passes the
-      // pre-check; inside its transaction it then blocks on a lock A holds. From there only the
-      // conditional UPDATE can refuse it.
-      const b = FormSubmissionEngine.Instance.SaveResponse(requestB, second, user, { kick: NO_DRAIN });
-      await waitForBlockedRequest(w, holder);
+      doorA.open();
+      await reached;
+      // B enters its transaction past a pre-check it already passed: only the UPDATE can refuse it.
+      doorB.open();
       release();
       const [resultA, resultB] = await Promise.all([a, b]);
 
@@ -286,6 +293,8 @@ describe.skipIf(!ENABLED)('FormSubmissionEngine on SQL Server (DW9, DW10)', () =
       expect(await messagesFor(w, requestA.clientResponseId!)).toBe(1);
       expect(await messagesFor(w, requestB.clientResponseId!)).toBe(0);
     } finally {
+      doorA.open();
+      doorB.open();
       release();
       await Promise.all([first.ReleaseIndependentInstance(), second.ReleaseIndependentInstance()]);
     }
@@ -321,15 +330,20 @@ describe.skipIf(!ENABLED)('FormSubmissionEngine on SQL Server (DW9, DW10)', () =
     const [first, second] = await Promise.all([w.provider.CreateIndependentInstance(), w.provider.CreateIndependentInstance()]);
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    let firstReachedPublish!: (spid: number) => void;
-    const reached = new Promise<number>((r) => (firstReachedPublish = r));
+    let firstReachedPublish!: () => void;
+    const reached = new Promise<void>((r) => (firstReachedPublish = r));
+    const doorA = door();
+    const doorB = door();
     try {
-      // A promotes the draft and holds its transaction open at the publish; B — a retry of the same
-      // submit — reads the draft as Partial under READ_COMMITTED_SNAPSHOT and must not promote it too.
-      const a = FormSubmissionEngine.Instance.SaveResponse(draft, first, user, { queue: heldQueue(gate, firstReachedPublish), kick: NO_DRAIN });
-      const holder = await reached;
-      const b = FormSubmissionEngine.Instance.SaveResponse(draft, second, user, { kick: NO_DRAIN });
-      await waitForBlockedRequest(w, holder);
+      // Both — B a retry of the same submit — read the draft as Partial and pass every read-time check.
+      const a = FormSubmissionEngine.Instance.SaveResponse(draft, first, user, { queue: heldQueue(gate, firstReachedPublish), kick: NO_DRAIN, beforeCommit: doorA.seam });
+      const b = FormSubmissionEngine.Instance.SaveResponse(draft, second, user, { kick: NO_DRAIN, beforeCommit: doorB.seam });
+      await Promise.all([doorA.reached, doorB.reached]);
+      // A promotes the draft and holds its transaction open at the publish; B, let in after, must
+      // find it sealed and not promote it too.
+      doorA.open();
+      await reached;
+      doorB.open();
       release();
       const [resultA, resultB] = await Promise.all([a, b]);
 
@@ -340,6 +354,8 @@ describe.skipIf(!ENABLED)('FormSubmissionEngine on SQL Server (DW9, DW10)', () =
       expect(await responseCount(w, link.id)).toBe(1);
       expect(await messagesFor(w, draft.clientResponseId!)).toBe(1);
     } finally {
+      doorA.open();
+      doorB.open();
       release();
       await Promise.all([first.ReleaseIndependentInstance(), second.ReleaseIndependentInstance()]);
     }

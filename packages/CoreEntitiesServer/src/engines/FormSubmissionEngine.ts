@@ -128,6 +128,13 @@ export interface SubmissionSeams {
   readonly kick?: (responseId: string) => void;
   /** "Now", for the link's window. */
   readonly now?: Date;
+  /**
+   * Awaited once, after every read-time check (the quota pre-check included) and before the
+   * transaction opens. It lets a concurrency spec order two saves from the inside — both past the
+   * pre-check, then one transaction at a time — instead of watching for a lock wait through a
+   * server-wide DMV a database-scoped login cannot read (#339).
+   */
+  readonly beforeCommit?: () => Promise<void>;
 }
 
 /** What `GetRespondentForm` returns: the projection, and the per-session extras. */
@@ -496,6 +503,9 @@ export class FormSubmissionEngine extends BaseSingleton<FormSubmissionEngine> {
     const trigger = queuedTrigger(resolved.definition, screenedOut ? 'knockout' : complete ? 'completion' : 'partial');
     const queue = seams.queue ?? OUTBOX_RESPONSE_SUBMITTED;
 
+    if (seams.beforeCommit) {
+      await seams.beforeCommit();
+    }
     const committed = await this.commit({
       gate,
       resolved,
