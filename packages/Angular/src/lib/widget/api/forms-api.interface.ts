@@ -107,6 +107,13 @@ export const FORM_UNAVAILABLE_MESSAGE = 'This form is not available.';
 export const RESPONSE_NOT_SAVED_MESSAGE = 'Something went wrong while submitting your response. Please try again.';
 
 /**
+ * The one sentence for a request that never reached the server. Replaces the browser's own
+ * `TypeError` text, which differs per engine ("Failed to fetch", "Load failed", "NetworkError when
+ * attempting to fetch resource.") and says nothing a respondent can act on.
+ */
+export const API_UNREACHABLE_MESSAGE = "You appear to be offline. Your answers are still here — try again when you're connected.";
+
+/**
  * `Forms.GetRespondentForm` was refused, or served a definition the widget cannot render.
  *
  * `message` is always {@link FORM_UNAVAILABLE_MESSAGE}, which is what the respondent sees; `reason`
@@ -128,6 +135,17 @@ export class ResponseNotSavedError extends Error {
   constructor(public readonly reason: string) {
     super(RESPONSE_NOT_SAVED_MESSAGE);
     this.name = 'ResponseNotSavedError';
+  }
+}
+
+/**
+ * The request never got an answer: `fetch` rejected (offline, DNS, connection reset, CORS). `message`
+ * is {@link API_UNREACHABLE_MESSAGE}; `reason` carries the browser's own text for the console.
+ */
+export class FormsApiUnreachableError extends Error {
+  constructor(public readonly reason: string) {
+    super(API_UNREACHABLE_MESSAGE);
+    this.name = 'FormsApiUnreachableError';
   }
 }
 

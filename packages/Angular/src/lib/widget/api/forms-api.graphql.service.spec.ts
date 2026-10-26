@@ -15,7 +15,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FormsSaveResponseInput } from '@mj-biz-apps/forms-entities';
 import { toRespondentDefinition, type PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
-import { FormUnavailableError, FORM_UNAVAILABLE_MESSAGE, ResponseNotSavedError, SessionExpiredError } from './forms-api.interface';
+import {
+  API_UNREACHABLE_MESSAGE,
+  FormsApiUnreachableError,
+  FormUnavailableError,
+  FORM_UNAVAILABLE_MESSAGE,
+  ResponseNotSavedError,
+  SessionExpiredError,
+} from './forms-api.interface';
 import { EXECUTE_REMOTE_OPERATION_MUTATION, FormsGraphQLApiService, isSessionExpired } from './forms-api.graphql.service';
 import { FORMS_API_CONFIG, normalizeApiConfig } from './forms-api.config';
 
@@ -269,6 +276,26 @@ describe('saveResponse — a result, or a refused call', () => {
 
   it('an output that is not a save result is refused rather than guessed at', async () => {
     stubFetch({ body: ran({ Success: true }) });
+    await expect(service().saveResponse(saveInput())).rejects.toBeInstanceOf(ResponseNotSavedError);
+  });
+});
+
+describe('a network failure is one fixed sentence, not the browser\'s text', () => {
+  it('turns the fetch rejection into FormsApiUnreachableError, keeping the browser cause in reason', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    const failure = await service().saveResponse(saveInput()).catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(FormsApiUnreachableError);
+    expect((failure as FormsApiUnreachableError).message).toBe(API_UNREACHABLE_MESSAGE);
+    expect((failure as FormsApiUnreachableError).message).toBe(
+      "You appear to be offline. Your answers are still here — try again when you're connected.",
+    );
+    expect((failure as FormsApiUnreachableError).reason).toContain('Failed to fetch');
+  });
+
+  it('a 200 carrying a GraphQL refusal is still ResponseNotSavedError', async () => {
+    stubFetch({ body: refused('FORBIDDEN', 'nope') });
     await expect(service().saveResponse(saveInput())).rejects.toBeInstanceOf(ResponseNotSavedError);
   });
 });

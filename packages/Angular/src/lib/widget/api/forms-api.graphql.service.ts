@@ -20,7 +20,9 @@ import type {
 } from '@mj-biz-apps/forms-entities';
 import { respondentFormDefinitionSchema, type ResumeSnapshot } from '@mj-biz-apps/forms-entities/contracts';
 
+import { failureDetail } from '../core/failure-detail';
 import {
+  FormsApiUnreachableError,
   FormUnavailableError,
   ResponseNotSavedError,
   SessionExpiredError,
@@ -187,11 +189,18 @@ export class FormsGraphQLApiService implements IFormsApiService {
     if (this.config.token) {
       headers['Authorization'] = `Bearer ${this.config.token}`;
     }
-    const response = await fetch(this.config.graphqlUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ query, variables }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(this.config.graphqlUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ query, variables }),
+      });
+    } catch (err) {
+      // `fetch` rejects only when no response arrived; every HTTP status resolves. The browser's
+      // TypeError text differs per engine and means nothing to a respondent, so it goes to `reason`.
+      throw new FormsApiUnreachableError(failureDetail(err));
+    }
     // Read the body BEFORE judging the status. An expired session arrives as a 401 whose body
     // carries the one code the widget must be able to act on; throwing on `!ok` first is how that
     // code was thrown away and a respondent came to be shown `HTTP 401`. Only a JSON body is read —
