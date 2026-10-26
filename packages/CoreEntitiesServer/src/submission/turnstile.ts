@@ -20,12 +20,14 @@
  *    behaviour, not a new failure mode.
  *  - `hostname` — the host of the page the challenge was solved on, echoed back by Cloudflare.
  *    Checked against the hostnames a legitimate solve can report (this API's own public host plus
- *    the distribution's authored embed origins) and LOGGED on a mismatch, never refused. Warn-only
- *    is deliberate: the expected set is derived from `MJAPI_PUBLIC_URL` and `AllowedOrigins`,
- *    and neither is guaranteed to name every hostname a legitimate deployment answers on (multi-
- *    host proxies, internal names), so failing on it would brick working captcha-enabled forms.
- *    An operator who sees the warning and knows their topology can act on it; `remoteip` above is
- *    the enforcement half.
+ *    the distribution's authored embed origins) and LOGGED on a mismatch by default. Warn-only
+ *    is the default deliberately: the expected set is derived from `MJAPI_PUBLIC_URL` and
+ *    `AllowedOrigins`, and neither is guaranteed to name every hostname a legitimate deployment
+ *    answers on (multi-host proxies, internal names), so failing on it would brick working
+ *    captcha-enabled forms. A deployment that knows its topology sets
+ *    `FORMS_TURNSTILE_ENFORCE_HOSTNAME` to refuse mismatched tokens outright — closing the
+ *    token-farming hole where a challenge solved on an attacker's own page (embedding this
+ *    deployment's public sitekey) verifies here; `remoteip` above is the other enforcement half.
  */
 import { LogError } from '@memberjunction/core';
 import { getPublicSubmitConfig } from './config.js';
@@ -131,7 +133,17 @@ async function callSiteVerify(
     }
     const parsed = (await res.json()) as SiteVerifyResponse;
     if (parsed.success) {
-      warnOnUnexpectedHostname(parsed.hostname, options.expectedHostnames);
+      const mismatch = hostnameOutsideExpectedSet(parsed.hostname, options.expectedHostnames);
+      if (mismatch && getPublicSubmitConfig().turnstileEnforceHostname) {
+        LogError(
+          `[Forms] Turnstile token REFUSED: it was solved on hostname "${parsed.hostname}", outside ` +
+            `the expected set, and FORMS_TURNSTILE_ENFORCE_HOSTNAME is on.`,
+        );
+        return { success: false, errorCode: 'hostname-mismatch' };
+      }
+      if (mismatch) {
+        warnOnUnexpectedHostname(parsed.hostname, options.expectedHostnames);
+      }
       return { success: true };
     }
     return { success: false, errorCode: parsed['error-codes']?.[0] ?? 'verification-failed' };
@@ -141,8 +153,24 @@ async function callSiteVerify(
 }
 
 /**
+ * True when Cloudflare reported a solve hostname AND an expected set exists AND the hostname is
+ * outside it. No report / no expected set is NOT a mismatch (nothing to judge against).
+ */
+function hostnameOutsideExpectedSet(
+  reported: string | undefined,
+  expected: readonly string[] | undefined,
+): boolean {
+  if (!reported || !expected || expected.length === 0) {
+    return false;
+  }
+  return !expected.includes(reported.toLowerCase());
+}
+
+/**
  * Say so — to the operator, not the respondent — when a verified token was solved on a hostname
- * outside the expected set. Warn-only by design; the module header carries the reasoning.
+ * outside the expected set. Warn-only by default (the module header carries the reasoning);
+ * deployments that know their topology turn on `FORMS_TURNSTILE_ENFORCE_HOSTNAME` to refuse
+ * instead.
  */
 function warnOnUnexpectedHostname(
   reported: string | undefined,
