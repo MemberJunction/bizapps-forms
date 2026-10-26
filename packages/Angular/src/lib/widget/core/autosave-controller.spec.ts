@@ -75,6 +75,61 @@ describe('AutosaveController.resume — the host says the road reopened', () => 
     expect(save).toHaveBeenCalledTimes(1);
   });
 
+  it('is a no-op while quiesced by settle() — an online event must not overlap the final submit', async () => {
+    const save = vi.fn().mockRejectedValue(new Error('offline'));
+    const c = new AutosaveController(save, () => {}, 500);
+    c.ping();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(c.status).toBe('error');
+
+    await c.settle(); // the final submit is now on the wire
+    c.resume();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it('is a no-op after cancel() too', async () => {
+    const save = vi.fn().mockRejectedValue(new Error('offline'));
+    const c = new AutosaveController(save, () => {}, 500);
+    c.ping();
+    await vi.advanceTimersByTimeAsync(500);
+    c.cancel();
+    c.resume();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it('works again after settle() once a ping returns the form to editing', async () => {
+    const save = vi.fn().mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline')).mockResolvedValue('r1');
+    const c = new AutosaveController(save, () => {}, 500);
+    c.ping();
+    await vi.advanceTimersByTimeAsync(500);
+    await c.settle();
+    c.ping(); // a refused submit gave the form back to the respondent
+    await vi.advanceTimersByTimeAsync(500);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(c.status).toBe('error');
+
+    c.resume();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(save).toHaveBeenCalledTimes(3);
+    expect(c.status).toBe('saved');
+  });
+
+  it('works again after settle() once flushNow() runs', async () => {
+    const save = vi.fn().mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline')).mockResolvedValue('r1');
+    const c = new AutosaveController(save, () => {}, 500);
+    c.ping();
+    await vi.advanceTimersByTimeAsync(500);
+    await c.settle();
+    await c.flushNow();
+    expect(c.status).toBe('error');
+
+    c.resume();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(save).toHaveBeenCalledTimes(3);
+  });
+
   it('is a no-op after dispose', async () => {
     const save = vi.fn().mockRejectedValue(new Error('offline'));
     const c = new AutosaveController(save, () => {}, 500);
