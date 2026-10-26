@@ -17,7 +17,8 @@
  *     a failed save at once and restarts the backoff, so a failing flush re-enters the capped
  *     schedule from its first delay rather than from where the last run stopped. `settle()` and
  *     `cancel()` quiesce the controller (the final submit is about to send every answer itself), and a
- *     quiesced controller ignores `resume()` until the next `ping()` or `flushNow()` — otherwise an
+ *     quiesced controller ignores `resume()` until the next `ping()`, `flushNow()` or `reopen()` (the host returned the form to editing, e.g. after a
+ *     refused or failed submit) — otherwise an
  *     `online` event during the submit would put a partial on the wire beside the final write.
  *
  * Framework-free (takes injected `setTimeout`/`clearTimeout`) so it is unit-testable
@@ -90,7 +91,8 @@ export class AutosaveController {
    * `settle()` or `cancel()` ran and nothing has asked for a save since. While set, {@link resume}
    * does nothing: a failed save leaves `settledStatus` at 'error', which alone would let a late
    * `online` event write a partial concurrently with the final submit that quiesced us. Cleared by
-   * `ping()` and `flushNow()`, the paths a form uses once a refused submit returns it to editing.
+   * `ping()`, `flushNow()` and `reopen()`, the paths a form uses once a refused or failed submit
+   * returns it to editing.
    */
   private quiesced = false;
 
@@ -200,6 +202,16 @@ export class AutosaveController {
     this.clearTimer();
     this.failedAttempts = 0;
     this.flush();
+  }
+
+  /**
+   * The host returned the form to editing after a `settle()`/`cancel()` (a submit that was refused
+   * or failed). Ends the quiesced state WITHOUT sending anything, so a later {@link resume} can
+   * recover a failed autosave. Not `ping()`/`flushNow()`: those would put a partial on the wire
+   * right behind the submit that just failed.
+   */
+  public reopen(): void {
+    this.quiesced = false;
   }
 
   /** Stop all activity; a controller is dead after this. */

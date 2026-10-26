@@ -64,4 +64,30 @@ describe('the online event resumes a failed autosave', () => {
     expect(api.savesOf('partial')).toHaveLength(2);
     expect(form.autosaveNow).toBe('saved');
   });
+
+  it('still resumes after an offline Submit failed and handed the form back', async () => {
+    let offline = true;
+    const api = new FakeFormsApi(servedAs(screeningForm()), (input) => {
+      if (offline) {
+        throw new Error('Failed to fetch');
+      }
+      return screeningServer(input);
+    });
+    const { form } = await mountForm({ api });
+    form.rt.setValue('name', 'Sam');
+    form.progress();
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+    expect(form.autosaveNow).toBe('error');
+
+    await form.submit();
+    expect(form.phaseNow).toBe('ready');
+    const partialsBefore = api.savesOf('partial').length;
+
+    offline = false;
+    fakeWindow.dispatchEvent(new Event('online'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(api.savesOf('partial')).toHaveLength(partialsBefore + 1);
+    expect(form.autosaveNow).toBe('saved');
+  });
 });

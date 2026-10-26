@@ -1095,13 +1095,24 @@ export class MjFormComponent implements OnInit, OnDestroy {
       }
       // The banner shows the fixed sentence; the cause goes to whoever opens the console.
       console.warn(`[mj-form] the response could not be submitted: ${failureDetail(err)}`);
-      this.phase.set('ready');
+      this.returnToEditing();
       const message = err instanceof Error ? err.message : 'Submission failed. Please try again.';
       this.errorText.set(message);
       this.handlePossibleTurnstileFailure(message);
     } finally {
       this.submitTimer.Stop();
     }
+  }
+
+  /**
+   * A submit that settled the autosave did not end the fill: hand the form back to the respondent
+   * and tell the autosave so too. Without `reopen()` the controller stays quiesced and an `online`
+   * event after an offline submit would never retry the save. Sends nothing itself — a partial
+   * right behind a submit that just failed would only fail again.
+   */
+  private returnToEditing(): void {
+    this.phase.set('ready');
+    this.autosave?.reopen();
   }
 
   /**
@@ -1131,7 +1142,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
     const failure = this.uploads.failureAmong(ids);
     if (failure) {
-      this.phase.set('ready');
+      this.returnToEditing();
       this.refuseWithUploadFailure(failure);
       return false;
     }
@@ -1196,6 +1207,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
     const outcome = outcomeForResult(res);
     this.phase.set(outcome.phase);
+    if (outcome.phase === 'ready') {
+      this.autosave?.reopen();
+    }
     if (outcome.phase === 'done') {
       // The draft is sealed: tell the page so it can drop the device pointer. Reopening the public
       // link on this browser afterwards must show a FRESH form — the response is finished, and a

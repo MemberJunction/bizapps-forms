@@ -130,6 +130,34 @@ describe('AutosaveController.resume — the host says the road reopened', () => 
     expect(save).toHaveBeenCalledTimes(3);
   });
 
+  it('settle, reopen, resume re-sends the failed save once (a failed submit handed the form back)', async () => {
+    const save = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue('r1');
+    const c = new AutosaveController(save, () => {}, 500);
+    c.ping();
+    await vi.advanceTimersByTimeAsync(500);
+    await c.settle();
+    c.reopen();
+    expect(save).toHaveBeenCalledTimes(1); // reopen itself sends nothing
+
+    c.resume();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(c.status).toBe('saved');
+  });
+
+  it('settle, reopen with nothing failed: resume sends nothing', async () => {
+    const save = vi.fn().mockResolvedValue('r1');
+    const c = new AutosaveController(save, () => {}, 500);
+    c.ping();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(c.status).toBe('saved');
+    await c.settle();
+    c.reopen();
+    c.resume();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
   it('is a no-op after dispose', async () => {
     const save = vi.fn().mockRejectedValue(new Error('offline'));
     const c = new AutosaveController(save, () => {}, 500);
