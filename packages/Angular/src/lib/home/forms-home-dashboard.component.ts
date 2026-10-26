@@ -2,7 +2,9 @@ import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
+  ElementRef,
   inject,
+  ViewChild,
 } from '@angular/core';
 import { DatePipe, Location } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -117,6 +119,22 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
 
   /** MJGlobal subscription behind {@link watchForFormChanges}; released on destroy. */
   private formChanges?: FormsWriteSubscription;
+  /**
+   * The row whose Archive is waiting for its second click, or null. At most one row asks at a time:
+   * asking about another row, opening a row, Cancel and Escape all clear it.
+   */
+  public confirmingArchive: string | null = null;
+
+  /**
+   * The confirm button exists only while a row is asking, so the setter running with an element is
+   * the moment to move focus onto it: a keyboard user who pressed the icon button lands on the
+   * answer instead of on a button that has just disappeared.
+   */
+  @ViewChild('archiveConfirmButton')
+  private set archiveConfirmButton(ref: ElementRef<HTMLButtonElement> | undefined) {
+    ref?.nativeElement.focus();
+  }
+
   /** Unregisters the {@link watchForReturn} listener; released on destroy. */
   private stopWatchingUrl?: () => void;
 
@@ -313,6 +331,37 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   }
 
   /**
+   * The Archive icon's click. Restoring opens nothing and is one click; archiving asks first
+   * (F11) — one stray click used to close the form's share links with no question.
+   *
+   * There is deliberately no Undo toast: a true undo would reopen the links, which is a server-side
+   * decision (`Forms.RestoreForm` keeps them closed on purpose).
+   */
+  public async requestArchive(row: FormSummaryRow): Promise<void> {
+    if (this.isArchived(row)) {
+      await this.toggleArchive(row);
+      return;
+    }
+    this.confirmingArchive = row.id;
+    this.cdr.markForCheck();
+  }
+
+  /** The question the inline confirm asks; the form's name is in it so the row cannot be mistaken. */
+  public archiveQuestion(row: FormSummaryRow): string {
+    return `Archive "${row.name}"? Its open share links close and respondents see "no longer accepting responses". Restore brings it back, but the links stay closed.`;
+  }
+
+  public async confirmArchive(row: FormSummaryRow): Promise<void> {
+    this.confirmingArchive = null;
+    await this.toggleArchive(row);
+  }
+
+  public cancelArchive(): void {
+    this.confirmingArchive = null;
+    this.cdr.markForCheck();
+  }
+
+  /**
    * Archives a form, or restores an archived one.
    *
    * Not a delete, and not labelled as one: every child table holds a plain FK to the form, and
@@ -348,6 +397,7 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
 
   /** Opens an existing form record (renders the WP-D builder). */
   public openForm(row: FormSummaryRow): void {
+    this.confirmingArchive = null;
     this.OpenEntityRecord.emit({
       EntityName: HOME_ENTITY.forms,
       RecordPKey: CompositeKey.FromID(row.id),

@@ -433,3 +433,75 @@ describe('FormsHomeDashboardComponent — re-reads when navigated back to (F10)'
     expect(reads()).toBe(0);
   });
 });
+
+describe('FormsHomeDashboardComponent — Archive asks first (F11)', () => {
+  const archivedRow: FormSummaryRow = { ...draftRow, status: 'Closed' };
+  const other: FormSummaryRow = { ...draftRow, id: 'form-2', name: 'Survey' };
+
+  function spied() {
+    const archive = vi.fn(async (id: string) => ({ ok: true as const, output: { FormID: id, Status: 'Closed' as FormStatus } }));
+    const restore = vi.fn(async (id: string) => ({ ok: true as const, output: { FormID: id, Status: 'Published' as FormStatus } }));
+    return { archive, restore, component: makeComponent(homeService({ archive, restore })) };
+  }
+
+  it('the first Archive click only asks: it enters the confirming state and archives nothing', () => {
+    const { archive, component } = spied();
+
+    component.requestArchive(draftRow);
+
+    expect(component.confirmingArchive).toBe('form-1');
+    expect(archive).not.toHaveBeenCalled();
+  });
+
+  it('confirming archives exactly once and leaves the confirming state', async () => {
+    const { archive, component } = spied();
+    component.requestArchive(draftRow);
+
+    await component.confirmArchive(draftRow);
+
+    expect(archive).toHaveBeenCalledTimes(1);
+    expect(archive).toHaveBeenCalledWith('form-1');
+    expect(component.confirmingArchive).toBeNull();
+  });
+
+  it('Cancel, Escape and opening a row never archive', () => {
+    const { archive, component } = spied();
+
+    component.requestArchive(draftRow);
+    component.cancelArchive();
+    expect(component.confirmingArchive).toBeNull();
+
+    component.requestArchive(draftRow);
+    component.OpenEntityRecord.subscribe(() => undefined);
+    component.openForm(other);
+    expect(component.confirmingArchive).toBeNull();
+
+    expect(archive).not.toHaveBeenCalled();
+  });
+
+  it('asking about another row moves the question to that row', () => {
+    const { component } = spied();
+    component.requestArchive(draftRow);
+
+    component.requestArchive(other);
+
+    expect(component.confirmingArchive).toBe('form-2');
+  });
+
+  it('Restore stays one click: no question, restore() called directly', async () => {
+    const { restore, component } = spied();
+
+    await component.requestArchive(archivedRow);
+
+    expect(restore).toHaveBeenCalledTimes(1);
+    expect(component.confirmingArchive).toBeNull();
+  });
+
+  it('names the form and what happens to its links in the question', () => {
+    const { component } = spied();
+
+    expect(component.archiveQuestion(draftRow)).toBe(
+      'Archive "Intake"? Its open share links close and respondents see "no longer accepting responses". Restore brings it back, but the links stay closed.',
+    );
+  });
+});
