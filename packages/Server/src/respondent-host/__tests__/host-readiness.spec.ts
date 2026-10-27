@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assessDatabaseReadiness,
   assessRespondentReadiness,
   checkProvisioningUserReadiness,
   checkRespondentReadiness,
   checkTurnstileReadiness,
+  refuseBootOnDatabaseReadiness,
   RESPONDENT_ROLE,
 } from '../host-readiness';
 import type {
@@ -321,5 +323,56 @@ describe('assessRespondentReadiness', () => {
     expect(reasons.join('\n')).toMatch(/magicLink.*not enabled/i);
     expect(reasons.join('\n')).toContain('contextUserForProvisioning');
     expect(reasons.join('\n')).toContain('FORMS_TURNSTILE_SITE_KEY');
+  });
+});
+
+describe('assessDatabaseReadiness', () => {
+  it('has nothing to say on PostgreSQL, which is always MVCC', () => {
+    expect(assessDatabaseReadiness({ dialect: 'postgres', readCommittedSnapshotOn: null })).toEqual([]);
+  });
+
+  it('is ready on SQL Server with READ_COMMITTED_SNAPSHOT on', () => {
+    expect(assessDatabaseReadiness({ dialect: 'sqlserver', readCommittedSnapshotOn: true })).toEqual([]);
+  });
+
+  it('names the symptom and the fix when it is off', () => {
+    const reasons = assessDatabaseReadiness({ dialect: 'sqlserver', readCommittedSnapshotOn: false, databaseName: 'MJ_Host' });
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain('READ_COMMITTED_SNAPSHOT');
+    expect(reasons[0]).toContain('deadlock');
+    expect(reasons[0]).toContain("Could not read the form's pages; nothing was published");
+    expect(reasons[0]).toContain('ALTER DATABASE [MJ_Host] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;');
+  });
+
+  // The reason is also the body of the refusal, which only exists when the flag IS set, so it must
+  // not tell the operator to set it. The advice is the log-only line's to give.
+  it('does not advise setting the opt-in flag in the reason itself', () => {
+    const reasons = assessDatabaseReadiness({ dialect: 'sqlserver', readCommittedSnapshotOn: false, databaseName: 'MJ_Host' });
+    expect(reasons[0]).not.toContain('to refuse to boot');
+  });
+
+  it('says the state is unknown, rather than guessing, when the probe failed', () => {
+    const reasons = assessDatabaseReadiness({ dialect: 'sqlserver', readCommittedSnapshotOn: null });
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain('could not be read');
+    expect(reasons[0]).toContain('READ_COMMITTED_SNAPSHOT');
+  });
+});
+
+describe('refuseBootOnDatabaseReadiness', () => {
+  const reasons = ['READ_COMMITTED_SNAPSHOT is off'];
+
+  it('does nothing without a reason, even when the flag is set', () => {
+    expect(() => refuseBootOnDatabaseReadiness([], { FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT: 'true' })).not.toThrow();
+  });
+
+  it('lets a boot with a reason continue when the flag is not set', () => {
+    expect(() => refuseBootOnDatabaseReadiness(reasons, {})).not.toThrow();
+  });
+
+  it('throws naming the flag when the flag is true and a reason exists', () => {
+    expect(() => refuseBootOnDatabaseReadiness(reasons, { FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT: ' TRUE ' })).toThrow(
+      /FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT.*READ_COMMITTED_SNAPSHOT is off/s,
+    );
   });
 });

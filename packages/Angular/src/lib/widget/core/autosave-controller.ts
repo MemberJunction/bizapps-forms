@@ -13,6 +13,13 @@
  *     capped backoff (`RETRY_DELAYS_MS`) — once the cap is spent the status stays `'error'`, the
  *     host is told (`AutosaveHooks.onRetriesSpent`), and the next edit re-arms the normal debounce (not another backoff retry — `failedAttempts`
  *     resets only on a success), and a final submit carries every answer anyway.
+ *   - told when the network is back: `resume()` is the host's "the road reopened" signal. It re-sends
+ *     a failed save at once and restarts the backoff, so a failing flush re-enters the capped
+ *     schedule from its first delay rather than from where the last run stopped. `settle()` and
+ *     `cancel()` quiesce the controller (the final submit is about to send every answer itself), and a
+ *     quiesced controller ignores `resume()` until the next `ping()`, `flushNow()` or `reopen()` (the host returned the form to editing, e.g. after a
+ *     refused or failed submit) — otherwise an
+ *     `online` event during the submit would put a partial on the wire beside the final write.
  *
  * Framework-free (takes injected `setTimeout`/`clearTimeout`) so it is unit-testable
  * with fake timers and no Angular. The component wires it to signals + the API.
@@ -80,6 +87,14 @@ export class AutosaveController {
   private failedAttempts = 0;
   /** The last status a save run SETTLED on (idle / saved / error) — restored when a save sends nothing. */
   private settledStatus: AutosaveStatus = 'idle';
+  /**
+   * `settle()` or `cancel()` ran and nothing has asked for a save since. While set, {@link resume}
+   * does nothing: a failed save leaves `settledStatus` at 'error', which alone would let a late
+   * `online` event write a partial concurrently with the final submit that quiesced us. Cleared by
+   * `ping()`, `flushNow()` and `reopen()`, the paths a form uses once a refused or failed submit
+   * returns it to editing.
+   */
+  private quiesced = false;
 
   constructor(
     private readonly save: AutosaveFn,
@@ -103,12 +118,14 @@ export class AutosaveController {
       this.rearm = true;
       return;
     }
+    this.quiesced = false;
     this.setStatus('pending');
     this.arm();
   }
 
   /** Cancel any pending timer (e.g. on final submit, which persists everything). */
   public cancel(): void {
+    this.quiesced = true;
     this.clearTimer();
     this.rearm = false;
   }
@@ -123,6 +140,7 @@ export class AutosaveController {
    * caller is about to send every answer itself.
    */
   public async settle(): Promise<void> {
+    this.quiesced = true;
     this.clearTimer();
     this.rearm = false;
     if (this.inFlightSave) {
@@ -156,6 +174,7 @@ export class AutosaveController {
     if (this.disposed) {
       return;
     }
+    this.quiesced = false;
     if (this.inFlightSave) {
       await this.inFlightSave;
     }
@@ -167,6 +186,32 @@ export class AutosaveController {
     }
     this.flush();
     await this.inFlightSave;
+  }
+
+  /**
+   * The host's "the road reopened" signal (the browser's `online` event). Re-sends a save that
+   * failed — whether a backoff retry is still pending or the cap is already spent — without waiting
+   * for the respondent's next edit. The backoff restarts from its first delay, so if this flush
+   * fails too it re-enters the capped schedule. A no-op when the last save did not fail (nothing to
+   * recover), while quiesced by `settle()`/`cancel()`, or after {@link dispose}.
+   */
+  public resume(): void {
+    if (this.disposed || this.quiesced || this.settledStatus !== 'error') {
+      return;
+    }
+    this.clearTimer();
+    this.failedAttempts = 0;
+    this.flush();
+  }
+
+  /**
+   * The host returned the form to editing after a `settle()`/`cancel()` (a submit that was refused
+   * or failed). Ends the quiesced state WITHOUT sending anything, so a later {@link resume} can
+   * recover a failed autosave. Not `ping()`/`flushNow()`: those would put a partial on the wire
+   * right behind the submit that just failed.
+   */
+  public reopen(): void {
+    this.quiesced = false;
   }
 
   /** Stop all activity; a controller is dead after this. */

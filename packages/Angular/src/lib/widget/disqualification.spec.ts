@@ -291,7 +291,7 @@ describe('the seal', () => {
 
   it('navigates only after the seal resolved, to the redirect the server returned', async () => {
     const assign = vi.fn();
-    vi.stubGlobal('window', { location: { href: 'https://embed.example/page', assign, reload: vi.fn() } });
+    vi.stubGlobal('window', { location: { href: 'https://embed.example/page', assign, reload: vi.fn() }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
     const seal = deferred<FormsSaveResponseOutput>();
     const withRedirect = (input: FormsSaveResponseInput): FormsSaveResponseOutput => ({
       ...screeningServer(input),
@@ -413,7 +413,7 @@ describe('a knockout the server finds at Submit is shown as one', () => {
   });
 
   it('a screening with a redirect and no message still never falls back to the form-wide thank-you', async () => {
-    vi.stubGlobal('window', { location: { href: 'https://embed.example/page', assign: vi.fn(), reload: vi.fn() } });
+    vi.stubGlobal('window', { location: { href: 'https://embed.example/page', assign: vi.fn(), reload: vi.fn() }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
     const { form } = await liveScreening((input) => ({
       Success: true,
       ResponseID: input.ClientResponseID,

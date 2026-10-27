@@ -53,6 +53,8 @@ import { LogStatus, LogError, LogErrorEx, Metadata, RunView, type UserInfo } fro
 import { UserCache } from '@memberjunction/generic-database-provider';
 import {
   getMagicLinkProvisioningConfig,
+  isPostgres,
+  requireDatabaseProvider,
   resolveAutomationPrincipal,
   withIsolatedProvider,
   withLazyIsolatedProvider,
@@ -66,7 +68,13 @@ import { getGraphqlUrlForRequest, getRespondentHostConfig, graphqlRootPathWarnin
 import { renderRespondentHostPage } from './host-page.js';
 import { redeemSlugToToken } from './redeem.service.js';
 import { loadFormIdentity } from './form-identity.js';
-import { assessRespondentReadiness } from './host-readiness.js';
+import {
+  assessDatabaseReadiness,
+  assessRespondentReadiness,
+  isDatabaseReadinessRequired,
+  refuseBootOnDatabaseReadiness,
+  REQUIRE_READ_COMMITTED_SNAPSHOT_ENV,
+} from './host-readiness.js';
 import { assessAutomationReadiness, describeDurableDispatch, type PermissionLookup } from '../automation/automation-readiness.js';
 import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.js';
 import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
@@ -200,6 +208,10 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     // only as a per-submit log line on a best-effort hook, which is how #239 and four before it
     // went unnoticed.
     this.reportAutomationReadiness();
+    // And for the database: a host without READ_COMMITTED_SNAPSHOT works until two authors publish
+    // or clone at once. The one boot check allowed to stop the process — it logs and exits, and
+    // only when the operator opted in.
+    await this.reportDatabaseReadiness();
   }
 
   /**
@@ -316,6 +328,62 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     });
     for (const reason of reasons) {
       LogError(`[Forms] Anonymous respondent path is NOT ready: ${reason}`);
+    }
+  }
+
+  /**
+   * Probe `READ_COMMITTED_SNAPSHOT` once (SQL Server only), log each reason, and — only when
+   * `FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT=true` — refuse to boot.
+   *
+   * The probe itself never throws: a failed read is logged with what was being read and reported to
+   * the assessment as an unknown state, so it is neither swallowed nor allowed to take down an
+   * MJAPI that also serves other apps.
+   *
+   * The opt-in refusal ends the PROCESS (exit code 1) rather than throwing. A throw from this hook
+   * only rejects `createMJServer`'s promise, which the host prints and moves on from; the port never
+   * opens, but the open database pool keeps node alive — a live PID that serves nothing and that a
+   * supervisor cannot tell from a healthy start. `FORMS_REQUIRE_SESSION_HASH_SALT` does not need
+   * this because it runs at module load, where a throw fails the import; this check needs a live
+   * provider, so it cannot move there.
+   */
+  private async reportDatabaseReadiness(): Promise<void> {
+    const probe = await this.probeReadCommittedSnapshot();
+    if (probe === undefined) return;
+    const reasons = assessDatabaseReadiness({ dialect: 'sqlserver', ...probe });
+    for (const reason of reasons) {
+      // The opt-in advice belongs here, not in the reason: the refusal embeds the reasons, and it
+      // only exists when the operator has already set the flag.
+      const advice = isDatabaseReadinessRequired()
+        ? ''
+        : ` Set ${REQUIRE_READ_COMMITTED_SNAPSHOT_ENV}=true to refuse to boot without it.`;
+      LogError(`[Forms] Database is NOT ready for concurrent authoring: ${reason}${advice}`);
+    }
+    try {
+      refuseBootOnDatabaseReadiness(reasons);
+    } catch (e) {
+      LogError(e instanceof Error ? e.message : String(e));
+      process.exit(1);
+    }
+  }
+
+  /** The probe's reading, or `undefined` on PostgreSQL where there is nothing to ask. */
+  private async probeReadCommittedSnapshot(): Promise<{ readCommittedSnapshotOn: boolean | null; databaseName?: string } | undefined> {
+    try {
+      const provider = requireDatabaseProvider(Metadata.Provider, 'The READ_COMMITTED_SNAPSHOT boot probe');
+      if (isPostgres(provider)) return undefined;
+      const rows = await provider.ExecuteSQL<{ IsOn: boolean | number; DatabaseName: string }>(
+        'SELECT is_read_committed_snapshot_on AS IsOn, DB_NAME() AS DatabaseName FROM sys.databases WHERE name = DB_NAME()',
+        undefined,
+        undefined,
+        this.systemUser(),
+      );
+      if (rows.length !== 1) {
+        throw new Error(`expected one sys.databases row for the current database, got ${rows.length}`);
+      }
+      return { readCommittedSnapshotOn: Boolean(rows[0].IsOn), databaseName: rows[0].DatabaseName };
+    } catch (e) {
+      LogError(`[Forms] Could not read READ_COMMITTED_SNAPSHOT at boot: ${e instanceof Error ? e.message : String(e)}`);
+      return { readCommittedSnapshotOn: null };
     }
   }
 

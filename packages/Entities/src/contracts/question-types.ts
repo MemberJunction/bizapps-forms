@@ -283,3 +283,12 @@ export type MatrixAnswer = Record<string, string | string[]>;
  * already is. The discriminator is stored on the option row.
  */
 export type MatrixAxis = 'Row' | 'Column';
+
+/**
+ * The axis a Matrix option is on. An option with no `matrixAxis` is a row: rows came first, and
+ * options authored before columns existed carry no axis. Every reader goes through here so that
+ * "absent means Row" is decided once.
+ */
+export function matrixAxisOf(option: { matrixAxis?: MatrixAxis }): MatrixAxis {
+  return option.matrixAxis ?? 'Row';
+}

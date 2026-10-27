@@ -59,7 +59,10 @@ vi.mock('@mj-biz-apps/forms-core-entities-server', async (importOriginal) => ({
   resolveAutomationPrincipal: () => null,
 }));
 vi.mock('../captcha-demand', () => ({ readCaptchaDemand: async () => ({ ok: true, demand: undefined }) }));
-vi.mock('../host-readiness', () => ({ assessRespondentReadiness: () => [] }));
+vi.mock('../host-readiness', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../host-readiness')>()),
+  assessRespondentReadiness: () => [],
+}));
 
 /** The caller key the resume route built for its rate limiter — the fact under test. */
 let capturedCallerKey: string | undefined;

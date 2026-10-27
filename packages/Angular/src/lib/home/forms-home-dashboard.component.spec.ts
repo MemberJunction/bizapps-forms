@@ -9,6 +9,7 @@
  */
 import '@angular/compiler';
 import { ChangeDetectorRef, Injector, runInInjectionContext } from '@angular/core';
+import { Location } from '@angular/common';
 import { NavigationService } from '@memberjunction/ng-shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FormsHomeDashboardComponent } from './forms-home-dashboard.component';
@@ -30,16 +31,54 @@ function homeService(overrides: Partial<HomeServiceSurface>): HomeServiceSurface
   };
 }
 
-function makeComponent(service: HomeServiceSurface): FormsHomeDashboardComponent {
+/** A `Location` whose URL changes the test fires by hand; counts live subscriptions. */
+function fakeLocation() {
+  const listeners = new Set<(url: string, state: unknown) => void>();
+  const location = {
+    onUrlChange: (fn: (url: string, state: unknown) => void) => {
+      listeners.add(fn);
+      return () => void listeners.delete(fn);
+    },
+  };
+  return { location, navigate: (url: string) => listeners.forEach((fn) => fn(url, null)), live: () => listeners.size };
+}
+
+type ChangeDetectorSurface = Pick<ChangeDetectorRef, 'markForCheck' | 'detectChanges'>;
+
+/**
+ * A component that exposes, with real types, the protected members the specs need: the lifecycle
+ * hook `BaseDashboard` calls, and the template's focus targets (which the node env cannot render).
+ */
+class HomeProbe extends FormsHomeDashboardComponent {
+  public init(): void {
+    this.initDashboard();
+  }
+
+  public setFocusTargets(triggers: NonNullable<HomeProbe['archiveTriggers']>, title: NonNullable<HomeProbe['pageTitle']>): void {
+    this.archiveTriggers = triggers;
+    this.pageTitle = title;
+  }
+}
+
+function makeComponent(service: HomeServiceSurface, location?: object, cdr?: ChangeDetectorSurface): FormsHomeDashboardComponent {
+  return makeProbe(service, location, cdr);
+}
+
+function makeProbe(
+  service: HomeServiceSurface,
+  location: object = fakeLocation().location,
+  cdr: ChangeDetectorSurface = { markForCheck: () => undefined, detectChanges: () => undefined },
+): HomeProbe {
   const injector = Injector.create({
     providers: [
+      { provide: Location, useValue: location },
       { provide: FormsHomeService, useValue: service },
       // The failure paths under test never reach navigation; an empty double satisfies the injector.
       { provide: NavigationService, useValue: {} },
-      { provide: ChangeDetectorRef, useValue: { markForCheck: () => undefined, detectChanges: () => undefined } },
+      { provide: ChangeDetectorRef, useValue: cdr },
     ],
   });
-  return runInInjectionContext(injector, () => new FormsHomeDashboardComponent());
+  return runInInjectionContext(injector, () => new HomeProbe());
 }
 
 /** Every Error the component emits, in order. */
@@ -377,5 +416,208 @@ describe('FormsHomeDashboardComponent — reloads heard from elsewhere, and a hu
     expect(component.forms).toEqual([]);
     expect(component.loading).toBe(false);
     component.ngOnDestroy();
+  });
+});
+
+describe('FormsHomeDashboardComponent — re-reads when navigated back to (F10)', () => {
+  const initDashboard = (c: HomeProbe): void => c.init();
+
+  function counting() {
+    let reads = 0;
+    const service = homeService({ loadForms: async () => { reads += 1; return []; } });
+    return { service, reads: () => reads };
+  }
+
+  it('reads once when the URL returns to the Forms home, and not for another route', async () => {
+    const { service, reads } = counting();
+    const url = fakeLocation();
+    const component = makeProbe(service, url.location);
+    initDashboard(component);
+
+    url.navigate('/app/forms/Responses%20%26%20Analytics');
+    await new Promise((settled) => setTimeout(settled, 0));
+    expect(reads()).toBe(0);
+
+    url.navigate('/app/forms/Forms');
+    await vi.waitFor(() => expect(reads()).toBe(1));
+    component.ngOnDestroy();
+  });
+
+  it('stops listening once destroyed', async () => {
+    const { service, reads } = counting();
+    const url = fakeLocation();
+    const component = makeProbe(service, url.location);
+    initDashboard(component);
+    expect(url.live()).toBe(1);
+
+    component.ngOnDestroy();
+    url.navigate('/app/forms');
+    await new Promise((settled) => setTimeout(settled, 0));
+
+    expect(url.live()).toBe(0);
+    expect(reads()).toBe(0);
+  });
+});
+
+describe('FormsHomeDashboardComponent — Archive asks first (F11)', () => {
+  const archivedRow: FormSummaryRow = { ...draftRow, status: 'Closed' };
+  const other: FormSummaryRow = { ...draftRow, id: 'form-2', name: 'Survey' };
+
+  function spied() {
+    const archive = vi.fn(async (id: string) => ({ ok: true as const, output: { FormID: id, Status: 'Closed' as FormStatus } }));
+    const restore = vi.fn(async (id: string) => ({ ok: true as const, output: { FormID: id, Status: 'Published' as FormStatus } }));
+    return { archive, restore, component: makeComponent(homeService({ archive, restore })) };
+  }
+
+  it('the first Archive click only asks: it enters the confirming state and archives nothing', () => {
+    const { archive, component } = spied();
+
+    component.requestArchive(draftRow);
+
+    expect(component.confirmingArchive).toBe('form-1');
+    expect(archive).not.toHaveBeenCalled();
+  });
+
+  it('confirming archives exactly once and leaves the confirming state', async () => {
+    const { archive, component } = spied();
+    component.requestArchive(draftRow);
+
+    await component.confirmArchive(draftRow);
+
+    expect(archive).toHaveBeenCalledTimes(1);
+    expect(archive).toHaveBeenCalledWith('form-1');
+    expect(component.confirmingArchive).toBeNull();
+  });
+
+  it('Cancel, Escape and opening a row never archive', () => {
+    const { archive, component } = spied();
+
+    component.requestArchive(draftRow);
+    component.cancelArchive();
+    expect(component.confirmingArchive).toBeNull();
+
+    component.requestArchive(draftRow);
+    component.OpenEntityRecord.subscribe(() => undefined);
+    component.openForm(other);
+    expect(component.confirmingArchive).toBeNull();
+
+    expect(archive).not.toHaveBeenCalled();
+  });
+
+  it('asking about another row moves the question to that row', () => {
+    const { component } = spied();
+    component.requestArchive(draftRow);
+
+    component.requestArchive(other);
+
+    expect(component.confirmingArchive).toBe('form-2');
+  });
+
+  it('Restore stays one click: no question, restore() called directly', async () => {
+    const { restore, component } = spied();
+
+    await component.requestArchive(archivedRow);
+
+    expect(restore).toHaveBeenCalledTimes(1);
+    expect(component.confirmingArchive).toBeNull();
+  });
+
+  it('names the form and what happens to its links in the question', () => {
+    const { component } = spied();
+
+    expect(component.archiveQuestion(draftRow)).toBe(
+      'Archive "Intake"? Its open share links close and respondents see "no longer accepting responses". Restore brings it back, but the links stay closed.',
+    );
+  });
+});
+
+describe('FormsHomeDashboardComponent — focus after the Archive question closes (F11, WCAG 2.4.3)', () => {
+  const live: FormSummaryRow = { ...draftRow };
+  const archivedOnly: FormSummaryRow = { ...draftRow, status: 'Closed' };
+
+  /** The template's focus targets, replaced by recorders (the node env renders no DOM). */
+  function withTargets(component: HomeProbe): string[] {
+    const focused: string[] = [];
+    const trigger = (rowId: string) => ({ nativeElement: { focus: () => void focused.push(`trigger ${rowId}`), dataset: { rowId } } });
+    const triggers = [trigger('form-1'), trigger('form-2')];
+    component.setFocusTargets(
+      { find: (matches) => triggers.find(matches) },
+      { nativeElement: { focus: () => void focused.push('title') } },
+    );
+    return focused;
+  }
+
+  /** A click or Escape keydown that records when its propagation is stopped. */
+  const stoppableEvent = (order: string[]) => ({ stopPropagation: () => void order.push('stop') });
+
+  it("Cancel puts focus back on that row's Archive icon", () => {
+    const component = makeProbe(homeService({}));
+    const focused = withTargets(component);
+    void component.requestArchive(live);
+
+    component.cancelArchive();
+
+    expect(focused).toEqual(['trigger form-1']);
+  });
+
+  // The walk-through bug: Cancel re-rendered synchronously, removing the confirm wrapper (and its
+  // stopPropagation listener) mid-dispatch, so the click reached the card and opened the form.
+  // The buttons must stop the click themselves, before anything re-renders.
+  // Escape reaches the same method (`(keydown.escape)="cancelArchive($event)"`), so the Cancel case
+  // covers it: both pass their DOM event.
+  it('Cancel, Escape and Archive stop their own event, before they re-render', async () => {
+    const order: string[] = [];
+    const component = makeProbe(homeService({}), undefined, {
+      markForCheck: () => undefined,
+      detectChanges: () => void order.push('render'),
+    });
+    withTargets(component);
+
+    void component.requestArchive(live);
+    component.cancelArchive(stoppableEvent(order));
+    expect(order.slice(0, 2)).toEqual(['stop', 'render']);
+
+    order.length = 0;
+    void component.requestArchive(live);
+    const confirming = component.confirmArchive(live, stoppableEvent(order));
+    expect(order[0]).toBe('stop');
+    await confirming;
+  });
+
+  it('does not touch the view after being destroyed mid-archive', async () => {
+    let release: () => void = () => undefined;
+    const component = makeProbe(homeService({ archive: () => new Promise((r) => { release = () => r({ ok: true, output: { FormID: 'form-1', Status: 'Closed' as FormStatus } }); }) }));
+    const focused = withTargets(component);
+    void component.requestArchive(live);
+
+    const confirming = component.confirmArchive(live);
+    component.ngOnDestroy();
+    release();
+    await confirming;
+
+    expect(focused).toEqual([]);
+  });
+
+  it('after a confirmed archive that removes the row, focus goes to the page title, not body', async () => {
+    const component = makeProbe(homeService({ loadForms: async () => [] }));
+    const focused = withTargets(component);
+    await component.loadForms();
+    void component.requestArchive(live);
+
+    await component.confirmArchive(live);
+
+    expect(focused).toEqual(['title']);
+  });
+
+  it('after a confirmed archive that leaves the row visible, focus returns to its icon', async () => {
+    const component = makeProbe(homeService({ loadForms: async () => [archivedOnly] }));
+    const focused = withTargets(component);
+    component.showArchived = true;
+    await component.loadForms();
+    void component.requestArchive(live);
+
+    await component.confirmArchive(live);
+
+    expect(focused).toEqual(['trigger form-1']);
   });
 });

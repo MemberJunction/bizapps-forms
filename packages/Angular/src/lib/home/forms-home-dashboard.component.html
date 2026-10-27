@@ -1,7 +1,7 @@
 <div class="mjf-page">
   <header class="mjf-page-head">
     <div class="mjf-page-headings">
-      <h1 class="mjf-page-title">Forms</h1>
+      <h1 class="mjf-page-title" #pageTitle tabindex="-1">Forms</h1>
       <p class="mjf-page-sub">{{ summaryLine }}</p>
     </div>
     <div class="mjf-page-actions">
@@ -147,18 +147,45 @@
               </div>
 
               <div class="mjf-row-actions">
-                <button
-                  type="button"
-                  class="mjf-btn mjf-btn--quiet mjf-btn--icon mjf-btn--sm"
-                  [class.home-archive]="!isArchived(row)"
-                  [class.home-restore]="isArchived(row)"
-                  [disabled]="busy"
-                  [attr.title]="isArchived(row) ? 'Restore this form' : 'Archive this form'"
-                  [attr.aria-label]="(isArchived(row) ? 'Restore ' : 'Archive ') + row.name"
-                  (click)="toggleArchive(row); $event.stopPropagation()"
-                >
-                  <i class="fa-solid" [class.fa-box-archive]="!isArchived(row)" [class.fa-rotate-left]="isArchived(row)" aria-hidden="true"></i>
-                </button>
+                @if (confirmingArchive === row.id) {
+                  <!-- Every key is captured here: Enter/Space on these buttons would otherwise bubble to
+                       the row's own keydown handlers and open the form. Escape cancels. -->
+                  <div
+                    class="home-confirm"
+                    role="group"
+                    [attr.aria-describedby]="'archive-question-' + row.id"
+                    (click)="$event.stopPropagation()"
+                    (keydown.escape)="cancelArchive($event)"
+                    (keydown)="$event.stopPropagation()"
+                  >
+                    <span class="home-confirm-text" role="alert" [id]="'archive-question-' + row.id">{{ archiveQuestion(row) }}</span>
+                    <button
+                      #archiveConfirmButton
+                      type="button"
+                      class="mjf-btn mjf-btn--quiet mjf-btn--sm home-confirm-archive"
+                      [disabled]="busy"
+                      (click)="confirmArchive(row, $event)"
+                    >Archive</button>
+                    <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="cancelArchive($event)">Cancel</button>
+                  </div>
+                } @else {
+                  <button
+                    #archiveTrigger
+                    [attr.data-row-id]="row.id"
+                    type="button"
+                    class="mjf-btn mjf-btn--quiet mjf-btn--icon mjf-btn--sm"
+                    [class.home-archive]="!isArchived(row)"
+                    [class.home-restore]="isArchived(row)"
+                    [disabled]="busy"
+                    [attr.title]="isArchived(row) ? 'Restore this form' : 'Archive this form'"
+                    [attr.aria-label]="(isArchived(row) ? 'Restore ' : 'Archive ') + row.name"
+                    (click)="requestArchive(row); $event.stopPropagation()"
+                    (keydown.enter)="$event.stopPropagation()"
+                    (keydown.space)="$event.stopPropagation()"
+                  >
+                    <i class="fa-solid" [class.fa-box-archive]="!isArchived(row)" [class.fa-rotate-left]="isArchived(row)" aria-hidden="true"></i>
+                  </button>
+                }
               </div>
 
               <i class="fa-solid fa-chevron-right home-chevron" aria-hidden="true"></i>

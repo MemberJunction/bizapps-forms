@@ -12,6 +12,7 @@ export { formsWidgetProviders } from './widget-providers';
 // S1 API seam
 export {
   FORMS_API_SERVICE,
+  FormsApiUnreachableError,
   FormUnavailableError,
   ResponseNotSavedError,
   SessionExpiredError,

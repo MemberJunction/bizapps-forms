@@ -26,8 +26,8 @@
 import { dateAnswerInstant, isZonelessDateTime } from './answer-date';
 import { isAnswerSupplied } from './conditional-rule';
 import type { AnswerValue } from './conditional-rule';
-import { ADDRESS_FIELDS, CONTACT_INFO_FIELDS, questionTypeBehavior } from './question-types';
-import type { FormQuestionType } from './question-types';
+import { ADDRESS_FIELDS, CONTACT_INFO_FIELDS, matrixAxisOf, questionTypeBehavior } from './question-types';
+import type { FormQuestionType, MatrixAxis } from './question-types';
 import type { JSONValue } from './json-value';
 
 /**
@@ -52,7 +52,7 @@ export interface AnswerFormatQuestion {
 /** The parts of an authored option this module reads. */
 export interface AnswerFormatOption {
   value: string;
-  matrixAxis?: 'Row' | 'Column';
+  matrixAxis?: MatrixAxis;
 }
 
 /** Default `OpinionScale` bounds when the author set none. Must match what the widget renders. */
@@ -398,11 +398,11 @@ export function validateCompositeParts(
  */
 function offeredValues(
   question: AnswerFormatQuestion,
-  axis?: 'Row' | 'Column',
+  axis?: MatrixAxis,
 ): ReadonlySet<string> | null {
   const options = question.options ?? [];
   const matching = axis
-    ? options.filter((o) => (o.matrixAxis ?? 'Row') === axis)
+    ? options.filter((o) => matrixAxisOf(o) === axis)
     : options;
   return matching.length > 0 ? new Set(matching.map((o) => o.value)) : null;
 }

@@ -43,6 +43,7 @@ import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../../shared/entity-names.js';
 import { AFFECTED_ROWS_ALIAS, affectedRows } from '../../shared/affected-rows.js';
 import { formsProcedureCall } from '../../shared/forms-procedure.js';
+import { isPostgres } from '../../shared/database-provider.js';
 import { isGuid } from '../../shared/guid.js';
 import type { ResponseSubmittedTrigger } from './response-submitted-event.js';
 
@@ -202,10 +203,6 @@ async function renewLease(provider: DatabaseProviderBase, eventId: string, worke
   const q = (name: string): string => provider.QuoteIdentifier(name);
   const update = `UPDATE ${eventTable(provider)} SET ${q('LockedUntil')} = ${POSTGRES_LEASE_EXPIRY} WHERE ${postgresLeaseHeldBy(provider, eventId, workerId)}`;
   return (await affectedOne(provider, counted(provider, update), contextUser, what)) === 1;
-}
-
-function isPostgres(provider: DatabaseProviderBase): boolean {
-  return provider.PlatformKey === 'postgresql';
 }
 
 /** The fence every PostgreSQL write after the claim carries: the event is still Running, under THIS worker. */

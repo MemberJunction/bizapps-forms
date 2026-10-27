@@ -51,8 +51,10 @@ import {
 } from '@mj-biz-apps/forms-entities/contracts';
 
 import {
+  API_UNREACHABLE_LOAD_MESSAGE,
   FORM_UNAVAILABLE_MESSAGE,
   FORMS_API_SERVICE,
+  FormsApiUnreachableError,
   FormUnavailableError,
   SessionExpiredError,
 } from './api/forms-api.interface';
@@ -71,6 +73,7 @@ import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, NOTHING_TO_SAVE, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
 import { FormUploadStore, type UploadFailure } from './core/upload-store';
+import { progressReportingSink } from './core/progress-reporting-sink';
 import { nothingToSubmit } from './core/nothing-to-submit';
 import { passedSubmitPoints } from './core/partial-submit-point';
 import { initialPhaseFor, outcomeForResult, resumedPhaseFor, shouldIgnoreSubmit } from './core/submit-phase';
@@ -370,6 +373,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   private responseId: string | undefined;
   private autosave: AutosaveController | null = null;
+  /** The `online` handler while registered — kept so ngOnDestroy removes the same function. */
+  private onlineListener: (() => void) | null = null;
   /** Prefetch of later screens' images; one queue per load (core/prefetch-scheduler.ts). */
   private readonly prefetcher = new PrefetchScheduler(prefetchImages, () => this.destroyed);
   /** Set on destroy: a `load()` still awaiting the network resumes afterwards and must start nothing. */
@@ -394,10 +399,28 @@ export class MjFormComponent implements OnInit, OnDestroy {
   private readonly ledger = new CommitLedger();
 
   public async ngOnInit(): Promise<void> {
+    this.listenForNetwork();
     await this.load();
   }
 
+  /**
+   * A save that failed while the network was down is re-sent the moment the browser says it is back,
+   * instead of at the next backoff tick or the respondent's next edit. Registered once per widget
+   * (not per load) and guarded for non-browser hosts.
+   */
+  private listenForNetwork(): void {
+    if (typeof window === 'undefined' || this.onlineListener) {
+      return;
+    }
+    this.onlineListener = () => this.autosave?.resume();
+    window.addEventListener('online', this.onlineListener);
+  }
+
   public ngOnDestroy(): void {
+    if (this.onlineListener && typeof window !== 'undefined') {
+      window.removeEventListener('online', this.onlineListener);
+    }
+    this.onlineListener = null;
     this.autosave?.dispose();
     this.destroyed = true;
     this.prefetcher.Cancel();
@@ -436,8 +459,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.form.set(form);
       const runtime = new FormRuntime(form);
       this.runtime.set(runtime);
-      // File answers are committed by the store, not by a view event — see `FormUploadStore.succeed`.
-      this.uploads.connect(runtime);
+      // File answers are committed by the store, not by a view event — see `FormUploadStore.succeed` —
+      // so no `valueChange` reaches `onProgress` for them. The sink reports progress at the commit
+      // instead, or the draft would miss the file until another field blurred (F4).
+      this.uploads.connect(progressReportingSink(runtime, () => this.onProgress()));
       this.autosave?.dispose();
       // Preview never autosaves: the draft it renders is the author's, and nothing about it may be
       // sent to the respondent API. Every autosave entry point no-ops on a null controller.
@@ -485,6 +510,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
         // the reason is for whoever opens the console.
         console.warn(`[mj-form] ${err.reason}`);
         this.fail(FORM_UNAVAILABLE_MESSAGE);
+        return;
+      }
+      if (err instanceof FormsApiUnreachableError) {
+        // The error's own sentence promises "your answers are still here", which is false on a first
+        // load where nothing was entered; the load page gets its own wording.
+        console.warn(`[mj-form] the form could not be loaded: ${failureDetail(err)}`);
+        this.fail(API_UNREACHABLE_LOAD_MESSAGE);
         return;
       }
       this.fail(err instanceof Error ? err.message : 'Failed to load the form.');
@@ -643,6 +675,15 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (this.endingEarly) {
       return;
     }
+    // Progress counts only while the respondent is editing. The upload store reports every file-answer
+    // commit through here (`progressReportingSink`), and a final submit restarts `unsaved` uploads
+    // while the phase is 'submitting': a ping then would un-quiesce the autosave the submit just
+    // settled and arm a save that can never be sent. Nothing is lost by returning before
+    // `clearResolvedRefusal` too: the submit cleared the banner when it started, and a refusal it
+    // raises on the way back to 'ready' must stay until the respondent acts on it.
+    if (this.phase() !== 'ready') {
+      return;
+    }
     // Also on a KEYSTROKE, not only on the commit below. The ready line is driven by the same
     // signals and reappears the moment a character lands, so clearing only on blur left the two
     // on screen together for as long as the respondent kept typing — the narrower version of the
@@ -661,8 +702,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
    *   failed upload any more — a new upload, a cleared answer, or a rule hiding the question.
    *   Answering ANOTHER question does not clear it: the failed upload still blocks the submit.
    *
-   * An upload start fires no event of its own, so the respondent's next keystroke, blur or Next is
-   * what clears a stale refusal.
+   * Runs on every progress report, which includes each file-answer commit the upload store makes
+   * (an upload's start, success or failure, and a clear — see `progressReportingSink`) while the form
+   * is 'ready'; otherwise the respondent's next keystroke, blur or Next is what clears a stale refusal.
    *
    * A ONE-WAY transition driven by their own action, deliberately, rather than a view-level
    * suppression of the sentence. Suppressing it in the view would also blank the SERVER's copy of
@@ -1072,13 +1114,24 @@ export class MjFormComponent implements OnInit, OnDestroy {
       }
       // The banner shows the fixed sentence; the cause goes to whoever opens the console.
       console.warn(`[mj-form] the response could not be submitted: ${failureDetail(err)}`);
-      this.phase.set('ready');
+      this.returnToEditing();
       const message = err instanceof Error ? err.message : 'Submission failed. Please try again.';
       this.errorText.set(message);
       this.handlePossibleTurnstileFailure(message);
     } finally {
       this.submitTimer.Stop();
     }
+  }
+
+  /**
+   * A submit that settled the autosave did not end the fill: hand the form back to the respondent
+   * and tell the autosave so too. Without `reopen()` the controller stays quiesced and an `online`
+   * event after an offline submit would never retry the save. Sends nothing itself — a partial
+   * right behind a submit that just failed would only fail again.
+   */
+  private returnToEditing(): void {
+    this.phase.set('ready');
+    this.autosave?.reopen();
   }
 
   /**
@@ -1108,7 +1161,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
     const failure = this.uploads.failureAmong(ids);
     if (failure) {
-      this.phase.set('ready');
+      this.returnToEditing();
       this.refuseWithUploadFailure(failure);
       return false;
     }
@@ -1173,6 +1226,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
     const outcome = outcomeForResult(res);
     this.phase.set(outcome.phase);
+    if (outcome.phase === 'ready') {
+      this.autosave?.reopen();
+    }
     if (outcome.phase === 'done') {
       // The draft is sealed: tell the page so it can drop the device pointer. Reopening the public
       // link on this browser afterwards must show a FRESH form — the response is finished, and a
@@ -1300,9 +1356,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // Never autosave once the respondent has moved past editing — a partial landing after
     // the final submit would resurrect a Partial row (or, worse, revert the confirmation).
     // The autosave is also cancelled in onSubmit(); this is the belt-and-braces guard for a
-    // save that was already dispatched before the cancel.
+    // save that was already dispatched before the cancel. NOTHING_TO_SAVE, because nothing was
+    // sent: anything else reads as a save to the controller, which then shows "Progress saved"
+    // and forgets an earlier failure an `online` event should still retry.
     if (this.phase() !== 'ready') {
-      return this.responseTarget();
+      return NOTHING_TO_SAVE;
     }
     let sentKey = '';
     let res: FormsSaveResponseOutput;

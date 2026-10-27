@@ -13,12 +13,15 @@
  * design and must never fail an author's save.
  *
  * So the subject here is the PRINCIPAL, not the mechanism. It seeds the least-privilege author that
- * such a host would have (full rights on `MJ_BizApps_Forms: Form Distributions`, nothing on the
- * invite entity), drives the ordinary builder operations as that user, and asks core to redeem the
+ * such a host would have (full rights on `MJ_BizApps_Forms: Form Distributions`, Read on
+ * `MJ_BizApps_Forms: Forms`, nothing on the invite entity), drives the ordinary builder operations as that user, and asks core to redeem the
  * token afterwards. The System-user control beside each case is what makes a failure legible: when
  * the same operation succeeds as System and fails as the author, the difference is the principal.
  *
- * Seeded rows (role, user, grant, membership) carry fixed ids and are removed in a `finally`; a
+ * The Read grant on Forms is not incidental: #303's archived-form gate reads the Form AS THE
+ * WRITER and fails closed, so no author can share a form they cannot see.
+ *
+ * Seeded rows (role, user, grants, membership) carry fixed ids and are removed in a `finally`; a
  * crashed run is cleaned up by the next one, which deletes before it inserts.
  *
  * Lives beside `credential-lifecycle-smoke.mjs` for the same reason that one does: it has to run
@@ -55,8 +58,10 @@ const IDS = {
   role: '114C0DE0-0000-4114-9000-000000000001',
   user: '114C0DE0-0000-4114-9000-000000000002',
   distGrant: '114C0DE0-0000-4114-9000-000000000003',
+  formGrant: '114C0DE0-0000-4114-9000-000000000005',
   membership: '114C0DE0-0000-4114-9000-000000000004',
 };
+const FORM_ENTITY = 'MJ_BizApps_Forms: Forms';
 const AUTHOR_NAME = 'repro114.least.privilege.author@example.invalid';
 
 /**
@@ -77,6 +82,7 @@ function unseed() {
     DELETE FROM __mj.MagicLinkInvite WHERE CreatedByUserID = '${IDS.user}';
     DELETE FROM __mj.UserRole WHERE ID = '${IDS.membership}';
     DELETE FROM __mj.EntityPermission WHERE ID = '${IDS.distGrant}';
+    DELETE FROM __mj.EntityPermission WHERE ID = '${IDS.formGrant}';
     DELETE FROM __mj.UserRole WHERE UserID = '${IDS.user}';
     DELETE FROM __mj.[User] WHERE ID = '${IDS.user}';
     DELETE FROM __mj.EntityPermission WHERE RoleID = '${IDS.role}';
@@ -86,7 +92,7 @@ function unseed() {
 
 /**
  * Create the author a least-privilege host would have: every right on the distribution they own,
- * and no row whatsoever on `MJ: Magic Link Invites`.
+ * Read on the form it points at (see the header), and no row whatsoever on `MJ: Magic Link Invites`.
  *
  * Deliberately NOT granted read on the invite entity either. An operator deciding "may Alice
  * publish forms?" grants rights on forms; nothing about that decision mentions core's magic-link
@@ -107,6 +113,9 @@ function seed() {
     INSERT INTO __mj.EntityPermission (ID, EntityID, RoleID, CanCreate, CanRead, CanUpdate, CanDelete, Type)
       SELECT '${IDS.distGrant}', e.ID, '${IDS.role}', 1, 1, 1, 1, 'Allow'
       FROM __mj.Entity e WHERE e.Name = '${DIST_ENTITY}';
+    INSERT INTO __mj.EntityPermission (ID, EntityID, RoleID, CanCreate, CanRead, CanUpdate, CanDelete, Type)
+      SELECT '${IDS.formGrant}', e.ID, '${IDS.role}', 0, 1, 0, 0, 'Allow'
+      FROM __mj.Entity e WHERE e.Name = '${FORM_ENTITY}';
   `);
 }
 

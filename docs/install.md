@@ -116,7 +116,9 @@ Beyond the `magicLink` block in the [README](../README.md#-install-into-a-host-a
 - **`READ_COMMITTED_SNAPSHOT ON`** on the host database (since #303). No migration sets it — it is a
   database-wide setting and switching it needs exclusive access:
   `ALTER DATABASE [<db>] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;`. Without it,
-  saving a link and archiving its form can deadlock (one is rolled back and fails).
+  any two concurrent authoring transactions (publish, clone, structural saves, saving a link
+  against archiving its form) can deadlock, and one is rolled back and fails. MJAPI logs an error
+  at boot when it is off; set `FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT=true` to refuse to boot instead.
 - **MJ's scheduler** (`scheduledJobs` in the host's `mj.config.cjs`, on by default) with a
   `systemUserEmail` that names an existing user. On-submit automations run from an outbox: the
   submitting process runs them right after the save, and the *Forms — Automation Outbox Sweep* job

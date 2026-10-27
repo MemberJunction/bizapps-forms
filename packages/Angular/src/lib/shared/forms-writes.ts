@@ -13,7 +13,7 @@
  * operation's caller ANNOUNCES the entities it changed ({@link announceWrites}, done by
  * `runOperation`), and {@link onFormsWrite} hears both kinds through one decoder.
  */
-import { BaseEntity } from '@memberjunction/core';
+import { BaseEntity, type BaseEntityEvent } from '@memberjunction/core';
 import { MJEventType, MJGlobal } from '@memberjunction/global';
 
 /** The MJGlobal event code an operation write is announced under. */
@@ -40,6 +40,13 @@ export function announceWrites(entityNames: readonly string[], kind: FormsWriteK
   for (const entityName of entityNames) {
     const args: OperationWriteArgs = { entityName, kind };
     MJGlobal.Instance.RaiseEvent({ component: {}, event: MJEventType.ComponentEvent, eventCode: FORMS_OPERATION_WRITE_EVENT, args });
+    // MJ's own "the server changed rows you cannot see" signal. Its client provider replays an
+    // identical RunViews for a few seconds and drops that replay only on a BaseEntity save, delete
+    // or remote-invalidate, so without this a re-read right after the operation (the home's list
+    // after Archive) got the rows from before it. onFormsWrite ignores this type, so no Forms
+    // listener hears the write twice.
+    const invalidate: BaseEntityEvent = { type: 'remote-invalidate', baseEntity: null, entityName, payload: null };
+    MJGlobal.Instance.RaiseEvent({ component: {}, event: MJEventType.ComponentEvent, eventCode: BaseEntity.BaseEventCode, args: invalidate });
   }
 }
 
