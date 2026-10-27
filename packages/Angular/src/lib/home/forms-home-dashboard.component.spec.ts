@@ -531,6 +531,41 @@ describe('FormsHomeDashboardComponent — focus after the Archive question close
     expect(focused).toEqual(['trigger form-1']);
   });
 
+  // The walk-through bug: Cancel re-rendered synchronously, removing the confirm wrapper (and its
+  // stopPropagation listener) mid-dispatch, so the click reached the card and opened the form.
+  // The buttons must stop the click themselves, before anything re-renders.
+  it('Cancel and Archive stop the click themselves, before they re-render', async () => {
+    const order: string[] = [];
+    const component = makeComponent(homeService({}));
+    (component as unknown as { cdr: { detectChanges(): void } }).cdr.detectChanges = () => void order.push('render');
+    const click = () => ({ stopPropagation: () => void order.push('stop') }) as unknown as Event;
+    withTargets(component);
+
+    void component.requestArchive(live);
+    component.cancelArchive(click());
+    expect(order.slice(0, 2)).toEqual(['stop', 'render']);
+
+    order.length = 0;
+    void component.requestArchive(live);
+    const confirming = component.confirmArchive(live, click());
+    expect(order[0]).toBe('stop');
+    await confirming;
+  });
+
+  it('does not touch the view after being destroyed mid-archive', async () => {
+    let release: () => void = () => undefined;
+    const component = makeComponent(homeService({ archive: () => new Promise((r) => { release = () => r({ ok: true, output: { FormID: 'form-1', Status: 'Closed' as FormStatus } }); }) }));
+    const focused = withTargets(component);
+    void component.requestArchive(live);
+
+    const confirming = component.confirmArchive(live);
+    component.ngOnDestroy();
+    release();
+    await confirming;
+
+    expect(focused).toEqual([]);
+  });
+
   it('after a confirmed archive that removes the row, focus goes to the page title, not body', async () => {
     const component = makeComponent(homeService({ loadForms: async () => [] }));
     const focused = withTargets(component);

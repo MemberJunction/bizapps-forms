@@ -164,9 +164,9 @@
                       type="button"
                       class="mjf-btn mjf-btn--quiet mjf-btn--sm home-confirm-archive"
                       [disabled]="busy"
-                      (click)="confirmArchive(row)"
+                      (click)="confirmArchive(row, $event)"
                     >Archive</button>
-                    <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="cancelArchive()">Cancel</button>
+                    <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="cancelArchive($event)">Cancel</button>
                   </div>
                 } @else {
                   <button

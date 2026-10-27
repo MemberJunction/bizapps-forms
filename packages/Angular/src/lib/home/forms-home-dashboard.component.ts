@@ -219,7 +219,11 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     return super.Refresh();
   }
 
+  /** Set on destroy so a write that settles afterwards does not render or focus a dead view. */
+  private destroyed = false;
+
   public ngOnDestroy(): void {
+    this.destroyed = true;
     this.formChanges?.unsubscribe();
     this.formChanges = undefined;
     this.stopWatchingUrl?.();
@@ -361,9 +365,19 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     return `Archive "${row.name}"? Its open share links close and respondents see "no longer accepting responses". Restore brings it back, but the links stay closed.`;
   }
 
-  public async confirmArchive(row: FormSummaryRow): Promise<void> {
+  /**
+   * `event` is the button's own click. It is stopped HERE, first: the confirm re-renders as soon as
+   * the state clears, which removes the wrapper's `(click)` stopPropagation listener mid-dispatch,
+   * and a click that was only stopped by the wrapper then reached the card and opened the form.
+   */
+  public async confirmArchive(row: FormSummaryRow, event?: Event): Promise<void> {
+    event?.stopPropagation();
     this.confirmingArchive = null;
     await this.toggleArchive(row);
+    // The user may have navigated away during the archive; a destroyed view cannot be rendered.
+    if (this.destroyed) {
+      return;
+    }
     // The row usually leaves the list (archived forms are hidden); focus must not fall to <body>.
     if (this.visibleForms.some((r) => r.id === row.id)) {
       this.focusArchiveTrigger(row.id);
@@ -372,7 +386,9 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     }
   }
 
-  public cancelArchive(): void {
+  /** Stops its own click first, for the reason given on {@link confirmArchive}. */
+  public cancelArchive(event?: Event): void {
+    event?.stopPropagation();
     const rowId = this.confirmingArchive;
     this.confirmingArchive = null;
     this.cdr.markForCheck();
