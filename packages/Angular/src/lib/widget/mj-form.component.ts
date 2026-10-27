@@ -675,6 +675,15 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (this.endingEarly) {
       return;
     }
+    // Progress counts only while the respondent is editing. The upload store reports every file-answer
+    // commit through here (`progressReportingSink`), and a final submit restarts `unsaved` uploads
+    // while the phase is 'submitting': a ping then would un-quiesce the autosave the submit just
+    // settled and arm a save that can never be sent. Nothing is lost by returning before
+    // `clearResolvedRefusal` too: the submit cleared the banner when it started, and a refusal it
+    // raises on the way back to 'ready' must stay until the respondent acts on it.
+    if (this.phase() !== 'ready') {
+      return;
+    }
     // Also on a KEYSTROKE, not only on the commit below. The ready line is driven by the same
     // signals and reappears the moment a character lands, so clearing only on blur left the two
     // on screen together for as long as the respondent kept typing — the narrower version of the
@@ -693,8 +702,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
    *   failed upload any more — a new upload, a cleared answer, or a rule hiding the question.
    *   Answering ANOTHER question does not clear it: the failed upload still blocks the submit.
    *
-   * An upload start fires no event of its own, so the respondent's next keystroke, blur or Next is
-   * what clears a stale refusal.
+   * Runs on every progress report, which includes each file-answer commit the upload store makes
+   * (an upload's start, success or failure, and a clear — see `progressReportingSink`) while the form
+   * is 'ready'; otherwise the respondent's next keystroke, blur or Next is what clears a stale refusal.
    *
    * A ONE-WAY transition driven by their own action, deliberately, rather than a view-level
    * suppression of the sentence. Suppressing it in the view would also blank the SERVER's copy of
@@ -1346,9 +1356,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // Never autosave once the respondent has moved past editing — a partial landing after
     // the final submit would resurrect a Partial row (or, worse, revert the confirmation).
     // The autosave is also cancelled in onSubmit(); this is the belt-and-braces guard for a
-    // save that was already dispatched before the cancel.
+    // save that was already dispatched before the cancel. NOTHING_TO_SAVE, because nothing was
+    // sent: anything else reads as a save to the controller, which then shows "Progress saved"
+    // and forgets an earlier failure an `online` event should still retry.
     if (this.phase() !== 'ready') {
-      return this.responseTarget();
+      return NOTHING_TO_SAVE;
     }
     let sentKey = '';
     let res: FormsSaveResponseOutput;
