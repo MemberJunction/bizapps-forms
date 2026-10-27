@@ -335,14 +335,20 @@ describe('assessDatabaseReadiness', () => {
     expect(assessDatabaseReadiness({ dialect: 'sqlserver', readCommittedSnapshotOn: true })).toEqual([]);
   });
 
-  it('names the symptom, the fix and the opt-in flag when it is off', () => {
+  it('names the symptom and the fix when it is off', () => {
     const reasons = assessDatabaseReadiness({ dialect: 'sqlserver', readCommittedSnapshotOn: false, databaseName: 'MJ_Host' });
     expect(reasons).toHaveLength(1);
     expect(reasons[0]).toContain('READ_COMMITTED_SNAPSHOT');
     expect(reasons[0]).toContain('deadlock');
     expect(reasons[0]).toContain("Could not read the form's pages; nothing was published");
     expect(reasons[0]).toContain('ALTER DATABASE [MJ_Host] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;');
-    expect(reasons[0]).toContain('FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT');
+  });
+
+  // The reason is also the body of the refusal, which only exists when the flag IS set, so it must
+  // not tell the operator to set it. The advice is the log-only line's to give.
+  it('does not advise setting the opt-in flag in the reason itself', () => {
+    const reasons = assessDatabaseReadiness({ dialect: 'sqlserver', readCommittedSnapshotOn: false, databaseName: 'MJ_Host' });
+    expect(reasons[0]).not.toContain('to refuse to boot');
   });
 
   it('says the state is unknown, rather than guessing, when the probe failed', () => {

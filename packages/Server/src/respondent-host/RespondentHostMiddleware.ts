@@ -68,7 +68,13 @@ import { getGraphqlUrlForRequest, getRespondentHostConfig, graphqlRootPathWarnin
 import { renderRespondentHostPage } from './host-page.js';
 import { redeemSlugToToken } from './redeem.service.js';
 import { loadFormIdentity } from './form-identity.js';
-import { assessDatabaseReadiness, assessRespondentReadiness, refuseBootOnDatabaseReadiness } from './host-readiness.js';
+import {
+  assessDatabaseReadiness,
+  assessRespondentReadiness,
+  isDatabaseReadinessRequired,
+  refuseBootOnDatabaseReadiness,
+  REQUIRE_READ_COMMITTED_SNAPSHOT_ENV,
+} from './host-readiness.js';
 import { assessAutomationReadiness, describeDurableDispatch, type PermissionLookup } from '../automation/automation-readiness.js';
 import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.js';
 import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
@@ -345,7 +351,12 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     if (probe === undefined) return;
     const reasons = assessDatabaseReadiness({ dialect: 'sqlserver', ...probe });
     for (const reason of reasons) {
-      LogError(`[Forms] Database is NOT ready for concurrent authoring: ${reason}`);
+      // The opt-in advice belongs here, not in the reason: the refusal embeds the reasons, and it
+      // only exists when the operator has already set the flag.
+      const advice = isDatabaseReadinessRequired()
+        ? ''
+        : ` Set ${REQUIRE_READ_COMMITTED_SNAPSHOT_ENV}=true to refuse to boot without it.`;
+      LogError(`[Forms] Database is NOT ready for concurrent authoring: ${reason}${advice}`);
     }
     try {
       refuseBootOnDatabaseReadiness(reasons);

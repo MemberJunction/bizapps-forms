@@ -358,8 +358,18 @@ export function assessDatabaseReadiness(inputs: DatabaseReadinessInputs): string
       `structure at the same time can deadlock each other; the author sees "Could not read the ` +
       `form's pages; nothing was published". Run ALTER DATABASE [${database}] SET ` +
       `READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE; (needs exclusive access, so it is a host ` +
-      `step). Set ${REQUIRE_READ_COMMITTED_SNAPSHOT_ENV}=true to refuse to boot without it.`,
+      `step).`,
   ];
+}
+
+/**
+ * Whether the operator opted in to refusing the boot (`FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT=true`).
+ * One parse, shared by the refusal and by the log line that otherwise advises the flag: a reason must
+ * not carry that advice itself, because the refusal embeds the reasons and only exists when the flag
+ * is already set.
+ */
+export function isDatabaseReadinessRequired(env: Record<string, string | undefined> = process.env): boolean {
+  return (env[REQUIRE_READ_COMMITTED_SNAPSHOT_ENV] ?? '').trim().toLowerCase() === 'true';
 }
 
 /**
@@ -373,7 +383,7 @@ export function refuseBootOnDatabaseReadiness(
   reasons: string[],
   env: Record<string, string | undefined> = process.env,
 ): void {
-  if (reasons.length === 0 || (env[REQUIRE_READ_COMMITTED_SNAPSHOT_ENV] ?? '').trim().toLowerCase() !== 'true') {
+  if (reasons.length === 0 || !isDatabaseReadinessRequired(env)) {
     return;
   }
   throw new Error(

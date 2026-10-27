@@ -149,6 +149,30 @@ describe('RespondentHostMiddleware boot — database readiness', () => {
     }
   });
 
+  it('tells an operator who has not opted in how to make the boot refuse', async () => {
+    probeReturns(false);
+
+    await new RespondentHostMiddleware().ConfigureExpressApp(express());
+
+    expect(rcsiLogs()[0]).toContain(`Set ${FLAG}=true to refuse to boot without it.`);
+  });
+
+  // F1 of the PR #348 review: the refusal used to embed that advice and told the operator to set
+  // the flag the same line said was set.
+  it('never advises setting the flag once the operator has set it', async () => {
+    process.env[FLAG] = 'true';
+    probeReturns(false);
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    try {
+      await new RespondentHostMiddleware().ConfigureExpressApp(express());
+
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(logError.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('to refuse to boot'))).toEqual([]);
+    } finally {
+      exit.mockRestore();
+    }
+  });
+
   it('does not exit when the flag is not set, even with the setting off', async () => {
     probeReturns(false);
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
