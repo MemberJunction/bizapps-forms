@@ -203,7 +203,8 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     // went unnoticed.
     this.reportAutomationReadiness();
     // And for the database: a host without READ_COMMITTED_SNAPSHOT works until two authors publish
-    // or clone at once. The one boot check allowed to throw — only when the operator opted in.
+    // or clone at once. The one boot check allowed to stop the process — it logs and exits, and
+    // only when the operator opted in.
     await this.reportDatabaseReadiness();
   }
 

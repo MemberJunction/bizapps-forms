@@ -14,6 +14,11 @@
 --
 -- GUARD. Common is a hard dependency but this file must not fail on a host where it is not yet
 -- installed, so a missing table is a clean no-op, not an error.
+--
+-- FAIL-LOUD, DELIBERATELY. The postcondition THROW can trip only if something writes '(unknown)'
+-- between the UPDATE and the check — a stale pre-fix MJAPI still serving respondents during the
+-- migrate. Failing then is the point: the repair is not done, and rerunning the migrate (after the
+-- MJAPI has the fixed action) succeeds.
 -- =============================================================================================
 
 IF OBJECT_ID(N'__mj_BizAppsCommon.Person', N'U') IS NOT NULL
@@ -24,5 +29,5 @@ BEGIN
 
     -- Postcondition: no placeholder survives.
     IF EXISTS (SELECT 1 FROM [__mj_BizAppsCommon].[Person] WHERE LastName = N'(unknown)')
-        THROW 51160, 'MJ Forms v0.16.x: People rows with LastName ''(unknown)'' remain after the repair.', 1;
+        THROW 51166, 'MJ Forms v0.16.x: People rows with LastName ''(unknown)'' remain after the repair.', 1;
 END

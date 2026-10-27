@@ -126,10 +126,13 @@ export interface AuthoredPageNode {
  * questions and no answer, so no helper that walks questions can reach one by accident.
  *
  * ORDER INVARIANT: `pages`, each page's `questions` and each question's `options` are in display
- * order (`DisplayOrder`, ties by id). Every producer owes it (the builder's load, the server's
- * publish `readDraft`); readers rely on it without re-sorting — `ruleInventoryFormOf` takes array
- * order as reading order, so a tree in database (GUID) order makes it refuse rules that read an
- * earlier question.
+ * order (`DisplayOrder`). Every producer owes it; readers rely on it without re-sorting —
+ * `ruleInventoryFormOf` takes array order as reading order, so a tree in database (GUID) order makes
+ * it refuse rules that read an earlier question. What each producer guarantees for TIES differs:
+ * the server's publish `readDraft` sorts every level with ties by id, so its order is total; the
+ * builder's load reads questions `OrderBy: 'DisplayOrder'` and takes pages and options as their
+ * related-record loads return them, so tied rows come back in whatever order the database gives.
+ * No reader may depend on how two rows with the same `DisplayOrder` are broken.
  */
 export interface AuthoredFormTree {
   readonly form: AuthoredFormRow;
