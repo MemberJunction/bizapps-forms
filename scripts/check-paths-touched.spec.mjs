@@ -109,7 +109,7 @@ const EXPECTED_SCOPE = {
     'packages/': 'the product code and every Vitest suite',
     'apps/': 'the MJAPI harness is a workspace member, so it is in the lockfile',
     'scripts/': 'the gate scripts and their specs',
-    'smoke/': 'smoke/lib/{fixture,sqlcmd,target,operations,host-page}.spec.mjs run in build-and-test and nowhere else',
+    'smoke/': 'smoke/lib/{fixture,sqlcmd,target,operations,host-page,grants}.spec.mjs run in build-and-test and nowhere else',
     'migrations/': 'question-types.spec.ts reads migrations/ and runs inside npm test',
     '.github/scripts/': 'validate-widget-bundle.sh and the package-lock case test run here',
     '.claude/': 'lint:hook-guard:test and lint:git-gate:test run nowhere else',
