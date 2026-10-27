@@ -34,8 +34,13 @@ Fixes from the 2026-10-26 pre-release smoke test. Ships one migration
   correct labels.
 - **Archive asks first.** Archiving a form from the Forms home asks for confirmation, because it
   closes every share link of the form.
+- **The Archive and Restore icons work from the keyboard.** Enter or Space on the icon opened the
+  form's builder instead, and before the confirmation was added it also archived the form without
+  asking. It now opens the confirmation, as a click does.
 - **The Forms home refreshes when you return to it**, so response counts are current without a
   page reload.
+- **Archive and Restore update the list at once.** Archiving or restoring a form within a few
+  seconds of opening the Forms home left the list showing it as before until the next reload.
 
 ### For respondents
 
