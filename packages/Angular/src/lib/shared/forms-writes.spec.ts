@@ -93,3 +93,41 @@ describe('onFormsWrite with debounceMs', () => {
     expect(heard).toEqual([]);
   });
 });
+
+// Review of PR #348, F6: MJ's client provider replays an identical RunViews for DedupLingerMs (5 s)
+// and drops that replay only on a BaseEntity save / delete / remote-invalidate event. An operation
+// write raised only the Forms event, so a re-read within 5 s of the last one (the home's list right
+// after Archive) was answered from the replay, with the archived form still in it.
+describe('announceWrites and MJ client caches', () => {
+  it('raises a BaseEntity remote-invalidate per written entity, which is what drops a lingered read', () => {
+    const seen: { code: string; type?: string; entityName?: string }[] = [];
+    const sub = MJGlobal.Instance.GetEventListener(false).subscribe((e) => {
+      if (e.event === MJEventType.ComponentEvent && e.eventCode === BaseEntity.BaseEventCode) {
+        const args = e.args as { type?: string; entityName?: string };
+        seen.push({ code: e.eventCode, type: args.type, entityName: args.entityName });
+      }
+    });
+    try {
+      announceWrites(['MJ_BizApps_Forms: Forms', 'MJ_BizApps_Forms: Form Distributions']);
+    } finally {
+      sub.unsubscribe();
+    }
+
+    expect(seen).toEqual([
+      { code: BaseEntity.BaseEventCode, type: 'remote-invalidate', entityName: 'MJ_BizApps_Forms: Forms' },
+      { code: BaseEntity.BaseEventCode, type: 'remote-invalidate', entityName: 'MJ_BizApps_Forms: Form Distributions' },
+    ]);
+  });
+
+  it('is not heard twice by a Forms listener: the remote-invalidate is neither a save nor a delete', () => {
+    const heard: string[] = [];
+    const sub = onFormsWrite('MJ_BizApps_Forms: Forms', ['save', 'delete'], () => heard.push('write'));
+    try {
+      announceWrites(['MJ_BizApps_Forms: Forms']);
+    } finally {
+      sub.unsubscribe();
+    }
+
+    expect(heard).toEqual(['write']);
+  });
+});
