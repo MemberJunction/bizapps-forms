@@ -321,14 +321,16 @@ FORMS_INTEGRATION_DB=1 npx vitest run \
   src/engines/__tests__/FormSubmissionEngine.integration.spec.ts \
   src/entities/__tests__/form-structure-graph.integration.spec.ts \
   src/reporting/__tests__/FormReportingEngine.integration.spec.ts \
-  src/engines/__tests__/FormAuthoringEngine.integration.spec.ts
+  src/engines/__tests__/FormAuthoringEngine.integration.spec.ts \
+  src/engines/__tests__/FormPublishingEngine.integration.spec.ts
 ```
 
 The sandbox must have `READ_COMMITTED_SNAPSHOT ON` (a host requirement, see
 [`local-host.md` §5](local-host.md#5-host-requirements-since-303-the-automation-outbox-and-read_committed_snapshot)),
-and the specs are run **together, in parallel**, on purpose: vitest runs the four files at once, so
-they double as a concurrency check. With RCSI off the same command produced seven deadlock errors
-and three failed specs; with it on, none.
+and the specs are run **together, in parallel**, on purpose: vitest runs the files at once, so
+they double as a concurrency check. With RCSI off the four-file command produced seven deadlock
+errors and three failed specs; with it on, none. With the publish spec added, measured 2026-10-27 on
+a copy of the dev database: RCSI off, 4 of 8 runs deadlocked; RCSI on, 0 of 8.
 
 | # | Guarantee | Where it is proven |
 |---|---|---|
@@ -338,8 +340,9 @@ and three failed specs; with it on, none.
 | 4 | **Key-only structural saves** — a builder structural edit sends none of the form's columns, so a rename or an archive committed meanwhile survives it | `form-structure-graph.integration.spec.ts`, the rename / archive / page-title cases |
 | 5 | **Binary value grouping** — the reporting queries count a choice value by its exact text (`G` and `"g "` are not option `g`) | `FormReportingEngine.integration.spec.ts`, "counts choice values by their exact text" |
 | 6 | **The outbox claim** — two drains claiming at once take disjoint events; a retried event waits for its `NextAttemptAt`; only the lease holder settles; an event never overtakes an older open one of its response | `FormSubmissionEngine.integration.spec.ts`, "the automation outbox claim on SQL Server" |
+| 7 | **Publish judges rules in display order** — a rule that reads an earlier question publishes even when the database returns the questions in id order, which disagrees with display order (F9 of the 2026-10-26 smoke test) | `FormPublishingEngine.integration.spec.ts` |
 
-Also there, not one of the six but in the same class: a stale builder save after a submission
+Also there, not one of the seven but in the same class: a stale builder save after a submission
 leaves `ResponseCount` where the slot `UPDATE` put it (final review I2), and clone / create-from-
 template / publish-immediately roll back whole (`FormAuthoringEngine.integration.spec.ts`). The
 durable fix is a scheduled CI job against a container database; until one exists, this list is the

@@ -9,10 +9,11 @@
  * and sorts AFTER the dependent by id — the rule reads the earlier question, and a gate in id order
  * would see it as later.
  *
- * OPT-IN. Skipped unless `FORMS_INTEGRATION_DB` is set; run it ONLY against the sandbox
- * (`DB_DATABASE=MJ_Smoke_1026`; connection from the repo `.env`):
+ * OPT-IN. Skipped unless `FORMS_INTEGRATION_DB` is set; run it ONLY against a sandbox database the
+ * repo `.env` names (connection from that file), never the shared dev database. It is one of the
+ * release checklist's opt-in specs (`docs/database-operations.md`) and runs with the others there:
  *
- *   cd packages/CoreEntitiesServer && DB_DATABASE=MJ_Smoke_1026 FORMS_INTEGRATION_DB=1 node <vitest.mjs> run src/engines/__tests__/FormPublishingEngine.integration.spec.ts
+ *   cd packages/CoreEntitiesServer && FORMS_INTEGRATION_DB=1 npx vitest run src/engines/__tests__/FormPublishingEngine.integration.spec.ts
  *
  * Every fixture form it builds is deleted in `afterAll`, whether the tests passed or not.
  */
