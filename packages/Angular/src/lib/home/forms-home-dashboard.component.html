@@ -155,7 +155,7 @@
                     role="group"
                     [attr.aria-describedby]="'archive-question-' + row.id"
                     (click)="$event.stopPropagation()"
-                    (keydown.escape)="cancelArchive()"
+                    (keydown.escape)="cancelArchive($event)"
                     (keydown)="$event.stopPropagation()"
                   >
                     <span class="home-confirm-text" role="alert" [id]="'archive-question-' + row.id">{{ archiveQuestion(row) }}</span>

@@ -4,7 +4,6 @@ import {
   Component,
   ElementRef,
   inject,
-  QueryList,
   ViewChild,
   ViewChildren,
 } from '@angular/core';
@@ -67,6 +66,23 @@ const AUTHORING_FAILED = 'The authoring action failed.';
 function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
+
+/**
+ * The narrow slices of the template's elements that focus restoration uses. Structural, so the real
+ * `ElementRef` / `QueryList` satisfy them and a test can supply a plain double without a DOM.
+ */
+interface FocusTarget {
+  nativeElement: Pick<HTMLElement, 'focus'>;
+}
+interface TriggerRef {
+  nativeElement: Pick<HTMLButtonElement, 'focus' | 'dataset'>;
+}
+interface TriggerLookup {
+  find(predicate: (trigger: TriggerRef) => boolean): TriggerRef | undefined;
+}
+
+/** What the archive handlers need of a DOM event; a test double need only offer this. */
+type StoppableEvent = Pick<Event, 'stopPropagation'>;
 
 /** Which authoring panel (if any) is open. */
 type AuthoringPanel = 'none' | 'ai' | 'template';
@@ -139,11 +155,11 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
 
   /** Every row's Archive/Restore icon, found by `data-row-id` when focus has to return to one. */
   @ViewChildren('archiveTrigger')
-  private archiveTriggers?: QueryList<ElementRef<HTMLButtonElement>>;
+  protected archiveTriggers?: TriggerLookup;
 
   /** Stable focus target (`tabindex="-1"`) for when the row that held focus is gone. */
   @ViewChild('pageTitle')
-  private pageTitle?: ElementRef<HTMLElement>;
+  protected pageTitle?: FocusTarget;
 
   /** Unregisters the {@link watchForReturn} listener; released on destroy. */
   private stopWatchingUrl?: () => void;
@@ -370,7 +386,7 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
    * the state clears, which removes the wrapper's `(click)` stopPropagation listener mid-dispatch,
    * and a click that was only stopped by the wrapper then reached the card and opened the form.
    */
-  public async confirmArchive(row: FormSummaryRow, event?: Event): Promise<void> {
+  public async confirmArchive(row: FormSummaryRow, event?: StoppableEvent): Promise<void> {
     event?.stopPropagation();
     this.confirmingArchive = null;
     await this.toggleArchive(row);
@@ -387,7 +403,7 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   }
 
   /** Stops its own click first, for the reason given on {@link confirmArchive}. */
-  public cancelArchive(event?: Event): void {
+  public cancelArchive(event?: StoppableEvent): void {
     event?.stopPropagation();
     const rowId = this.confirmingArchive;
     this.confirmingArchive = null;
