@@ -1,5 +1,6 @@
-import { Component, ElementRef, Injector, afterNextRender, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, ElementRef, Injector, ViewChild, afterNextRender, computed, inject } from '@angular/core';
+import { CommonModule, Location } from '@angular/common';
+import { NavigationService } from '@memberjunction/ng-shared';
 import { FormsModule } from '@angular/forms';
 import {
   CdkDropList,
@@ -32,6 +33,9 @@ import type {
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
 import { BuilderStateService } from './builder-state.service';
+import { UndoToastComponent } from './undo-toast.component';
+import type { HeldDelete } from './pending-delete';
+import { answeredRefusal } from './delete-refusal';
 import { DesignStateService } from './design-state.service';
 import { readDraftAutomations, readLiveSnapshot } from './publish-baseline';
 import { runOperation } from '../shared/remote-operation';
@@ -51,7 +55,10 @@ import {
   templateControlState,
   type TemplateControlState,
 } from '../templates/template-fingerprint';
-import { ResponsesTabComponent } from '../responses/responses-tab.component';
+import { ResponsesTabComponent, type ResponsesTabState } from '../responses/responses-tab.component';
+import { DEFAULT_RESPONSE_QUERY } from '../responses/responses-query';
+import type { BuilderTab, BuilderView } from '../shared/view-urls';
+import { BuilderUrlSync } from './builder-url-sync';
 import type { ResponseRecordLink } from '../responses/response-models';
 import { DesignPanelComponent } from './design-panel.component';
 import { FormPreviewModalComponent } from './form-preview-modal.component';
@@ -140,7 +147,6 @@ import { targetPageFor, type NewQuestionTarget } from './new-question-target';
  * came back. Collection follows configuration.
  */
 
-type BuilderTab = 'build' | 'design' | 'distribute' | 'automate' | 'responses';
 
 /**
  * Stand-in version id used only while fingerprinting.
@@ -207,6 +213,7 @@ function draftDefinition(
     SaveAsTemplateDialogComponent,
     RuleBadgeComponent,
     QuestionTypePickerComponent,
+    UndoToastComponent,
   ],
   providers: [
     BuilderStateService,
@@ -259,6 +266,18 @@ export class FormBuilderComponent extends BaseFormComponent {
   /** Live palette filter. At 25 types, scanning seven groups is slower than typing. */
   protected paletteQuery = '';
   protected activeTab: BuilderTab = 'build';
+
+  /**
+   * The Responses tab's table and open response: what it starts on when it mounts, and the last
+   * state it reported, so switching tabs and back — or a reload — lands where the author was.
+   */
+  protected responsesState: ResponsesTabState = { query: DEFAULT_RESPONSE_QUERY, responseId: null };
+  @ViewChild(ResponsesTabComponent) private responsesTab?: ResponsesTabComponent;
+
+  private readonly location = inject(Location);
+  private readonly navigation = inject(NavigationService);
+  /** Keeps the tab and the Responses view in the URL (UI audit F09); see `builder-url-sync.ts`. */
+  private urlSync: BuilderUrlSync | null = null;
   protected busy = false;
   protected statusMessage = '';
 
@@ -519,6 +538,8 @@ export class FormBuilderComponent extends BaseFormComponent {
     }
     this.busy = true;
     try {
+      // A held delete is not in the database yet; re-reading first would bring the item back.
+      await this.state.releaseHeldDelete();
       this.tree = await this.state.loadTree(this.record);
     } catch (err) {
       // Stop HERE. An empty tree is what tells the builder to create "Page 1", so carrying on over
@@ -543,8 +564,43 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.watchForAutomationChanges();
     this.watchForDistributionChanges();
     this.watchForFormOperations();
+    this.followUrl();
     this.busy = false;
     this.announceReady();
+  }
+
+  /** Open on the view the URL names, and follow back / forward from here on. */
+  private followUrl(): void {
+    this.urlSync?.Stop();
+    this.urlSync = new BuilderUrlSync(this.record.ID, {
+      path: () => this.location.path(),
+      onUrlChange: (fn) => this.location.onUrlChange((url) => fn(url)),
+      writeActiveTab: (params) => this.navigation.UpdateActiveTabQueryParams(params),
+    });
+    const view = this.urlSync.Read();
+    if (view) {
+      this.showView(view);
+    }
+    this.urlSync.Watch((next) => this.showView(next));
+  }
+
+  /** Show a view the URL named; nothing is written back. */
+  private showView(view: BuilderView): void {
+    this.activeTab = view.view;
+    this.responsesState = view.responses;
+    // A Responses tab already on screen moves in place; one not yet mounted starts from the state.
+    void this.responsesTab?.ApplyState(view.responses);
+    this.cdr.markForCheck();
+  }
+
+  /** The Responses tab moved to another page, sort, search or response. */
+  protected onResponsesState(state: ResponsesTabState): void {
+    this.responsesState = state;
+    this.writeUrl();
+  }
+
+  private writeUrl(): void {
+    this.urlSync?.Write({ view: this.activeTab, responses: this.responsesState });
   }
 
   /**
@@ -730,9 +786,9 @@ export class FormBuilderComponent extends BaseFormComponent {
    * of the page. Measured on BOTH openers before this was called a defect, so it is not something
    * the empty-state control introduced; the picker stays opener-independent and is not touched.
    *
-   * The card is the right destination rather than a re-created opener: the insert has already
-   * selected it, it already carries `tabindex="0"` for exactly this, and it is what the author
-   * came here to edit.
+   * The card's title button is the right destination rather than a re-created opener: the insert
+   * has already selected the card, and it is what the author came here to edit. The button, not
+   * the card: since UI audit F05 the card is not a tab stop, and `focus()` on it did nothing.
    *
    * Keyed on the question id rather than on `.is-selected`, so the focus target does not depend on
    * a class that exists to paint something — and `afterNextRender` because the card does not exist
@@ -743,7 +799,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     afterNextRender(
       () => {
         this.host.nativeElement
-          .querySelector<HTMLElement>(`.fb-q[data-question-id="${questionId}"]`)
+          .querySelector<HTMLElement>(`.fb-q[data-question-id="${questionId}"] button.fb-q-label`)
           ?.focus();
       },
       { injector: this.injector },
@@ -837,32 +893,39 @@ export class FormBuilderComponent extends BaseFormComponent {
   /**
    * Delete a page AND every question on it.
    *
-   * Hover-revealed like every other delete on the canvas, but unlike them it asks first, because
-   * the blast radius is not what the button is attached to: the page header shows a title and a
-   * toggle, with no hint of how many questions go down with it. The last page is never deletable
-   * — a form with no page has nowhere to put a question, and the builder would immediately
-   * recreate one underneath the author.
+   * It used to ask through the browser's OK/Cancel box, because the header gives no hint of how
+   * many questions go down with it. It is held for Undo like every other delete instead (UI audit
+   * F07), and the toast says how many questions went with it. The last page is never deletable —
+   * a form with no page has nowhere to put a question, and the builder would immediately recreate
+   * one underneath the author.
    */
   protected async deletePage(page: PageNode): Promise<void> {
-    if (!this.tree || this.busy || this.tree.pages.length <= 1) {
+    const tree = this.tree;
+    if (!tree || this.busy || tree.pages.length <= 1 || this.checkingDelete) {
+      return;
+    }
+    const sectionName = `Section ${tree.pages.indexOf(page) + 1}`;
+    if (!(await this.deletable({ kind: 'section', name: sectionName }, page.questions.map((q) => q.entity.ID)))) {
+      return;
+    }
+    const index = tree.pages.indexOf(page);
+    if (index < 0 || tree.pages.length <= 1) {
       return;
     }
     const count = page.questions.length;
-    const what = count === 1 ? '1 question' : `${count} questions`;
-    if (count > 0 && !confirm(`Delete this section and its ${what}? This cannot be undone.`)) {
-      return;
+    const with_ = count === 0 ? '' : count === 1 ? ' and its question' : ` and its ${count} questions`;
+    tree.pages = tree.pages.filter((p) => p !== page);
+    this.selection = clearIfPage(this.selection, page.entity.ID);
+    for (const q of page.questions) {
+      this.selection = clearIfQuestion(this.selection, q.entity.ID);
     }
-    this.busy = true;
-    if (await this.state.deletePage(this.tree, page)) {
-      this.tree.pages = this.tree.pages.filter((p) => p.entity.ID !== page.entity.ID);
-      this.selection = clearIfPage(this.selection, page.entity.ID);
-      for (const q of page.questions) {
-        this.selection = clearIfQuestion(this.selection, q.entity.ID);
-      }
-      this.markDirty();
-    }
-    this.busy = false;
-    this.cdr.markForCheck();
+    this.holdDelete({
+      label: `${sectionName.toLowerCase()}${with_}`,
+      restore: () => {
+        tree.pages = reinsert(tree.pages, index, page);
+      },
+      commit: () => this.state.deletePage(tree, page),
+    });
   }
 
   /** Toggle whether leaving this page banks a Partial response immediately. */
@@ -1192,19 +1255,23 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.cdr.markForCheck();
   }
 
-  protected async deleteScreen(screen: mjBizAppsFormsFormScreenEntity): Promise<void> {
-    if (!this.tree || this.busy) {
+  protected deleteScreen(screen: mjBizAppsFormsFormScreenEntity): void {
+    const tree = this.tree;
+    if (!tree || this.busy) {
       return;
     }
-    this.busy = true;
-    // The service removes it from the tree, because deleting the default ending also has to
-    // promote a survivor — an invariant no caller should be able to forget.
-    if (await this.state.deleteScreen(this.tree, screen)) {
-      this.selection = clearIfScreen(this.selection, screen.ID);
-      this.markDirty();
-    }
-    this.busy = false;
-    this.cdr.markForCheck();
+    const index = tree.screens.indexOf(screen);
+    // Off screen now, held for Undo (F07). The service still promotes a survivor to default ending
+    // when the delete is written — an invariant no caller should be able to forget.
+    tree.screens = tree.screens.filter((s) => s !== screen);
+    this.selection = clearIfScreen(this.selection, screen.ID);
+    this.holdDelete({
+      label: screen.ScreenType === 'Welcome' ? 'the welcome screen' : `ending “${screen.Title || 'Untitled'}”`,
+      restore: () => {
+        tree.screens = reinsert(tree.screens, index, screen);
+      },
+      commit: () => this.state.deleteScreen(tree, screen),
+    });
   }
 
   /**
@@ -1426,33 +1493,113 @@ export class FormBuilderComponent extends BaseFormComponent {
     });
   }
 
-  protected async onRemoveOption(event: { node: QuestionNode; optionIndex: number }): Promise<void> {
+  protected onRemoveOption(event: { node: QuestionNode; optionIndex: number }): void {
     const { node, optionIndex } = event;
     const option = node.options[optionIndex];
-    if (this.busy || !this.tree || !option) {
+    const tree = this.tree;
+    if (this.busy || !tree || !option) {
       return;
     }
-    await this.whileBusy(async () => {
-      // The delete closes the gap in the option order in the same save, and takes the option out
-      // of `node.options` itself once it is gone.
-      if (this.tree && (await this.state.deleteOption(this.tree, node, option))) {
-        this.markDirty();
-      }
+    // Off the question now, held for Undo (F07); the written delete closes the order gap.
+    node.options = node.options.filter((o) => o !== option);
+    this.holdDelete({
+      label: `option “${option.Label?.trim() || 'Untitled'}”`,
+      restore: () => {
+        node.options = reinsert(node.options, optionIndex, option);
+      },
+      commit: () => this.state.deleteOption(tree, node, option),
     });
   }
 
   protected async deleteQuestion(page: PageNode, node: QuestionNode): Promise<void> {
-    if (this.busy || !this.tree) {
+    const tree = this.tree;
+    if (this.busy || !tree || !page.questions.includes(node) || this.checkingDelete) {
       return;
     }
-    await this.whileBusy(async () => {
-      // One save deletes it (with its options) and closes the gap in the page's order; the service
-      // takes it out of `page.questions` once it is gone.
-      if (this.tree && (await this.state.deleteQuestion(this.tree, page, node))) {
-        this.selection = clearIfQuestion(this.selection, node.entity.ID);
-        this.markDirty();
-      }
+    const name = node.entity.Prompt?.trim() || 'Untitled';
+    if (!(await this.deletable({ kind: 'question', name }, [node.entity.ID]))) {
+      return;
+    }
+    // Read after the check: the page may have changed while it ran.
+    const index = page.questions.indexOf(node);
+    if (index < 0) {
+      return;
+    }
+    // Off the canvas now, held for Undo (F07). The written delete takes its options with it and
+    // closes the gap in the page's order, in one save.
+    page.questions = page.questions.filter((q) => q !== node);
+    this.selection = clearIfQuestion(this.selection, node.entity.ID);
+    const neighbour = page.questions[index] ?? page.questions[index - 1];
+    this.holdDelete({
+      label: `question “${name}”`,
+      restore: () => {
+        page.questions = reinsert(page.questions, index, node);
+      },
+      commit: () => this.state.deleteQuestion(tree, page, node),
     });
+    // Focus would otherwise fall to <body> with the button that held it.
+    if (neighbour) {
+      this.focusQuestionCard(neighbour.entity.ID);
+    }
+  }
+
+  /** While a delete is asking whether its questions were answered; a second click waits for it. */
+  private checkingDelete = false;
+
+  /**
+   * Whether respondents left the questions unanswered, so the delete can be held for Undo. An
+   * answered question cannot be deleted — every answer points at it — and the author is told so
+   * now, in words, rather than ten seconds later by a refused save (see `delete-refusal.ts`). A
+   * count that could not be read lets the delete go ahead; the save's own refusal still explains.
+   */
+  private async deletable(subject: Parameters<typeof answeredRefusal>[0], questionIds: string[]): Promise<boolean> {
+    this.checkingDelete = true;
+    try {
+      const answers = await this.state.answerCount(questionIds);
+      const refusal = answeredRefusal(subject, answers ?? 0);
+      if (refusal) {
+        this.state.showRefusal(refusal);
+        this.cdr.markForCheck();
+        return false;
+      }
+      return true;
+    } finally {
+      this.checkingDelete = false;
+    }
+  }
+
+  /** The held delete, as a one-item list so the toast is re-created — and its countdown restarted — per delete. */
+  protected readonly heldToasts = computed(() => {
+    const held = this.state.heldDelete();
+    return held ? [held] : [];
+  });
+
+  /**
+   * Hand a delete to the undo hold, wrapping it so the canvas repaints when the item comes back
+   * and the form is marked changed once the delete is written. The caller has already taken the
+   * item out of the tree.
+   */
+  private holdDelete(held: HeldDelete): void {
+    this.state.holdDelete({
+      label: held.label,
+      restore: () => {
+        held.restore();
+        this.cdr.markForCheck();
+      },
+      commit: async () => {
+        const ok = await held.commit();
+        if (ok) {
+          this.markDirty();
+        }
+        this.cdr.markForCheck();
+        return ok;
+      },
+    });
+    this.cdr.markForCheck();
+  }
+
+  protected undoDelete(): void {
+    this.state.undoDelete();
   }
 
   /** Hold `busy` across `work`, released on every path — a stuck flag freezes every guarded handler. */
@@ -1877,6 +2024,10 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.distributionChanges = undefined;
     this.formOperations?.unsubscribe();
     this.formOperations = undefined;
+    // Leaving the builder ends the undo window: write the held delete now rather than lose it.
+    void this.state.releaseHeldDelete();
+    this.urlSync?.Stop();
+    this.urlSync = null;
     super.ngOnDestroy();
   }
 
@@ -2158,6 +2309,7 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   protected setTab(tab: BuilderTab): void {
     this.activeTab = tab;
+    this.writeUrl();
     this.cdr.markForCheck();
   }
 
@@ -2224,4 +2376,10 @@ function createRefusalReason(failure: string | null): string {
   const opens = (text.match(/\{/g) ?? []).length;
   const closes = (text.match(/\}/g) ?? []).length;
   return closes > opens && text.endsWith('}') ? text.slice(0, -1).trimEnd() : text;
+}
+
+/** `items` with `item` put back at `index` (clamped), for Undo. */
+function reinsert<T>(items: readonly T[], index: number, item: T): T[] {
+  const at = Math.min(Math.max(index, 0), items.length);
+  return [...items.slice(0, at), item, ...items.slice(at)];
 }

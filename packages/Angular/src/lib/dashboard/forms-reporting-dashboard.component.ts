@@ -8,6 +8,7 @@ import type { ExportFormat } from '@memberjunction/export-engine';
 
 import { FORMS_UI_CSS, FORMS_VIZ_CSS, failureMessage } from '../shared';
 import { FORMS_REPORTING_CSS } from './forms-reporting-dashboard.styles';
+import { reportingViewFromParams, reportingViewToParams, type ReportingMode, type ReportingView } from '../shared/view-urls';
 import { FormsReportingService } from './services/forms-reporting.service';
 import { FormsReportingExportService } from './services/forms-reporting-export.service';
 import type { FormReportData, ReportableForm } from './models/reporting.model';
@@ -43,7 +44,7 @@ import { ResponsesTabComponent } from '../responses/responses-tab.component';
  * responses stay separate because reading one person's submission is a genuinely different
  * task from reading the aggregate.
  */
-type DashboardMode = 'insights' | 'responses';
+type DashboardMode = ReportingMode;
 
 /**
  * Responses & Analytics — the Forms app's cross-form home for everything that has been
@@ -140,6 +141,12 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   public exportNotice: string | null = null;
 
   public mode: DashboardMode = 'insights';
+
+  /**
+   * The form and view a link (or back / forward) asked for, kept until the form list can satisfy
+   * it — a deep link arrives before the list does (UI audit F09).
+   */
+  private urlView: ReportingView | null = null;
   public readonly modes: { key: DashboardMode; label: string; icon: string }[] = [
     { key: 'insights', label: 'Insights', icon: 'fa-solid fa-chart-simple' },
     { key: 'responses', label: 'Responses', icon: 'fa-solid fa-table-list' },
@@ -266,13 +273,53 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
    * Refresh used to jump back to the first form's Insights.
    */
   private async showSelectionAfterLoad(): Promise<void> {
-    const selectedId = this.selectedForm?.formId;
-    const kept = selectedId ? this.forms.find((f) => f.formId === selectedId) : undefined;
-    if (kept) {
+    const wanted = this.urlView;
+    this.urlView = null;
+    const selectedId = this.selectedForm?.formId ?? wanted?.formId;
+    const kept = selectedId ? this.forms.find((f) => f.formId.toLowerCase() === selectedId.toLowerCase()) : undefined;
+    if (kept && kept.formId === this.selectedForm?.formId) {
       await this.loadReportFor(kept);
-    } else {
-      await this.selectForm(this.forms[0]);
+      return;
     }
+    // The view is set as the load starts, not after it: the reader should land on Responses at once.
+    const showing = this.selectForm(kept ?? this.forms[0]);
+    if (kept && wanted?.view === 'responses') {
+      this.setMode('responses', false);
+    }
+    await showing;
+  }
+
+  /**
+   * A link, a reload or back / forward named a form and view. Before the list is in, it waits for
+   * {@link showSelectionAfterLoad}; after, it is applied at once. MJ delivers these with its own
+   * write-back suppressed, and this applies them without writing, so the URL is never rewritten
+   * with what it just supplied.
+   */
+  protected override OnQueryParamsChanged(params: Record<string, string>, _source: 'popstate' | 'deeplink'): void {
+    const view = reportingViewFromParams(params);
+    if (this.forms.length === 0) {
+      this.urlView = view;
+      return;
+    }
+    const form = view.formId ? this.forms.find((f) => f.formId.toLowerCase() === view.formId?.toLowerCase()) : undefined;
+    void this.followUrl(form ?? this.forms[0], view.view);
+  }
+
+  private async followUrl(form: ReportableForm, view: DashboardMode): Promise<void> {
+    const showing = form.formId !== this.selectedForm?.formId ? this.selectForm(form) : null;
+    this.setMode(view, false);
+    await showing;
+  }
+
+  /** The rail: the reader picked a form — shown, and kept in the URL. */
+  public async pickForm(form: ReportableForm): Promise<void> {
+    const showing = this.selectForm(form);
+    this.writeUrl();
+    await showing;
+  }
+
+  private writeUrl(): void {
+    this.UpdateQueryParams(reportingViewToParams({ formId: this.selectedForm?.formId ?? null, view: this.mode }));
   }
 
   // --- The rail --------------------------------------------------------------
@@ -386,10 +433,14 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
 
   // --- The report ------------------------------------------------------------
 
-  public setMode(mode: DashboardMode): void {
+  /** Switch Insights / Responses; `remember` keeps it in the URL (a reader's switch, not a link's). */
+  public setMode(mode: DashboardMode, remember = true): void {
     this.mode = mode;
     if (mode === 'responses') {
       this.responsesMounted = true;
+    }
+    if (remember) {
+      this.writeUrl();
     }
     this.cdr.markForCheck();
   }

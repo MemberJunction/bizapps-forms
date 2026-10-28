@@ -291,7 +291,12 @@
 
   <!-- Created on activation, so the responses query never runs on builder open. -->
   @if (activeTab === 'responses' && tree) {
-    <mjf-responses-tab class="fb-pane-host" [FormID]="tree.form.ID" (OpenRecord)="openLinkedRecord($event)" />
+    <mjf-responses-tab
+      class="fb-pane-host"
+      [FormID]="tree.form.ID"
+      [InitialState]="responsesState"
+      (StateChange)="onResponsesState($event)"
+      (OpenRecord)="openLinkedRecord($event)" />
   }
 
   <!-- `&& tree` matters: everything below reads the loaded tree, and the tree is assigned after
@@ -813,6 +818,12 @@
       (Confirmed)="saveAsTemplate($event)"
       (Cancelled)="closeTemplateDialog()"
     />
+  }
+
+  <!-- The delete the author can still take back (UI audit F07). One item at most; tracked by
+       identity so each delete gets a fresh toast and countdown. -->
+  @for (held of heldToasts(); track held) {
+    <mjf-undo-toast [Label]="held.label" (Undo)="undoDelete()" />
   }
 </div>
 }

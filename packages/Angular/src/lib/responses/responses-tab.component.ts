@@ -10,21 +10,24 @@ import {
   signal,
 } from '@angular/core';
 import { LogError } from '@memberjunction/core';
-import { MAX_RESPONSE_PAGE_SIZE } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS, failureMessage } from '../shared';
 import { FORMS_ENTITY } from '../shared/entity-names';
 import { onFormsWrite, type FormsWriteSubscription } from '../shared/forms-writes';
 import { resolveResponsesView } from './responses-view-state';
 import { readResponseDetail, readResponsePage } from './response-reads';
-import type { ResponseDetail, ResponseListRow, ResponseRecordLink } from './response-models';
+import type { DetailPosition, ResponseDetail, ResponseListRow, ResponseRecordLink } from './response-models';
 import { FormsResponseListComponent } from './response-list.component';
 import { FormsResponseDetailComponent } from './response-detail.component';
+import { DEFAULT_RESPONSE_QUERY, pageCount, type ResponseQuery } from './responses-query';
 
 /** How long a burst of Form Response writes settles before the list re-reads once. */
 const WRITE_REFRESH_DEBOUNCE_MS = 300;
 
-/** Shown in place of "Load more" once paging can no longer be trusted. */
-export const LIST_CHANGED_NOTICE = 'The list changed — refresh to see it.';
+/** What the tab shows, as its host keeps it in the URL: the list's query and the open response. */
+export interface ResponsesTabState {
+  query: ResponseQuery;
+  responseId: string | null;
+}
 
 /**
  * A form's submissions, list plus drill-down, scoped to one form.
@@ -34,11 +37,11 @@ export const LIST_CHANGED_NOTICE = 'The list changed — refresh to see it.';
  * (`Embedded`, under the dashboard's own header). Data loads when this component is created — on
  * tab activation, not on builder open, because the builder's hot path is editing.
  *
- * The list pages through `Forms.ListResponses` (one page at a time, "Load more" for the next), so a
- * form with thousands of responses costs one page, not every answer it ever collected. Paging is by
- * offset, so a response that arrives or is deleted between pages would shift the next page by a row
- * (repeating one, or skipping one): when a page's count differs from the list's, or hands back a row
- * already shown, the tab stops paging and says the list changed, and a refresh starts it over.
+ * The list shows ONE page of `Forms.ListResponses` at a time, searched, sorted and paged by the
+ * server (`ResponseQuery`). It used to append 200-row pages and search only what it had loaded, so a
+ * search on a larger form said "nothing found" for a respondent the form did have (UI audit F08).
+ * Each page now replaces the last, so there is no appended list for a moved row to corrupt; a page
+ * past the end (the list shrank) lands on the last page instead.
  *
  * It re-reads by itself only when a Form Response is written in this browser; a submission from a
  * respondent reaches the list through Refresh, which both mounts offer.
@@ -58,7 +61,7 @@ export const LIST_CHANGED_NOTICE = 'The list changed — refresh to see it.';
         <header class="mjf-page-head">
           <div class="mjf-page-headings">
             <h2 class="mjf-page-title rt-title">Responses</h2>
-            @if (View() === 'list' || View() === 'detail' || View() === 'no-responses') {
+            @if ((View() === 'list' || View() === 'detail' || View() === 'no-responses') && !Query().search.trim()) {
               <p class="mjf-page-sub">
                 {{ Total() }} {{ Total() === 1 ? 'response' : 'responses' }} across every
                 published version of this form.
@@ -122,7 +125,9 @@ export const LIST_CHANGED_NOTICE = 'The list changed — refresh to see it.';
             [Detail]="d"
             (Back)="CloseDetail()"
             (Reload)="ReloadDetail()"
-            (OpenRecord)="OpenRecord.emit($event)"></mj-forms-response-detail>
+            [Position]="DetailPosition()"
+          (Adjacent)="OpenAdjacent($event)"
+          (OpenRecord)="OpenRecord.emit($event)"></mj-forms-response-detail>
         }
       }
       @case ('list') {
@@ -132,11 +137,9 @@ export const LIST_CHANGED_NOTICE = 'The list changed — refresh to see it.';
         <mj-forms-response-list
           [Rows]="Rows()"
           [Total]="Total()"
-          [CanLoadMore]="HasMore()"
-          [LoadingMore]="LoadingMore()"
-          [Busy]="OpeningResponse()"
-          [Notice]="ListChanged() ? listChangedNotice : null"
-          (LoadMore)="LoadMore()"
+          [Query]="Query()"
+          [Busy]="OpeningResponse() || Paging()"
+          (QueryChange)="SetQuery($event)"
           (Open)="OpenResponse($event)"></mj-forms-response-list>
       }
       }
@@ -177,26 +180,37 @@ export class ResponsesTabComponent implements OnInit, OnDestroy {
    */
   @Output() BusyChange = new EventEmitter<boolean>();
 
-  public readonly listChangedNotice = LIST_CHANGED_NOTICE;
+  /** What the tab shows changed — a new page, sort or search, or a response opened or closed. */
+  @Output() StateChange = new EventEmitter<ResponsesTabState>();
+
+  /** What to show first, from the host's URL. Read once, on init. */
+  @Input() InitialState: ResponsesTabState | null = null;
 
   public readonly Loading = signal(true);
   public readonly Error = signal<string | null>(null);
   public readonly Rows = signal<ResponseListRow[]>([]);
-  /** Complete responses across every page. */
+  /** Complete responses matching the search, across every page. */
   public readonly Total = signal(0);
-  public readonly LoadingMore = signal(false);
+  /** The page, sort and search on screen. */
+  public readonly Query = signal<ResponseQuery>(DEFAULT_RESPONSE_QUERY);
+  public readonly PageCount = computed(() => pageCount(this.Total(), this.Query().pageSize));
+  /** While a page other than the first load is being read; the rows on screen stay, held. */
+  public readonly Paging = signal(false);
   public readonly Detail = signal<ResponseDetail | null>(null);
   /** While one response's detail loads; the list stays on screen under the reader's cursor. */
   public readonly OpeningResponse = signal(false);
 
-  /** Set when a page disagreed with the list (see the class doc); paging stops until a refresh. */
-  public readonly ListChanged = signal(false);
-
-  /** Set when a page came back shorter than asked for: the server has nothing after it. */
-  private readonly exhausted = signal(false);
-
-  /** Whether "Load more" may be offered. */
-  public readonly HasMore = computed(() => !this.ListChanged() && !this.exhausted() && this.Rows().length < this.Total());
+  /** Where the open response sits in the whole list; null while none is open or it is not on this page. */
+  public readonly DetailPosition = computed<DetailPosition | null>(() => {
+    const open = this.Detail();
+    const at = open ? this.Rows().findIndex((r) => r.responseId === open.responseId) : -1;
+    if (at < 0) {
+      return null;
+    }
+    const q = this.Query();
+    const index = (q.page - 1) * q.pageSize + at + 1;
+    return { index, total: this.Total(), hasPrevious: index > 1, hasNext: index < this.Total() };
+  });
 
   private writes: FormsWriteSubscription | null = null;
 
@@ -231,6 +245,7 @@ export class ResponsesTabComponent implements OnInit, OnDestroy {
       failed: this.loadFailed(),
       isPublished: this.LabelVersionID() !== null,
       rowCount: this.Rows().length,
+      searching: this.Query().search.trim() !== '',
       hasDetail: this.Detail() !== null,
     }),
   );
@@ -241,7 +256,14 @@ export class ResponsesTabComponent implements OnInit, OnDestroy {
     this.writes = onFormsWrite(FORMS_ENTITY.FormResponse, ['save', 'delete'], () => void this.load(), {
       debounceMs: WRITE_REFRESH_DEBOUNCE_MS,
     });
+    const initial = this.InitialState;
+    if (initial) {
+      this.Query.set(initial.query);
+    }
     await this.load();
+    if (initial?.responseId && this.Rows().some((r) => r.responseId === initial.responseId)) {
+      await this.OpenResponse(initial.responseId);
+    }
   }
 
   public ngOnDestroy(): void {
@@ -256,34 +278,39 @@ export class ResponsesTabComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * The next page, appended — unless it shows the list moved under the reader (a different count, or
-   * a row already shown), in which case nothing is appended and paging stops (`ListChanged`).
+   * Show another page, sort or search. A new search or sort starts on page 1. The rows on screen
+   * stay, held, until the page lands; a page asked for after this one wins, whatever order they
+   * arrive in.
    */
-  public async LoadMore(): Promise<void> {
-    if (this.LoadingMore() || this.Loading() || !this.HasMore()) {
+  public async SetQuery(next: ResponseQuery): Promise<void> {
+    const current = this.Query();
+    const restart = next.search.trim() !== current.search.trim() || next.sort !== current.sort || next.pageSize !== current.pageSize;
+    this.Query.set(restart ? { ...next, page: 1 } : next);
+    this.Detail.set(null);
+    this.emitState();
+    await this.load(true);
+  }
+
+  /** Open the response before (`-1`) or after (`1`) the open one, crossing to the neighbouring page at an edge. */
+  public async OpenAdjacent(direction: -1 | 1): Promise<void> {
+    const position = this.DetailPosition();
+    if (!position || this.OpeningResponse() || (direction < 0 ? !position.hasPrevious : !position.hasNext)) {
       return;
     }
-    const generation = this.generation;
-    this.LoadingMore.set(true);
-    this.Error.set(null);
-    try {
-      const page = await readResponsePage(this.FormID, this.Rows().length);
-      if (generation !== this.generation) {
-        return;
-      }
-      const held = new Set(this.Rows().map((r) => r.responseId));
-      if (page.total !== this.Total() || page.rows.some((r) => held.has(r.responseId))) {
-        this.ListChanged.set(true);
-        return;
-      }
-      this.Rows.set([...this.Rows(), ...page.rows]);
-      this.exhausted.set(page.rows.length < MAX_RESPONSE_PAGE_SIZE);
-    } catch (err) {
-      this.failUnlessSuperseded(generation, err, 'Failed to load more responses.');
-    } finally {
-      if (generation === this.generation) {
-        this.LoadingMore.set(false);
-      }
+    const rows = this.Rows();
+    const at = rows.findIndex((r) => r.responseId === this.Detail()?.responseId);
+    const neighbour = rows[at + direction];
+    if (neighbour) {
+      await this.OpenResponse(neighbour.responseId);
+      return;
+    }
+    const q = this.Query();
+    this.Query.set({ ...q, page: q.page + direction });
+    await this.load(true);
+    const landed = this.Rows();
+    const target = direction > 0 ? landed[0] : landed[landed.length - 1];
+    if (target) {
+      await this.OpenResponse(target.responseId);
     }
   }
 
@@ -293,7 +320,7 @@ export class ResponsesTabComponent implements OnInit, OnDestroy {
    * A click while another response is opening is ignored: two loads in flight settle in network
    * order, and the reader could land on the response they did not pick.
    */
-  public async OpenResponse(responseId: string): Promise<void> {
+  public async OpenResponse(responseId: string, announce = true): Promise<void> {
     if (this.OpeningResponse() || this.LabelVersionID() === null) {
       return;
     }
@@ -305,6 +332,9 @@ export class ResponsesTabComponent implements OnInit, OnDestroy {
       const detail = await readResponseDetail(responseId, this.LabelVersionID());
       if (generation === this.generation) {
         this.Detail.set(detail);
+        if (announce) {
+          this.emitState();
+        }
       }
     } catch (err) {
       this.failUnlessSuperseded(generation, err, 'Failed to load that response.');
@@ -350,24 +380,57 @@ export class ResponsesTabComponent implements OnInit, OnDestroy {
 
   public CloseDetail(): void {
     this.Detail.set(null);
+    this.emitState();
   }
 
-  private async load(): Promise<void> {
+  /**
+   * Apply a state the host read from its URL (back / forward): the query, then the response.
+   * Nothing is announced back, so the host's URL is not rewritten with what it just supplied.
+   */
+  public async ApplyState(state: ResponsesTabState): Promise<void> {
+    const sameQuery = JSON.stringify(state.query) === JSON.stringify(this.Query());
+    if (!sameQuery) {
+      this.Query.set(state.query);
+      this.Detail.set(null);
+      await this.load(true);
+    }
+    if (!state.responseId) {
+      this.Detail.set(null);
+    } else if (state.responseId !== this.Detail()?.responseId && this.Rows().some((r) => r.responseId === state.responseId)) {
+      await this.OpenResponse(state.responseId, false);
+    }
+  }
+
+  private emitState(): void {
+    this.StateChange.emit({ query: this.Query(), responseId: this.Detail()?.responseId ?? null });
+  }
+
+  /**
+   * Read the page the query names. `paging` keeps the current rows on screen (held) instead of the
+   * full-surface loading state, for a page turn, a sort or a search.
+   *
+   * A page past the end — the list shrank since the link was made, or since the reader paged — is
+   * read again as the last page, once.
+   */
+  private async load(paging = false): Promise<void> {
     const generation = ++this.generation;
-    this.Loading.set(true);
-    this.LoadingMore.set(false);
-    this.ListChanged.set(false);
+    (paging ? this.Paging : this.Loading).set(true);
     this.Error.set(null);
     this.loadFailed.set(false);
     try {
-      const page = await readResponsePage(this.FormID, 0);
+      let page = await readResponsePage(this.FormID, this.Query());
+      const last = pageCount(page.total, this.Query().pageSize);
+      if (generation === this.generation && page.rows.length === 0 && page.total > 0 && this.Query().page > last) {
+        this.Query.set({ ...this.Query(), page: last });
+        this.emitState();
+        page = await readResponsePage(this.FormID, this.Query());
+      }
       if (generation !== this.generation) {
         return;
       }
       this.LabelVersionID.set(page.labelVersionId);
       this.Rows.set(page.rows);
       this.Total.set(page.total);
-      this.exhausted.set(page.rows.length < MAX_RESPONSE_PAGE_SIZE);
     } catch (err) {
       if (generation === this.generation) {
         this.loadFailed.set(true);
@@ -376,6 +439,7 @@ export class ResponsesTabComponent implements OnInit, OnDestroy {
     } finally {
       if (generation === this.generation) {
         this.Loading.set(false);
+        this.Paging.set(false);
       }
     }
   }

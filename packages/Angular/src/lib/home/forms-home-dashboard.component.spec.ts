@@ -17,6 +17,8 @@ import { FormsHomeService } from './forms-home.service';
 import { HOME_ENTITY, type FormStatus, type FormSummaryRow } from './home-models';
 import { announceWrites } from '../shared/forms-writes';
 import { LOAD_TIMEOUT_MS } from '../shared/coalesced-load';
+import { ResourceData } from '@memberjunction/core-entities';
+import { HOME_URL_DEBOUNCE_MS } from './forms-home-dashboard.component';
 
 type HomeServiceSurface = Pick<FormsHomeService, 'loadForms' | 'archive' | 'restore' | 'createFromTemplate' | 'runAuthoringAction'>;
 
@@ -54,6 +56,11 @@ class HomeProbe extends FormsHomeDashboardComponent {
     this.initDashboard();
   }
 
+  /** What MJ's shell delivers on a deep link or back / forward. */
+  public deliver(params: Record<string, string>): void {
+    this.OnQueryParamsChanged(params, 'deeplink');
+  }
+
   public setFocusTargets(triggers: NonNullable<HomeProbe['archiveTriggers']>, title: NonNullable<HomeProbe['pageTitle']>): void {
     this.archiveTriggers = triggers;
     this.pageTitle = title;
@@ -68,13 +75,14 @@ function makeProbe(
   service: HomeServiceSurface,
   location: object = fakeLocation().location,
   cdr: ChangeDetectorSurface = { markForCheck: () => undefined, detectChanges: () => undefined },
+  navigation: object = {},
 ): HomeProbe {
   const injector = Injector.create({
     providers: [
       { provide: Location, useValue: location },
       { provide: FormsHomeService, useValue: service },
-      // The failure paths under test never reach navigation; an empty double satisfies the injector.
-      { provide: NavigationService, useValue: {} },
+      // Most paths never reach navigation; the URL specs pass a double that records writes.
+      { provide: NavigationService, useValue: navigation },
       { provide: ChangeDetectorRef, useValue: cdr },
     ],
   });
@@ -663,5 +671,69 @@ describe('FormsHomeDashboardComponent — focus after the Archive question close
     await component.confirmArchive(live);
 
     expect(focused).toEqual(['trigger form-1']);
+  });
+});
+
+describe('FormsHomeDashboardComponent — the search and archived toggle live in the URL (F09)', () => {
+  const rows: FormSummaryRow[] = [
+    { ...draftRow, id: 'a', name: 'Intake' },
+    { ...draftRow, id: 'b', name: 'Survey' },
+    { ...draftRow, id: 'c', name: 'Old intake', status: 'Closed' },
+  ];
+
+  function withUrl() {
+    const writes: Record<string, string | null>[] = [];
+    const navigation = { UpdateTabQueryParams: vi.fn((_tab: string, params: Record<string, string | null>) => (writes.push(params), true)) };
+    const component = makeProbe(homeService({ loadForms: async () => rows }), fakeLocation().location, undefined, navigation);
+    component.Data = new ResourceData({ Configuration: { tabId: 'tab-1' } });
+    return { component, writes };
+  }
+
+  it('applies the search and toggle a link carries', async () => {
+    const { component } = withUrl();
+    await component.loadForms();
+
+    component.deliver({ q: 'intake', archived: '1' });
+
+    expect(component.query).toBe('intake');
+    expect(component.showArchived).toBe(true);
+    expect(component.visibleForms.map((f) => f.id)).toEqual(['a', 'c']);
+  });
+
+  it('writes the search once typing pauses, and the toggle at once', async () => {
+    vi.useFakeTimers();
+    const { component, writes } = withUrl();
+    component.setQuery('in');
+    component.setQuery('intake');
+    expect(writes).toEqual([]);
+    vi.advanceTimersByTime(HOME_URL_DEBOUNCE_MS);
+    expect(writes).toEqual([{ q: 'intake', archived: null }]);
+
+    component.toggleArchived();
+    expect(writes.at(-1)).toEqual({ q: 'intake', archived: '1' });
+    vi.useRealTimers();
+  });
+
+  it('drops a pending URL write when the page is destroyed', () => {
+    vi.useFakeTimers();
+    const { component, writes } = withUrl();
+    component.setQuery('intake');
+    component.ngOnDestroy();
+    vi.advanceTimersByTime(HOME_URL_DEBOUNCE_MS);
+    expect(writes).toEqual([]);
+    vi.useRealTimers();
+  });
+
+  it('does not re-read the list when only its own query params change', async () => {
+    let reads = 0;
+    const url = fakeLocation();
+    const component = makeProbe(homeService({ loadForms: async () => ((reads += 1), []) }), url.location);
+    component.init();
+
+    url.navigate('/app/forms/Forms?q=intake');
+    await new Promise((settled) => setTimeout(settled, 0));
+
+    expect(reads).toBe(0);
+    component.ngOnDestroy();
   });
 });

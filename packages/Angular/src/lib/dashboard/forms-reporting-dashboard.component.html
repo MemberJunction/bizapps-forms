@@ -32,7 +32,7 @@
                 class="rp-form"
                 [class.is-on]="isSelected(f)"
                 [attr.aria-current]="isSelected(f) ? 'true' : null"
-                (click)="selectForm(f)">
+                (click)="pickForm(f)">
                 <span class="rp-form-name">{{ f.name }}</span>
                 <span class="rp-form-count" [class.is-none]="f.responseCount === 0">{{ f.responseCount }}</span>
               </button>

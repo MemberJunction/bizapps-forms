@@ -23,6 +23,7 @@ import { toFormReport } from './services/report-view';
 import { summaryOutput } from './testing/summary-fixture';
 import { LOAD_TIMEOUT_MS } from '../shared/coalesced-load';
 import type { FormReportData, ReportableForm } from './models/reporting.model';
+import { ResourceData } from '@memberjunction/core-entities';
 
 const settle = (): Promise<void> => new Promise((done) => setTimeout(done, 0));
 
@@ -77,7 +78,7 @@ interface Harness {
   errors: Error[];
 }
 
-function construct(): Harness {
+function construct(navigation: object = {}): Harness {
   const formLists: Deferred<ReportableForm[]>[] = [];
   const reportCalls: ReportCall[] = [];
   const reporting: ReportingSurface = {
@@ -104,7 +105,7 @@ function construct(): Harness {
     providers: [
       { provide: FormsReportingService, useValue: reporting },
       { provide: FormsReportingExportService, useValue: exporter },
-      { provide: NavigationService, useValue: {} },
+      { provide: NavigationService, useValue: navigation },
       { provide: ChangeDetectorRef, useValue: { markForCheck: () => undefined, detectChanges: () => undefined } },
     ],
   });
@@ -734,5 +735,79 @@ describe('FormsReportingDashboardComponent — a failure stays in the dashboard 
     await first;
     const calls = vi.mocked(console.error).mock.calls.flat();
     expect(calls.map(String).join('\n')).toContain('Failed to load the report: The query failed');
+  });
+});
+
+describe('FormsReportingDashboardComponent — the chosen form and view live in the URL (F09)', () => {
+  const G1: ReportableForm = { formId: '0F0F0F0F-0000-4000-8000-000000000001', formVersionId: 'v1', name: 'One', responseCount: 1 };
+  const G2: ReportableForm = { formId: '0F0F0F0F-0000-4000-8000-000000000002', formVersionId: 'v2', name: 'Two', responseCount: 2 };
+
+  /** A harness whose tab writes are recorded; `deliver` is what MJ's shell does on a link or back / forward. */
+  function withUrl() {
+    const writes: Record<string, string | null>[] = [];
+    const navigation = { UpdateTabQueryParams: vi.fn((_tab: string, params: Record<string, string | null>) => (writes.push(params), true)) };
+    const h = construct(navigation);
+    h.c.Data = new ResourceData({ Configuration: { tabId: 'tab-1' } });
+    const deliver = (params: Record<string, string>) =>
+      (h.c as unknown as { OnQueryParamsChanged(p: Record<string, string>, s: 'deeplink' | 'popstate'): void }).OnQueryParamsChanged(params, 'deeplink');
+    return { ...h, writes, deliver };
+  }
+
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('opens the form and view a link names, not the first form', async () => {
+    const { c, formLists, reportCalls, deliver } = withUrl();
+    deliver({ form: G2.formId, view: 'responses' });
+    loadData(c);
+    formLists[0].resolve([G1, G2]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(1));
+
+    expect(reportCalls[0].form.formId).toBe(G2.formId);
+    expect(c.mode).toBe('responses');
+  });
+
+  it('falls back to the first form when the link names one that is not listed', async () => {
+    const { c, formLists, reportCalls, deliver } = withUrl();
+    deliver({ form: '0F0F0F0F-0000-4000-8000-0000000000FF' });
+    loadData(c);
+    formLists[0].resolve([G1, G2]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(1));
+
+    expect(reportCalls[0].form.formId).toBe(c.forms[0].formId);
+  });
+
+  it('writes the form the reader picks and the view they switch to — and nothing for its own first pick', async () => {
+    const { c, formLists, reportCalls, writes } = withUrl();
+    loadData(c);
+    formLists[0].resolve([G1, G2]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(1));
+    expect(writes).toEqual([]);
+
+    void c.pickForm(G2);
+    c.setMode('responses');
+
+    expect(writes).toEqual([
+      { form: G2.formId, view: null },
+      { form: G2.formId, view: 'responses' },
+    ]);
+  });
+
+  it('follows back / forward to another form once the list is in', async () => {
+    const { c, formLists, reportCalls, deliver } = withUrl();
+    loadData(c);
+    formLists[0].resolve([G1, G2]);
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(1));
+
+    // Whichever form the list did not open first (it sorts its forms).
+    const other = reportCalls[0].form.formId === G1.formId ? G2 : G1;
+    deliver({ form: other.formId });
+
+    await vi.waitFor(() => expect(reportCalls).toHaveLength(2));
+    expect(reportCalls[1].form.formId).toBe(other.formId);
   });
 });

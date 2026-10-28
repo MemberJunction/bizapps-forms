@@ -15,6 +15,8 @@
  * `RunView` that answers by entity name.
  */
 import '@angular/compiler';
+import { Location } from '@angular/common';
+import { NavigationService } from '@memberjunction/ng-shared';
 import { ChangeDetectorRef, ElementRef, Injector, runInInjectionContext } from '@angular/core';
 import type { CdkDragDrop } from '@angular/cdk/drag-drop';
 import { FormStateService } from '@memberjunction/ng-base-forms';
@@ -150,6 +152,9 @@ class FakeState {
   public async flushPendingSaves(): Promise<void> {
     this.calls.push('flush');
   }
+  /** No delete is ever held here; the hold is specced in builder-state.held-delete.spec.ts. */
+  public async releaseHeldDelete(): Promise<void> {}
+  public heldDelete = () => null;
   public saveOk = true;
   public failure: string | null = null;
   /** Like the real service: a successful save of a new record leaves it saved. */
@@ -233,6 +238,10 @@ function makeBuilder(): { builder: BuilderInternals; state: FakeState; distribut
       { provide: BuilderStateService, useValue: state },
       { provide: DesignStateService, useValue: { loadStyleById: async () => null, UseSaveQueue: () => undefined } },
       { provide: DistributionService, useValue: distributions },
+      // An address bar that names no record: the builder neither reads nor writes the URL here
+      // (that is specced in builder-url-sync.spec.ts).
+      { provide: Location, useValue: { path: () => '', onUrlChange: () => () => undefined } },
+      { provide: NavigationService, useValue: {} },
     ],
   });
   const component: Builder = runInInjectionContext(injector, () => new FormBuilderComponent());

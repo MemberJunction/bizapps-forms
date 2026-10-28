@@ -104,7 +104,7 @@
             placeholder="Search forms"
             aria-label="Search forms by name or category"
             [ngModel]="query"
-            (ngModelChange)="query = $event; applyFilter()"
+            (ngModelChange)="setQuery($event)"
           />
         </div>
         <span class="mjf-spacer"></span>

@@ -18,6 +18,7 @@ import { runOperation } from '../shared/remote-operation';
 // this file and its glyph table import nothing but @angular/core.
 import { IconComponent } from '../widget/components/icon.component';
 import type {
+  DetailPosition,
   ResponseAnswerView,
   ResponseFileView,
   ResponseAutomationAttempt,
@@ -79,6 +80,19 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
           <button #backButton type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm rd-back" (click)="Back.emit()">
             <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to responses
           </button>
+        }
+        @if (Position; as p) {
+          <!-- Reading responses one after another without going back to the list each time
+               (UI audit F08); the host crosses page boundaries. -->
+          <div class="rd-nav" role="group" aria-label="Move between responses">
+            <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" [disabled]="!p.hasPrevious" (click)="Adjacent.emit(-1)">
+              <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Previous
+            </button>
+            <span class="rd-pos">Response {{ p.index }} of {{ p.total }}</span>
+            <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" [disabled]="!p.hasNext" (click)="Adjacent.emit(1)">
+              Next <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+            </button>
+          </div>
         }
         <div class="meta">
           <span class="mjf-badge" [class.mjf-badge--success]="Detail.status === 'Complete'">{{ Detail.status }}</span>
@@ -269,6 +283,8 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
       /* --- header --- */
 
       .rd-head { display: flex; flex-direction: column; align-items: flex-start; gap: var(--mjf-gap-sm); }
+      .rd-nav { display: flex; flex-wrap: wrap; align-items: center; gap: var(--mjf-gap-sm); }
+      .rd-pos { font-size: var(--mjf-meta); color: var(--mj-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
       /* The sole escape from the detail view, so it is drawn as a real button rather than
          a bare link: a border, a radius and a hover it visibly responds to. The arrow
          slides on hover to say which way it goes. */
@@ -438,6 +454,12 @@ export class FormsResponseDetailComponent implements AfterViewInit {
   @Input() ShowBack = true;
 
   @Output() Back = new EventEmitter<void>();
+
+  /** Where this response sits in the list, when the host can move between responses; else null. */
+  @Input() Position: DetailPosition | null = null;
+
+  /** The reader asked for the response before (`-1`) or after (`1`) this one. */
+  @Output() Adjacent = new EventEmitter<-1 | 1>();
 
   /**
    * A record the user asked to open. The host maps it to its own navigation:

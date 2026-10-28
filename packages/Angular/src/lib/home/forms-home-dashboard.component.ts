@@ -16,6 +16,7 @@ import { RegisterClass } from '@memberjunction/global';
 import type { ActionParam } from '@memberjunction/actions-base';
 
 import { FORMS_UI_CSS, failureMessage } from '../shared';
+import { homeViewFromParams, homeViewToParams } from '../shared/view-urls';
 import { onFormsWrite, type FormsWriteSubscription } from '../shared/forms-writes';
 import { CoalescedLoad } from '../shared/coalesced-load';
 import { RowActivateDirective } from '../shared/row-activate.directive';
@@ -88,6 +89,9 @@ type StoppableEvent = Pick<Event, 'stopPropagation'>;
 
 /** Which authoring panel (if any) is open. */
 type AuthoringPanel = 'none' | 'ai' | 'template';
+
+/** How long typing in the search pauses before the URL follows it, so Back does not step letter by letter. */
+export const HOME_URL_DEBOUNCE_MS = 400;
 
 /**
  * Forms home / studio — the first-class MJExplorer "Forms" surface
@@ -171,6 +175,9 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
 
   /** Unregisters the {@link watchForReturn} listener; released on destroy. */
   private stopWatchingUrl?: () => void;
+  /** Whether the last URL this page saw was its own route; a re-read fires on ARRIVAL only. */
+  private onHomeRoute = true;
+  private urlWriteTimer: ReturnType<typeof setTimeout> | null = null;
 
   public async GetResourceDisplayName(_data: ResourceData): Promise<string> {
     return 'Forms';
@@ -203,7 +210,11 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
       return;
     }
     this.stopWatchingUrl = this.location.onUrlChange((url) => {
-      if (!isFormsHomeUrl(url)) {
+      // On ARRIVAL only: this page writes its own search into the URL (F09), and a URL change that
+      // never left the page is not a return to it.
+      const arrived = isFormsHomeUrl(url) && !this.onHomeRoute;
+      this.onHomeRoute = isFormsHomeUrl(url);
+      if (!arrived) {
         return;
       }
       // Not floating: the coalescer never rejects, and `readForms` shows its own failure.
@@ -246,12 +257,16 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   /** Set on destroy so a write that settles afterwards does not render or focus a dead view. */
   private destroyed = false;
 
-  public ngOnDestroy(): void {
+  public override ngOnDestroy(): void {
     this.destroyed = true;
     this.formChanges?.unsubscribe();
     this.formChanges = undefined;
     this.stopWatchingUrl?.();
     this.stopWatchingUrl = undefined;
+    this.clearUrlTimer();
+    // BaseResourceComponent's teardown ends MJ's query-param subscriptions, which this page now
+    // relies on (F09); shadowing it without the call left them running after the page was gone.
+    super.ngOnDestroy();
   }
 
   /**
@@ -378,6 +393,42 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   public toggleArchived(): void {
     this.showArchived = !this.showArchived;
     this.applyFilter();
+    this.writeUrl();
+  }
+
+  /** The search box: narrows at once; the URL follows once typing pauses. */
+  public setQuery(text: string): void {
+    this.query = text;
+    this.applyFilter();
+    this.clearUrlTimer();
+    this.urlWriteTimer = setTimeout(() => {
+      this.urlWriteTimer = null;
+      this.writeUrl();
+    }, HOME_URL_DEBOUNCE_MS);
+  }
+
+  /**
+   * A link, a reload or back / forward named a search and toggle (UI audit F09). MJ delivers these
+   * with its own write-back suppressed, so applying them here does not rewrite the URL.
+   */
+  protected override OnQueryParamsChanged(params: Record<string, string>, _source: 'popstate' | 'deeplink'): void {
+    const view = homeViewFromParams(params);
+    this.clearUrlTimer();
+    this.query = view.query;
+    this.showArchived = view.showArchived;
+    this.applyFilter();
+  }
+
+  private writeUrl(): void {
+    this.clearUrlTimer();
+    this.UpdateQueryParams(homeViewToParams({ query: this.query, showArchived: this.showArchived }));
+  }
+
+  private clearUrlTimer(): void {
+    if (this.urlWriteTimer !== null) {
+      clearTimeout(this.urlWriteTimer);
+      this.urlWriteTimer = null;
+    }
   }
 
   public isArchived(row: FormSummaryRow): boolean {

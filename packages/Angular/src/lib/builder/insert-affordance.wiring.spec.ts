@@ -321,6 +321,13 @@ describe('an insert leaves focus on the question it created', () => {
     expect(body).toMatch(/afterNextRender\(/);
     expect(body).toMatch(/data-question-id="\$\{questionId\}"/);
   });
+
+  it('focuses the card title button, because the card itself is no longer a tab stop (F05)', () => {
+    const source = componentTs();
+    const method = source.indexOf('private focusQuestionCard');
+    const body = source.slice(method, source.indexOf('\n  }', method));
+    expect(body).toMatch(/data-question-id="\$\{questionId\}"\] button\.fb-q-label/);
+  });
 });
 
 describe('the empty state styles its own illustration, not whatever is nested in it', () => {

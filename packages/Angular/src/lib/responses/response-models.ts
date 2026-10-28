@@ -181,3 +181,12 @@ export interface ResponseRecordLink {
   entityName: string;
   recordId: string;
 }
+
+/** Where the open response sits in the whole (searched) list, for the detail's "Response 3 of 217". */
+export interface DetailPosition {
+  /** 1-based, across every page. */
+  index: number;
+  total: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+}

@@ -299,6 +299,12 @@ export class QuestionEditorComponent {
     return optionLetter(index);
   }
 
+  /** How a remove button names its option — "Remove option “Blue”", never a bare "Remove option". */
+  protected optionName(option: mjBizAppsFormsFormQuestionOptionEntity): string {
+    const label = option.Label?.trim();
+    return label ? `“${label}”` : `${optionLetter(this.indexOfOption(option))} (untitled)`;
+  }
+
   /**
    * Whether "multiple answers" is a meaningful question about this type.
    *

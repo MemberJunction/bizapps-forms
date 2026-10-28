@@ -111,66 +111,166 @@ describe('ResponsesTabComponent', () => {
     expect(failing.Error()).toContain('The server is down.');
   });
 
-  it('appends the next page from where the list ends', async () => {
+  it('asks the server for the page, sort and search the table shows (F08)', async () => {
     const c = construct();
     const loading = c.ngOnInit();
-    calls[0].settle(listPage(range(0, 200), 203));
+    calls[0].settle(listPage(range(0, 25), 217));
     await loading;
-    expect(c.HasMore()).toBe(true);
+    expect(calls[0].input).toMatchObject({ StartRow: 0, MaxRows: 25, OrderBy: 'SubmittedAt DESC', Search: null });
 
-    const more = c.LoadMore();
-    expect((calls[1].input as FormsListResponsesInput).StartRow).toBe(200);
-    calls[1].settle(listPage(range(200, 3), 203));
-    await more;
+    // A new sort or page size starts again on page 1 …
+    const sorted = c.SetQuery({ ...c.Query(), page: 3, pageSize: 50, sort: 'oldest' });
+    calls[1].settle(listPage(range(0, 50), 217));
+    await sorted;
+    expect(calls[1].input).toMatchObject({ StartRow: 0, MaxRows: 50, OrderBy: 'SubmittedAt ASC' });
 
-    expect(c.Rows()).toHaveLength(203);
-    expect(c.HasMore()).toBe(false);
-    expect(c.LoadingMore()).toBe(false);
+    // … and a page turn keeps them.
+    const paged = c.SetQuery({ ...c.Query(), page: 3 });
+    calls[2].settle(listPage(range(100, 50), 217));
+    await paged;
+
+    expect(calls[2].input).toMatchObject({ StartRow: 100, MaxRows: 50, OrderBy: 'SubmittedAt ASC' });
+    expect(c.Rows()).toHaveLength(50);
+    expect(c.PageCount()).toBe(5);
   });
 
-  it.each([
-    ['a response arrived (the count grew)', () => listPage(range(200, 3), 204)],
-    ['a response was deleted (the count shrank)', () => listPage(range(201, 2), 202)],
-    ['a page handed back a row already shown', () => listPage(range(199, 4), 203)],
-  ])('says the list changed and stops offering Load more when %s', async (_, next) => {
+  it('sends a search to the server and starts it on page 1', async () => {
     const c = construct();
     const loading = c.ngOnInit();
-    calls[0].settle(listPage(range(0, 200), 203));
+    calls[0].settle(listPage(range(0, 25), 217));
     await loading;
+    const paged = c.SetQuery({ ...c.Query(), page: 4 });
+    calls[1].settle(listPage(range(75, 25), 217));
+    await paged;
 
-    const more = c.LoadMore();
-    calls[1].settle(next());
-    await more;
+    const searched = c.SetQuery({ ...c.Query(), search: 'ann' });
+    calls[2].settle(listPage([7], 1));
+    await searched;
 
-    expect(c.ListChanged()).toBe(true);
-    expect(c.HasMore()).toBe(false);
-    expect(c.Rows()).toHaveLength(200);
+    expect(calls[2].input).toMatchObject({ Search: 'ann', StartRow: 0 });
+    expect(c.Query().page).toBe(1);
+    expect(c.Total()).toBe(1);
   });
 
-  it('stops offering Load more when a page comes back shorter than asked for, whatever the count says', async () => {
+  it('shows "no match" in the list, not "no responses yet", when a search finds nothing', async () => {
     const c = construct();
     const loading = c.ngOnInit();
-    calls[0].settle(listPage([1, 2], 450));
+    calls[0].settle(listPage([1], 1));
     await loading;
 
-    expect(c.HasMore()).toBe(false);
+    const searched = c.SetQuery({ ...c.Query(), search: 'zzz' });
+    calls[1].settle(listPage([], 0));
+    await searched;
+
+    expect(c.View()).toBe('list');
   });
 
-  it('a refresh clears the "list changed" state', async () => {
+  it('never lets a slower, earlier page overwrite a later one', async () => {
     const c = construct();
     const loading = c.ngOnInit();
-    calls[0].settle(listPage(range(0, 200), 203));
+    calls[0].settle(listPage([1], 60));
     await loading;
-    const more = c.LoadMore();
-    calls[1].settle(listPage(range(200, 3), 204));
-    await more;
 
-    const refresh = c.Refresh();
-    calls[2].settle(listPage(range(0, 200), 204));
-    await refresh;
+    const first = c.SetQuery({ ...c.Query(), page: 2 });
+    const second = c.SetQuery({ ...c.Query(), page: 3 });
+    calls[2].settle(listPage([51], 60));
+    calls[1].settle(listPage([26], 60));
+    await Promise.all([first, second]);
 
-    expect(c.ListChanged()).toBe(false);
-    expect(c.HasMore()).toBe(true);
+    expect(c.Rows().map((r) => r.responseId)).toEqual(['r-51']);
+    expect(c.Query().page).toBe(3);
+  });
+
+  it('lands on the last page when the one asked for is past the end', async () => {
+    const c = construct();
+    const loading = c.ngOnInit();
+    calls[0].settle(listPage([1], 30));
+    await loading;
+
+    const states: { query: { page: number } }[] = [];
+    c.StateChange.subscribe((st) => states.push(st));
+    const paged = c.SetQuery({ ...c.Query(), page: 9 });
+    calls[1].settle(listPage([], 30));
+    await vi.waitFor(() => expect(calls).toHaveLength(3));
+    expect(calls[2].input).toMatchObject({ StartRow: 25 });
+    calls[2].settle(listPage([26, 27, 28, 29, 30], 30));
+    await paged;
+
+    expect(c.Query().page).toBe(2);
+    expect(c.Rows()).toHaveLength(5);
+    // …and tells the host, so the URL does not keep the page that was past the end.
+    expect(states.at(-1)?.query.page).toBe(2);
+  });
+
+  it('opens the next response on the page, and says where it is', async () => {
+    const c = construct();
+    const loading = c.ngOnInit();
+    calls[0].settle(listPage([1, 2, 3], 3));
+    await loading;
+    const opening = c.OpenResponse('r-2');
+    calls[1].settle(detail('r-2'));
+    await opening;
+    expect(c.DetailPosition()).toEqual({ index: 2, total: 3, hasPrevious: true, hasNext: true });
+
+    const next = c.OpenAdjacent(1);
+    calls[2].settle(detail('r-3'));
+    await next;
+
+    expect(calls[2].input).toMatchObject({ ResponseID: 'r-3' });
+    expect(c.DetailPosition()).toEqual({ index: 3, total: 3, hasPrevious: true, hasNext: false });
+  });
+
+  it('crosses to the next page to open the response after the last one on it', async () => {
+    const c = construct();
+    const loading = c.ngOnInit();
+    calls[0].settle(listPage(range(1, 25), 30));
+    await loading;
+    const opening = c.OpenResponse('r-25');
+    calls[1].settle(detail('r-25'));
+    await opening;
+
+    const next = c.OpenAdjacent(1);
+    await vi.waitFor(() => expect(calls).toHaveLength(3));
+    expect(calls[2].input).toMatchObject({ StartRow: 25 });
+    calls[2].settle(listPage(range(26, 5), 30));
+    await vi.waitFor(() => expect(calls).toHaveLength(4));
+    calls[3].settle(detail('r-26'));
+    await next;
+
+    expect(c.Query().page).toBe(2);
+    expect(c.Detail()?.responseId).toBe('r-26');
+    expect(c.DetailPosition()?.index).toBe(26);
+  });
+
+  it('tells its host what it shows, so the host can keep it in the URL (F09)', async () => {
+    const c = construct();
+    const states: unknown[] = [];
+    c.StateChange.subscribe((s) => states.push(s));
+    const loading = c.ngOnInit();
+    calls[0].settle(listPage([1], 1));
+    await loading;
+    const opening = c.OpenResponse('r-1');
+    calls[1].settle(detail('r-1'));
+    await opening;
+    c.CloseDetail();
+
+    expect(states).toEqual([
+      { query: c.Query(), responseId: 'r-1' },
+      { query: c.Query(), responseId: null },
+    ]);
+  });
+
+  it('opens what a deep link names: its page, then its response', async () => {
+    const c = construct();
+    c.InitialState = { query: { search: '', sort: 'newest', page: 2, pageSize: 25 }, responseId: 'r-30' };
+    const loading = c.ngOnInit();
+    expect(calls[0].input).toMatchObject({ StartRow: 25 });
+    calls[0].settle(listPage(range(26, 5), 30));
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    calls[1].settle(detail('r-30'));
+    await loading;
+
+    expect(c.Detail()?.responseId).toBe('r-30');
   });
 
   it('re-reads the list when a Form Response is written elsewhere', async () => {

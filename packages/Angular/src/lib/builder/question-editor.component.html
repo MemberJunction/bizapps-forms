@@ -240,7 +240,7 @@
                 (change)="setOptionLabel(indexOfOption(opt), rowInput.value)"
                 [attr.aria-label]="'Row ' + ($index + 1)"
               />
-              <button type="button" class="qe-opt-remove" (click)="removeOption(indexOfOption(opt))" aria-label="Remove row">
+              <button type="button" class="qe-opt-remove" (click)="removeOption(indexOfOption(opt))" [attr.aria-label]="'Remove row ' + optionName(opt)">
                 <i class="fa-solid fa-xmark" aria-hidden="true"></i>
               </button>
             </div>
@@ -264,7 +264,7 @@
                 (change)="setOptionLabel(indexOfOption(opt), colInput.value)"
                 [attr.aria-label]="'Column ' + ($index + 1)"
               />
-              <button type="button" class="qe-opt-remove" (click)="removeOption(indexOfOption(opt))" aria-label="Remove column">
+              <button type="button" class="qe-opt-remove" (click)="removeOption(indexOfOption(opt))" [attr.aria-label]="'Remove column ' + optionName(opt)">
                 <i class="fa-solid fa-xmark" aria-hidden="true"></i>
               </button>
             </div>
@@ -294,7 +294,7 @@
                   type="button"
                   class="qe-opt-remove"
                   (click)="removeOption($index)"
-                  aria-label="Remove option"
+                  [attr.aria-label]="'Remove option ' + optionName(opt)"
                 >
                   <i class="fa-solid fa-xmark" aria-hidden="true"></i>
                 </button>
