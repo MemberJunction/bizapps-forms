@@ -360,7 +360,7 @@
               </thead>
               <tbody>
                 @for (row of matrixRows(); track row.id) {
-                  <tr>
+                  <tr [class.mjf-matrix__row--missing]="matrixMissing().has(row.value)">
                     <th scope="row" class="mjf-matrix__row">{{ row.label }}</th>
                     @for (col of matrixColumns(); track col.id) {
                       <td class="mjf-matrix__cell">
@@ -375,6 +375,7 @@
                             [value]="col.value"
                             [checked]="isMatrixSelected(row.value, col.value)"
                             [attr.aria-label]="row.label + ': ' + col.label"
+                            [attr.aria-invalid]="matrixMissing().has(row.value) || null"
                             (change)="onMatrix(row.value, col.value)"
                           />
                           <span class="mjf-choice__mark" aria-hidden="true"></span>

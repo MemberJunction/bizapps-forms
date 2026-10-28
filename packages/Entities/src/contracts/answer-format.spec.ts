@@ -9,6 +9,7 @@ import {
   numericScalePoints,
   impliedAnswerValues,
   MAX_IMPLIED_SCALE_POINTS,
+  missingMatrixRows,
 } from './answer-format';
 import { FORM_QUESTION_TYPES } from './question-types';
 
@@ -495,5 +496,29 @@ describe('impliedAnswerValues', () => {
         expect(() => impliedAnswerValues(type, { max: 4 })).not.toThrow();
       }
     });
+  });
+});
+
+describe('missingMatrixRows', () => {
+  const opt = (value: string, matrixAxis?: 'Row' | 'Column') => ({ value, matrixAxis });
+  const matrix = { type: 'Matrix' as const, options: [opt('a', 'Row'), opt('b', 'Row'), opt('c', 'Row'), opt('x', 'Column'), opt('y', 'Column')] };
+
+  it('lists unanswered rows in author order', () => {
+    expect(missingMatrixRows(matrix, { b: 'x' })).toEqual(['a', 'c']);
+  });
+  it('lists every row for no answer at all', () => {
+    expect(missingMatrixRows(matrix, null)).toEqual(['a', 'b', 'c']);
+  });
+  it('treats a blank or empty-list cell as missing', () => {
+    expect(missingMatrixRows(matrix, { a: '', b: [], c: ['x'] })).toEqual(['a', 'b']);
+  });
+  it('is empty when every row is answered', () => {
+    expect(missingMatrixRows(matrix, { a: 'x', b: 'y', c: ['x', 'y'] })).toEqual([]);
+  });
+  it('is empty for a matrix with no columns, which no respondent could complete', () => {
+    expect(missingMatrixRows({ type: 'Matrix', options: [opt('a'), opt('b')] }, {})).toEqual([]);
+  });
+  it('is empty for any other type', () => {
+    expect(missingMatrixRows({ type: 'ShortText', options: [] }, 'x')).toEqual([]);
   });
 });

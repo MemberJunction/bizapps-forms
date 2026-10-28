@@ -33,6 +33,7 @@ import {
   CONTACT_INFO_FIELDS,
   doodlePen,
   isAnswerableQuestionType,
+  missingMatrixRows,
   numericScalePoints,
   opinionScaleBounds,
   ratingScaleMax,
@@ -616,6 +617,15 @@ export class FormQuestionComponent {
   );
   protected readonly matrixColumns = computed(() =>
     this.question().options.filter((o) => o.matrixAxis === 'Column'),
+  );
+  /**
+   * The rows a required Matrix still needs, by row value — asked of the shared contract, the same
+   * one the submit check uses, so the rows marked here are the rows the server would refuse over.
+   * Empty until the question's error is showing: a respondent who has not tried to continue yet is
+   * not shown red rows.
+   */
+  protected readonly matrixMissing = computed(() =>
+    this.errorMessage() ? new Set(missingMatrixRows(this.question(), this.value())) : new Set<string>(),
   );
 
   private readonly matrixValue = computed<Record<string, string>>(() => {

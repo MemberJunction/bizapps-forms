@@ -721,6 +721,10 @@
 }
 
 .mjf-matrix__row { text-align: left; color: var(--mjf-page-ink); white-space: nowrap; }
+/* A row a required Matrix still needs, shown only once the question's error is: a tint plus an
+   inset bar, so the marking does not depend on colour alone. */
+.mjf-matrix__row--missing { background: color-mix(in srgb, var(--mjf-status-error) 8%, transparent); }
+.mjf-matrix__row--missing .mjf-matrix__row { color: var(--mjf-status-error); box-shadow: inset 3px 0 0 var(--mjf-status-error); }
 .mjf-matrix__corner { padding: 0.5rem; }
 
 .mjf-matrix tbody tr { border-top: 1px solid var(--mjf-choice-border); }

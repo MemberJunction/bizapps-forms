@@ -315,6 +315,30 @@ export function isRequiredSatisfied(type: FormQuestionType, value: AnswerValue):
 }
 
 /**
+ * The rows of a `Matrix` answer that have no answer yet, as row VALUES in author order.
+ *
+ * Exists because "required" and "answered" mean different things for a Matrix. Logic rules ask
+ * {@link isAnswerSupplied}, which counts a Matrix answered once ANY row has a value — and that has to
+ * stay, or every published "if Q3 is answered" rule would change meaning. A REQUIRED Matrix, though,
+ * accepted one row of five, which no respondent or author reads as "answered the question".
+ *
+ * Empty — "nothing missing" — for any other type, and for a Matrix with no columns or no rows: such
+ * a question cannot be completed at all, and the plain required check already refuses it empty.
+ */
+export function missingMatrixRows(question: AnswerFormatQuestion, value: AnswerValue): string[] {
+  if (question.type !== 'Matrix') {
+    return [];
+  }
+  const options = question.options ?? [];
+  const rows = options.filter((o) => matrixAxisOf(o) === 'Row').map((o) => o.value);
+  if (rows.length === 0 || !options.some((o) => matrixAxisOf(o) === 'Column')) {
+    return [];
+  }
+  const answered = isMatrixAnswer(value) ? (value as Record<string, string | string[]>) : {};
+  return rows.filter((row) => !isAnswerSupplied(answered[row]));
+}
+
+/**
  * How much of one question is filled in, 0..1.
  *
  * All-or-nothing for a scalar question, and PER SUB-FIELD for a composite. That distinction is
