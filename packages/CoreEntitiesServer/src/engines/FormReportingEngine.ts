@@ -24,14 +24,16 @@
  * Caller-facing messages are fixed sentences; provider, SQL and exception text travels on
  * `logDetail` to the one log line `runEngineCall` writes.
  */
-import { LogError, type DatabaseProviderBase, type RunViewParams, type RunViewResult, type UserInfo } from '@memberjunction/core';
+import { EntityPermissionType, LogError, type DatabaseProviderBase, type RunViewParams, type RunViewResult, type UserInfo } from '@memberjunction/core';
 import { BaseSingleton, UUIDsEqual } from '@memberjunction/global';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import {
   answerHoldsValue,
   deriveRespondentLabel,
   MAX_RESPONSE_PAGE_SIZE,
+  MAX_RESPONSE_SEARCH_LENGTH,
   quoteSqlString,
+  sqlLiteral,
   type FormsGetResponseDetailOutput,
   type FormsGetResponseSummaryOutput,
   type FormsListResponsesOutput,
@@ -115,6 +117,11 @@ export interface ResponseListRequest {
   orderBy?: ResponseListOrder;
   /** Attach each row's stored answers and the labelling definition (the export). */
   includeAnswers: boolean;
+  /**
+   * Narrow to responses whose linked person's name, or any text answer, contains this — matched
+   * literally, case as the column's collation decides. Blank or absent: no narrowing.
+   */
+  search?: string;
 }
 
 /** What `GetResponseDetail` is asked for. */
@@ -205,7 +212,7 @@ export class FormReportingEngine extends BaseSingleton<FormReportingEngine> {
     requireUser(user, `Listing the responses of form ${listing.formId}`);
     return runEngineCall(provider, `[FormReportingEngine] the responses of form ${listing.formId} were not listed (user ${user.ID})`, () =>
       callerSafe('Listing responses', async () => {
-        const filter = responseListFilter(listing);
+        const filter = responseListFilter(listing, provider, user);
         const [counted, page] = await provider.RunViews(
           [
             { EntityName: FORMS_ENTITY.FormResponse, ExtraFilter: filter, ResultType: 'count_only' },
@@ -340,7 +347,7 @@ function responseDetailReads(responseId: string): RunViewParams[] {
 
 /** A list request with every field checked, defaulted and bounded. */
 type ValidListRequest = Required<Pick<ResponseListRequest, 'formId' | 'startRow' | 'maxRows' | 'orderBy' | 'includeAnswers'>> &
-  Pick<ResponseListRequest, 'formVersionId' | 'status'>;
+  Pick<ResponseListRequest, 'formVersionId' | 'status' | 'search'>;
 
 /**
  * Refuse what an in-process caller (an Action, an agent) could hand in that the wire check would
@@ -364,6 +371,13 @@ function validateListRequest(request: ResponseListRequest): ValidListRequest {
   if (typeof request.includeAnswers !== 'boolean') {
     throw new FormReportingError('Whether to include answers must be true or false.');
   }
+  if (request.search !== undefined && typeof request.search !== 'string') {
+    throw new FormReportingError('The search must be text.');
+  }
+  const search = request.search?.trim() || undefined;
+  if (search && search.length > MAX_RESPONSE_SEARCH_LENGTH) {
+    throw new FormReportingError(`The search can be at most ${MAX_RESPONSE_SEARCH_LENGTH} characters.`);
+  }
   return {
     formId,
     formVersionId,
@@ -372,10 +386,11 @@ function validateListRequest(request: ResponseListRequest): ValidListRequest {
     maxRows: Math.min(request.maxRows, MAX_RESPONSE_PAGE_SIZE),
     orderBy: request.orderBy ?? 'SubmittedAt DESC',
     includeAnswers: request.includeAnswers,
+    search,
   };
 }
 
-function responseListFilter(listing: ValidListRequest): string {
+function responseListFilter(listing: ValidListRequest, provider: DatabaseProviderBase, user: UserInfo): string {
   const clauses = [`FormID=${quoteSqlString(listing.formId)}`];
   if (listing.formVersionId) {
     clauses.push(`FormVersionID=${quoteSqlString(listing.formVersionId)}`);
@@ -383,7 +398,42 @@ function responseListFilter(listing: ValidListRequest): string {
   if (listing.status) {
     clauses.push(`Status=${quoteSqlString(listing.status)}`);
   }
+  if (listing.search) {
+    clauses.push(responseSearchClause(listing.search, provider, user));
+  }
   return clauses.join(' AND ');
+}
+
+/**
+ * The search predicate: the linked person's name, OR any text answer, contains the term.
+ *
+ * WHY ANSWERS TOO. The list's respondent label is not stored — it is worked out from the linked
+ * Person or from the response's own name and email answers (`deriveRespondentLabel`) — so a search on
+ * the person alone would miss every anonymous respondent the table names by their email. Any text
+ * answer covers every label the table can show, and finds a response by what it said as well.
+ *
+ * WHO MAY SEARCH ANSWERS. The answer half is a subquery inside the response read, so the RunView
+ * applies the caller's permissions and row filter to RESPONSES only. It therefore carries the
+ * caller's own row filter on ANSWERS inside it, and is left out entirely for a caller who may not
+ * read answers: such a caller searches names only, and cannot find a response by answer text it is
+ * not allowed to see.
+ */
+function responseSearchClause(term: string, provider: DatabaseProviderBase, user: UserInfo): string {
+  const contains = `LIKE ${sqlLiteral(`%${escapeLikePattern(term)}%`)} ESCAPE '\\'`;
+  const byPerson = `RespondentPerson ${contains}`;
+  const answers = provider.EntityByName(FORMS_ENTITY.FormResponseAnswer);
+  if (!answers || !answers.GetUserPermisions(user).CanRead) {
+    return `(${byPerson})`;
+  }
+  const view = provider.QuoteSchemaAndView(answers.SchemaName, answers.BaseView);
+  const rowFilter = answers.GetEffectiveRowFilterWhereClause(user, EntityPermissionType.Read, '').trim();
+  const scoped = rowFilter ? ` AND (${rowFilter})` : '';
+  return `(${byPerson} OR ID IN (SELECT ResponseID FROM ${view} WHERE TextValue ${contains}${scoped}))`;
+}
+
+/** Escape LIKE's own metacharacters (and the escape character itself) so the term matches literally. */
+function escapeLikePattern(term: string): string {
+  return term.replace(/[\\%_[]/g, (ch) => `\\${ch}`);
 }
 
 /** One list row: who responded, how much they answered, and — for the export — what. */

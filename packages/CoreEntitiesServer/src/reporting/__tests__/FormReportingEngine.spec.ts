@@ -298,6 +298,66 @@ describe('ListResponses', () => {
     expect(read?.params.ExtraFilter).toBe(`FormID='${FORM_ID}' AND FormVersionID='${VERSION_ID}' AND Status='Disqualified'`);
   });
 
+  describe('search (UI audit F08: it used to search only the rows the browser had loaded)', () => {
+    const answersView = '[__mj_BizAppsForms].[vwFormResponseAnswers]';
+    const filterOf = (db: ReturnType<typeof reportingWorld>, resultType: string) =>
+      db.viewCalls.find((c) => c.params.EntityName === RESPONSE_TABLE && c.params.ResultType === resultType)?.params.ExtraFilter;
+
+    it('matches the linked person OR any text answer, in the count and the page alike', async () => {
+      const db = reportingWorld(fixture());
+
+      await engine.ListResponses({ ...base, status: 'Complete', search: '  Ann ' }, db.provider, READER);
+
+      const expected =
+        `FormID='${FORM_ID}' AND Status='Complete' AND (RespondentPerson LIKE N'%Ann%' ESCAPE '\\' OR ` +
+        `ID IN (SELECT ResponseID FROM ${answersView} WHERE TextValue LIKE N'%Ann%' ESCAPE '\\'))`;
+      expect(filterOf(db, 'simple')).toBe(expected);
+      expect(filterOf(db, 'count_only')).toBe(expected);
+    });
+
+    it('matches wildcards and quotes literally, never as SQL', async () => {
+      const db = reportingWorld(fixture());
+
+      await engine.ListResponses({ ...base, search: `50%_a[b]\\c'd` }, db.provider, READER);
+
+      expect(filterOf(db, 'simple')).toContain(`RespondentPerson LIKE N'%50\\%\\_a\\[b]\\\\c''d%' ESCAPE '\\'`);
+    });
+
+    it('adds nothing for a blank search', async () => {
+      const db = reportingWorld(fixture());
+
+      await engine.ListResponses({ ...base, search: '   ' }, db.provider, READER);
+
+      expect(filterOf(db, 'simple')).toBe(`FormID='${FORM_ID}'`);
+    });
+
+    it('searches names only for a caller who may not read answers', async () => {
+      const db = reportingWorld(fixture(), { readPermissions: { [ANSWER_TABLE]: false } });
+
+      await engine.ListResponses({ ...base, search: 'Ann' }, db.provider, READER);
+
+      expect(filterOf(db, 'simple')).toBe(`FormID='${FORM_ID}' AND (RespondentPerson LIKE N'%Ann%' ESCAPE '\\')`);
+    });
+
+    it("keeps the caller's row filter on answers inside the answer search", async () => {
+      const db = reportingWorld(fixture(), { rowFilters: { [ANSWER_TABLE]: "QuestionID='q-allowed'" } });
+
+      await engine.ListResponses({ ...base, search: 'Ann' }, db.provider, READER);
+
+      // Parenthesised again by the engine: harmless when MJ already wraps the clause, and safe when it does not.
+      expect(filterOf(db, 'simple')).toContain(`WHERE TextValue LIKE N'%Ann%' ESCAPE '\\' AND ((QuestionID='q-allowed'))))`);
+    });
+
+    it('refuses a search longer than 100 characters before reading anything', async () => {
+      const db = reportingWorld(fixture());
+
+      const err = await refusal(engine.ListResponses({ ...base, search: 'x'.repeat(101) }, db.provider, READER));
+
+      expect(err.message).toBe('The search can be at most 100 characters.');
+      expect(db.viewCalls).toEqual([]);
+    });
+  });
+
   it.each([
     [{ startRow: -1 }, 'The first row must be a whole number of at least 0.'],
     [{ maxRows: 0 }, 'The page size must be a whole number of at least 1.'],
