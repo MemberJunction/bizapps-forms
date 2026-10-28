@@ -727,6 +727,7 @@
 .mjf-matrix__cell { padding: 0.375rem; text-align: center; }
 
 .mjf-matrix__pick {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -739,7 +740,17 @@
 }
 
 .mjf-matrix__pick:hover { background: var(--mjf-accent-soft); }
-.mjf-matrix__pick:focus-visible { outline: none; box-shadow: var(--mjf-focus-ring); }
+/* The native radio covers the whole 44px target, invisible; the mark beside it is what shows. */
+.mjf-matrix__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.mjf-matrix__pick:has(.mjf-matrix__input:focus-visible) { box-shadow: var(--mjf-focus-ring); }
 .mjf-matrix__pick--selected .mjf-choice__mark { border-color: var(--mjf-accent); background: var(--mjf-accent); }
 
 /* ---- Checkbox (single consent) / Legal ---- */
@@ -763,6 +774,23 @@
 .mjf-legal__terms:focus-visible { outline: none; box-shadow: var(--mjf-focus-ring); }
 
 /* ---- Composites (Address / ContactInfo) ---- */
+/* A fieldset only for its semantics: no frame, no inset, and the legend reads like any header. */
+.mjf-composite-set {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.mjf-composite-set > legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+}
+.mjf-composite-set > legend + * { clear: both; }
+
 .mjf-composite {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

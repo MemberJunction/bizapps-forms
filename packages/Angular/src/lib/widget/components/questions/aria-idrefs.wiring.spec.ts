@@ -35,8 +35,11 @@ const component = readFileSync(join(__dirname, 'form-question.component.ts'), 'u
   .replace(/\/\*[\s\S]*?\*\//g, '')
   .replace(/\/\/[^\n]*/g, '');
 
-/** The types whose control is a group of buttons rather than one native element. */
-const GROUPED_TYPES = ['SingleChoice', 'MultiChoice', 'Rating', 'NPS', 'YesNo', 'PictureChoice', 'OpinionScale', 'Legal'];
+/**
+ * The types named by aria-labelledby: the eight groups of buttons, and (since UI audit F11) the
+ * ranking list and the matrix table, which had no name of their own.
+ */
+const GROUPED_TYPES = ['SingleChoice', 'MultiChoice', 'Rating', 'NPS', 'YesNo', 'PictureChoice', 'OpinionScale', 'Legal', 'Ranking', 'Matrix'];
 
 /** Index of the `}` closing the block whose `{` sits just before `from`. Interpolations are balanced too. */
 function closingBrace(text: string, from: number): number {
@@ -80,8 +83,17 @@ function idsBoundIn(html: string): Set<string> {
   return new Set([...html.matchAll(/\[id\]="([^"]+)"/g)].map((m) => m[1]));
 }
 
+/** The body of the `describedBy` computed only — `compositeDescribedBy` pushes ids too. */
+const describedByBody = component.slice(
+  component.indexOf('readonly describedBy = computed'),
+  component.indexOf('});', component.indexOf('readonly describedBy = computed')),
+);
+
 /** The id expressions `describedBy()` can join: every `ids.push(this.X())` in the computed. */
-const describedByMembers = [...component.matchAll(/ids\.push\(this\.(\w+)\(\)\)/g)].map((m) => `${m[1]}()`);
+const describedByMembers = [...describedByBody.matchAll(/ids\.push\(this\.(\w+)\(\)\)/g)].map((m) => `${m[1]}()`);
+
+/** What `compositeDescribedBy(field)` can join: the question's help, that field's error, or the question's. */
+const COMPOSITE_DESCRIBED_BY = ['helpId()', 'partErrorId(field)', 'errorId()'];
 
 /** The id-producing calls an idref expression can evaluate to (`a ? x() : null` → `x()`). */
 function producersOf(expression: string): string[] {
@@ -93,8 +105,13 @@ describe('every ARIA idref in the question template resolves within its own bran
     expect(describedByMembers).toEqual(['helpId()', 'errorId()', 'statusId()', 'failureId()']);
   });
 
-  it('gives the shared label the id that grouped controls are named by, with the prompt inside it', () => {
-    expect(shared).toMatch(/<label class="mjf-question__label" \[id\]="labelId\(\)"[^>]*>\s*<span class="mjf-question__prompt">\{\{ q\.prompt \}\}<\/span>/);
+  it('gives every header shape the id that grouped controls are named by, with the prompt inside it', () => {
+    // Since UI audit F11 the header is a <label for> only for a single control, a named <span>
+    // for a group or matrix, and the composite's <legend>; all three render #questionHeading.
+    expect(shared).toMatch(/<label class="mjf-question__label" \[id\]="labelId\(\)" \[attr\.for\]="inputId\(\)">\s*<ng-container \*ngTemplateOutlet="questionHeading"/);
+    expect(shared).toMatch(/<span class="mjf-question__label" \[id\]="labelId\(\)">\s*<ng-container \*ngTemplateOutlet="questionHeading"/);
+    expect(branches.get('#compositeControl')).toMatch(/<legend class="mjf-question__label" \[id\]="labelId\(\)">\s*<ng-container \*ngTemplateOutlet="questionHeading"/);
+    expect(branches.get('#questionHeading')).toContain('<span class="mjf-question__prompt">{{ hq.prompt }}</span>');
   });
 
   it.each([...branches.keys()])('%s: every aria-labelledby / aria-describedby target is bound as [id] in scope', (branch) => {
@@ -106,6 +123,10 @@ describe('every ARIA idref in the question template resolves within its own bran
         if (producer === 'describedBy()') {
           for (const member of describedByMembers) {
             expect(anywhere, `${branch}: ${attr}="${expression}" can yield ${member}, bound as [id] nowhere`).toContain(member);
+          }
+        } else if (producer === 'compositeDescribedBy(field)') {
+          for (const member of COMPOSITE_DESCRIBED_BY) {
+            expect(inScope, `${branch}: ${attr}="${expression}" can yield ${member}, bound as [id] neither here nor shared`).toContain(member);
           }
         } else {
           expect(inScope, `${branch}: ${attr}="${expression}" points at ${producer}, bound as [id] neither here nor in the shared region`).toContain(producer);

@@ -9,14 +9,19 @@
       }
     </div>
   } @else {
-    <label class="mjf-question__label" [id]="labelId()" [attr.for]="inputId()">
-      <span class="mjf-question__prompt">{{ q.prompt }}</span>
-      @if (q.isRequired) {
-        <span class="mjf-question__required" aria-hidden="true">*</span>
-        <span class="mjf-visually-hidden">(required)</span>
-      }
-    </label>
-    @if (q.helpText) {
+    <!-- The header follows the question's shape (UI audit F11). A <label for> only names a single
+         labelable control; a group or a matrix is named by this element's id through
+         aria-labelledby; an address's header is its fieldset's <legend>, in that template. -->
+    @if (shape() === 'control') {
+      <label class="mjf-question__label" [id]="labelId()" [attr.for]="inputId()">
+        <ng-container *ngTemplateOutlet="questionHeading" />
+      </label>
+    } @else if (shape() !== 'fieldset') {
+      <span class="mjf-question__label" [id]="labelId()">
+        <ng-container *ngTemplateOutlet="questionHeading" />
+      </span>
+    }
+    @if (q.helpText && shape() !== 'fieldset') {
       <p class="mjf-question__help" [id]="helpId()">{{ q.helpText }}</p>
     }
 
@@ -52,7 +57,7 @@
           />
         }
         @case ('SingleChoice') {
-          <div class="mjf-choices" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-choices" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (opt of q.options; track opt.id) {
               <button
                 type="button"
@@ -103,7 +108,7 @@
           </select>
         }
         @case ('Rating') {
-          <div class="mjf-rating" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-rating" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (star of ratingScale(); track star) {
               <button
                 type="button"
@@ -120,7 +125,7 @@
           </div>
         }
         @case ('NPS') {
-          <div class="mjf-nps" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-nps" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (n of npsScale; track n) {
               <button
                 type="button"
@@ -135,7 +140,7 @@
           </div>
         }
         @case ('YesNo') {
-          <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-yesno" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             <button type="button" role="radio" class="mjf-choice mjf-yesno__btn"
               [class.mjf-choice--selected]="booleanValue() === true"
               [attr.aria-checked]="booleanValue() === true" (click)="onYesNo(true)">Yes</button>
@@ -246,7 +251,7 @@
           </p>
         }
         @case ('PictureChoice') {
-          <div class="mjf-pics" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-pics" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (opt of q.options; track opt.id) {
               <button
                 type="button"
@@ -273,7 +278,7 @@
         }
         @case ('OpinionScale') {
           <div class="mjf-scale">
-            <div class="mjf-scale__row" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+            <div class="mjf-scale__row" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
               @for (point of scalePoints(); track point) {
                 <button
                   type="button"
@@ -304,6 +309,7 @@
             #rankList
             class="mjf-rank"
             cdkDropList
+            [attr.aria-labelledby]="labelId()"
             [attr.aria-describedby]="describedBy()"
             (cdkDropListDropped)="onRankDrop($event.previousIndex, $event.currentIndex)"
           >
@@ -343,7 +349,7 @@
         }
         @case ('Matrix') {
           <div class="mjf-matrix-wrap">
-            <table class="mjf-matrix" [attr.aria-describedby]="describedBy()">
+            <table class="mjf-matrix" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
               <thead>
                 <tr>
                   <td class="mjf-matrix__corner"></td>
@@ -358,15 +364,21 @@
                     <th scope="row" class="mjf-matrix__row">{{ row.label }}</th>
                     @for (col of matrixColumns(); track col.id) {
                       <td class="mjf-matrix__cell">
-                        <button
-                          type="button"
-                          role="radio"
-                          class="mjf-matrix__pick"
-                          [class.mjf-matrix__pick--selected]="isMatrixSelected(row.value, col.value)"
-                          [attr.aria-checked]="isMatrixSelected(row.value, col.value)"
-                          [attr.aria-label]="row.label + ': ' + col.label"
-                          (click)="onMatrix(row.value, col.value)"
-                        ><span class="mjf-choice__mark" aria-hidden="true"></span></button>
+                        <!-- Native radios, one name per row: the browser makes each row its own
+                             group ("2 of 4") with arrow keys, which role="radio" buttons in table
+                             cells never were (UI audit F11). The visible mark is unchanged. -->
+                        <label class="mjf-matrix__pick" [class.mjf-matrix__pick--selected]="isMatrixSelected(row.value, col.value)">
+                          <input
+                            type="radio"
+                            class="mjf-matrix__input"
+                            [name]="matrixName(row.value)"
+                            [value]="col.value"
+                            [checked]="isMatrixSelected(row.value, col.value)"
+                            [attr.aria-label]="row.label + ': ' + col.label"
+                            (change)="onMatrix(row.value, col.value)"
+                          />
+                          <span class="mjf-choice__mark" aria-hidden="true"></span>
+                        </label>
                       </td>
                     }
                   </tr>
@@ -397,7 +409,7 @@
                 {{ legalTerms() }}
               </div>
             }
-            <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+            <div class="mjf-yesno" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
               <button type="button" role="radio" class="mjf-choice mjf-yesno__btn"
                 [class.mjf-choice--selected]="booleanValue() === true"
                 [attr.aria-checked]="booleanValue() === true" (click)="onYesNo(true)">I accept</button>
@@ -485,6 +497,14 @@
      fall-through, so one template shared by two cases is how the two stay one control. -->
 <ng-template #compositeControl>
   @let cq = question();
+  <!-- The question is the fieldset's legend, so every field is announced inside it (UI audit F11). -->
+  <fieldset class="mjf-composite-set">
+  <legend class="mjf-question__label" [id]="labelId()">
+    <ng-container *ngTemplateOutlet="questionHeading" />
+  </legend>
+  @if (cq.helpText) {
+    <p class="mjf-question__help" [id]="helpId()">{{ cq.helpText }}</p>
+  }
   <div class="mjf-composite">
     @for (field of compositeFields(); track field) {
       @let fieldError = partError(field);
@@ -498,7 +518,7 @@
           [value]="compositePart(field)"
           [attr.aria-required]="cq.isRequired"
           [attr.aria-invalid]="compositeInvalid(field)"
-          [attr.aria-describedby]="fieldError ? partErrorId(field) : null"
+          [attr.aria-describedby]="compositeDescribedBy(field)"
           (input)="syncComposite()"
           (change)="syncComposite()"
         />
@@ -508,10 +528,21 @@
       </div>
     }
   </div>
+  </fieldset>
   @if (hasPartErrors()) {
     <!-- The visible messages sit beside their own inputs, which is right for sighted users but
          announces nothing when validation fires on pressing Next. One hidden alert carries the
          summary (the same messages joined) so the announcement survives the split. -->
     <p class="mjf-visually-hidden" role="alert">{{ errorMessage() }}</p>
+  }
+</ng-template>
+
+<!-- The question's visible heading, shared by the three header shapes. -->
+<ng-template #questionHeading>
+  @let hq = question();
+  <span class="mjf-question__prompt">{{ hq.prompt }}</span>
+  @if (hq.isRequired) {
+    <span class="mjf-question__required" aria-hidden="true">*</span>
+    <span class="mjf-visually-hidden">(required)</span>
   }
 </ng-template>
