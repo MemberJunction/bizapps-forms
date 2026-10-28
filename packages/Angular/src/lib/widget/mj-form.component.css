@@ -57,10 +57,16 @@
   /* DERIVED from the accent, never bound to the Explorer's hover token as it once was: the
      Design tab writes --mjf-accent and nothing else, so a form whose author set a maroon button
      kept MJ's blue on hover — the button changed colour and then flashed blue under the pointer.
-     Mixed toward the BUTTON TEXT rather than toward black or the page, because on-accent is the
-     one colour guaranteed to contrast with the accent (or the picker is already warning about
-     it), so the shift is visible on a black button and a white one alike. */
-  --mjf-accent-strong: color-mix(in srgb, var(--mjf-accent) 88%, var(--mjf-on-accent));
+     Mixed AWAY from the button text: toward black under light text, toward white under dark
+     text (on-accent's lightness rounded to the opposite pole). It once mixed toward the text,
+     which lowers contrast by construction — MJ's blue under white fell from 4.9:1 to 4.0:1 on
+     hover, below AA. Moving away can only raise contrast, whichever pair the author picked.
+     The derived shade is set in the @supports block at the end of this file: a browser without
+     relative colour or round() keeps the plain accent on hover. It cannot be a second declaration
+     here, because a custom property accepts any value when parsed and an unsupported one then
+     fails at computed time, leaving the hover background transparent. accent-hover.spec.ts checks
+     the maths on eight pairs. */
+  --mjf-accent-strong: var(--mjf-accent);
   --mjf-on-accent: var(--mj-brand-on-primary);
   /* ---- Derived from the two colours the author actually picks ----
      Everything below is mixed from --mjf-page-bg and --mjf-page-ink rather than read from the
@@ -568,5 +574,12 @@
 @container mjf (min-width: 30rem) {
   .mjf-expired__action {
     width: auto;
+  }
+}
+
+/* The hover shade where the browser can compute it; see --mjf-accent-strong above. */
+@supports (color: oklch(from red round(nearest, calc(1 - l), 1) 0 0)) {
+  :host {
+    --mjf-accent-strong: color-mix(in oklab, var(--mjf-accent) 88%, oklch(from var(--mjf-on-accent) round(nearest, calc(1 - l), 1) 0 0));
   }
 }
