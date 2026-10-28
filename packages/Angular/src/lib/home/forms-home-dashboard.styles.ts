@@ -42,6 +42,7 @@ export const FORMS_HOME_CSS = /* css */ `
 
 /* The row's trailing affordance. Muted until hover so a long list doesn't read as a
    column of arrows. */
+/* ui-gate: allow-disabled-token — decorative chevron; the row's own name says where it goes */
 .home-chevron { flex: none; color: var(--mj-text-disabled); font-size: var(--mjf-meta); transition: color var(--mjf-ease), transform var(--mjf-ease); }
 .mjf-row:hover .home-chevron { color: var(--mj-text-secondary); transform: translateX(2px); }
 

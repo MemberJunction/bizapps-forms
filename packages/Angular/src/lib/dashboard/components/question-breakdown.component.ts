@@ -195,6 +195,7 @@ const MAX_CELL_TINT = 0.35;
         font-size: var(--mjf-label);
         color: var(--mj-text-muted);
       }
+      /* ui-gate: allow-disabled-token — decorative separator between two labelled values */
       .qb-dot { color: var(--mj-text-disabled); }
       /* Muted like the rest of the line. A skip rate is context, not an alarm — colouring
          it would put a warning on every optional question in the form. */

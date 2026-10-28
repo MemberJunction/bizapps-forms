@@ -94,9 +94,13 @@ describe('the add-content bar belongs to the selected question', () => {
   });
 
   it('does not steal the click that selects the question', () => {
+    // Since UI audit F05 the card selects through mjfRowActivate, which ignores a click that starts
+    // in a button, so the bar needs no stopPropagation of its own.
     const source = html();
     const bar = source.indexOf('class="fb-q-add"');
-    expect(source.slice(bar, bar + 600)).toMatch(/\(click\)="\$event\.stopPropagation\(\);/);
+    const cardAt = source.lastIndexOf('<article', bar);
+    expect(source.slice(cardAt, source.indexOf('>', cardAt))).toContain('(mjfRowActivate)="selectQuestion(node)"');
+    expect(source.slice(bar, bar + 600)).toMatch(/<button[\s\S]*\(click\)="openTypePicker\(page, \$index \+ 1\)"/);
   });
 
   it('leaves no trace of the gutter affordance it replaced', () => {
@@ -133,7 +137,7 @@ describe('the add-content bar above the first question', () => {
     const bar = aboveBar();
     expect(bar).toMatch(/@if \(offersInsertAbove\(page, node\)\)/);
     expect(bar).toMatch(/openTypePicker\(page, 0\)/);
-    expect(bar).toMatch(/\(click\)="\$event\.stopPropagation\(\);/);
+    expect(bar).toMatch(/<button/);
   });
 
   it('has its own rule, in design tokens, with the footer bar\'s spacing and no hover gate', () => {

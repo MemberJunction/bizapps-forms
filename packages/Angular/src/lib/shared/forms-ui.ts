@@ -67,6 +67,11 @@ export const FORMS_UI_TOKENS = /* css */ `
   /* Touch. Every interactive target is at least this tall — the plan's §2 UX bar. */
   --mjf-tap: 40px;
 
+  /* Text on --mj-brand-primary. Not MJ's --mj-brand-on-primary: its dark value is #fff on #4095d2
+     (3.25:1). --mj-text-inverse is white in light and #071927 in dark (5.5:1). Switch back here
+     once MJ fixes the token upstream; lint:ui keeps every other rule pointed at this one. */
+  --mjf-on-primary: var(--mj-text-inverse);
+
   --mjf-focus-ring: var(--mj-brand-primary);
   --mjf-ease: var(--mj-transition-base, 200ms ease);
 
@@ -207,7 +212,7 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
 .mjf-btn:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 .mjf-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-.mjf-btn--primary { color: var(--mj-brand-on-primary, var(--mj-text-inverse)); background: var(--mj-brand-primary); }
+.mjf-btn--primary { color: var(--mjf-on-primary); background: var(--mj-brand-primary); }
 .mjf-btn--primary:hover:not(:disabled) { background: var(--mj-brand-primary-hover); }
 .mjf-btn--primary:active:not(:disabled) { background: var(--mj-brand-primary-active); }
 
@@ -272,7 +277,32 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
   transition: border-color var(--mjf-ease), box-shadow var(--mjf-ease), background var(--mjf-ease);
 }
 .mjf-row:hover { border-color: var(--mj-border-strong); box-shadow: var(--mj-shadow-sm); }
-.mjf-row:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
+
+/* A row that activates through mjfRowActivate is not focusable itself: its keyboard path is the
+   .mjf-row-primary button inside (UI audit F05). That button looks like the text it replaced, and
+   the ring is drawn around the whole row, where it was before. */
+.mjf-row-primary {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 24px; /* WCAG 2.5.8; one line of text alone measured 19px */
+  overflow: hidden; /* the title's ellipsis clips here, not past the row */
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+/* Inside a block button the title is inline and its ellipsis would not clip; make it a block again. */
+.mjf-row-primary > .mjf-row-title {
+  display: block;
+  line-height: 24px;
+}
+.mjf-row-primary:focus-visible { outline: none; }
+.mjf-row:has(.mjf-row-primary:focus-visible) { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 .mjf-row.is-selected { border-color: var(--mj-brand-primary); box-shadow: 0 0 0 1px var(--mj-brand-primary); }
 
 /* The leading tile. Gives a list of same-shaped rows a scannable left edge.

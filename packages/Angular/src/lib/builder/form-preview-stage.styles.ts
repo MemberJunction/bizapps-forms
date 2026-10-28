@@ -174,7 +174,7 @@ export const PREVIEW_STAGE_STYLES = /* css */ `
    without relying on colour alone, which WCAG 1.4.1 asks for and colour-blind authors need. */
 .ps-screen.is-on {
   background: var(--mj-bg-surface-sunken);
-  color: var(--mj-brand-primary);
+  color: var(--mj-brand-primary-hover); /* brand on sunken measured 4.48:1 */
   box-shadow: var(--mj-shadow-sm);
   font-weight: 600;
 }

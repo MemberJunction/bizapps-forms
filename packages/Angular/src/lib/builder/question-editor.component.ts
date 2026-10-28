@@ -137,6 +137,7 @@ const QUESTION_EDITOR_CSS = /* css */ `
   padding: 56px var(--mjf-card-pad);
   text-align: center;
 }
+/* ui-gate: allow-disabled-token — decorative icon beside text that says the same thing */
 .qe-empty i { font-size: 1.25rem; color: var(--mj-text-disabled); }
 .qe-empty-title { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
 .qe-empty p { margin: 0; font-size: var(--mjf-label); color: var(--mj-text-muted); max-width: 30ch; }

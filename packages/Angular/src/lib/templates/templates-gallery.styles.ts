@@ -45,7 +45,8 @@ export const TEMPLATES_GALLERY_CSS = /* css */ `
   transition: border-color var(--mjf-ease), background var(--mjf-ease), transform var(--mjf-ease);
 }
 .tg-card:hover { border-color: var(--mj-border-strong); background: var(--mj-bg-surface-hover); }
-.tg-card:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
+/* The card is not focusable; its name button is. The ring goes around the card, as before. */
+.tg-card:has(.mjf-row-primary:focus-visible) { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 .tg-card.is-busy { opacity: 0.55; pointer-events: none; }
 
 .tg-card-top { display: flex; align-items: center; gap: var(--mjf-gap-sm); }
@@ -68,14 +69,14 @@ export const TEMPLATES_GALLERY_CSS = /* css */ `
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.tg-card-meta { font-size: var(--mjf-label); color: var(--mj-text-disabled); }
+.tg-card-meta { font-size: var(--mjf-label); color: var(--mj-text-muted); } /* disabled measured 1.93:1 in dark */
 
 /* "Built-in" says why there is no delete here. A disabled delete button would invite the
    click and then refuse it; a label answers the question instead of raising it. */
 .tg-lock {
   font-size: var(--mjf-label);
   font-weight: 600;
-  color: var(--mj-text-disabled);
+  color: var(--mj-text-muted);
   white-space: nowrap;
 }
 

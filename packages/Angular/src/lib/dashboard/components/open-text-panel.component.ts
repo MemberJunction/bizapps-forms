@@ -132,6 +132,7 @@ import type { OpenTextInsight } from '../models/reporting.model';
         font-size: var(--mjf-label);
         color: var(--mj-text-muted);
       }
+      /* ui-gate: allow-disabled-token — decorative separator between two labelled values */
       .otp-dot { color: var(--mj-text-disabled); }
 
       .otp-rate { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }

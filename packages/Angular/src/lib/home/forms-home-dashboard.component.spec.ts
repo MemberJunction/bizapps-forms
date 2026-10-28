@@ -98,30 +98,71 @@ const draftRow: FormSummaryRow = {
 };
 
 describe('FormsHomeDashboardComponent failure alert (#253)', () => {
-  it('keeps "Failed to load forms" in front of a real Error, in the alert and in the emitted Error', async () => {
+  it('keeps "Failed to load forms" in front of a real Error, and logs the original with it', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const cause = new Error('GraphQL Error (Code: unknown)');
     const component = makeComponent(homeService({ loadForms: async () => Promise.reject(cause) }));
-    const errors = emitted(component);
 
     await component.loadForms();
 
     expect(component.errorMessage).toBe('Failed to load forms: GraphQL Error (Code: unknown)');
-    expect(errors).toHaveLength(1);
-    expect(errors[0].message).toBe('Failed to load forms: GraphQL Error (Code: unknown)');
-    // The original failure travels as the cause, so its stack is not lost.
-    expect(errors[0].cause).toBe(cause);
+    // The original failure is logged with the sentence, so its stack is not lost.
+    expect(consoleError.mock.calls.flat()).toContain(cause);
+    consoleError.mockRestore();
   });
 
   it('shows the action sentence alone when the rejection is not an Error', async () => {
     const component = makeComponent(homeService({ loadForms: async () => Promise.reject('boom') }));
-    const errors = emitted(component);
 
     await component.loadForms();
 
     expect(component.errorMessage).toBe('Failed to load forms.');
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toBeInstanceOf(Error);
-    expect(errors[0].message).toBe('Failed to load forms.');
+  });
+
+  // UI audit F01, F10: a failed list stays in the dashboard, with its own state and Retry.
+  it('never emits the host Error, which would replace the page with "Unable to Load Dashboard"', async () => {
+    const component = makeComponent(homeService({ loadForms: async () => Promise.reject(new Error('down')) }));
+    const errors = emitted(component);
+
+    await component.loadForms();
+
+    expect(errors).toEqual([]);
+  });
+
+  it('shows the failed state, not "No forms yet", and Retry reads the list again', async () => {
+    let fail = true;
+    const component = makeComponent(
+      homeService({ loadForms: async () => (fail ? Promise.reject(new Error('down')) : [draftRow]) }),
+    );
+
+    await component.loadForms();
+    expect(component.listState).toBe('failed');
+
+    fail = false;
+    await component.loadForms();
+    expect(component.listState).toBe('list');
+  });
+
+  it('keeps the list failure apart from a later, unrelated failure (final review #2)', async () => {
+    // The failed card printed whatever `errorMessage` held, so an authoring message written while
+    // the list was down appeared under "Couldn’t load your forms."
+    const component = makeComponent(homeService({ loadForms: async () => Promise.reject(new Error('down')) }));
+    await component.loadForms();
+    component.openPanel('ai');
+    await component.authorWithAI();
+
+    expect(component.listState).toBe('failed');
+    expect(component.listLoadError).toBe('Failed to load forms: down');
+    expect(component.errorMessage).not.toBe(component.listLoadError);
+    expect(component.errorMessage).not.toBeNull();
+  });
+
+  it('says every form is archived rather than matching an empty search', async () => {
+    const component = makeComponent(homeService({ loadForms: async () => [{ ...draftRow, status: 'Closed' as FormStatus }] }));
+
+    await component.loadForms();
+
+    expect(component.listState).toBe('all-archived');
   });
 
   it('says the archive failed, then why', async () => {
@@ -146,7 +187,8 @@ describe('FormsHomeDashboardComponent failure alert (#253)', () => {
     await component.toggleArchive(draftRow);
 
     expect(component.errorMessage).toBe('Could not archive this form: Simulated save failure');
-    expect(errors.map((e) => e.message)).toEqual(['Could not archive this form: Simulated save failure']);
+    // Shown in the page, never escalated to the host (UI audit F01).
+    expect(errors).toEqual([]);
   });
 
   // MJ's action client turns a transport failure into { Success: false, Message: 'Error: …' }
@@ -409,7 +451,9 @@ describe('FormsHomeDashboardComponent — reloads heard from elsewhere, and a hu
     expect(component.loading).toBe(false);
     expect(component.errorMessage).toContain('Failed to load forms');
     expect(component.errorMessage).toContain(`did not settle within ${LOAD_TIMEOUT_MS} ms`);
-    expect(errors).toHaveLength(1);
+    expect(component.listState).toBe('failed');
+    // The page says so and offers Retry; the host is not asked to replace it (UI audit F01).
+    expect(errors).toEqual([]);
 
     pending[0]([draftRow]);
     await vi.advanceTimersByTimeAsync(0);

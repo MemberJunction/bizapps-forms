@@ -294,7 +294,8 @@ const LAYOUT_CSS = /* css */ `
   transition: border-color var(--mjf-ease), background var(--mjf-ease);
 }
 .fb-screen:hover { background: var(--mj-bg-surface-hover); }
-.fb-screen:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
+/* The card is not focusable; its title button is (UI audit F05). The ring goes around the card. */
+.fb-screen:has(.fb-screen-title:focus-visible) { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 .fb-screen.is-selected { border-color: var(--mj-brand-primary); background: var(--mj-bg-surface-hover); }
 
 /* The form's two bookends, and they no longer share a colour.
@@ -339,7 +340,18 @@ const LAYOUT_CSS = /* css */ `
   text-transform: uppercase;
   color: var(--mj-text-muted);
 }
+/* A button since UI audit F05 (the card's keyboard path), styled as the text it replaced. */
 .fb-screen-title {
+  display: block;
+  max-width: 100%;
+  min-height: 24px; /* WCAG 2.5.8 */
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  text-align: start;
+  background: none;
+  border: 0;
+  cursor: pointer;
   font-size: var(--mjf-meta);
   color: var(--mj-text-primary);
   overflow: hidden;
@@ -381,7 +393,7 @@ const LAYOUT_CSS = /* css */ `
 }
 .fb-page-head.is-selected .fb-page-num {
   background: var(--mj-brand-primary);
-  color: var(--mj-brand-on-primary, var(--mj-text-inverse));
+  color: var(--mjf-on-primary);
 }
 /* The section a palette click writes to. Quiet on purpose — it confirms a destination, it does
    not compete with the selection highlight it usually sits beside. */
@@ -389,7 +401,8 @@ const LAYOUT_CSS = /* css */ `
 .fb-page-target {
   flex: none;
   font-size: var(--mjf-label);
-  color: var(--mj-brand-primary);
+  /* The hover shade: --mj-brand-primary on its own 12% tint measured 4.18:1. */
+  color: var(--mj-brand-primary-hover);
   background: color-mix(in srgb, var(--mj-brand-primary) 12%, var(--mj-bg-surface));
   border-radius: var(--mjf-radius-sm);
   padding: 2px 8px;
@@ -590,7 +603,7 @@ const LAYOUT_CSS = /* css */ `
 .fb-q-list.cdk-drop-list-dragging .fb-q-add { visibility: hidden; }
 
 .fb-q:hover .fb-q-row { border-color: var(--mj-border-strong); box-shadow: var(--mj-shadow-sm); }
-.fb-q:focus-visible .fb-q-row { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
+.fb-q:has(.fb-q-row .fb-q-label:focus-visible) .fb-q-row { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 .fb-q.is-selected .fb-q-row { border-color: var(--mj-brand-primary); box-shadow: 0 0 0 1px var(--mj-brand-primary); }
 
 /* Drag handle — pointer/touch reorder (arrows remain the keyboard fallback). */
@@ -599,12 +612,14 @@ const LAYOUT_CSS = /* css */ `
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 28px;
+  /* WCAG 2.5.8 wants 24px at least; 40px tall matches --mjf-tap. The glyph is a control's only
+     visible sign, so it takes a colour that reaches 3:1, not the disabled one. */
+  min-width: 24px;
+  min-height: 40px;
   cursor: grab;
   border: none;
   background: transparent;
-  color: var(--mj-text-disabled);
+  color: var(--mj-text-muted);
   border-radius: var(--mjf-radius-sm);
   touch-action: none;
   transition: color var(--mjf-ease), background var(--mjf-ease);
@@ -650,13 +665,16 @@ const LAYOUT_CSS = /* css */ `
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   border-radius: var(--mjf-radius-sm);
-  color: var(--mj-text-muted);
+  color: var(--mj-text-secondary); /* muted measured 4.3:1 on sunken at 12px */
   background: var(--mj-bg-surface-sunken);
 }
-.fb-q.is-selected .fb-q-num { color: var(--mj-brand-primary); background: color-mix(in srgb, var(--mj-brand-primary) 12%, var(--mj-bg-surface)); }
+.fb-q.is-selected .fb-q-num { color: var(--mj-brand-primary-hover); background: color-mix(in srgb, var(--mj-brand-primary) 12%, var(--mj-bg-surface)); }
 
 .fb-q-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding-right: 8px; }
 .fb-q-label { font-size: var(--mjf-body); font-weight: 600; color: var(--mj-text-primary); word-break: break-word; }
+/* The row's label is a button since UI audit F05 (the card's keyboard path), styled as the text it replaced. */
+button.fb-q-label { display: block; max-width: 100%; min-height: 24px; /* WCAG 2.5.8 */ margin: 0; padding: 0; font-family: inherit; line-height: inherit; text-align: start; background: none; border: 0; cursor: pointer; }
+.fb-q-label:focus-visible, .fb-screen-title:focus-visible { outline: none; }
 .fb-q-help { font-size: var(--mjf-meta); color: var(--mj-text-muted); word-break: break-word; }
 .fb-q-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .fb-q-tags .mjf-badge { padding: 1px 8px; font-size: 0.6875rem; }
@@ -761,6 +779,7 @@ const LAYOUT_CSS = /* css */ `
    The p is scoped for the same reason rather than left as the next instance of the same trap.
    The .fb-screen-add rule above stays a descendant rule on purpose: it targets a CLASS, so it
    cannot capture something that merely happens to be nested here. */
+/* ui-gate: allow-disabled-token — decorative icon beside text that says the same thing */
 .fb-canvas-empty > i { font-size: 1.5rem; color: var(--mj-text-disabled); }
 .fb-canvas-empty > p { margin: 0; font-size: var(--mjf-meta); }
 

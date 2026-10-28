@@ -185,7 +185,9 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
     expect(c.selectedForm).toBe(FORM_B);
     expect(c.report).toBeNull();
     expect(c.errorMessage).toContain('B timed out');
-    expect(errors).toHaveLength(1);
+    // Shown in the page, never escalated to the host (UI audit F01).
+    expect(errors).toEqual([]);
+    expect(c.reportState).toBe('failed');
     expect(c.loadingReport).toBe(false);
 
     reportCalls[0].load.resolve(reportWithTotal(111));
@@ -260,7 +262,8 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
     await run;
 
     expect(c.errorMessage).toContain('disk full');
-    expect(errors).toHaveLength(1);
+    // Shown in the page, never escalated to the host (UI audit F01).
+    expect(errors).toEqual([]);
   });
 
   it('still surfaces a failed export once the reader is back on the form it was for', async () => {
@@ -283,7 +286,8 @@ describe('FormsReportingDashboardComponent — only the latest selection applies
 
     expect(c.selectedForm).toBe(FORM_A);
     expect(c.errorMessage).toContain('A export timed out');
-    expect(errors).toHaveLength(1);
+    // Shown in the page, never escalated to the host (UI audit F01).
+    expect(errors).toEqual([]);
   });
 
   it('ends the forms-loading state once the list is known, not when the first report settles', async () => {
@@ -646,7 +650,8 @@ describe('FormsReportingDashboardComponent — the failed-state retry, and a hun
     expect(c.loadingForms).toBe(false);
     expect(c.formsLoadError).toContain(`did not settle within ${LOAD_TIMEOUT_MS} ms`);
     expect(c.railState).toBe('failed');
-    expect(errors).toHaveLength(1);
+    // The rail says so and offers Retry; the host is not asked to replace the page (UI audit F01).
+    expect(errors).toEqual([]);
 
     formLists[0].resolve([FORM_A]);
     await vi.advanceTimersByTimeAsync(0);
@@ -670,5 +675,64 @@ describe('FormsReportingDashboardComponent — the failed-state retry, and a hun
     reportCalls[0].load.resolve(reportWithTotal(11));
     await vi.advanceTimersByTimeAsync(0);
     expect(c.report).toBeNull();
+  });
+});
+
+describe('FormsReportingDashboardComponent — a failure stays in the dashboard (UI audit F01)', () => {
+  // MJ's dashboard host replaces the whole page with "Unable to Load Dashboard" when a dashboard
+  // emits Error during its first load. One form's failed report did exactly that, although the
+  // pane can say so itself and offer Retry.
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('keeps a failed report in the pane, with no host Error, and Retry reads it again', async () => {
+    const { c, reportCalls, errors } = construct();
+    const first = c.selectForm(FORM_A);
+    reportCalls[0].load.reject(new Error('The query failed'));
+    await first;
+
+    expect(errors).toEqual([]);
+    expect(c.reportState).toBe('failed');
+
+    const retry = c.refresh();
+    expect(reportCalls).toHaveLength(2);
+    expect(c.reportState).toBe('loading');
+    reportCalls[1].load.resolve(reportWithTotal(5));
+    await retry;
+    expect(c.reportState).toBe('ready');
+  });
+
+  it('clears the failed state when the reader picks another form', async () => {
+    const { c, reportCalls } = construct();
+    const a = c.selectForm(FORM_A);
+    reportCalls[0].load.reject(new Error('The query failed'));
+    await a;
+    const b = c.selectForm(FORM_B);
+    reportCalls[1].load.resolve(reportWithTotal(3, FORM_B));
+    await b;
+    expect(c.reportState).toBe('ready');
+  });
+
+  it('does not escalate a failed form list either: the rail shows it with Retry', async () => {
+    const { c, formLists, errors } = construct();
+    loadData(c);
+    formLists[0].reject(new Error('down'));
+    await settle();
+    expect(errors).toEqual([]);
+    expect(c.railState).toBe('failed');
+  });
+
+  it('logs a failure it no longer escalates, with the original error attached', async () => {
+    const { c, reportCalls } = construct();
+    const first = c.selectForm(FORM_A);
+    const cause = new Error('The query failed');
+    reportCalls[0].load.reject(cause);
+    await first;
+    const calls = vi.mocked(console.error).mock.calls.flat();
+    expect(calls.map(String).join('\n')).toContain('Failed to load the report: The query failed');
   });
 });

@@ -19,7 +19,9 @@ import {
   portfolioLine,
   railState,
   relativeTime,
+  reportState,
   type RailState,
+  type ReportState,
   sortFormsForRail,
 } from './reporting-view-model';
 import { CoalescedLoad } from '../shared/coalesced-load';
@@ -110,6 +112,11 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
    */
   public responsesMounted = false;
   public errorMessage: string | null = null;
+  /**
+   * The selected form's report could not be read. Kept apart from `errorMessage`, which the
+   * reader can dismiss: the pane keeps its failed state and its Retry until the next read.
+   */
+  public reportFailed = false;
   /**
    * Why the form list itself failed to load, kept apart from `errorMessage` (which any later
    * action overwrites or dismisses). With no list on screen it means the list is unknown, not
@@ -247,6 +254,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     } else if (ownReportStamp === this.selectionStamp) {
       this.selectionStamp++;
       this.loadingReport = false;
+      this.reportFailed = true;
       this.fail(reason, 'Failed to load the report.');
     }
     this.cdr.markForCheck();
@@ -277,6 +285,17 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   /** "12 forms · 1,204 responses" — what this dashboard covers, before you pick one. */
   public get portfolioLine(): string {
     return portfolioLine(this.forms, this.formsLoadError);
+  }
+
+  /** Which state the selected form's pane shows; `failed` carries the Retry. */
+  public get reportState(): ReportState {
+    return reportState({
+      loading: this.loadingReport,
+      failed: this.reportFailed,
+      unavailable: this.summaryUnavailable,
+      hasReport: this.report !== null,
+      hasResponses: this.hasResponses,
+    });
   }
 
   /** Which of loading / failed / empty / ready the report pane shows. */
@@ -325,6 +344,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     const stamp = ++this.selectionStamp;
     this.selectedForm = form;
     this.loadingReport = true;
+    this.reportFailed = false;
     this.errorMessage = null;
     this.exportNotice = null;
     // The previous form's report must not sit under the new form's name while this one
@@ -352,6 +372,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
       // A failed report must not leave the previous form's numbers on screen under the new
       // form's name — every figure would be a lie about the form the header claims.
       this.report = null;
+      this.reportFailed = true;
       this.fail(err, 'Failed to load the report.');
     } finally {
       // The latest request owns the flag; a superseded one clearing it would end the
@@ -483,10 +504,16 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     this.cdr.markForCheck();
   }
 
+  /**
+   * Show and log a failure. It is never emitted as `BaseDashboard.Error`: MJ's host answers that,
+   * during the first load, by replacing the whole dashboard with "Unable to Load Dashboard" (UI
+   * audit F01) — and every failure here already has a state on the page with a way out (the
+   * rail's Retry, the pane's Retry, the dismissible banner). A throw from `initDashboard` or
+   * `loadData` itself still reaches the host through `BaseDashboard.runGuardedLoad`.
+   */
   private fail(err: unknown, action: string): void {
     const message = failureMessage(err, action);
     this.errorMessage = message;
-    LogError(message);
-    this.Error.emit(err instanceof Error ? err : new Error(message));
+    LogError(message, undefined, err);
   }
 }

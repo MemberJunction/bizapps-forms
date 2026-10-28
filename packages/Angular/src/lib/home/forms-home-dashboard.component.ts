@@ -18,7 +18,9 @@ import type { ActionParam } from '@memberjunction/actions-base';
 import { FORMS_UI_CSS, failureMessage } from '../shared';
 import { onFormsWrite, type FormsWriteSubscription } from '../shared/forms-writes';
 import { CoalescedLoad } from '../shared/coalesced-load';
+import { RowActivateDirective } from '../shared/row-activate.directive';
 import { FormsHomeService } from './forms-home.service';
+import { homeListState, type HomeListState } from './home-list-state';
 import { FORMS_HOME_CSS } from './forms-home-dashboard.styles';
 import { totalResponses } from './home-aggregations';
 import { isFormsHomeUrl } from './home-route';
@@ -113,7 +115,7 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [FormsHomeService],
-  imports: [FormsModule, DatePipe, TemplatesGalleryComponent],
+  imports: [FormsModule, DatePipe, TemplatesGalleryComponent, RowActivateDirective],
   templateUrl: './forms-home-dashboard.component.html',
   styles: [FORMS_UI_CSS, FORMS_HOME_CSS],
 })
@@ -125,6 +127,12 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   public loading = false;
   public busy = false;
   public errorMessage: string | null = null;
+  /**
+   * Why the last read of the list failed, or null. Kept apart from `errorMessage`, which any later
+   * action overwrites: the failed card shows THIS, so an unrelated message (an authoring
+   * refusal, a copy warning) never appears under "Couldn’t load your forms."
+   */
+  public listLoadError: string | null = null;
 
   public forms: FormSummaryRow[] = [];
   /** `forms` narrowed by `query`. Maintained by `applyFilter`, not recomputed in the template. */
@@ -292,6 +300,7 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
       'abort',
       () => {
         this.fail(signal.reason, 'Failed to load forms.');
+        this.listLoadError = this.errorMessage;
         this.endLoad();
       },
       { once: true },
@@ -301,11 +310,13 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
       const rows = await this.data.loadForms();
       if (signal.aborted) return;
       this.forms = rows;
+      this.listLoadError = null;
       this.applyFilter();
     } catch (err) {
       // Abandoned: the coalescer logs this late failure; the page already says the read failed.
       if (signal.aborted) throw err;
       this.fail(err, 'Failed to load forms.');
+      this.listLoadError = this.errorMessage;
     } finally {
       if (!signal.aborted) this.endLoad();
     }
@@ -347,6 +358,19 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.cdr.markForCheck();
   }
 
+  /** Which of loading / failed / first run / all archived / no match / list the page shows. */
+  public get listState(): HomeListState {
+    return homeListState({
+      loading: this.loading,
+      failed: this.listLoadError !== null,
+      total: this.forms.length,
+      archived: this.archivedCount,
+      visible: this.visibleForms.length,
+      query: this.query,
+      showArchived: this.showArchived,
+    });
+  }
+
   public get archivedCount(): number {
     return this.forms.filter((f) => f.status === ARCHIVED_STATUS).length;
   }
@@ -382,9 +406,10 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   }
 
   /**
-   * `event` is the button's own click. It is stopped HERE, first: the confirm re-renders as soon as
-   * the state clears, which removes the wrapper's `(click)` stopPropagation listener mid-dispatch,
-   * and a click that was only stopped by the wrapper then reached the card and opened the form.
+   * `event` is the button's own click, stopped here as a second guard. The first is the row itself:
+   * `mjfRowActivate` ignores any click that starts in a button. The stop still matters if this
+   * button is ever moved out of the row's control check, because the confirm re-renders as soon as
+   * the state clears and removes the wrapper's own `(click)` stop mid-dispatch.
    */
   public async confirmArchive(row: FormSummaryRow, event?: StoppableEvent): Promise<void> {
     event?.stopPropagation();
@@ -402,7 +427,7 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     }
   }
 
-  /** Stops its own click first, for the reason given on {@link confirmArchive}. */
+  /** Stops its own click as a second guard, for the reason given on {@link confirmArchive}. */
   public cancelArchive(event?: StoppableEvent): void {
     event?.stopPropagation();
     const rowId = this.confirmingArchive;
@@ -604,11 +629,15 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.cdr.markForCheck();
   }
 
-  /** Alert, log and emitted Error all say what failed; the original failure rides along as `cause`. */
+  /**
+   * Alert and log say what failed; the original failure is logged with it. Never emitted as
+   * `BaseDashboard.Error`: MJ's host answers that, during the first load, by replacing the whole
+   * page with "Unable to Load Dashboard" (UI audit F01), and every failure here has a state on
+   * the page with a way out. Same rule as the reporting dashboard's `fail`.
+   */
   private fail(err: unknown, action: string): void {
     const message = failureMessage(err, action);
     this.errorMessage = message;
-    LogError(message);
-    this.Error.emit(new Error(message, { cause: err }));
+    LogError(message, undefined, err);
   }
 }

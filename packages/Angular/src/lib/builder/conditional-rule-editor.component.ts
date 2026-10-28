@@ -57,7 +57,7 @@ const CONDITIONAL_EDITOR_CSS = /* css */ `
 
 .cre-combinator { display: flex; align-items: center; gap: var(--mjf-gap-sm); font-size: var(--mjf-meta); color: var(--mj-text-secondary); flex-wrap: wrap; }
 .cre-seg { font: inherit; font-size: var(--mjf-meta); font-weight: 600; min-height: 30px; padding: 4px 14px; cursor: pointer; border-radius: var(--mjf-radius-pill); border: 1px solid var(--mj-border-default); background: var(--mj-bg-surface); color: var(--mj-text-secondary); }
-.cre-seg.is-on { background: var(--mj-brand-primary); color: var(--mj-brand-on-primary, var(--mj-text-inverse)); border-color: var(--mj-brand-primary); }
+.cre-seg.is-on { background: var(--mj-brand-primary); color: var(--mjf-on-primary); border-color: var(--mj-brand-primary); }
 .cre-seg:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 
 /* One condition, on two lines: the question, then what must be true of its answer.

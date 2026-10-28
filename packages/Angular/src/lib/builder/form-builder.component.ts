@@ -37,6 +37,7 @@ import { readDraftAutomations, readLiveSnapshot } from './publish-baseline';
 import { runOperation } from '../shared/remote-operation';
 import { onFormsWrite, type FormsWriteSubscription } from '../shared/forms-writes';
 import { findTemplateSavedFrom, loadFormRecord } from '../shared/form-catalog';
+import { RowActivateDirective } from '../shared/row-activate.directive';
 import { QuestionEditorComponent } from './question-editor.component';
 import { ScreenEditorComponent } from './screen-editor.component';
 import { PageEditorComponent } from './page-editor.component';
@@ -194,6 +195,7 @@ function draftDefinition(
     CdkDrag,
     CdkDragHandle,
     CdkDragPreview,
+    RowActivateDirective,
     QuestionEditorComponent,
     ScreenEditorComponent,
     PageEditorComponent,

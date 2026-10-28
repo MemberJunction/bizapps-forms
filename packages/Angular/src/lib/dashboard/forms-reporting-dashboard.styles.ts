@@ -105,7 +105,7 @@ export const FORMS_REPORTING_CSS = /* css */ `
   color: var(--mj-text-secondary);
   font-variant-numeric: tabular-nums;
 }
-.rp-form-count.is-none { color: var(--mj-text-disabled); font-weight: 400; }
+.rp-form-count.is-none { color: var(--mj-text-muted); font-weight: 400; }
 
 .rp-rail-none { margin: 0; padding: 0 6px; font-size: var(--mjf-meta); color: var(--mj-text-muted); }
 .rp-rail-count { margin: 0; padding: 0 6px; font-size: var(--mjf-label); color: var(--mj-text-muted); }
@@ -176,6 +176,11 @@ export const FORMS_REPORTING_CSS = /* css */ `
 }
 .rp-alert-close {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px; /* measured 18x24 before: under WCAG 2.5.8's 24px */
+  min-height: 32px;
   padding: 4px;
   font: inherit;
   color: inherit;
