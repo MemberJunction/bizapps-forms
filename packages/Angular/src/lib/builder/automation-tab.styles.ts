@@ -74,7 +74,7 @@ export const AUTOMATION_STYLES = /* css */ `
   gap: var(--mjf-gap-sm);
   width: 100%;
   min-height: var(--mjf-tap);
-  padding: var(--mjf-gap-sm) 10px;
+  padding: var(--mjf-gap-sm) 8px;
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -214,7 +214,7 @@ export const AUTOMATION_STYLES = /* css */ `
   border-bottom: 1px solid var(--mjf-rule);
   white-space: nowrap;
 }
-.at-map td { padding: 10px var(--mjf-gap-sm); border-top: 1px solid var(--mjf-rule); vertical-align: middle; }
+.at-map td { padding: 8px var(--mjf-gap-sm); border-top: 1px solid var(--mjf-rule); vertical-align: middle; }
 .at-map tbody tr:first-child td { border-top: none; }
 .at-map-field { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .at-map-name { font-weight: 600; }
@@ -251,7 +251,7 @@ export const AUTOMATION_STYLES = /* css */ `
    promise an edit that does not exist until the first real step is added. */
 .at-builtin { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); margin: 0; padding: 0; list-style: none; }
 .at-builtin li { display: flex; align-items: flex-start; gap: var(--mjf-gap-sm); font-size: var(--mjf-body); color: var(--mj-text-primary); }
-.at-builtin i { flex: none; width: 16px; margin-top: 3px; color: var(--mj-brand-primary); text-align: center; }
+.at-builtin i { flex: none; width: 16px; margin-top: 4px; color: var(--mj-brand-primary); text-align: center; }
 .at-builtin span { color: var(--mj-text-secondary); font-size: var(--mjf-meta); }
 
 /* ------------------------------------------------------------------ mobile */

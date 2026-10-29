@@ -31,6 +31,7 @@ import { FormRuntime } from '../core/form-runtime';
 import { entryKey, sectionEntries, skippedMessage, type SectionEntry } from '../core/section-content';
 import { steppableSections } from '../core/section-stepper';
 import { nothingToSubmit } from '../core/nothing-to-submit';
+import { focusIsOutside, focusOnChange } from '../core/focus-on-change';
 import { StepJudge } from '../core/settled-validation';
 import { clampCursor } from '../core/stepper';
 import { FormUploadStore } from '../core/upload-store';
@@ -173,14 +174,15 @@ export class FormScrollComponent {
 
     // Move focus to the section itself when it changes, so keyboard and screen-reader users land
     // on the new heading rather than wherever the old Next button used to be — and so the
-    // browser scrolls the top of the section into view on a phone.
-    let lastFocusedId: string | null = null;
+    // browser scrolls the top of the section into view on a phone. The first section does not
+    // take focus from a control outside the form that holds it (the builder's tab strip).
+    const shouldFocus = focusOnChange();
     effect(() => {
       const page = this.current();
-      if (page && page.id !== lastFocusedId) {
-        lastFocusedId = page.id;
-        queueMicrotask(() => this.focusCurrentSection());
-      }
+      if (!page) return;
+      queueMicrotask(() => {
+        if (shouldFocus(page.id, focusIsOutside(this.hostRef.nativeElement))) this.focusCurrentSection();
+      });
     });
   }
 

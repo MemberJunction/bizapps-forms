@@ -39,6 +39,8 @@ export interface ResponsesViewState {
   /** Whether the form has a published version. Only meaningful once loaded. */
   isPublished: boolean;
   rowCount: number;
+  /** A search is narrowing the list: no rows then means "no match", which the list says, not "no responses yet". */
+  searching: boolean;
   hasDetail: boolean;
 }
 
@@ -51,6 +53,6 @@ export function resolveResponsesView(state: ResponsesViewState): ResponsesView {
   if (state.failed) return 'failed';
   if (!state.isPublished) return 'never-published';
   if (state.hasDetail) return 'detail';
-  if (state.rowCount === 0) return 'no-responses';
+  if (state.rowCount === 0 && !state.searching) return 'no-responses';
   return 'list';
 }

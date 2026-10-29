@@ -17,6 +17,8 @@ import { FormsHomeService } from './forms-home.service';
 import { HOME_ENTITY, type FormStatus, type FormSummaryRow } from './home-models';
 import { announceWrites } from '../shared/forms-writes';
 import { LOAD_TIMEOUT_MS } from '../shared/coalesced-load';
+import { ResourceData } from '@memberjunction/core-entities';
+import { HOME_URL_DEBOUNCE_MS } from './forms-home-dashboard.component';
 
 type HomeServiceSurface = Pick<FormsHomeService, 'loadForms' | 'archive' | 'restore' | 'createFromTemplate' | 'runAuthoringAction'>;
 
@@ -54,6 +56,11 @@ class HomeProbe extends FormsHomeDashboardComponent {
     this.initDashboard();
   }
 
+  /** What MJ's shell delivers on a deep link or back / forward. */
+  public deliver(params: Record<string, string>): void {
+    this.OnQueryParamsChanged(params, 'deeplink');
+  }
+
   public setFocusTargets(triggers: NonNullable<HomeProbe['archiveTriggers']>, title: NonNullable<HomeProbe['pageTitle']>): void {
     this.archiveTriggers = triggers;
     this.pageTitle = title;
@@ -68,13 +75,14 @@ function makeProbe(
   service: HomeServiceSurface,
   location: object = fakeLocation().location,
   cdr: ChangeDetectorSurface = { markForCheck: () => undefined, detectChanges: () => undefined },
+  navigation: object = {},
 ): HomeProbe {
   const injector = Injector.create({
     providers: [
       { provide: Location, useValue: location },
       { provide: FormsHomeService, useValue: service },
-      // The failure paths under test never reach navigation; an empty double satisfies the injector.
-      { provide: NavigationService, useValue: {} },
+      // Most paths never reach navigation; the URL specs pass a double that records writes.
+      { provide: NavigationService, useValue: navigation },
       { provide: ChangeDetectorRef, useValue: cdr },
     ],
   });
@@ -98,30 +106,97 @@ const draftRow: FormSummaryRow = {
 };
 
 describe('FormsHomeDashboardComponent failure alert (#253)', () => {
-  it('keeps "Failed to load forms" in front of a real Error, in the alert and in the emitted Error', async () => {
+  it('keeps "Failed to load forms" in front of a real Error, and logs the original with it', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const cause = new Error('GraphQL Error (Code: unknown)');
     const component = makeComponent(homeService({ loadForms: async () => Promise.reject(cause) }));
-    const errors = emitted(component);
 
     await component.loadForms();
 
     expect(component.errorMessage).toBe('Failed to load forms: GraphQL Error (Code: unknown)');
-    expect(errors).toHaveLength(1);
-    expect(errors[0].message).toBe('Failed to load forms: GraphQL Error (Code: unknown)');
-    // The original failure travels as the cause, so its stack is not lost.
-    expect(errors[0].cause).toBe(cause);
+    // The original failure is logged with the sentence, so its stack is not lost.
+    expect(consoleError.mock.calls.flat()).toContain(cause);
+    consoleError.mockRestore();
   });
 
   it('shows the action sentence alone when the rejection is not an Error', async () => {
     const component = makeComponent(homeService({ loadForms: async () => Promise.reject('boom') }));
-    const errors = emitted(component);
 
     await component.loadForms();
 
     expect(component.errorMessage).toBe('Failed to load forms.');
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toBeInstanceOf(Error);
-    expect(errors[0].message).toBe('Failed to load forms.');
+  });
+
+  // UI audit F01, F10: a failed list stays in the dashboard, with its own state and Retry.
+  it('never emits the host Error, which would replace the page with "Unable to Load Dashboard"', async () => {
+    const component = makeComponent(homeService({ loadForms: async () => Promise.reject(new Error('down')) }));
+    const errors = emitted(component);
+
+    await component.loadForms();
+
+    expect(errors).toEqual([]);
+  });
+
+  it('shows the failed state, not "No forms yet", and Retry reads the list again', async () => {
+    let fail = true;
+    const component = makeComponent(
+      homeService({ loadForms: async () => (fail ? Promise.reject(new Error('down')) : [draftRow]) }),
+    );
+
+    await component.loadForms();
+    expect(component.listState).toBe('failed');
+
+    fail = false;
+    await component.loadForms();
+    expect(component.listState).toBe('list');
+  });
+
+  it('keeps the list failure apart from a later, unrelated failure (final review #2)', async () => {
+    // The failed card printed whatever `errorMessage` held, so an authoring message written while
+    // the list was down appeared under "Couldn’t load your forms."
+    const component = makeComponent(homeService({ loadForms: async () => Promise.reject(new Error('down')) }));
+    await component.loadForms();
+    component.openPanel('ai');
+    await component.authorWithAI();
+
+    expect(component.listState).toBe('failed');
+    expect(component.listLoadError).toBe('Failed to load forms: down');
+    expect(component.errorMessage).not.toBe(component.listLoadError);
+    expect(component.errorMessage).not.toBeNull();
+  });
+
+  it('reports a failed reload in the banner while the list it could not refresh stays on screen', async () => {
+    // The banner hid every message equal to the list failure, on the assumption that the failed
+    // card showed it. With forms already loaded the card does not render, so the reload error
+    // reached neither place.
+    let fail = false;
+    const component = makeComponent(
+      homeService({ loadForms: async () => (fail ? Promise.reject(new Error('Connection lost')) : [draftRow]) }),
+    );
+    await component.loadForms();
+
+    fail = true;
+    await component.loadForms();
+
+    expect(component.listState).toBe('list');
+    expect(component.bannerMessage).toBe('Failed to load forms: Connection lost');
+  });
+
+  it('tells a failed first read once, in the failed card, not in the banner too', async () => {
+    const component = makeComponent(homeService({ loadForms: async () => Promise.reject(new Error('down')) }));
+
+    await component.loadForms();
+
+    expect(component.listState).toBe('failed');
+    expect(component.bannerMessage).toBeNull();
+  });
+
+  it('says every form is archived rather than matching an empty search', async () => {
+    const component = makeComponent(homeService({ loadForms: async () => [{ ...draftRow, status: 'Closed' as FormStatus }] }));
+
+    await component.loadForms();
+
+    expect(component.listState).toBe('all-archived');
   });
 
   it('says the archive failed, then why', async () => {
@@ -146,7 +221,8 @@ describe('FormsHomeDashboardComponent failure alert (#253)', () => {
     await component.toggleArchive(draftRow);
 
     expect(component.errorMessage).toBe('Could not archive this form: Simulated save failure');
-    expect(errors.map((e) => e.message)).toEqual(['Could not archive this form: Simulated save failure']);
+    // Shown in the page, never escalated to the host (UI audit F01).
+    expect(errors).toEqual([]);
   });
 
   // MJ's action client turns a transport failure into { Success: false, Message: 'Error: …' }
@@ -409,7 +485,9 @@ describe('FormsHomeDashboardComponent — reloads heard from elsewhere, and a hu
     expect(component.loading).toBe(false);
     expect(component.errorMessage).toContain('Failed to load forms');
     expect(component.errorMessage).toContain(`did not settle within ${LOAD_TIMEOUT_MS} ms`);
-    expect(errors).toHaveLength(1);
+    expect(component.listState).toBe('failed');
+    // The page says so and offers Retry; the host is not asked to replace it (UI audit F01).
+    expect(errors).toEqual([]);
 
     pending[0]([draftRow]);
     await vi.advanceTimersByTimeAsync(0);
@@ -619,5 +697,69 @@ describe('FormsHomeDashboardComponent — focus after the Archive question close
     await component.confirmArchive(live);
 
     expect(focused).toEqual(['trigger form-1']);
+  });
+});
+
+describe('FormsHomeDashboardComponent — the search and archived toggle live in the URL (F09)', () => {
+  const rows: FormSummaryRow[] = [
+    { ...draftRow, id: 'a', name: 'Intake' },
+    { ...draftRow, id: 'b', name: 'Survey' },
+    { ...draftRow, id: 'c', name: 'Old intake', status: 'Closed' },
+  ];
+
+  function withUrl() {
+    const writes: Record<string, string | null>[] = [];
+    const navigation = { UpdateTabQueryParams: vi.fn((_tab: string, params: Record<string, string | null>) => (writes.push(params), true)) };
+    const component = makeProbe(homeService({ loadForms: async () => rows }), fakeLocation().location, undefined, navigation);
+    component.Data = new ResourceData({ Configuration: { tabId: 'tab-1' } });
+    return { component, writes };
+  }
+
+  it('applies the search and toggle a link carries', async () => {
+    const { component } = withUrl();
+    await component.loadForms();
+
+    component.deliver({ q: 'intake', archived: '1' });
+
+    expect(component.query).toBe('intake');
+    expect(component.showArchived).toBe(true);
+    expect(component.visibleForms.map((f) => f.id)).toEqual(['a', 'c']);
+  });
+
+  it('writes the search once typing pauses, and the toggle at once', async () => {
+    vi.useFakeTimers();
+    const { component, writes } = withUrl();
+    component.setQuery('in');
+    component.setQuery('intake');
+    expect(writes).toEqual([]);
+    vi.advanceTimersByTime(HOME_URL_DEBOUNCE_MS);
+    expect(writes).toEqual([{ q: 'intake', archived: null }]);
+
+    component.toggleArchived();
+    expect(writes.at(-1)).toEqual({ q: 'intake', archived: '1' });
+    vi.useRealTimers();
+  });
+
+  it('drops a pending URL write when the page is destroyed', () => {
+    vi.useFakeTimers();
+    const { component, writes } = withUrl();
+    component.setQuery('intake');
+    component.ngOnDestroy();
+    vi.advanceTimersByTime(HOME_URL_DEBOUNCE_MS);
+    expect(writes).toEqual([]);
+    vi.useRealTimers();
+  });
+
+  it('does not re-read the list when only its own query params change', async () => {
+    let reads = 0;
+    const url = fakeLocation();
+    const component = makeProbe(homeService({ loadForms: async () => ((reads += 1), []) }), url.location);
+    component.init();
+
+    url.navigate('/app/forms/Forms?q=intake');
+    await new Promise((settled) => setTimeout(settled, 0));
+
+    expect(reads).toBe(0);
+    component.ngOnDestroy();
   });
 });

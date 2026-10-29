@@ -17,10 +17,12 @@
     </div>
   </header>
 
-  @if (errorMessage) {
+  <!-- A failed first read is told once, by the list's own failed state below; a failed reload
+       under a list still on screen, and any other message, shows here (see bannerMessage). -->
+  @if (bannerMessage; as message) {
     <div class="mjf-alert" role="alert">
       <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-      <span>{{ errorMessage }}</span>
+      <span>{{ message }}</span>
     </div>
   }
 
@@ -65,9 +67,22 @@
     }
   }
 
-  @if (loading) {
+  @if (listState === 'loading') {
     <div class="mjf-state"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading forms…</div>
-  } @else if (forms.length === 0) {
+  } @else if (listState === 'failed') {
+    <!-- Not "No forms yet": after a failed read the page does not know whether there are any. -->
+    <div class="mjf-empty" role="alert">
+      <span class="mjf-empty-icon"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i></span>
+      <span class="mjf-empty-title">Couldn’t load your forms.</span>
+      <p class="mjf-empty-body">Check your connection, then try again.</p>
+      @if (listLoadError) {
+        <p class="mjf-empty-body">{{ listLoadError }}</p>
+      }
+      <button type="button" class="mjf-btn mjf-btn--primary" (click)="loadForms()">
+        <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Retry
+      </button>
+    </div>
+  } @else if (listState === 'first-run') {
     <div class="mjf-empty">
       <span class="mjf-empty-icon"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i></span>
       <span class="mjf-empty-title">No forms yet</span>
@@ -89,7 +104,7 @@
             placeholder="Search forms"
             aria-label="Search forms by name or category"
             [ngModel]="query"
-            (ngModelChange)="query = $event; applyFilter()"
+            (ngModelChange)="setQuery($event)"
           />
         </div>
         <span class="mjf-spacer"></span>
@@ -107,7 +122,16 @@
         <span class="home-count">{{ countLine }}</span>
       </div>
 
-      @if (visibleForms.length === 0) {
+      @if (listState === 'all-archived') {
+        <div class="mjf-empty">
+          <span class="mjf-empty-icon"><i class="fa-solid fa-box-archive" aria-hidden="true"></i></span>
+          <span class="mjf-empty-title">All {{ forms.length }} forms are archived.</span>
+          <p class="mjf-empty-body">Archived forms take no responses. Show them to restore one, or start a new form.</p>
+          <button type="button" class="mjf-btn mjf-btn--ghost" (click)="toggleArchived()">
+            <i class="fa-solid fa-eye" aria-hidden="true"></i> Show archived
+          </button>
+        </div>
+      } @else if (listState === 'no-match') {
         <div class="mjf-empty">
           <span class="mjf-empty-icon"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></span>
           <span class="mjf-empty-title">No forms match “{{ query }}”</span>
@@ -116,19 +140,15 @@
       } @else {
         <div class="mjf-list">
           @for (row of visibleForms; track row.id) {
-            <article
-              class="mjf-row"
-              role="button"
-              tabindex="0"
-              [attr.aria-label]="'Open ' + row.name"
-              (click)="openForm(row)"
-              (keydown.enter)="openForm(row)"
-              (keydown.space)="openForm(row); $event.preventDefault()"
-            >
+            <!-- A click anywhere but a control opens the form; the name is the keyboard path. The row
+                 is never a button itself, so the Archive button inside it is not nested in one. -->
+            <article class="mjf-row" (mjfRowActivate)="openForm(row)">
               <span class="mjf-tile" aria-hidden="true"><i class="fa-solid fa-file-lines"></i></span>
 
               <div class="mjf-row-main">
-                <span class="mjf-row-title">{{ row.name }}</span>
+                <button type="button" class="mjf-row-primary" [attr.aria-label]="'Open ' + row.name" (click)="openForm(row)">
+                  <span class="mjf-row-title">{{ row.name }}</span>
+                </button>
                 <span class="mjf-row-meta">
                   {{ row.categoryName ?? 'Uncategorized' }}
                   @if (row.updatedAt) {
@@ -148,15 +168,14 @@
 
               <div class="mjf-row-actions">
                 @if (confirmingArchive === row.id) {
-                  <!-- Every key is captured here: Enter/Space on these buttons would otherwise bubble to
-                       the row's own keydown handlers and open the form. Escape cancels. -->
+                  <!-- Escape cancels. The click stop keeps a click on the question text from opening
+                       the form: it is an inline dialog inside the row, not part of the row. -->
                   <div
                     class="home-confirm"
                     role="group"
                     [attr.aria-describedby]="'archive-question-' + row.id"
                     (click)="$event.stopPropagation()"
                     (keydown.escape)="cancelArchive($event)"
-                    (keydown)="$event.stopPropagation()"
                   >
                     <span class="home-confirm-text" role="alert" [id]="'archive-question-' + row.id">{{ archiveQuestion(row) }}</span>
                     <button
@@ -179,9 +198,7 @@
                     [disabled]="busy"
                     [attr.title]="isArchived(row) ? 'Restore this form' : 'Archive this form'"
                     [attr.aria-label]="(isArchived(row) ? 'Restore ' : 'Archive ') + row.name"
-                    (click)="requestArchive(row); $event.stopPropagation()"
-                    (keydown.enter)="$event.stopPropagation()"
-                    (keydown.space)="$event.stopPropagation()"
+                    (click)="requestArchive(row)"
                   >
                     <i class="fa-solid" [class.fa-box-archive]="!isArchived(row)" [class.fa-rotate-left]="isArchived(row)" aria-hidden="true"></i>
                   </button>

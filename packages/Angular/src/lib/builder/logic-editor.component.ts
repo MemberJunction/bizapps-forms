@@ -63,7 +63,7 @@ const LOGIC_EDITOR_CSS = /* css */ `
   margin: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   font-size: var(--mjf-meta);
   color: var(--mj-text-muted);
 }
@@ -74,7 +74,7 @@ const LOGIC_EDITOR_CSS = /* css */ `
    holds an icon and ONE text node, and a sentence with a <strong> in it would become three flex
    items — a stray gap before the comma, and nowrap, so the line could not break on a phone. */
 .le-finish { margin: 0; font-size: var(--mjf-meta); line-height: 1.45; color: var(--mj-text-muted); }
-.le-finish i { margin-right: 6px; opacity: 0.8; }
+.le-finish i { margin-right: 4px; opacity: 0.8; }
 .le-finish strong { color: var(--mj-text-secondary); font-weight: 600; }
 
 /* One rule, framed, because "where does rule 1 end" is the question a flat stack cannot answer. */

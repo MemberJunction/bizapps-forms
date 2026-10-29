@@ -34,7 +34,7 @@ const RULE_DIALOG_CSS = /* css */ `
 .red-backdrop {
   position: absolute;
   inset: 0;
-  background: var(--mj-overlay-scrim, rgba(9, 17, 24, 0.55));
+  background: var(--mj-bg-overlay);
 }
 
 .red {
@@ -70,10 +70,10 @@ const RULE_DIALOG_CSS = /* css */ `
   border-radius: var(--mjf-radius-sm);
   background: var(--mj-bg-surface-hover);
   color: var(--mj-brand-primary);
-  font-size: 0.9375rem;
+  font-size: var(--mjf-icon);
 }
 .red-headings { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.red-title { margin: 0; font-size: 1.0625rem; font-weight: 600; color: var(--mj-text-primary); }
+.red-title { margin: 0; font-size: var(--mjf-section); font-weight: 600; color: var(--mj-text-primary); }
 .red-sub { margin: 0; font-size: var(--mjf-meta); line-height: 1.45; color: var(--mj-text-muted); }
 
 .red-close {
@@ -176,7 +176,7 @@ const RULE_DIALOG_CSS = /* css */ `
       </div>
 
       <!-- Confirm LEFT, cancel RIGHT, per the repo's dialog convention — in both states.
-           Done is disabled rather than hidden while there is nothing to save: a button that
+           Save is disabled rather than hidden while there is nothing to save: a button that
            vanishes leaves an author looking for it, where a dim one says "not yet". -->
       <div class="red-foot">
         @if (confirming) {
@@ -189,7 +189,7 @@ const RULE_DIALOG_CSS = /* css */ `
             class="mjf-btn mjf-btn--primary"
             [disabled]="!canConfirm"
             (click)="confirmed.emit()"
-          >Done</button>
+          >Save</button>
           <span class="red-spacer"></span>
           <button type="button" class="red-ghost" (click)="closeRequested.emit()">Cancel</button>
         }

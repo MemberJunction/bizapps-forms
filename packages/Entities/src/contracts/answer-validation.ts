@@ -41,6 +41,7 @@ import {
   isRequiredSatisfied,
   NOT_A_NUMBER_MESSAGE,
   matchesValidationPattern,
+  missingMatrixRows,
   validateAnswerFormat,
   validateCompositeParts,
 } from './answer-format';
@@ -266,8 +267,11 @@ function judgeAnswer(
   value: AnswerValue,
   mode: ValidationMode,
 ): AnswerProblem | undefined {
-  if (mode === 'complete' && question.isRequired && !isRequiredSatisfied(question.type, value)) {
-    return { message: requiredMessage(question) };
+  if (mode === 'complete' && question.isRequired) {
+    const message = requiredProblem(question, value);
+    if (message) {
+      return { message };
+    }
   }
   if (!isAnswerSupplied(value)) {
     return undefined; // nothing to validate on an unanswered, optional question
@@ -300,15 +304,25 @@ function judgeAnswer(
 }
 
 /**
- * The required message, respondent-facing — the widget shows it under the field.
+ * What a REQUIRED question still lacks, respondent-facing — the widget shows it under the field —
+ * or `undefined` when it is satisfied.
  *
  * A consent box gets its own sentence because "required" is the wrong word for a box that must be
- * ticked: the respondent HAS answered it (`false`), they have just not agreed.
+ * ticked: the respondent HAS answered it (`false`), they have just not agreed. A partly answered
+ * Matrix says how many rows are left, because "This question is required." beside three answered
+ * rows reads as a fault in the form.
  */
-function requiredMessage(question: PublishedFormQuestion): string {
-  return question.type === 'Checkbox' || question.type === 'Legal'
-    ? 'Please tick this box to continue.'
-    : 'This question is required.';
+function requiredProblem(question: PublishedFormQuestion, value: AnswerValue): string | undefined {
+  if (!isRequiredSatisfied(question.type, value)) {
+    return question.type === 'Checkbox' || question.type === 'Legal'
+      ? 'Please tick this box to continue.'
+      : 'This question is required.';
+  }
+  const missing = missingMatrixRows(question, value).length;
+  if (missing === 0) {
+    return undefined;
+  }
+  return missing === 1 ? '1 row still needs an answer.' : `${missing} rows still need an answer.`;
 }
 
 /**

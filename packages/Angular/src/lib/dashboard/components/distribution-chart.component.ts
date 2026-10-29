@@ -61,8 +61,8 @@ import type { DistributionBucket } from '../models/reporting.model';
       .dc-empty { margin: 0; font-size: var(--mjf-meta); color: var(--mj-text-muted); }
       .dc-note { margin: var(--mjf-gap-sm) 0 0; font-size: var(--mjf-label); color: var(--mj-text-muted); }
 
-      .dc-list { display: flex; flex-direction: column; gap: 14px; margin: 0; padding: 0; list-style: none; }
-      .dc-row { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+      .dc-list { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
+      .dc-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 
       .dc-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
       /* The dot is the only thing tying this row to its bar, so it holds its baseline
@@ -84,9 +84,9 @@ import type { DistributionBucket } from '../models/reporting.model';
       .dc-more {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        margin-top: 14px;
-        padding: 6px 0;
+        gap: 4px;
+        margin-top: 12px;
+        padding: 4px 0;
         font: inherit;
         font-size: var(--mjf-label);
         font-weight: 600;

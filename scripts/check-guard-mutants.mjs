@@ -1839,11 +1839,36 @@ export const MUTANTS = [
     killedBy: ['src/lib/responses/response-reads.spec.ts', 'src/lib/dashboard/services/forms-reporting-export.service.spec.ts'],
   },
   {
-    name: 'responses/list-pages-past-a-change',
-    behaviour: 'Load more stops and says the list changed when a page disagrees with it, instead of appending a shifted page',
+    // Was the Load-more check that refused to append a page the list had shifted under. The table
+    // now reads numbered pages (UI audit F08), so nothing is appended; what can go wrong is a page
+    // past the end after the list shrank, which must land on the last page, not an empty table.
+    name: 'responses/page-past-the-end-lands-on-last',
+    behaviour: 'a page past the end (the list shrank since the link or the last page turn) is read again as the last page, not shown empty',
     file: 'packages/Angular/src/lib/responses/responses-tab.component.ts',
-    find: '      if (page.total !== this.Total() || page.rows.some((r) => held.has(r.responseId))) {',
+    find: '      if (generation === this.generation && pastTheEnd) {',
     replace: '      if (false) {',
+    suite: 'packages/Angular',
+    killedBy: ['src/lib/responses/responses-tab.component.spec.ts'],
+  },
+  {
+    // A second delete used to leave the tree before the first one's held write ran; that write
+    // renumbers what it finds, so Undo restored the second at a position the rows no longer had.
+    name: 'builder/second-delete-waits-for-the-held-one',
+    behaviour: 'a new delete takes its item out of the tree only after the delete already held is written',
+    file: 'packages/Angular/src/lib/builder/builder-state.service.ts',
+    find: '      await this.pendingDelete.release();',
+    replace: '      void 0;',
+    suite: 'packages/Angular',
+    killedBy: ['src/lib/builder/builder-state.held-delete.spec.ts'],
+  },
+  {
+    // Next at a page edge reads the page, then opens its first response. A reader who went Back
+    // while the page loaded was pulled back into a detail they had just closed.
+    name: 'responses/next-across-a-page-respects-back',
+    behaviour: 'Next across a page boundary opens nothing when the page failed or the reader left the response meanwhile',
+    file: 'packages/Angular/src/lib/responses/responses-tab.component.ts',
+    find: '    if (!(await this.load(true, { ...q, page: q.page + direction })) || this.Detail() !== open) {',
+    replace: '    if (!(await this.load(true, { ...q, page: q.page + direction })) && false) {',
     suite: 'packages/Angular',
     killedBy: ['src/lib/responses/responses-tab.component.spec.ts'],
   },

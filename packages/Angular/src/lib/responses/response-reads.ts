@@ -26,6 +26,7 @@ import {
 } from '@mj-biz-apps/forms-entities';
 import { runOperation } from '../shared/remote-operation';
 import { buildResponseDetail, toResponseListRow } from './response-aggregations';
+import { toListInput, type ResponseQuery } from './responses-query';
 import type { ResponseDetail, ResponseListRow } from './response-models';
 
 /** One page of the response list, and where it sits in the whole. */
@@ -40,12 +41,10 @@ export interface ResponsePage {
   labelVersionId: string | null;
 }
 
-/** One page of a form's Complete responses, newest first, starting at row `startRow`. */
-export async function readResponsePage(formId: string, startRow: number): Promise<ResponsePage> {
-  const output = await listResponses(
-    { FormID: formId, Status: 'Complete', StartRow: startRow, MaxRows: MAX_RESPONSE_PAGE_SIZE, IncludeAnswers: false },
-    `listing the responses of form ${formId} from row ${startRow}`,
-  );
+/** The page of a form's Complete responses that `query` describes — searched, sorted and paged by the server. */
+export async function readResponsePage(formId: string, query: ResponseQuery): Promise<ResponsePage> {
+  const input = toListInput(formId, query);
+  const output = await listResponses(input, `listing the responses of form ${formId} from row ${input.StartRow}`);
   return { rows: output.Rows.map(toResponseListRow), total: output.TotalRowCount, labelVersionId: output.LabelVersionID };
 }
 

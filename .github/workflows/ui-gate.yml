@@ -41,5 +41,10 @@ jobs:
       - name: Self-test the checker
         run: node scripts/check-ui-tokens.mjs --self-test
 
+      # The token rules (on-primary, disabled-for-content) each came from a measured contrast
+      # failure. Their spec proves the rules fire and that the allow marker needs a reason.
+      - name: Token rule tests
+        run: npm run lint:ui:test
+
       - name: Run UI token gate (hardcoded colors + raw buttons)
         run: npm run lint:ui

@@ -32,6 +32,7 @@ export class ListResponsesServerOperation extends FormsListResponsesOperation {
       maxRows: requireWholeNumberInput(input?.MaxRows, 'MaxRows', 1, key),
       orderBy: optionalChoiceInput(input?.OrderBy, RESPONSE_LIST_ORDERS, 'OrderBy', key),
       includeAnswers: requireBooleanInput(input?.IncludeAnswers, 'IncludeAnswers', key),
+      search: optionalTextInput(input?.Search, 'Search', key),
     };
     const database = requireDatabaseProvider(provider, key);
     return FormReportingEngine.Instance.ListResponses(request, database, user);

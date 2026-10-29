@@ -72,16 +72,20 @@ describe('builder Responses tab wiring', () => {
     // "build it, style it, distribute it, decide what happens on submit, then read what came
     // back. Collection follows configuration." Pinning the whole union made adding any tab
     // fail here, which reads as a Responses regression and is not one.
-    const union = /type BuilderTab = ([^;]+);/.exec(component());
+    // The tab list moved to shared/view-urls.ts with the URL codec (UI audit F09), which also reads it.
+    const union = /BUILDER_TABS = \[([^\]]+)\]/.exec(readFileSync(join(BUILDER, '..', 'shared', 'view-urls.ts'), 'utf8'));
     expect(union).not.toBeNull();
-    const members = union![1].split('|').map((m) => m.trim());
+    const members = union![1].split(',').map((m) => m.trim());
     expect(members).toContain("'responses'");
     expect(members[members.length - 1]).toBe("'responses'");
     expect(members.indexOf("'automate'")).toBe(members.length - 2);
   });
 
   it('offers a tab button that activates it', () => {
-    expect(template()).toContain(`(click)="setTab('responses')"`);
+    // The strip renders one button per BUILDER_TAB_ITEMS entry (F12), so the Responses tab is
+    // there when the list carries it and every button activates its own tab.
+    expect(template()).toContain(`(click)="setTab(item.tab)"`);
+    expect(read(BUILDER, 'builder-tabs.ts')).toMatch(/responses: \{ label: 'Responses'/);
   });
 
   it('scopes the tab to the loaded form, not to every response in the database', () => {

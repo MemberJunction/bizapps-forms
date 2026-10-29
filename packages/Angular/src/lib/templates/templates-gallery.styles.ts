@@ -28,14 +28,14 @@ export const TEMPLATES_GALLERY_CSS = /* css */ `
   gap: var(--mjf-gap-sm);
 }
 
-/* The card is the click target for "use this one". The delete control inside it is a
-   separate button, so the card itself is a <div role="button"> rather than a <button>:
-   a button inside a button is invalid HTML and Safari drops the inner one. */
+/* The card is the click target for "use this one" (mjfRowActivate), but never a button
+   itself: the delete control inside it is one, and a button inside a button is invalid HTML
+   that Safari drops. The keyboard path is the card's name, .mjf-row-primary (UI audit F05). */
 .tg-card {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   padding: var(--mjf-card-pad-sm);
   text-align: left;
   cursor: pointer;
@@ -45,11 +45,12 @@ export const TEMPLATES_GALLERY_CSS = /* css */ `
   transition: border-color var(--mjf-ease), background var(--mjf-ease), transform var(--mjf-ease);
 }
 .tg-card:hover { border-color: var(--mj-border-strong); background: var(--mj-bg-surface-hover); }
-.tg-card:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
+/* The card is not focusable; its name button is. The ring goes around the card, as before. */
+.tg-card:has(.mjf-row-primary:focus-visible) { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 .tg-card.is-busy { opacity: 0.55; pointer-events: none; }
 
 .tg-card-top { display: flex; align-items: center; gap: var(--mjf-gap-sm); }
-.tg-card-icon { flex: none; width: 20px; font-size: 1.0625rem; color: var(--mjf-viz-fill); }
+.tg-card-icon { flex: none; width: 20px; font-size: var(--mjf-icon); color: var(--mjf-viz-fill); }
 .tg-card-name {
   flex: 1;
   min-width: 0;
@@ -68,14 +69,14 @@ export const TEMPLATES_GALLERY_CSS = /* css */ `
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.tg-card-meta { font-size: var(--mjf-label); color: var(--mj-text-disabled); }
+.tg-card-meta { font-size: var(--mjf-label); color: var(--mj-text-muted); } /* disabled measured 1.93:1 in dark */
 
 /* "Built-in" says why there is no delete here. A disabled delete button would invite the
    click and then refuse it; a label answers the question instead of raising it. */
 .tg-lock {
   font-size: var(--mjf-label);
   font-weight: 600;
-  color: var(--mj-text-disabled);
+  color: var(--mj-text-muted);
   white-space: nowrap;
 }
 
@@ -123,7 +124,7 @@ export const TEMPLATES_GALLERY_CSS = /* css */ `
   border-radius: var(--mjf-radius);
   box-shadow: 0 24px 60px -20px color-mix(in srgb, var(--mj-text-primary) 45%, transparent);
 }
-.tg-confirm-title { font-size: 1rem; font-weight: 700; color: var(--mj-text-primary); }
+.tg-confirm-title { font-size: var(--mjf-section); font-weight: 700; color: var(--mj-text-primary); }
 .tg-confirm-body { font-size: var(--mjf-meta); color: var(--mj-text-secondary); line-height: 1.5; }
 .tg-confirm-actions { display: flex; gap: var(--mjf-gap-sm); }
 

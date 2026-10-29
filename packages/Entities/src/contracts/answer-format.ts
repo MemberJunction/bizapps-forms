@@ -315,6 +315,30 @@ export function isRequiredSatisfied(type: FormQuestionType, value: AnswerValue):
 }
 
 /**
+ * The rows of a `Matrix` answer that have no answer yet, as row VALUES in author order.
+ *
+ * Exists because "required" and "answered" mean different things for a Matrix. Logic rules ask
+ * {@link isAnswerSupplied}, which counts a Matrix answered once ANY row has a value — and that has to
+ * stay, or every published "if Q3 is answered" rule would change meaning. A REQUIRED Matrix, though,
+ * accepted one row of five, which no respondent or author reads as "answered the question".
+ *
+ * Empty — "nothing missing" — for any other type, and for a Matrix with no columns or no rows: such
+ * a question cannot be completed at all, and the plain required check already refuses it empty.
+ */
+export function missingMatrixRows(question: AnswerFormatQuestion, value: AnswerValue): string[] {
+  if (question.type !== 'Matrix') {
+    return [];
+  }
+  const options = question.options ?? [];
+  const rows = options.filter((o) => matrixAxisOf(o) === 'Row').map((o) => o.value);
+  if (rows.length === 0 || !options.some((o) => matrixAxisOf(o) === 'Column')) {
+    return [];
+  }
+  const answered = isMatrixAnswer(value) ? (value as Record<string, string | string[]>) : {};
+  return rows.filter((row) => !isAnswerSupplied(answered[row]));
+}
+
+/**
  * How much of one question is filled in, 0..1.
  *
  * All-or-nothing for a scalar question, and PER SUB-FIELD for a composite. That distinction is
@@ -323,17 +347,25 @@ export function isRequiredSatisfied(type: FormQuestionType, value: AnswerValue):
  * and company watched the progress bar move once and then sit still through four more fields —
  * three consecutive actions with no feedback, which teaches them their input is not registering.
  *
+ * A Matrix is credited PER AUTHORED ROW, for the reason {@link missingMatrixRows} exists: a
+ * required Matrix is complete only when every row is answered, and a bar that read 100% after one
+ * row of five would contradict the Next refusal that follows it.
+ *
  * Progress is the only caller. Validation deliberately keeps the coarser test: a partly-filled
  * ContactInfo IS an answer, and the form is submittable on it.
  */
-export function answerCompleteness(type: FormQuestionType, value: AnswerValue): number {
-  const fields = compositeFieldsFor(type);
+export function answerCompleteness(question: AnswerFormatQuestion, value: AnswerValue): number {
+  const fields = compositeFieldsFor(question.type);
   if (fields && isStringRecord(value)) {
     const parts = value as Record<string, string>;
     const filled = fields.filter((f) => isAnswerSupplied(parts[f])).length;
     return filled / fields.length;
   }
-  return isRequiredSatisfied(type, value) ? 1 : 0;
+  if (!isRequiredSatisfied(question.type, value)) {
+    return 0;
+  }
+  const rows = (question.options ?? []).filter((o) => matrixAxisOf(o) === 'Row').length;
+  return question.type === 'Matrix' && rows > 0 ? (rows - missingMatrixRows(question, value).length) / rows : 1;
 }
 
 /** The fixed sub-field list of a composite type, or undefined for everything else. */

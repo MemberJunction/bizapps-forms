@@ -45,10 +45,11 @@ export const FORMS_UI_TOKENS = /* css */ `
   --mjf-gutter: 32px;
   --mjf-stack: 24px;          /* between major sections */
   --mjf-gap: 16px;            /* between siblings inside a section */
+  --mjf-gap-md: 12px;
   --mjf-gap-sm: 8px;
   --mjf-gap-xs: 4px;
   --mjf-card-pad: 20px;
-  --mjf-card-pad-sm: 14px;
+  --mjf-card-pad-sm: var(--mjf-gap-md);  /* was 14px, the one step off the 4px grid */
 
   /* Shape. 12px on cards/rows, pill on badges and segmented controls — the two
      radii that carry the whole look. */
@@ -56,16 +57,30 @@ export const FORMS_UI_TOKENS = /* css */ `
   --mjf-radius-sm: var(--mj-radius-md, 8px);
   --mjf-radius-pill: var(--mj-radius-full, 9999px);
 
-  /* Type. Deliberately restrained: one display size, one section size, one body
-     size, one meta size. Anything else is a special case that needs justifying. */
+  /* Type. Deliberately restrained: one display size, one heading size, one section size, one
+     body size, one meta size. lint:ui refuses a raw font-size outside these (F22). Heading is
+     the step pane and dialog titles kept reaching for between section and title. */
   --mjf-title: 1.75rem;
+  --mjf-heading: 1.375rem;
   --mjf-section: 1.125rem;
   --mjf-body: 0.9375rem;
   --mjf-meta: 0.8125rem;
   --mjf-label: 0.75rem;
+  /* Big numbers on Analytics. Not text, so not on the text scale. */
+  --mjf-figure: 2.5rem;
+  --mjf-figure-lg: 3.25rem;
+  /* Icon glyphs, sized apart from the text beside them. */
+  --mjf-icon-sm: 0.75rem;
+  --mjf-icon: 1rem;
+  --mjf-icon-lg: 1.5rem;
 
   /* Touch. Every interactive target is at least this tall — the plan's §2 UX bar. */
   --mjf-tap: 40px;
+
+  /* Text on --mj-brand-primary. Not MJ's --mj-brand-on-primary: its dark value is #fff on #4095d2
+     (3.25:1). --mj-text-inverse is white in light and #071927 in dark (5.5:1). Switch back here
+     once MJ fixes the token upstream; lint:ui keeps every other rule pointed at this one. */
+  --mjf-on-primary: var(--mj-text-inverse);
 
   --mjf-focus-ring: var(--mj-brand-primary);
   --mjf-ease: var(--mj-transition-base, 200ms ease);
@@ -207,7 +222,7 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
 .mjf-btn:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 .mjf-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-.mjf-btn--primary { color: var(--mj-brand-on-primary, var(--mj-text-inverse)); background: var(--mj-brand-primary); }
+.mjf-btn--primary { color: var(--mjf-on-primary); background: var(--mj-brand-primary); }
 .mjf-btn--primary:hover:not(:disabled) { background: var(--mj-brand-primary-hover); }
 .mjf-btn--primary:active:not(:disabled) { background: var(--mj-brand-primary-active); }
 
@@ -234,7 +249,7 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
   display: inline-flex;
   align-items: center;
   gap: var(--mjf-gap-xs);
-  padding: 3px 10px;
+  padding: 4px 8px;
   font-size: var(--mjf-label);
   font-weight: 600;
   line-height: 1.5;
@@ -272,7 +287,32 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
   transition: border-color var(--mjf-ease), box-shadow var(--mjf-ease), background var(--mjf-ease);
 }
 .mjf-row:hover { border-color: var(--mj-border-strong); box-shadow: var(--mj-shadow-sm); }
-.mjf-row:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
+
+/* A row that activates through mjfRowActivate is not focusable itself: its keyboard path is the
+   .mjf-row-primary button inside (UI audit F05). That button looks like the text it replaced, and
+   the ring is drawn around the whole row, where it was before. */
+.mjf-row-primary {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 24px; /* WCAG 2.5.8; one line of text alone measured 19px */
+  overflow: hidden; /* the title's ellipsis clips here, not past the row */
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+/* Inside a block button the title is inline and its ellipsis would not clip; make it a block again. */
+.mjf-row-primary > .mjf-row-title {
+  display: block;
+  line-height: 24px;
+}
+.mjf-row-primary:focus-visible { outline: none; }
+.mjf-row:has(.mjf-row-primary:focus-visible) { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 .mjf-row.is-selected { border-color: var(--mj-brand-primary); box-shadow: 0 0 0 1px var(--mj-brand-primary); }
 
 /* The leading tile. Gives a list of same-shaped rows a scannable left edge.
@@ -292,7 +332,7 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
   border-radius: var(--mjf-radius-sm);
   background: color-mix(in srgb, var(--mj-brand-primary) 12%, var(--mj-bg-surface));
   color: var(--mj-brand-primary);
-  font-size: 1rem;
+  font-size: var(--mjf-icon);
 }
 
 .mjf-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -334,7 +374,7 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
   border-bottom: 1px solid var(--mjf-rule);
 }
 .mjf-table tbody td {
-  padding: 14px var(--mjf-card-pad);
+  padding: 12px var(--mjf-card-pad);
   color: var(--mj-text-primary);
   border-top: 1px solid var(--mjf-rule);
   vertical-align: middle;
@@ -350,7 +390,7 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
 
 /* ---------------------------------------------------------------------- fields */
 
-.mjf-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.mjf-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .mjf-field-label { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
 .mjf-field-hint { font-size: var(--mjf-label); color: var(--mj-text-muted); }
 
@@ -360,7 +400,7 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
   box-sizing: border-box;
   width: 100%;
   min-height: var(--mjf-tap);
-  padding: 9px 12px;
+  padding: 8px 12px;
   font: inherit;
   font-size: var(--mjf-body);
   color: var(--mj-text-primary);
@@ -418,7 +458,7 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
 /* A search box with room for its leading icon. */
 .mjf-search { position: relative; display: flex; align-items: center; }
 .mjf-search > i { position: absolute; left: 12px; color: var(--mj-text-muted); pointer-events: none; font-size: var(--mjf-meta); }
-.mjf-search > .mjf-input { padding-left: 34px; }
+.mjf-search > .mjf-input { padding-left: 32px; }
 
 /* ------------------------------------------------------- toolbars and segments */
 
@@ -427,7 +467,7 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
 
 .mjf-seg {
   display: inline-flex;
-  padding: 3px;
+  padding: 4px;
   gap: 2px;
   background: var(--mj-bg-surface-sunken);
   border: 1px solid var(--mj-border-subtle);
@@ -435,7 +475,7 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
 }
 .mjf-seg button {
   min-height: 32px;
-  padding: 0 14px;
+  padding: 0 12px;
   font: inherit;
   font-size: var(--mjf-meta);
   font-weight: 600;
@@ -527,7 +567,7 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
   justify-content: center;
   width: 56px;
   height: 56px;
-  font-size: 1.375rem;
+  font-size: var(--mjf-icon-lg);
   border-radius: var(--mjf-radius-pill);
   background: var(--mj-bg-surface-sunken);
   color: var(--mj-text-muted);

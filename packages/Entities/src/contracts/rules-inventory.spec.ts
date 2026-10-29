@@ -702,8 +702,33 @@ describe('endingReachFor', () => {
     });
 
     it('a screen nothing reaches still says so', () => {
-      const reach = withEndings([{ id: 'e1', label: 'Orphan' }]);
+      const reach = withEndings([
+        { id: 'e0', label: 'Thanks', isDefault: true },
+        { id: 'e1', label: 'Orphan' },
+      ]);
       expect(reach.get('e1')).toEqual({ label: 'Never shown — add a condition', unreachable: true });
+    });
+  });
+
+  describe('a form with no default ending (one is being deleted, and held for Undo)', () => {
+    // `resolveEndingScreen` then lands everyone on the first ending with no condition, and the
+    // delete's save makes that one the default. Telling the author it is never shown is false.
+    it('names the first unconditional ending as the default it is in effect', () => {
+      const reach = withEndings([
+        { id: 'e1', label: 'VIP', conditionalRule: showVip },
+        { id: 'e2', label: 'Thanks' },
+        { id: 'e3', label: 'Orphan' },
+      ]);
+      expect(reach.get('e2')).toEqual({ label: 'Default ending', unreachable: false });
+      expect(reach.get('e3')).toEqual({ label: 'Never shown — add a condition', unreachable: true });
+    });
+
+    it('never makes a screened-out screen the default, as the runtime does not', () => {
+      const reach = withEndings([
+        { id: 'e1', label: 'Not eligible', isDisqualification: true },
+        { id: 'e2', label: 'Thanks' },
+      ]);
+      expect(reach.get('e2')).toEqual({ label: 'Default ending', unreachable: false });
     });
   });
 
@@ -737,7 +762,7 @@ describe('endingReachFor', () => {
     });
 
     it('a rule naming a screen that no longer exists reaches nothing', () => {
-      const reach = withEndings([{ id: 'e1', label: 'Thanks' }], goToEnding('deleted'));
+      const reach = withEndings([{ id: 'e0', label: 'Thanks', isDefault: true }, { id: 'e1', label: 'VIP' }], goToEnding('deleted'));
       expect(reach.get('e1')?.unreachable).toBe(true);
     });
   });

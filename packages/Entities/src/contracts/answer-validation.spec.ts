@@ -1198,3 +1198,38 @@ describe('validateAnswer and validateAnswers agree on numbers the column cannot 
   }
 });
 
+
+describe('a required Matrix needs every row answered', () => {
+  const opt = (value: string, matrixAxis: 'Row' | 'Column', displayOrder: number) => ({ id: value, label: value, value, matrixAxis, displayOrder });
+  const matrix = (isRequired: boolean) =>
+    q({
+      type: 'Matrix',
+      isRequired,
+      options: [opt('speed', 'Row', 1), opt('price', 'Row', 2), opt('support', 'Row', 3), opt('poor', 'Column', 4), opt('good', 'Column', 5)],
+    });
+
+  it('refuses one row of three, naming how many are missing', () => {
+    expect(validateAnswer(matrix(true), { speed: 'good' }, 'complete')).toEqual({ message: '2 rows still need an answer.' });
+  });
+  it('uses the singular for one missing row', () => {
+    expect(validateAnswer(matrix(true), { speed: 'good', price: 'poor' }, 'complete')).toEqual({ message: '1 row still needs an answer.' });
+  });
+  it('accepts every row answered', () => {
+    expect(validateAnswer(matrix(true), { speed: 'good', price: 'poor', support: 'good' }, 'complete')).toBeUndefined();
+  });
+  it('counts a row whose multi-select is empty as missing', () => {
+    expect(validateAnswer(matrix(true), { speed: 'good', price: [], support: 'good' }, 'complete')).toEqual({ message: '1 row still needs an answer.' });
+  });
+  it('keeps the plain required message when nothing is answered', () => {
+    expect(validateAnswer(matrix(true), null, 'complete')).toEqual({ message: 'This question is required.' });
+  });
+  it('does not hold a draft to it', () => {
+    expect(validateAnswer(matrix(true), { speed: 'good' }, 'draft')).toBeUndefined();
+  });
+  it('does not hold an optional Matrix to it', () => {
+    expect(validateAnswer(matrix(false), { speed: 'good' }, 'complete')).toBeUndefined();
+  });
+  it('leaves logic\'s "is answered" alone: one row still counts as answered', () => {
+    expect(isAnswerSupplied({ speed: 'good' })).toBe(true);
+  });
+});

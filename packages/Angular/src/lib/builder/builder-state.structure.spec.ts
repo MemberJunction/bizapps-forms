@@ -69,7 +69,8 @@ describe('deleting a page', () => {
     expect(ok).toBe(false);
     expect(store.stored('p2')).toBeDefined();
     expect(store.saves).toHaveLength(0);
-    expect(state.lastFailure()).toBe('Could not delete page. The DELETE statement conflicted with the REFERENCE constraint.');
+    // Reworded for the author (delete-refusal.ts); the SQL text stays in the log.
+    expect(state.lastFailure()).toBe('Could not delete page. Other records still point at it.');
   });
 });
 

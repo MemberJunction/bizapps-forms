@@ -77,7 +77,7 @@ export const COLOR_PICKER_STYLES = /* css */ `
   position: absolute;
   width: 14px;
   height: 14px;
-  margin: -7px 0 0 -7px;
+  margin: -8px 0 0 -8px;
   /* ui-gate: allow-literal-color(3) — a white ring inside a dark halo is the one treatment
      that stays visible over EVERY colour the plane can show, which is the cursor's whole job. */
   border: 2px solid #fff;
@@ -146,7 +146,7 @@ export const COLOR_PICKER_STYLES = /* css */ `
   background: var(--mj-bg-surface);
   color: var(--mj-text-primary);
   font-family: var(--mj-font-family-mono, monospace);
-  font-size: 0.8125rem;
+  font-size: var(--mjf-meta);
   text-transform: lowercase;
 }
 .cp-hex:focus-visible {
@@ -165,7 +165,7 @@ export const COLOR_PICKER_STYLES = /* css */ `
   border-radius: var(--mjf-radius-sm);
   background: color-mix(in srgb, var(--mj-status-warning) 14%, transparent);
   color: var(--mj-text-primary);
-  font-size: 0.75rem;
+  font-size: var(--mjf-label);
   line-height: 1.35;
 }
 .cp-warn i { margin-top: 0.125rem; color: var(--mj-status-warning); }

@@ -1,5 +1,6 @@
-import { Component, ElementRef, Injector, afterNextRender, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, ElementRef, Injector, ViewChild, afterNextRender, computed, inject } from '@angular/core';
+import { CommonModule, Location } from '@angular/common';
+import { NavigationService } from '@memberjunction/ng-shared';
 import { FormsModule } from '@angular/forms';
 import {
   CdkDropList,
@@ -32,11 +33,15 @@ import type {
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
 import { BuilderStateService } from './builder-state.service';
+import { UndoToastComponent } from './undo-toast.component';
+import type { HeldDelete } from './pending-delete';
+import { answeredRefusal } from './delete-refusal';
 import { DesignStateService } from './design-state.service';
 import { readDraftAutomations, readLiveSnapshot } from './publish-baseline';
 import { runOperation } from '../shared/remote-operation';
 import { onFormsWrite, type FormsWriteSubscription } from '../shared/forms-writes';
 import { findTemplateSavedFrom, loadFormRecord } from '../shared/form-catalog';
+import { RowActivateDirective } from '../shared/row-activate.directive';
 import { QuestionEditorComponent } from './question-editor.component';
 import { ScreenEditorComponent } from './screen-editor.component';
 import { PageEditorComponent } from './page-editor.component';
@@ -50,7 +55,12 @@ import {
   templateControlState,
   type TemplateControlState,
 } from '../templates/template-fingerprint';
-import { ResponsesTabComponent } from '../responses/responses-tab.component';
+import { ResponsesTabComponent, type ResponsesTabState } from '../responses/responses-tab.component';
+import { DEFAULT_RESPONSE_QUERY } from '../responses/responses-query';
+import type { BuilderTab, BuilderView } from '../shared/view-urls';
+import { BuilderUrlSync } from './builder-url-sync';
+import { BUILDER_TAB_ITEMS, tabAfterKey, tabElementId, tabPanelId } from './builder-tabs';
+import { InspectorSheet, SHEET_MEDIA_QUERY } from './inspector-sheet';
 import type { ResponseRecordLink } from '../responses/response-models';
 import { DesignPanelComponent } from './design-panel.component';
 import { FormPreviewModalComponent } from './form-preview-modal.component';
@@ -139,7 +149,6 @@ import { targetPageFor, type NewQuestionTarget } from './new-question-target';
  * came back. Collection follows configuration.
  */
 
-type BuilderTab = 'build' | 'design' | 'distribute' | 'automate' | 'responses';
 
 /**
  * Stand-in version id used only while fingerprinting.
@@ -168,6 +177,9 @@ function draftDefinition(
   return built.ok ? built.definition : null;
 }
 
+/** Numbers each builder instance, so its tab and panel ids are unique in the document. */
+let builderInstanceSeq = 0;
+
 /**
  * The visual form builder — registered as the override for the
  * `MJ_BizApps_Forms: Forms` entity form so that opening a Form record in Explorer
@@ -194,6 +206,7 @@ function draftDefinition(
     CdkDrag,
     CdkDragHandle,
     CdkDragPreview,
+    RowActivateDirective,
     QuestionEditorComponent,
     ScreenEditorComponent,
     PageEditorComponent,
@@ -205,6 +218,7 @@ function draftDefinition(
     SaveAsTemplateDialogComponent,
     RuleBadgeComponent,
     QuestionTypePickerComponent,
+    UndoToastComponent,
   ],
   providers: [
     BuilderStateService,
@@ -240,8 +254,59 @@ export class FormBuilderComponent extends BaseFormComponent {
    * What the right-hand pane is showing. ONE value, not a question id beside a screen id: the
    * pane shows a single editor, and two independent fields let it show a screen's properties
    * while a freshly-added question sat highlighted and unreachable on the canvas.
+   *
+   * Every write goes through the setter because, below 900px, selecting is what opens the
+   * Properties sheet and clearing is what closes it (F14). The sheet has to hear about every
+   * change — a delete clears the selection too — or it would think it is still open.
    */
-  protected selection: BuilderSelection = NOTHING_SELECTED;
+  private _selection: BuilderSelection = NOTHING_SELECTED;
+  protected get selection(): BuilderSelection {
+    return this._selection;
+  }
+  protected set selection(next: BuilderSelection) {
+    const opening = this._selection.kind === 'none' && next.kind !== 'none';
+    const closing = this._selection.kind !== 'none' && next.kind === 'none';
+    this._selection = next;
+    if (opening) this.moveFocusIntoSheet();
+    if (closing) this.sheet.Closed();
+  }
+
+  private readonly isNarrow = (): boolean =>
+    typeof matchMedia === 'function' && matchMedia(SHEET_MEDIA_QUERY).matches;
+  private readonly sheet = new InspectorSheet(this.isNarrow);
+
+  /** Escape closes the sheet. At desktop width the pane is a column, and Escape there is not ours. */
+  protected onPropertiesEscape(): void {
+    if (this.isNarrow() && this.selection.kind !== 'none') this.closeSheet();
+  }
+
+  private moveFocusIntoSheet(): void {
+    // Width first: it is false wherever there is no window, so `document` is only read in a browser.
+    if (!this.isNarrow()) return;
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!this.sheet.Opened(active)) return;
+    // The sheet becomes visible on this render; focus can only land on it after.
+    afterNextRender(
+      () => this.host.nativeElement.querySelector<HTMLElement>('.fb-sheet-done')?.focus(),
+      { injector: this.injector },
+    );
+  }
+
+  /** Done or Escape on the Properties sheet: deselect, and return focus to the card that opened it. */
+  protected closeSheet(): void {
+    const returnTo = this.sheet.Closed();
+    this.selection = NOTHING_SELECTED;
+    this.cdr.markForCheck();
+    returnTo?.focus();
+  }
+
+  /** The sheet's heading: what is being edited. */
+  protected get inspectorTitle(): string {
+    if (this.selectedScreen) return this.selectedScreen.Title || 'Screen';
+    if (this.selectedPage) return this.selectedPage.entity.Title || `Section ${this.selectedPageIndex + 1}`;
+    return this.selectedNode?.entity.Prompt || 'Question';
+  }
+
   protected get selectedQuestionId(): string | null {
     return questionId(this.selection);
   }
@@ -257,6 +322,28 @@ export class FormBuilderComponent extends BaseFormComponent {
   /** Live palette filter. At 25 types, scanning seven groups is slower than typing. */
   protected paletteQuery = '';
   protected activeTab: BuilderTab = 'build';
+
+  protected readonly tabItems = BUILDER_TAB_ITEMS;
+  /** Prefix for the tab and panel ids: Explorer can hold several builders open at once. */
+  private readonly tabScope = `fb${++builderInstanceSeq}`;
+  protected tabId(tab: BuilderTab): string {
+    return tabElementId(this.tabScope, tab);
+  }
+  protected panelId(tab: BuilderTab): string {
+    return tabPanelId(this.tabScope, tab);
+  }
+
+  /**
+   * The Responses tab's table and open response: what it starts on when it mounts, and the last
+   * state it reported, so switching tabs and back — or a reload — lands where the author was.
+   */
+  protected responsesState: ResponsesTabState = { query: DEFAULT_RESPONSE_QUERY, responseId: null };
+  @ViewChild(ResponsesTabComponent) private responsesTab?: ResponsesTabComponent;
+
+  private readonly location = inject(Location);
+  private readonly navigation = inject(NavigationService);
+  /** Keeps the tab and the Responses view in the URL (UI audit F09); see `builder-url-sync.ts`. */
+  private urlSync: BuilderUrlSync | null = null;
   protected busy = false;
   protected statusMessage = '';
 
@@ -517,6 +604,8 @@ export class FormBuilderComponent extends BaseFormComponent {
     }
     this.busy = true;
     try {
+      // A held delete is not in the database yet; re-reading first would bring the item back.
+      await this.state.releaseHeldDelete();
       this.tree = await this.state.loadTree(this.record);
     } catch (err) {
       // Stop HERE. An empty tree is what tells the builder to create "Page 1", so carrying on over
@@ -541,8 +630,57 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.watchForAutomationChanges();
     this.watchForDistributionChanges();
     this.watchForFormOperations();
+    this.followUrl();
     this.busy = false;
     this.announceReady();
+  }
+
+  /** Open on the view the URL names, and follow back / forward from here on. */
+  private followUrl(): void {
+    this.urlSync?.Stop();
+    this.urlSync = new BuilderUrlSync(this.record.ID, {
+      path: () => this.location.path(),
+      onUrlChange: (fn) => this.location.onUrlChange((url) => fn(url)),
+      writeActiveTab: (params) => this.navigation.UpdateActiveTabQueryParams(params),
+    });
+    const view = this.urlSync.Read();
+    if (view) {
+      this.showView(view);
+    }
+    this.urlSync.Watch((next) => this.showView(next));
+  }
+
+  /** Show a view the URL named; nothing is written back. */
+  private showView(view: BuilderView): void {
+    this.activeTab = view.view;
+    this.responsesState = view.responses;
+    // A Responses tab already on screen moves in place; one not yet mounted starts from the state.
+    void this.responsesTab?.ApplyState(view.responses);
+    this.cdr.markForCheck();
+    this.revealActiveTab();
+  }
+
+  /**
+   * On a phone the strip scrolls, so a link straight to Responses would select a tab that sits
+   * past the edge. A click or an arrow key already brings its tab into view; a URL does not.
+   */
+  private revealActiveTab(): void {
+    afterNextRender(
+      () => this.host.nativeElement
+        .querySelector<HTMLElement>(`#${this.tabId(this.activeTab)}`)
+        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' }),
+      { injector: this.injector },
+    );
+  }
+
+  /** The Responses tab moved to another page, sort, search or response. */
+  protected onResponsesState(state: ResponsesTabState): void {
+    this.responsesState = state;
+    this.writeUrl();
+  }
+
+  private writeUrl(): void {
+    this.urlSync?.Write({ view: this.activeTab, responses: this.responsesState });
   }
 
   /**
@@ -728,9 +866,9 @@ export class FormBuilderComponent extends BaseFormComponent {
    * of the page. Measured on BOTH openers before this was called a defect, so it is not something
    * the empty-state control introduced; the picker stays opener-independent and is not touched.
    *
-   * The card is the right destination rather than a re-created opener: the insert has already
-   * selected it, it already carries `tabindex="0"` for exactly this, and it is what the author
-   * came here to edit.
+   * The card's title button is the right destination rather than a re-created opener: the insert
+   * has already selected the card, and it is what the author came here to edit. The button, not
+   * the card: since UI audit F05 the card is not a tab stop, and `focus()` on it did nothing.
    *
    * Keyed on the question id rather than on `.is-selected`, so the focus target does not depend on
    * a class that exists to paint something — and `afterNextRender` because the card does not exist
@@ -741,7 +879,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     afterNextRender(
       () => {
         this.host.nativeElement
-          .querySelector<HTMLElement>(`.fb-q[data-question-id="${questionId}"]`)
+          .querySelector<HTMLElement>(`.fb-q[data-question-id="${questionId}"] button.fb-q-label`)
           ?.focus();
       },
       { injector: this.injector },
@@ -835,32 +973,40 @@ export class FormBuilderComponent extends BaseFormComponent {
   /**
    * Delete a page AND every question on it.
    *
-   * Hover-revealed like every other delete on the canvas, but unlike them it asks first, because
-   * the blast radius is not what the button is attached to: the page header shows a title and a
-   * toggle, with no hint of how many questions go down with it. The last page is never deletable
-   * — a form with no page has nowhere to put a question, and the builder would immediately
-   * recreate one underneath the author.
+   * It used to ask through the browser's OK/Cancel box, because the header gives no hint of how
+   * many questions go down with it. It is held for Undo like every other delete instead (UI audit
+   * F07), and the toast says how many questions went with it. The last page is never deletable —
+   * a form with no page has nowhere to put a question, and the builder would immediately recreate
+   * one underneath the author.
    */
   protected async deletePage(page: PageNode): Promise<void> {
-    if (!this.tree || this.busy || this.tree.pages.length <= 1) {
+    const tree = this.tree;
+    if (!tree || this.busy || tree.pages.length <= 1 || this.checkingDelete) {
+      return;
+    }
+    const sectionName = `Section ${tree.pages.indexOf(page) + 1}`;
+    if (!(await this.deletable({ kind: 'section', name: sectionName }, page.questions.map((q) => q.entity.ID)))) {
       return;
     }
     const count = page.questions.length;
-    const what = count === 1 ? '1 question' : `${count} questions`;
-    if (count > 0 && !confirm(`Delete this section and its ${what}? This cannot be undone.`)) {
-      return;
-    }
-    this.busy = true;
-    if (await this.state.deletePage(this.tree, page)) {
-      this.tree.pages = this.tree.pages.filter((p) => p.entity.ID !== page.entity.ID);
+    const with_ = count === 0 ? '' : count === 1 ? ' and its question' : ` and its ${count} questions`;
+    await this.holdDelete(`${sectionName.toLowerCase()}${with_}`, () => {
+      const index = tree.pages.indexOf(page);
+      if (index < 0 || tree.pages.length <= 1) {
+        return null;
+      }
+      tree.pages = tree.pages.filter((p) => p !== page);
       this.selection = clearIfPage(this.selection, page.entity.ID);
       for (const q of page.questions) {
         this.selection = clearIfQuestion(this.selection, q.entity.ID);
       }
-      this.markDirty();
-    }
-    this.busy = false;
-    this.cdr.markForCheck();
+      return {
+        restore: () => {
+          tree.pages = reinsert(tree.pages, index, page);
+        },
+        commit: () => this.state.deletePage(tree, page),
+      };
+    });
   }
 
   /** Toggle whether leaving this page banks a Partial response immediately. */
@@ -1191,18 +1337,27 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   protected async deleteScreen(screen: mjBizAppsFormsFormScreenEntity): Promise<void> {
-    if (!this.tree || this.busy) {
+    const tree = this.tree;
+    if (!tree || this.busy) {
       return;
     }
-    this.busy = true;
-    // The service removes it from the tree, because deleting the default ending also has to
-    // promote a survivor — an invariant no caller should be able to forget.
-    if (await this.state.deleteScreen(this.tree, screen)) {
+    // Off screen, held for Undo (F07). The service still promotes a survivor to default ending
+    // when the delete is written — an invariant no caller should be able to forget.
+    const label = screen.ScreenType === 'Welcome' ? 'the welcome screen' : `ending “${screen.Title || 'Untitled'}”`;
+    await this.holdDelete(label, () => {
+      const index = tree.screens.indexOf(screen);
+      if (index < 0) {
+        return null;
+      }
+      tree.screens = tree.screens.filter((s) => s !== screen);
       this.selection = clearIfScreen(this.selection, screen.ID);
-      this.markDirty();
-    }
-    this.busy = false;
-    this.cdr.markForCheck();
+      return {
+        restore: () => {
+          tree.screens = reinsert(tree.screens, index, screen);
+        },
+        commit: () => this.state.deleteScreen(tree, screen),
+      };
+    });
   }
 
   /**
@@ -1427,30 +1582,121 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected async onRemoveOption(event: { node: QuestionNode; optionIndex: number }): Promise<void> {
     const { node, optionIndex } = event;
     const option = node.options[optionIndex];
-    if (this.busy || !this.tree || !option) {
+    const tree = this.tree;
+    if (this.busy || !tree || !option) {
       return;
     }
-    await this.whileBusy(async () => {
-      // The delete closes the gap in the option order in the same save, and takes the option out
-      // of `node.options` itself once it is gone.
-      if (this.tree && (await this.state.deleteOption(this.tree, node, option))) {
-        this.markDirty();
+    // Off the question, held for Undo (F07); the written delete closes the order gap.
+    await this.holdDelete(`option “${option.Label?.trim() || 'Untitled'}”`, () => {
+      const index = node.options.indexOf(option);
+      if (index < 0) {
+        return null;
       }
+      node.options = node.options.filter((o) => o !== option);
+      return {
+        restore: () => {
+          node.options = reinsert(node.options, index, option);
+        },
+        commit: () => this.state.deleteOption(tree, node, option),
+      };
     });
   }
 
   protected async deleteQuestion(page: PageNode, node: QuestionNode): Promise<void> {
-    if (this.busy || !this.tree) {
+    const tree = this.tree;
+    if (this.busy || !tree || !page.questions.includes(node) || this.checkingDelete) {
       return;
     }
-    await this.whileBusy(async () => {
-      // One save deletes it (with its options) and closes the gap in the page's order; the service
-      // takes it out of `page.questions` once it is gone.
-      if (this.tree && (await this.state.deleteQuestion(this.tree, page, node))) {
-        this.selection = clearIfQuestion(this.selection, node.entity.ID);
-        this.markDirty();
+    const name = node.entity.Prompt?.trim() || 'Untitled';
+    if (!(await this.deletable({ kind: 'question', name }, [node.entity.ID]))) {
+      return;
+    }
+    // Off the canvas, held for Undo (F07). The written delete takes its options with it and
+    // closes the gap in the page's order, in one save.
+    let neighbour: QuestionNode | undefined;
+    await this.holdDelete(`question “${name}”`, () => {
+      // Read when the item is taken: the page may have changed while the check and the earlier
+      // delete's write ran.
+      const index = page.questions.indexOf(node);
+      if (index < 0) {
+        return null;
       }
+      page.questions = page.questions.filter((q) => q !== node);
+      this.selection = clearIfQuestion(this.selection, node.entity.ID);
+      neighbour = page.questions[index] ?? page.questions[index - 1];
+      return {
+        restore: () => {
+          page.questions = reinsert(page.questions, index, node);
+        },
+        commit: () => this.state.deleteQuestion(tree, page, node),
+      };
     });
+    // Focus would otherwise fall to <body> with the button that held it.
+    if (neighbour) {
+      this.focusQuestionCard(neighbour.entity.ID);
+    }
+  }
+
+  /** While a delete is asking whether its questions were answered; a second click waits for it. */
+  private checkingDelete = false;
+
+  /**
+   * Whether respondents left the questions unanswered, so the delete can be held for Undo. An
+   * answered question cannot be deleted — every answer points at it — and the author is told so
+   * now, in words, rather than ten seconds later by a refused save (see `delete-refusal.ts`). A
+   * count that could not be read lets the delete go ahead; the save's own refusal still explains.
+   */
+  private async deletable(subject: Parameters<typeof answeredRefusal>[0], questionIds: string[]): Promise<boolean> {
+    this.checkingDelete = true;
+    try {
+      const answers = await this.state.answerCount(questionIds);
+      const refusal = answeredRefusal(subject, answers ?? 0);
+      if (refusal) {
+        this.state.showRefusal(refusal);
+        this.cdr.markForCheck();
+        return false;
+      }
+      return true;
+    } finally {
+      this.checkingDelete = false;
+    }
+  }
+
+  /** The held delete, as a one-item list so the toast is re-created — and its countdown restarted — per delete. */
+  protected readonly heldToasts = computed(() => {
+    const held = this.state.heldDelete();
+    return held ? [held] : [];
+  });
+
+  /**
+   * Hand a delete to the undo hold (see `BuilderStateService.holdDelete` for why `take` runs late).
+   *
+   * The form is marked changed when the item leaves the canvas and again when it comes back, not
+   * when the write lands ten seconds later: the draft fingerprint, the Publish changes button and
+   * the stale-notice banners all read the tree, which is what the author sees.
+   */
+  private async holdDelete(label: string, take: () => Omit<HeldDelete, 'label'> | null): Promise<void> {
+    const held = await this.state.holdDelete(label, () => {
+      const taken = take();
+      return taken && {
+        restore: () => {
+          taken.restore();
+          this.markDirty();
+        },
+        commit: async () => {
+          const ok = await taken.commit();
+          this.cdr.markForCheck();
+          return ok;
+        },
+      };
+    });
+    if (held) {
+      this.markDirty();
+    }
+  }
+
+  protected undoDelete(): void {
+    this.state.undoDelete();
   }
 
   /** Hold `busy` across `work`, released on every path — a stuck flag freezes every guarded handler. */
@@ -1875,6 +2121,10 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.distributionChanges = undefined;
     this.formOperations?.unsubscribe();
     this.formOperations = undefined;
+    // Leaving the builder ends the undo window: write the held delete now rather than lose it.
+    void this.state.releaseHeldDelete();
+    this.urlSync?.Stop();
+    this.urlSync = null;
     super.ngOnDestroy();
   }
 
@@ -2156,7 +2406,19 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   protected setTab(tab: BuilderTab): void {
     this.activeTab = tab;
+    this.writeUrl();
     this.cdr.markForCheck();
+  }
+
+  /** Arrow keys, Home and End on the tab strip: open the tab and move focus with it. */
+  protected onTabKey(event: KeyboardEvent): void {
+    const next = tabAfterKey(this.activeTab, event.key);
+    if (!next) return;
+    event.preventDefault();
+    this.setTab(next);
+    // Every tab button is always rendered, so the target exists now; only its tabindex waits
+    // for change detection, and focus() does not need it.
+    this.host.nativeElement.querySelector<HTMLButtonElement>(`#${this.tabId(next)}`)?.focus();
   }
 
   /**
@@ -2186,6 +2448,9 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (!this.tree || this.busy) {
       return;
     }
+    // A held delete is written first, so the preview shows the form its save leaves — a default
+    // ending deleted a moment ago has been replaced by then, as it will be when the window passes.
+    await this.state.releaseHeldDelete();
     const style = this.record.StyleID
       ? (await this.design.loadStyleById(this.record.StyleID)) ?? undefined
       : undefined;
@@ -2222,4 +2487,10 @@ function createRefusalReason(failure: string | null): string {
   const opens = (text.match(/\{/g) ?? []).length;
   const closes = (text.match(/\}/g) ?? []).length;
   return closes > opens && text.endsWith('}') ? text.slice(0, -1).trimEnd() : text;
+}
+
+/** `items` with `item` put back at `index` (clamped), for Undo. */
+function reinsert<T>(items: readonly T[], index: number, item: T): T[] {
+  const at = Math.min(Math.max(index, 0), items.length);
+  return [...items.slice(0, at), item, ...items.slice(at)];
 }

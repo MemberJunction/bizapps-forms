@@ -3,11 +3,11 @@
  * behave. The component spec instantiates the class without rendering the template, so nothing else
  * in the suite can see a template binding go missing.
  *
- * The row is an `<article role="button">` whose `(keydown.enter)` / `(keydown.space)` open the form.
- * A button nested in it must stop those keys itself, or a keyboard user who presses Enter or Space on
- * it opens the form instead (review of PR #348: Enter on the Archive icon opened the builder and the
- * archive confirm was unreachable by keyboard; on the base it also archived the form silently).
- * Same pattern as the template gallery's delete button.
+ * History: the row used to be an `<article role="button">` whose `(keydown.enter)` / `(keydown.space)`
+ * opened the form, so every button nested in it had to stop those keys (review of PR #348: Enter on
+ * the Archive icon opened the builder and the archive confirm was unreachable by keyboard). The UI
+ * audit (F05) removed the cause: the row is no longer a button, so a key pressed on the Archive icon
+ * or in the confirm can only reach that control. These checks pin that the cause stays removed.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -25,15 +25,24 @@ function openingTagWith(marker: string): string {
 }
 
 describe('Forms home template (source-text check)', () => {
-  it('the row opens the form on Enter and Space, which is why nested buttons must stop those keys', () => {
+  it('the row listens to no keys, so a key on a control inside it cannot open the form', () => {
     const row = openingTagWith('class="mjf-row"');
-    expect(row).toContain('(keydown.enter)="openForm(row)"');
-    expect(row).toContain('(keydown.space)="openForm(row)');
+    expect(row).not.toContain('(keydown');
+    expect(row).toContain('(mjfRowActivate)="openForm(row)"');
   });
 
-  it('the Archive/Restore icon stops Enter and Space from reaching the row', () => {
+  it('the Archive/Restore icon is a plain button again: no stops needed', () => {
     const trigger = openingTagWith('#archiveTrigger');
-    expect(trigger).toContain('(keydown.enter)="$event.stopPropagation()"');
-    expect(trigger).toContain('(keydown.space)="$event.stopPropagation()"');
+    expect(trigger).toContain('(click)="requestArchive(row)"');
+    expect(trigger).not.toContain('stopPropagation');
+  });
+
+  it('Escape still cancels the inline archive confirm', () => {
+    expect(openingTagWith('class="home-confirm"')).toContain('(keydown.escape)="cancelArchive($event)"');
+  });
+
+  it('the top banner shows bannerMessage, the getter that knows when the failed card is already telling', () => {
+    expect(template).toContain('@if (bannerMessage; as message)');
+    expect(template).not.toContain('errorMessage !== listLoadError');
   });
 });

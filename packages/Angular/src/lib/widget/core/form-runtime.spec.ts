@@ -319,6 +319,17 @@ describe('FormRuntime progress', () => {
     expect(rt.progress()).toBe(1);
   });
 
+  it('does not read full after one row of a five-row Matrix, which Next would still refuse', () => {
+    const rows = ['r1', 'r2', 'r3', 'r4', 'r5'].map((value, i) => ({ id: value, value, label: value, displayOrder: i, matrixAxis: 'Row' as const }));
+    const columns = ['good', 'bad'].map((value, i) => ({ id: value, value, label: value, displayOrder: i, matrixAxis: 'Column' as const }));
+    const rt = runtimeFor(formOf([{ id: 'grid', type: 'Matrix', isRequired: true, options: [...rows, ...columns] }]));
+
+    rt.setValue('grid', { r1: 'good' });
+
+    expect(rt.progress()).toBeGreaterThan(0);
+    expect(rt.progress()).toBeLessThan(1);
+  });
+
   // `isRequired` reaches the weighting — the mapping this class owns, and the one thing
   // `progress.spec.ts` cannot see, since it is handed `ProgressQuestion` already built.
   it('still weights the required answer above an optional one', () => {

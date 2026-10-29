@@ -56,8 +56,8 @@ const CONDITIONAL_EDITOR_CSS = /* css */ `
 }
 
 .cre-combinator { display: flex; align-items: center; gap: var(--mjf-gap-sm); font-size: var(--mjf-meta); color: var(--mj-text-secondary); flex-wrap: wrap; }
-.cre-seg { font: inherit; font-size: var(--mjf-meta); font-weight: 600; min-height: 30px; padding: 4px 14px; cursor: pointer; border-radius: var(--mjf-radius-pill); border: 1px solid var(--mj-border-default); background: var(--mj-bg-surface); color: var(--mj-text-secondary); }
-.cre-seg.is-on { background: var(--mj-brand-primary); color: var(--mj-brand-on-primary, var(--mj-text-inverse)); border-color: var(--mj-brand-primary); }
+.cre-seg { font: inherit; font-size: var(--mjf-meta); font-weight: 600; min-height: 30px; padding: 4px 12px; cursor: pointer; border-radius: var(--mjf-radius-pill); border: 1px solid var(--mj-border-default); background: var(--mj-bg-surface); color: var(--mj-text-secondary); }
+.cre-seg.is-on { background: var(--mj-brand-primary); color: var(--mjf-on-primary); border-color: var(--mj-brand-primary); }
 .cre-seg:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 
 /* One condition, on two lines: the question, then what must be true of its answer.
@@ -91,7 +91,7 @@ const CONDITIONAL_EDITOR_CSS = /* css */ `
   background: var(--mj-bg-surface);
   color: var(--mj-text-muted);
 }
-.cre-remove:hover { background: var(--mj-bg-surface-hover); color: var(--mj-status-error, var(--mj-color-error-600)); }
+.cre-remove:hover { background: var(--mj-bg-surface-hover); color: var(--mj-status-error-text); }
 .cre-remove:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 1px; }
 
 .cre-add {
@@ -103,7 +103,7 @@ const CONDITIONAL_EDITOR_CSS = /* css */ `
   align-items: center;
   gap: var(--mjf-gap-sm);
   min-height: var(--mjf-tap);
-  padding: 8px 14px;
+  padding: 8px 12px;
   cursor: pointer;
   border-radius: var(--mjf-radius-sm);
   border: 1px dashed var(--mj-border-default);

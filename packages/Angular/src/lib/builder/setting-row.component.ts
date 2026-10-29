@@ -29,14 +29,14 @@ const SETTING_ROW_CSS = /* css */ `
   align-items: center;
   gap: var(--mjf-gap-sm);
   min-height: 44px;
-  padding: 6px 0;
+  padding: 4px 0;
 }
 .sr-label {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   font-size: var(--mjf-meta);
   font-weight: 600;
   color: var(--mj-text-primary);
@@ -55,7 +55,7 @@ const SETTING_ROW_CSS = /* css */ `
   width: 18px;
   height: 18px;
   padding: 0;
-  font-size: 12px;
+  font-size: var(--mjf-label);
   color: var(--mj-text-muted);
   cursor: help;
   background: none;
@@ -75,7 +75,7 @@ const SETTING_ROW_CSS = /* css */ `
   left: 0;
   right: 0;
   z-index: 30;
-  padding: 8px 10px;
+  padding: 8px 8px;
   font-size: var(--mjf-label);
   font-weight: 400;
   line-height: 1.45;
@@ -100,7 +100,7 @@ const SETTING_ROW_CSS = /* css */ `
   opacity: 1;
   visibility: visible;
 }
-.sr-control { flex: none; display: flex; align-items: center; gap: 6px; }
+.sr-control { flex: none; display: flex; align-items: center; gap: 4px; }
 
 /* The editor the row reveals. Sits directly under its row so it reads as belonging to it rather
    than as the next setting along. */

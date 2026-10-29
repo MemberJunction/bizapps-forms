@@ -499,10 +499,26 @@ export interface EndingReach {
  */
 export function endingReachFor(form: RuleInventoryForm): Map<string, EndingReach> {
   const targeted = targetedEndings(form);
-  return new Map(form.endings.map((ending) => [ending.id, reachOf(ending, targeted.has(ending.id))]));
+  const fallback = fallbackEndingId(form.endings);
+  return new Map(form.endings.map((ending) => [ending.id, reachOf(ending, targeted.has(ending.id), ending.id === fallback)]));
 }
 
-function reachOf(ending: RuleInventoryItem, targeted: boolean): EndingReach {
+/**
+ * The ending a form with NO default lands everyone on: the first with no condition that is not
+ * screened out, which is `resolveEndingScreen`'s own fallback. Null when a default exists.
+ *
+ * A form is without a default while its default ending's delete is held for Undo (UI audit F07):
+ * the save that writes the delete promotes a survivor, but until then the survivor read "Never
+ * shown — add a condition" while being the one screen every respondent would see.
+ */
+function fallbackEndingId(endings: readonly RuleInventoryItem[]): string | null {
+  if (endings.some((e) => e.isDefault)) {
+    return null;
+  }
+  return endings.find((e) => e.isDisqualification !== true && !e.conditionalRule?.show)?.id ?? null;
+}
+
+function reachOf(ending: RuleInventoryItem, targeted: boolean, isFallback: boolean): EndingReach {
   if (ending.isDefault) {
     return { label: 'Default ending', unreachable: false };
   }
@@ -520,8 +536,11 @@ function reachOf(ending: RuleInventoryItem, targeted: boolean): EndingReach {
   if (targeted) {
     return { label: 'Reached by a rule', unreachable: false };
   }
+  if (isFallback) {
+    return { label: 'Default ending', unreachable: false };
+  }
   // Endings are checked in order and the first match wins, so one with no condition is only ever
-  // reachable as the default — and there already is one.
+  // reachable as the default — and that is another screen (`fallbackEndingId` covers a form with none).
   return { label: 'Never shown — add a condition', unreachable: true };
 }
 
