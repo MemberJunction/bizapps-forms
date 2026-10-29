@@ -271,9 +271,14 @@ export class ResponsesTabComponent implements OnInit, OnDestroy {
     this.writes = null;
   }
 
-  /** Re-queries from the first page; the author may be watching submissions arrive. */
+  /**
+   * Re-reads the page on screen and closes any open response; the author may be watching
+   * submissions arrive. The close is announced, or the host's URL keeps naming the response.
+   */
   public async Refresh(): Promise<void> {
-    this.Detail.set(null);
+    if (this.Detail() !== null) {
+      this.CloseDetail();
+    }
     await this.load();
   }
 
@@ -291,26 +296,38 @@ export class ResponsesTabComponent implements OnInit, OnDestroy {
     await this.load(true);
   }
 
-  /** Open the response before (`-1`) or after (`1`) the open one, crossing to the neighbouring page at an edge. */
+  /**
+   * Open the response before (`-1`) or after (`1`) the open one, crossing to the neighbouring page at
+   * an edge.
+   *
+   * A crossing reads the page first and opens only if it is still wanted: the page landed, and the
+   * reader has not gone Back or opened another response meanwhile. The query moves only when the
+   * page lands, so the position line keeps naming the response on screen while it loads; and a
+   * response that then will not open closes the stale one, whose position is on the page just left.
+   */
   public async OpenAdjacent(direction: -1 | 1): Promise<void> {
     const position = this.DetailPosition();
-    if (!position || this.OpeningResponse() || (direction < 0 ? !position.hasPrevious : !position.hasNext)) {
+    const open = this.Detail();
+    if (!position || !open || this.OpeningResponse() || this.Paging() || (direction < 0 ? !position.hasPrevious : !position.hasNext)) {
       return;
     }
     const rows = this.Rows();
-    const at = rows.findIndex((r) => r.responseId === this.Detail()?.responseId);
-    const neighbour = rows[at + direction];
+    const neighbour = rows[rows.findIndex((r) => r.responseId === open.responseId) + direction];
     if (neighbour) {
       await this.OpenResponse(neighbour.responseId);
       return;
     }
     const q = this.Query();
-    this.Query.set({ ...q, page: q.page + direction });
-    await this.load(true);
+    if (!(await this.load(true, { ...q, page: q.page + direction })) || this.Detail() !== open) {
+      return;
+    }
     const landed = this.Rows();
     const target = direction > 0 ? landed[0] : landed[landed.length - 1];
     if (target) {
       await this.OpenResponse(target.responseId);
+    }
+    if (this.Detail() === open) {
+      this.CloseDetail();
     }
   }
 
@@ -406,36 +423,43 @@ export class ResponsesTabComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Read the page the query names. `paging` keeps the current rows on screen (held) instead of the
-   * full-surface loading state, for a page turn, a sort or a search.
+   * Read the page `query` names (by default the one on screen), and make it the query once it lands.
+   * `paging` keeps the current rows on screen (held) instead of the full-surface loading state, for a
+   * page turn, a sort or a search. True when this read's page is the one now shown.
    *
    * A page past the end — the list shrank since the link was made, or since the reader paged — is
    * read again as the last page, once.
    */
-  private async load(paging = false): Promise<void> {
+  private async load(paging = false, query: ResponseQuery = this.Query()): Promise<boolean> {
     const generation = ++this.generation;
     (paging ? this.Paging : this.Loading).set(true);
     this.Error.set(null);
     this.loadFailed.set(false);
     try {
-      let page = await readResponsePage(this.FormID, this.Query());
-      const last = pageCount(page.total, this.Query().pageSize);
-      if (generation === this.generation && page.rows.length === 0 && page.total > 0 && this.Query().page > last) {
-        this.Query.set({ ...this.Query(), page: last });
-        this.emitState();
-        page = await readResponsePage(this.FormID, this.Query());
+      let page = await readResponsePage(this.FormID, query);
+      const last = pageCount(page.total, query.pageSize);
+      const pastTheEnd = page.rows.length === 0 && page.total > 0 && query.page > last;
+      if (generation === this.generation && pastTheEnd) {
+        query = { ...query, page: last };
+        page = await readResponsePage(this.FormID, query);
       }
       if (generation !== this.generation) {
-        return;
+        return false;
+      }
+      this.Query.set(query);
+      if (pastTheEnd) {
+        this.emitState();
       }
       this.LabelVersionID.set(page.labelVersionId);
       this.Rows.set(page.rows);
       this.Total.set(page.total);
+      return true;
     } catch (err) {
       if (generation === this.generation) {
         this.loadFailed.set(true);
       }
       this.failUnlessSuperseded(generation, err, 'Failed to load this form’s responses.');
+      return false;
     } finally {
       if (generation === this.generation) {
         this.Loading.set(false);

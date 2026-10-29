@@ -42,6 +42,28 @@ describe('builder deletes can be undone (source-text smoke)', () => {
     expect(ts).toMatch(/private async loadBuilder\(\): Promise<void> \{[\s\S]*?await this\.state\.releaseHeldDelete\(\);[\s\S]*?this\.state\.loadTree\(/);
   });
 
+  // Review of PR #350. These pin wiring only; the ordering they protect is specced against the
+  // real service in builder-state.held-delete.spec.ts ("a second delete while one is held").
+  it.each(['deleteQuestion', 'deleteScreen', 'deletePage', 'onRemoveOption'])(
+    '%s takes the item out of the tree inside the hold, after the held delete is written',
+    (name) => {
+      const b = body(name);
+      const handoff = b.indexOf('this.holdDelete(');
+      expect(b.slice(0, handoff)).not.toMatch(/\.(questions|screens|pages|options) = /);
+      expect(b.slice(handoff)).toMatch(/\.(questions|screens|pages|options) = /);
+    },
+  );
+
+  it('marks the form changed when the item leaves the canvas and when Undo brings it back', () => {
+    const wrapper = ts.slice(ts.indexOf('private async holdDelete('), ts.indexOf('\n  }\n', ts.indexOf('private async holdDelete(')));
+    expect(wrapper).toMatch(/taken\.restore\(\);\s*this\.markDirty\(\);/);
+    expect(wrapper).toMatch(/if \(held\) \{\s*this\.markDirty\(\);/);
+  });
+
+  it('writes the held delete before building the preview', () => {
+    expect(ts).toMatch(/protected async openPreview\(\): Promise<void> \{[\s\S]*?await this\.state\.releaseHeldDelete\(\);[\s\S]*?tryBuildPublishedDefinition\(/);
+  });
+
   it('names the option a remove button removes', () => {
     expect(editor).not.toMatch(/aria-label="Remove (option|row|column)"/);
     for (const kind of ['row', 'column', 'option']) {

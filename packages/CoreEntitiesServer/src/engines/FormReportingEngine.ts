@@ -24,7 +24,7 @@
  * Caller-facing messages are fixed sentences; provider, SQL and exception text travels on
  * `logDetail` to the one log line `runEngineCall` writes.
  */
-import { EntityPermissionType, LogError, type DatabaseProviderBase, type RunViewParams, type RunViewResult, type UserInfo } from '@memberjunction/core';
+import { EntityPermissionType, LogError, type DatabaseProviderBase, type EntityInfo, type RunViewParams, type RunViewResult, type UserInfo } from '@memberjunction/core';
 import { BaseSingleton, UUIDsEqual } from '@memberjunction/global';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import {
@@ -212,6 +212,7 @@ export class FormReportingEngine extends BaseSingleton<FormReportingEngine> {
     requireUser(user, `Listing the responses of form ${listing.formId}`);
     return runEngineCall(provider, `[FormReportingEngine] the responses of form ${listing.formId} were not listed (user ${user.ID})`, () =>
       callerSafe('Listing responses', async () => {
+        requireAnswerRead(provider, user, listing.formId);
         const filter = responseListFilter(listing, provider, user);
         const [counted, page] = await provider.RunViews(
           [
@@ -414,21 +415,39 @@ function responseListFilter(listing: ValidListRequest, provider: DatabaseProvide
  *
  * WHO MAY SEARCH ANSWERS. The answer half is a subquery inside the response read, so the RunView
  * applies the caller's permissions and row filter to RESPONSES only. It therefore carries the
- * caller's own row filter on ANSWERS inside it, and is left out entirely for a caller who may not
- * read answers: such a caller searches names only, and cannot find a response by answer text it is
- * not allowed to see.
+ * caller's own row filter on ANSWERS inside it, so nobody finds a response by answer text they are
+ * not allowed to see. A caller who may not read answers at all never gets here:
+ * {@link requireAnswerRead} refuses the whole list first.
  */
 function responseSearchClause(term: string, provider: DatabaseProviderBase, user: UserInfo): string {
   const contains = `LIKE ${sqlLiteral(`%${escapeLikePattern(term)}%`)} ESCAPE '\\'`;
   const byPerson = `RespondentPerson ${contains}`;
-  const answers = provider.EntityByName(FORMS_ENTITY.FormResponseAnswer);
-  if (!answers || !answers.GetUserPermisions(user).CanRead) {
-    return `(${byPerson})`;
-  }
+  const answers = answerEntityOf(provider);
   const view = provider.QuoteSchemaAndView(answers.SchemaName, answers.BaseView);
   const rowFilter = answers.GetEffectiveRowFilterWhereClause(user, EntityPermissionType.Read, '').trim();
   const scoped = rowFilter ? ` AND (${rowFilter})` : '';
   return `(${byPerson} OR ID IN (SELECT ResponseID FROM ${view} WHERE TextValue ${contains}${scoped}))`;
+}
+
+/**
+ * Refuse a caller who may not read answers, before any read. Every list row's respondent label and
+ * answered count are worked out from its answers, read as the caller, so without that right the list
+ * cannot be built: MJ would refuse the answer read after the response read had already run. Saying so
+ * here names the reason instead of reporting a failed read.
+ */
+function requireAnswerRead(provider: DatabaseProviderBase, user: UserInfo, formId: string): void {
+  if (!answerEntityOf(provider).GetUserPermisions(user).CanRead) {
+    throw new FormReportingError(`You may not read the answers of form ${formId}, and the response list is built from them.`);
+  }
+}
+
+/** The answer entity's metadata. Missing means the app is not installed, which is a fault. */
+function answerEntityOf(provider: DatabaseProviderBase): EntityInfo {
+  const answers = provider.EntityByName(FORMS_ENTITY.FormResponseAnswer);
+  if (!answers) {
+    throw new FormReportingError(`The ${FORMS_ENTITY.FormResponseAnswer} entity is not in this host's metadata.`, { fault: true });
+  }
+  return answers;
 }
 
 /** Escape LIKE's own metacharacters (and the escape character itself) so the term matches literally. */

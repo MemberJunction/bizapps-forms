@@ -331,12 +331,16 @@ describe('ListResponses', () => {
       expect(filterOf(db, 'simple')).toBe(`FormID='${FORM_ID}'`);
     });
 
-    it('searches names only for a caller who may not read answers', async () => {
+    // Every row's respondent label and answered count come from its answers, so the list is read
+    // with them as the caller: one who may not read answers had a "names only" search here, but MJ
+    // refuses the answer read that follows it (the fake does not enforce reads, so it passed).
+    it.each([undefined, 'Ann'])('refuses a caller who may not read answers, before any read (search %j)', async (search) => {
       const db = reportingWorld(fixture(), { readPermissions: { [ANSWER_TABLE]: false } });
 
-      await engine.ListResponses({ ...base, search: 'Ann' }, db.provider, READER);
+      const err = await refusal(engine.ListResponses({ ...base, search }, db.provider, READER));
 
-      expect(filterOf(db, 'simple')).toBe(`FormID='${FORM_ID}' AND (RespondentPerson LIKE N'%Ann%' ESCAPE '\\')`);
+      expect(err).toMatchObject({ fault: false, message: `You may not read the answers of form ${FORM_ID}, and the response list is built from them.` });
+      expect(db.viewCalls).toEqual([]);
     });
 
     it("keeps the caller's row filter on answers inside the answer search", async () => {

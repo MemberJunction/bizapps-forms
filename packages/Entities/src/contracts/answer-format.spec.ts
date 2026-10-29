@@ -225,33 +225,51 @@ describe('isRequiredSatisfied', () => {
 
 describe('answerCompleteness', () => {
   it('gives a composite credit per sub-field, so filling one of five is not the whole question', () => {
-    expect(answerCompleteness('ContactInfo', { firstName: 'Ada' })).toBeCloseTo(0.2);
-    expect(answerCompleteness('ContactInfo', { firstName: 'Ada', lastName: 'L' })).toBeCloseTo(0.4);
+    expect(answerCompleteness({ type: 'ContactInfo' }, { firstName: 'Ada' })).toBeCloseTo(0.2);
+    expect(answerCompleteness({ type: 'ContactInfo' }, { firstName: 'Ada', lastName: 'L' })).toBeCloseTo(0.4);
     expect(
-      answerCompleteness('ContactInfo', {
+      answerCompleteness({ type: 'ContactInfo' }, {
         firstName: 'Ada', lastName: 'L', email: 'a@b.co', phone: '5551234567', company: 'X',
       }),
     ).toBe(1);
   });
 
   it('counts address parts the same way', () => {
-    expect(answerCompleteness('Address', { line1: '1 High St' })).toBeCloseTo(1 / 6);
+    expect(answerCompleteness({ type: 'Address' }, { line1: '1 High St' })).toBeCloseTo(1 / 6);
   });
 
   it('is all-or-nothing for a scalar question', () => {
-    expect(answerCompleteness('ShortText', 'hi')).toBe(1);
-    expect(answerCompleteness('ShortText', '')).toBe(0);
-    expect(answerCompleteness('ShortText', undefined)).toBe(0);
+    expect(answerCompleteness({ type: 'ShortText' }, 'hi')).toBe(1);
+    expect(answerCompleteness({ type: 'ShortText' }, '')).toBe(0);
+    expect(answerCompleteness({ type: 'ShortText' }, undefined)).toBe(0);
   });
 
   it('gives an unticked consent box no credit, matching what required demands of it', () => {
-    expect(answerCompleteness('Legal', false)).toBe(0);
-    expect(answerCompleteness('Legal', true)).toBe(1);
+    expect(answerCompleteness({ type: 'Legal' }, false)).toBe(0);
+    expect(answerCompleteness({ type: 'Legal' }, true)).toBe(1);
+  });
+
+  it('gives a Matrix credit per authored row, so one row of five is not the whole question', () => {
+    const matrix = {
+      type: 'Matrix' as const,
+      options: [
+        ...['r1', 'r2', 'r3', 'r4', 'r5'].map((value) => ({ value, matrixAxis: 'Row' as const })),
+        { value: 'good', matrixAxis: 'Column' as const },
+        { value: 'bad', matrixAxis: 'Column' as const },
+      ],
+    };
+    expect(answerCompleteness(matrix, { r1: 'good' })).toBeCloseTo(0.2);
+    expect(answerCompleteness(matrix, { r1: 'good', r2: 'bad', r3: 'good', r4: 'good', r5: 'bad' })).toBe(1);
+    expect(answerCompleteness(matrix, undefined)).toBe(0);
+  });
+
+  it('falls back to answered-or-not for a Matrix with no authored rows to count', () => {
+    expect(answerCompleteness({ type: 'Matrix' }, { r1: 'good' })).toBe(1);
   });
 
   it('still credits a legitimate falsy answer', () => {
-    expect(answerCompleteness('YesNo', false)).toBe(1);
-    expect(answerCompleteness('NPS', 0)).toBe(1);
+    expect(answerCompleteness({ type: 'YesNo' }, false)).toBe(1);
+    expect(answerCompleteness({ type: 'NPS' }, 0)).toBe(1);
   });
 });
 

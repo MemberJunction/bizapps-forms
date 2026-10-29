@@ -242,6 +242,78 @@ describe('ResponsesTabComponent', () => {
     expect(c.DetailPosition()?.index).toBe(26);
   });
 
+  describe('Next across a page boundary, when something goes wrong', () => {
+    /** Page 1 of 30 loaded, its last row (r-25) open, and Next pressed: the page-2 read is in flight. */
+    async function crossing(c: ResponsesTabComponent): Promise<{ next: Promise<void> }> {
+      const loading = c.ngOnInit();
+      calls[0].settle(listPage(range(1, 25), 30));
+      await loading;
+      const opening = c.OpenResponse('r-25');
+      calls[1].settle(detail('r-25'));
+      await opening;
+      const next = c.OpenAdjacent(1);
+      await vi.waitFor(() => expect(calls).toHaveLength(3));
+      // Wrapped: an async function returning the promise itself would wait for it to settle.
+      return { next };
+    }
+
+    it('keeps the failure on screen, and opens nothing, when the next page will not load', async () => {
+      const c = construct();
+      const { next } = await crossing(c);
+
+      calls[2].settle(refused('The server is down.'));
+      await next;
+      await flush();
+
+      expect(calls).toHaveLength(3);
+      expect(c.Error()).toContain('The server is down.');
+      expect(c.Query().page).toBe(1);
+    });
+
+    it('keeps saying where the open response is while the next page loads, and ignores a second Next', async () => {
+      const c = construct();
+      const { next } = await crossing(c);
+
+      expect(c.DetailPosition()?.index).toBe(25);
+      void c.OpenAdjacent(1);
+      await flush();
+      expect(calls).toHaveLength(3);
+
+      calls[2].settle(listPage(range(26, 5), 30));
+      await vi.waitFor(() => expect(calls).toHaveLength(4));
+      calls[3].settle(detail('r-26'));
+      await next;
+    });
+
+    it('stays on the list when the reader goes Back while the next page loads', async () => {
+      const c = construct();
+      const { next } = await crossing(c);
+
+      c.CloseDetail();
+      calls[2].settle(listPage(range(26, 5), 30));
+      await next;
+      await flush();
+
+      expect(calls).toHaveLength(3);
+      expect(c.Detail()).toBeNull();
+    });
+
+    it('shows the new page and the failure, not a stale response without its position, when the response will not open', async () => {
+      const c = construct();
+      const { next } = await crossing(c);
+
+      calls[2].settle(listPage(range(26, 5), 30));
+      await vi.waitFor(() => expect(calls).toHaveLength(4));
+      calls[3].settle(refused('Gone.'));
+      await next;
+
+      expect(c.Query().page).toBe(2);
+      expect(c.Detail()).toBeNull();
+      expect(c.Error()).toContain('Gone.');
+      expect(c.View()).toBe('list');
+    });
+  });
+
   it('tells its host what it shows, so the host can keep it in the URL (F09)', async () => {
     const c = construct();
     const states: unknown[] = [];
@@ -258,6 +330,27 @@ describe('ResponsesTabComponent', () => {
       { query: c.Query(), responseId: 'r-1' },
       { query: c.Query(), responseId: null },
     ]);
+  });
+
+  it('tells its host when Refresh closes the open response, so the URL stops naming it', async () => {
+    // Found in the live smoke of the PR #350 review fixes: the URL kept `response=` after Refresh,
+    // so reloading the page reopened a response the reader had left.
+    const c = construct();
+    const states: { responseId: string | null }[] = [];
+    c.StateChange.subscribe((s) => states.push(s));
+    const loading = c.ngOnInit();
+    calls[0].settle(listPage([1], 1));
+    await loading;
+    const opening = c.OpenResponse('r-1');
+    calls[1].settle(detail('r-1'));
+    await opening;
+
+    const refreshing = c.Refresh();
+    calls[2].settle(listPage([1], 1));
+    await refreshing;
+
+    expect(c.Detail()).toBeNull();
+    expect(states.at(-1)?.responseId).toBeNull();
   });
 
   it('opens what a deep link names: its page, then its response', async () => {

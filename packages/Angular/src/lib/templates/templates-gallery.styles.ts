@@ -28,9 +28,9 @@ export const TEMPLATES_GALLERY_CSS = /* css */ `
   gap: var(--mjf-gap-sm);
 }
 
-/* The card is the click target for "use this one". The delete control inside it is a
-   separate button, so the card itself is a <div role="button"> rather than a <button>:
-   a button inside a button is invalid HTML and Safari drops the inner one. */
+/* The card is the click target for "use this one" (mjfRowActivate), but never a button
+   itself: the delete control inside it is one, and a button inside a button is invalid HTML
+   that Safari drops. The keyboard path is the card's name, .mjf-row-primary (UI audit F05). */
 .tg-card {
   position: relative;
   display: flex;

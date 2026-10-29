@@ -165,6 +165,32 @@ describe('FormsHomeDashboardComponent failure alert (#253)', () => {
     expect(component.errorMessage).not.toBeNull();
   });
 
+  it('reports a failed reload in the banner while the list it could not refresh stays on screen', async () => {
+    // The banner hid every message equal to the list failure, on the assumption that the failed
+    // card showed it. With forms already loaded the card does not render, so the reload error
+    // reached neither place.
+    let fail = false;
+    const component = makeComponent(
+      homeService({ loadForms: async () => (fail ? Promise.reject(new Error('Connection lost')) : [draftRow]) }),
+    );
+    await component.loadForms();
+
+    fail = true;
+    await component.loadForms();
+
+    expect(component.listState).toBe('list');
+    expect(component.bannerMessage).toBe('Failed to load forms: Connection lost');
+  });
+
+  it('tells a failed first read once, in the failed card, not in the banner too', async () => {
+    const component = makeComponent(homeService({ loadForms: async () => Promise.reject(new Error('down')) }));
+
+    await component.loadForms();
+
+    expect(component.listState).toBe('failed');
+    expect(component.bannerMessage).toBeNull();
+  });
+
   it('says every form is archived rather than matching an empty search', async () => {
     const component = makeComponent(homeService({ loadForms: async () => [{ ...draftRow, status: 'Closed' as FormStatus }] }));
 

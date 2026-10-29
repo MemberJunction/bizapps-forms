@@ -1845,8 +1845,30 @@ export const MUTANTS = [
     name: 'responses/page-past-the-end-lands-on-last',
     behaviour: 'a page past the end (the list shrank since the link or the last page turn) is read again as the last page, not shown empty',
     file: 'packages/Angular/src/lib/responses/responses-tab.component.ts',
-    find: '      if (generation === this.generation && page.rows.length === 0 && page.total > 0 && this.Query().page > last) {',
+    find: '      if (generation === this.generation && pastTheEnd) {',
     replace: '      if (false) {',
+    suite: 'packages/Angular',
+    killedBy: ['src/lib/responses/responses-tab.component.spec.ts'],
+  },
+  {
+    // A second delete used to leave the tree before the first one's held write ran; that write
+    // renumbers what it finds, so Undo restored the second at a position the rows no longer had.
+    name: 'builder/second-delete-waits-for-the-held-one',
+    behaviour: 'a new delete takes its item out of the tree only after the delete already held is written',
+    file: 'packages/Angular/src/lib/builder/builder-state.service.ts',
+    find: '      await this.pendingDelete.release();',
+    replace: '      void 0;',
+    suite: 'packages/Angular',
+    killedBy: ['src/lib/builder/builder-state.held-delete.spec.ts'],
+  },
+  {
+    // Next at a page edge reads the page, then opens its first response. A reader who went Back
+    // while the page loaded was pulled back into a detail they had just closed.
+    name: 'responses/next-across-a-page-respects-back',
+    behaviour: 'Next across a page boundary opens nothing when the page failed or the reader left the response meanwhile',
+    file: 'packages/Angular/src/lib/responses/responses-tab.component.ts',
+    find: '    if (!(await this.load(true, { ...q, page: q.page + direction })) || this.Detail() !== open) {',
+    replace: '    if (!(await this.load(true, { ...q, page: q.page + direction })) && false) {',
     suite: 'packages/Angular',
     killedBy: ['src/lib/responses/responses-tab.component.spec.ts'],
   },

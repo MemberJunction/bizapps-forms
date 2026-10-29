@@ -1,5 +1,7 @@
 # UI Audit Criticals Implementation Plan
 
+> **As built (2026-10-28).** This plan is a record of intent; its checkboxes were not ticked as the work landed. Where the code differs, the design's own "As built" note (`docs/superpowers/specs/2026-10-28-ui-audit-criticals-design.md`) is the authority. In short: there is no `shared/dashboard-failure.ts` (the wording already lives in `shared/failure-message.ts`), and there is no `dashboard/report-state.ts` (`reportState` sits beside `railState` in `dashboard/reporting-view-model.ts`). Doodle undo is `widget/components/questions/doodle-strokes.ts` and `doodle-history.ts`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
 > **Chosen method: Native** (Soham, 2026-10-28). The session implements every task itself with superpowers:executing-plans, then one fresh reviewer on the most capable model checks the whole branch.

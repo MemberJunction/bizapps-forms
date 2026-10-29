@@ -347,17 +347,25 @@ export function missingMatrixRows(question: AnswerFormatQuestion, value: AnswerV
  * and company watched the progress bar move once and then sit still through four more fields —
  * three consecutive actions with no feedback, which teaches them their input is not registering.
  *
+ * A Matrix is credited PER AUTHORED ROW, for the reason {@link missingMatrixRows} exists: a
+ * required Matrix is complete only when every row is answered, and a bar that read 100% after one
+ * row of five would contradict the Next refusal that follows it.
+ *
  * Progress is the only caller. Validation deliberately keeps the coarser test: a partly-filled
  * ContactInfo IS an answer, and the form is submittable on it.
  */
-export function answerCompleteness(type: FormQuestionType, value: AnswerValue): number {
-  const fields = compositeFieldsFor(type);
+export function answerCompleteness(question: AnswerFormatQuestion, value: AnswerValue): number {
+  const fields = compositeFieldsFor(question.type);
   if (fields && isStringRecord(value)) {
     const parts = value as Record<string, string>;
     const filled = fields.filter((f) => isAnswerSupplied(parts[f])).length;
     return filled / fields.length;
   }
-  return isRequiredSatisfied(type, value) ? 1 : 0;
+  if (!isRequiredSatisfied(question.type, value)) {
+    return 0;
+  }
+  const rows = (question.options ?? []).filter((o) => matrixAxisOf(o) === 'Row').length;
+  return question.type === 'Matrix' && rows > 0 ? (rows - missingMatrixRows(question, value).length) / rows : 1;
 }
 
 /** The fixed sub-field list of a composite type, or undefined for everything else. */

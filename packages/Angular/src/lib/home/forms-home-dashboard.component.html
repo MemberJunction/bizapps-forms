@@ -17,12 +17,12 @@
     </div>
   </header>
 
-  <!-- A failed list read is told once, by the list's own failed state below; any other message
-       (written while the list is down or not) still shows here. -->
-  @if (errorMessage && errorMessage !== listLoadError) {
+  <!-- A failed first read is told once, by the list's own failed state below; a failed reload
+       under a list still on screen, and any other message, shows here (see bannerMessage). -->
+  @if (bannerMessage; as message) {
     <div class="mjf-alert" role="alert">
       <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-      <span>{{ errorMessage }}</span>
+      <span>{{ message }}</span>
     </div>
   }
 

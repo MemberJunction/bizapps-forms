@@ -40,4 +40,9 @@ describe('Forms home template (source-text check)', () => {
   it('Escape still cancels the inline archive confirm', () => {
     expect(openingTagWith('class="home-confirm"')).toContain('(keydown.escape)="cancelArchive($event)"');
   });
+
+  it('the top banner shows bannerMessage, the getter that knows when the failed card is already telling', () => {
+    expect(template).toContain('@if (bannerMessage; as message)');
+    expect(template).not.toContain('errorMessage !== listLoadError');
+  });
 });

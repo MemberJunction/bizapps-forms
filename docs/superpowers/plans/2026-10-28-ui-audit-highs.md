@@ -1,5 +1,7 @@
 # UI audit Highs Implementation Plan
 
+> **As built (2026-10-28).** This plan is a record of intent; its checkboxes were not ticked as the work landed. Where the code differs: the undo toast is `builder/undo-toast.component.ts`, not under `shared/`. The URL codecs are one module, `shared/view-urls.ts`, not `shared/url-params.ts`, `builder/builder-url.ts`, `home/home-url.ts` and `dashboard/reporting-url.ts`. The builder writes through `builder/builder-url-sync.ts`, by `NavigationService.UpdateActiveTabQueryParams` and only while the address bar names this record, because MJ 6.1.6 gives record forms no tab id. An answered question or section is refused at the click (`delete-refusal.ts`, `BuilderStateService.answerCount`), not ten seconds later by the save.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (chosen: native) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fix the audit's remaining High findings (F07 undo, F08 server-side responses table, F09 URL state) and the two follow-ups (Matrix "required" means every row; button hover never lowers contrast) on `fix/ui-audit-criticals`.

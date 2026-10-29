@@ -988,23 +988,24 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (!(await this.deletable({ kind: 'section', name: sectionName }, page.questions.map((q) => q.entity.ID)))) {
       return;
     }
-    const index = tree.pages.indexOf(page);
-    if (index < 0 || tree.pages.length <= 1) {
-      return;
-    }
     const count = page.questions.length;
     const with_ = count === 0 ? '' : count === 1 ? ' and its question' : ` and its ${count} questions`;
-    tree.pages = tree.pages.filter((p) => p !== page);
-    this.selection = clearIfPage(this.selection, page.entity.ID);
-    for (const q of page.questions) {
-      this.selection = clearIfQuestion(this.selection, q.entity.ID);
-    }
-    this.holdDelete({
-      label: `${sectionName.toLowerCase()}${with_}`,
-      restore: () => {
-        tree.pages = reinsert(tree.pages, index, page);
-      },
-      commit: () => this.state.deletePage(tree, page),
+    await this.holdDelete(`${sectionName.toLowerCase()}${with_}`, () => {
+      const index = tree.pages.indexOf(page);
+      if (index < 0 || tree.pages.length <= 1) {
+        return null;
+      }
+      tree.pages = tree.pages.filter((p) => p !== page);
+      this.selection = clearIfPage(this.selection, page.entity.ID);
+      for (const q of page.questions) {
+        this.selection = clearIfQuestion(this.selection, q.entity.ID);
+      }
+      return {
+        restore: () => {
+          tree.pages = reinsert(tree.pages, index, page);
+        },
+        commit: () => this.state.deletePage(tree, page),
+      };
     });
   }
 
@@ -1335,22 +1336,27 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.cdr.markForCheck();
   }
 
-  protected deleteScreen(screen: mjBizAppsFormsFormScreenEntity): void {
+  protected async deleteScreen(screen: mjBizAppsFormsFormScreenEntity): Promise<void> {
     const tree = this.tree;
     if (!tree || this.busy) {
       return;
     }
-    const index = tree.screens.indexOf(screen);
-    // Off screen now, held for Undo (F07). The service still promotes a survivor to default ending
+    // Off screen, held for Undo (F07). The service still promotes a survivor to default ending
     // when the delete is written — an invariant no caller should be able to forget.
-    tree.screens = tree.screens.filter((s) => s !== screen);
-    this.selection = clearIfScreen(this.selection, screen.ID);
-    this.holdDelete({
-      label: screen.ScreenType === 'Welcome' ? 'the welcome screen' : `ending “${screen.Title || 'Untitled'}”`,
-      restore: () => {
-        tree.screens = reinsert(tree.screens, index, screen);
-      },
-      commit: () => this.state.deleteScreen(tree, screen),
+    const label = screen.ScreenType === 'Welcome' ? 'the welcome screen' : `ending “${screen.Title || 'Untitled'}”`;
+    await this.holdDelete(label, () => {
+      const index = tree.screens.indexOf(screen);
+      if (index < 0) {
+        return null;
+      }
+      tree.screens = tree.screens.filter((s) => s !== screen);
+      this.selection = clearIfScreen(this.selection, screen.ID);
+      return {
+        restore: () => {
+          tree.screens = reinsert(tree.screens, index, screen);
+        },
+        commit: () => this.state.deleteScreen(tree, screen),
+      };
     });
   }
 
@@ -1573,21 +1579,26 @@ export class FormBuilderComponent extends BaseFormComponent {
     });
   }
 
-  protected onRemoveOption(event: { node: QuestionNode; optionIndex: number }): void {
+  protected async onRemoveOption(event: { node: QuestionNode; optionIndex: number }): Promise<void> {
     const { node, optionIndex } = event;
     const option = node.options[optionIndex];
     const tree = this.tree;
     if (this.busy || !tree || !option) {
       return;
     }
-    // Off the question now, held for Undo (F07); the written delete closes the order gap.
-    node.options = node.options.filter((o) => o !== option);
-    this.holdDelete({
-      label: `option “${option.Label?.trim() || 'Untitled'}”`,
-      restore: () => {
-        node.options = reinsert(node.options, optionIndex, option);
-      },
-      commit: () => this.state.deleteOption(tree, node, option),
+    // Off the question, held for Undo (F07); the written delete closes the order gap.
+    await this.holdDelete(`option “${option.Label?.trim() || 'Untitled'}”`, () => {
+      const index = node.options.indexOf(option);
+      if (index < 0) {
+        return null;
+      }
+      node.options = node.options.filter((o) => o !== option);
+      return {
+        restore: () => {
+          node.options = reinsert(node.options, index, option);
+        },
+        commit: () => this.state.deleteOption(tree, node, option),
+      };
     });
   }
 
@@ -1600,22 +1611,25 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (!(await this.deletable({ kind: 'question', name }, [node.entity.ID]))) {
       return;
     }
-    // Read after the check: the page may have changed while it ran.
-    const index = page.questions.indexOf(node);
-    if (index < 0) {
-      return;
-    }
-    // Off the canvas now, held for Undo (F07). The written delete takes its options with it and
+    // Off the canvas, held for Undo (F07). The written delete takes its options with it and
     // closes the gap in the page's order, in one save.
-    page.questions = page.questions.filter((q) => q !== node);
-    this.selection = clearIfQuestion(this.selection, node.entity.ID);
-    const neighbour = page.questions[index] ?? page.questions[index - 1];
-    this.holdDelete({
-      label: `question “${name}”`,
-      restore: () => {
-        page.questions = reinsert(page.questions, index, node);
-      },
-      commit: () => this.state.deleteQuestion(tree, page, node),
+    let neighbour: QuestionNode | undefined;
+    await this.holdDelete(`question “${name}”`, () => {
+      // Read when the item is taken: the page may have changed while the check and the earlier
+      // delete's write ran.
+      const index = page.questions.indexOf(node);
+      if (index < 0) {
+        return null;
+      }
+      page.questions = page.questions.filter((q) => q !== node);
+      this.selection = clearIfQuestion(this.selection, node.entity.ID);
+      neighbour = page.questions[index] ?? page.questions[index - 1];
+      return {
+        restore: () => {
+          page.questions = reinsert(page.questions, index, node);
+        },
+        commit: () => this.state.deleteQuestion(tree, page, node),
+      };
     });
     // Focus would otherwise fall to <body> with the button that held it.
     if (neighbour) {
@@ -1655,27 +1669,30 @@ export class FormBuilderComponent extends BaseFormComponent {
   });
 
   /**
-   * Hand a delete to the undo hold, wrapping it so the canvas repaints when the item comes back
-   * and the form is marked changed once the delete is written. The caller has already taken the
-   * item out of the tree.
+   * Hand a delete to the undo hold (see `BuilderStateService.holdDelete` for why `take` runs late).
+   *
+   * The form is marked changed when the item leaves the canvas and again when it comes back, not
+   * when the write lands ten seconds later: the draft fingerprint, the Publish changes button and
+   * the stale-notice banners all read the tree, which is what the author sees.
    */
-  private holdDelete(held: HeldDelete): void {
-    this.state.holdDelete({
-      label: held.label,
-      restore: () => {
-        held.restore();
-        this.cdr.markForCheck();
-      },
-      commit: async () => {
-        const ok = await held.commit();
-        if (ok) {
+  private async holdDelete(label: string, take: () => Omit<HeldDelete, 'label'> | null): Promise<void> {
+    const held = await this.state.holdDelete(label, () => {
+      const taken = take();
+      return taken && {
+        restore: () => {
+          taken.restore();
           this.markDirty();
-        }
-        this.cdr.markForCheck();
-        return ok;
-      },
+        },
+        commit: async () => {
+          const ok = await taken.commit();
+          this.cdr.markForCheck();
+          return ok;
+        },
+      };
     });
-    this.cdr.markForCheck();
+    if (held) {
+      this.markDirty();
+    }
   }
 
   protected undoDelete(): void {
@@ -2431,6 +2448,9 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (!this.tree || this.busy) {
       return;
     }
+    // A held delete is written first, so the preview shows the form its save leaves — a default
+    // ending deleted a moment ago has been replaced by then, as it will be when the window passes.
+    await this.state.releaseHeldDelete();
     const style = this.record.StyleID
       ? (await this.design.loadStyleById(this.record.StyleID)) ?? undefined
       : undefined;

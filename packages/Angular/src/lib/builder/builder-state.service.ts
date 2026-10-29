@@ -519,10 +519,37 @@ export class BuilderStateService {
   /** What the undo toast shows, or null. */
   public readonly heldDelete = this.pendingDelete.current;
 
-  /** Hold a delete whose item the caller has already taken out of the tree. */
-  public holdDelete(held: HeldDelete): void {
-    this.pendingDelete.hold(held);
+  /**
+   * Take an item out of the tree and hold its delete. `take` removes it and says how to put it back
+   * and how to write the delete, or returns null when the item is already gone. Resolves true once
+   * the delete is held.
+   *
+   * WHY `take` IS CALLED HERE, LATE. A delete's write renumbers whatever it finds in the tree WHEN
+   * IT RUNS, and holding this one writes the one held before it. An item taken out first would be
+   * missing from that renumber — so Undo put it back at a position the rows no longer had, and a
+   * default ending deleted next left the first delete no survivor to promote. So the held delete is
+   * written first, and only then is the next item taken. Calls are queued, so a third delete waits
+   * for the second to be held.
+   */
+  public holdDelete(label: string, take: () => Omit<HeldDelete, 'label'> | null): Promise<boolean> {
+    const run = async (): Promise<boolean> => {
+      await this.pendingDelete.release();
+      const taken = take();
+      if (!taken) {
+        return false;
+      }
+      this.pendingDelete.hold({ label, ...taken });
+      return true;
+    };
+    const held = this.holdQueue.then(run);
+    this.holdQueue = held.then(
+      () => undefined,
+      () => undefined,
+    );
+    return held;
   }
+  /** `holdDelete` calls, one at a time. Never rejects; each caller sees its own outcome. */
+  private holdQueue: Promise<void> = Promise.resolve();
 
   /** Take back the held delete; false when there is none. */
   public undoDelete(): boolean {

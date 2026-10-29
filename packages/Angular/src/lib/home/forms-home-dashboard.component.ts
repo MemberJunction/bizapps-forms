@@ -386,6 +386,18 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     });
   }
 
+  /**
+   * What the top banner says, or null. Every message shows there except a list failure the failed
+   * card is already telling. Asked of `listState`, not of the message alone: a reload that fails
+   * under a list already on screen renders no failed card, so the banner is its only place.
+   */
+  public get bannerMessage(): string | null {
+    if (this.errorMessage === null) {
+      return null;
+    }
+    return this.errorMessage === this.listLoadError && this.listState === 'failed' ? null : this.errorMessage;
+  }
+
   public get archivedCount(): number {
     return this.forms.filter((f) => f.status === ARCHIVED_STATUS).length;
   }

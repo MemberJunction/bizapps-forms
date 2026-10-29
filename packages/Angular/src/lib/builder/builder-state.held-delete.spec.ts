@@ -18,15 +18,38 @@ afterEach(() => {
 
 const ids = (page: PageNode): string[] => page.questions.map((q) => q.entity.ID);
 
-/** What the builder does on a trash click: out of the tree now, the write held. */
-function holdQuestionDelete(state: GraphedBuilderState, tree: Parameters<GraphedBuilderState['deleteQuestion']>[0], page: PageNode, node: QuestionNode) {
-  const index = page.questions.indexOf(node);
-  page.questions = page.questions.filter((q) => q !== node);
-  const restore = vi.fn(() => {
-    page.questions = [...page.questions.slice(0, index), node, ...page.questions.slice(index)];
+/** What the builder does on a trash click: out of the tree, the write held. */
+async function holdQuestionDelete(state: GraphedBuilderState, tree: Parameters<GraphedBuilderState['deleteQuestion']>[0], page: PageNode, node: QuestionNode) {
+  const restore = vi.fn();
+  await state.holdDelete(node.entity.ID, () => {
+    const index = page.questions.indexOf(node);
+    page.questions = page.questions.filter((q) => q !== node);
+    return {
+      restore: () => {
+        restore();
+        page.questions = [...page.questions.slice(0, index), node, ...page.questions.slice(index)];
+      },
+      commit: () => state.deleteQuestion(tree, page, node),
+    };
   });
-  state.holdDelete({ label: node.entity.ID, restore, commit: () => state.deleteQuestion(tree, page, node) });
   return restore;
+}
+
+type Tree = Parameters<GraphedBuilderState['deleteScreen']>[0];
+type Screen = Parameters<GraphedBuilderState['deleteScreen']>[1];
+
+/** The same for an ending screen. */
+function holdScreenDelete(state: GraphedBuilderState, tree: Tree, screen: Screen): Promise<boolean> {
+  return state.holdDelete(screen.ID, () => {
+    const index = tree.screens.indexOf(screen);
+    tree.screens = tree.screens.filter((s) => s !== screen);
+    return {
+      restore: () => {
+        tree.screens = [...tree.screens.slice(0, index), screen, ...tree.screens.slice(index)];
+      },
+      commit: () => state.deleteScreen(tree, screen),
+    };
+  });
 }
 
 describe('a held builder delete', () => {
@@ -46,7 +69,7 @@ describe('a held builder delete', () => {
     const { tree, store } = fakeTree([{ id: 'p1', questions: [{ id: 'q0' }, { id: 'q1' }] }]);
     const state = new GraphedBuilderState(store);
     const page = tree.pages[0];
-    holdQuestionDelete(state, tree, page, page.questions[0]);
+    await holdQuestionDelete(state, tree, page, page.questions[0]);
 
     const added = await state.addQuestion(tree, page, 'ShortText', 'Appended');
 
@@ -59,7 +82,7 @@ describe('a held builder delete', () => {
   it('is written by flushPendingSaves, which publish awaits', async () => {
     const { tree, store } = fakeTree([{ id: 'p1', questions: [{ id: 'q0' }, { id: 'q1' }] }]);
     const state = new GraphedBuilderState(store);
-    holdQuestionDelete(state, tree, tree.pages[0], tree.pages[0].questions[0]);
+    await holdQuestionDelete(state, tree, tree.pages[0], tree.pages[0].questions[0]);
 
     await state.flushPendingSaves();
 
@@ -70,7 +93,7 @@ describe('a held builder delete', () => {
     vi.useFakeTimers();
     const { tree, store } = fakeTree([{ id: 'p1', questions: [{ id: 'q0' }, { id: 'q1' }] }]);
     const state = new GraphedBuilderState(store);
-    holdQuestionDelete(state, tree, tree.pages[0], tree.pages[0].questions[0]);
+    await holdQuestionDelete(state, tree, tree.pages[0], tree.pages[0].questions[0]);
 
     await vi.advanceTimersByTimeAsync(10_000);
 
@@ -82,7 +105,7 @@ describe('a held builder delete', () => {
     const { tree, store } = fakeTree([{ id: 'p1', questions: [{ id: 'q0' }, { id: 'q1' }, { id: 'q2' }] }]);
     const state = new GraphedBuilderState(store);
     const page = tree.pages[0];
-    const restore = holdQuestionDelete(state, tree, page, page.questions[1]);
+    const restore = await holdQuestionDelete(state, tree, page, page.questions[1]);
 
     expect(state.undoDelete()).toBe(true);
     await vi.advanceTimersByTimeAsync(20_000);
@@ -98,7 +121,7 @@ describe('a held builder delete', () => {
     store.refuse.set('q0', 'refused');
     const state = new GraphedBuilderState(store);
     const page = tree.pages[0];
-    holdQuestionDelete(state, tree, page, page.questions[0]);
+    await holdQuestionDelete(state, tree, page, page.questions[0]);
 
     await state.flushPendingSaves();
 
@@ -110,9 +133,9 @@ describe('a held builder delete', () => {
     const { tree, store } = fakeTree([{ id: 'p1', questions: [{ id: 'q0' }, { id: 'q1' }, { id: 'q2' }] }]);
     const state = new GraphedBuilderState(store);
     const page = tree.pages[0];
-    holdQuestionDelete(state, tree, page, page.questions[0]);
+    await holdQuestionDelete(state, tree, page, page.questions[0]);
     // Holding the second commits the first; the first's save must not wait on the second.
-    holdQuestionDelete(state, tree, page, page.questions[0]);
+    await holdQuestionDelete(state, tree, page, page.questions[0]);
     // Let the first delete's save start while the second is still held: that is the window in
     // which a flush inside the save would release the second and wait on it behind itself.
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -143,9 +166,7 @@ describe('a held builder delete', () => {
     const end = (id: string, order: number, isDefault: boolean) => ({ ID: id, FormID: 'form-1', ScreenType: 'Ending', IsDisqualification: false, DisplayOrder: order, IsDefault: isDefault, Title: id });
     const { tree, store } = fakeTree([{ id: 'p1' }], [end('x', 0, false), end('y', 1, false), end('d', 2, true)]);
     const state = new GraphedBuilderState(store);
-    const d = tree.screens[2];
-    tree.screens = tree.screens.filter((s) => s !== d);
-    state.holdDelete({ label: 'd', restore: () => undefined, commit: () => state.deleteScreen(tree, d) });
+    await holdScreenDelete(state, tree, tree.screens[2]);
 
     expect(await state.setDefaultEnding(tree, 'y')).toBe(true);
 
@@ -158,7 +179,7 @@ describe('a held builder delete', () => {
     const { tree, store } = fakeTree([{ id: 'p1', questions: [{ id: 'q0' }, { id: 'q1' }] }]);
     store.refuse.set('q0', 'Error executing SQL Error: The DELETE statement conflicted with the REFERENCE constraint "FK_FormResponseAnswer_Question". Query: DECLARE @ResultTable');
     const state = new GraphedBuilderState(store);
-    holdQuestionDelete(state, tree, tree.pages[0], tree.pages[0].questions[0]);
+    await holdQuestionDelete(state, tree, tree.pages[0], tree.pages[0].questions[0]);
 
     await state.flushPendingSaves();
 
@@ -172,3 +193,42 @@ describe('a held builder delete', () => {
   });
 });
 
+/**
+ * UI audit F07, review of PR #350: a second delete used to leave the tree BEFORE the first one's
+ * held write ran, and that write renumbers what it finds when it runs. So the second item was left
+ * out of the order the database was given, and Undo put it back at a position the rows no longer had.
+ */
+describe('a second delete while one is held', () => {
+  const end = (id: string, order: number, isDefault: boolean) => ({ ID: id, FormID: 'form-1', ScreenType: 'Ending', IsDisqualification: false, DisplayOrder: order, IsDefault: isDefault, Title: id });
+
+  it('leaves the stored order matching the page when the second is undone', async () => {
+    const { tree, store } = fakeTree([{ id: 'p1', questions: [{ id: 'q1' }, { id: 'q2' }, { id: 'q3' }] }]);
+    const state = new GraphedBuilderState(store);
+    const page = tree.pages[0];
+    const [q1, q2] = page.questions;
+    void holdQuestionDelete(state, tree, page, q1);
+    await holdQuestionDelete(state, tree, page, q2);
+    expect(store.stored('q1')).toBeUndefined();
+
+    expect(state.undoDelete()).toBe(true);
+    await state.flushPendingSaves();
+
+    expect(ids(page)).toEqual(['q2', 'q3']);
+    expect(page.questions.map((q) => store.stored(q.entity.ID)?.DisplayOrder)).toEqual([0, 1]);
+  });
+
+  it('keeps a default ending when the old default and then the survivor are deleted, and the survivor undone', async () => {
+    const { tree, store } = fakeTree([{ id: 'p1' }], [end('e1', 0, true), end('e2', 1, false)]);
+    const state = new GraphedBuilderState(store);
+    const [e1, e2] = tree.screens;
+    void holdScreenDelete(state, tree, e1);
+    await holdScreenDelete(state, tree, e2);
+    expect(store.stored('e1')).toBeUndefined();
+
+    expect(state.undoDelete()).toBe(true);
+    await state.flushPendingSaves();
+
+    expect(tree.screens.map((s) => s.ID)).toEqual(['e2']);
+    expect(store.stored('e2')?.IsDefault).toBe(true);
+  });
+});
