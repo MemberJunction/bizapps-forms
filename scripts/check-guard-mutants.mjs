@@ -1839,10 +1839,13 @@ export const MUTANTS = [
     killedBy: ['src/lib/responses/response-reads.spec.ts', 'src/lib/dashboard/services/forms-reporting-export.service.spec.ts'],
   },
   {
-    name: 'responses/list-pages-past-a-change',
-    behaviour: 'Load more stops and says the list changed when a page disagrees with it, instead of appending a shifted page',
+    // Was the Load-more check that refused to append a page the list had shifted under. The table
+    // now reads numbered pages (UI audit F08), so nothing is appended; what can go wrong is a page
+    // past the end after the list shrank, which must land on the last page, not an empty table.
+    name: 'responses/page-past-the-end-lands-on-last',
+    behaviour: 'a page past the end (the list shrank since the link or the last page turn) is read again as the last page, not shown empty',
     file: 'packages/Angular/src/lib/responses/responses-tab.component.ts',
-    find: '      if (page.total !== this.Total() || page.rows.some((r) => held.has(r.responseId))) {',
+    find: '      if (generation === this.generation && page.rows.length === 0 && page.total > 0 && this.Query().page > last) {',
     replace: '      if (false) {',
     suite: 'packages/Angular',
     killedBy: ['src/lib/responses/responses-tab.component.spec.ts'],
