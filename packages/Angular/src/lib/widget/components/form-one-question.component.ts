@@ -21,6 +21,7 @@ import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-enti
 
 import { FormRuntime } from '../core/form-runtime';
 import { nothingToSubmit } from '../core/nothing-to-submit';
+import { focusIsOutside, focusOnChange } from '../core/focus-on-change';
 import { StepJudge } from '../core/settled-validation';
 import { clampCursor } from '../core/stepper';
 import { advancesOnEnter } from './enter-advances';
@@ -148,14 +149,15 @@ export class FormOneQuestionComponent {
     });
 
     // Move focus to the current question only when the question itself changes — not on
-    // every answer edit — so typing or selecting an answer never yanks focus mid-input.
-    let lastFocusedId: string | null = null;
+    // every answer edit — so typing or selecting an answer never yanks focus mid-input. The first
+    // question does not take focus from a control outside the form that holds it.
+    const shouldFocus = focusOnChange();
     effect(() => {
       const c = this.current();
-      if (c && c.id !== lastFocusedId) {
-        lastFocusedId = c.id;
-        queueMicrotask(() => this.focusCurrent());
-      }
+      if (!c) return;
+      queueMicrotask(() => {
+        if (shouldFocus(c.id, focusIsOutside(this.hostRef.nativeElement))) this.focusCurrent();
+      });
     });
   }
 
