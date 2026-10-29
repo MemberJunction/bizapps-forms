@@ -53,7 +53,7 @@ const IMAGE_PICKER_CSS = /* css */ `
 .ipd-backdrop {
   position: absolute;
   inset: 0;
-  background: var(--mj-overlay-scrim, rgba(9, 17, 24, 0.55));
+  background: var(--mj-bg-overlay);
 }
 
 .ipd {
@@ -74,10 +74,10 @@ const IMAGE_PICKER_CSS = /* css */ `
   display: flex;
   align-items: center;
   gap: var(--mjf-gap-sm);
-  padding: 14px var(--mjf-gap);
+  padding: 12px var(--mjf-gap);
   border-bottom: 1px solid var(--mjf-rule);
 }
-.ipd-title { flex: 1 1 auto; margin: 0; font-size: 1rem; font-weight: 600; color: var(--mj-text-primary); }
+.ipd-title { flex: 1 1 auto; margin: 0; font-size: var(--mjf-section); font-weight: 600; color: var(--mj-text-primary); }
 .ipd-close {
   flex: none;
   width: 32px;
@@ -107,7 +107,7 @@ const IMAGE_PICKER_CSS = /* css */ `
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   width: 100%;
   min-height: 200px;
   padding: var(--mjf-gap);
@@ -131,9 +131,9 @@ const IMAGE_PICKER_CSS = /* css */ `
   background: var(--mj-bg-surface-hover);
   color: var(--mj-text-primary);
 }
-.ipd-drop-icon { font-size: 22px; color: var(--mj-text-muted); }
+.ipd-drop-icon { font-size: var(--mjf-icon-lg); color: var(--mj-text-muted); }
 .ipd-drop.is-dragging .ipd-drop-icon { color: var(--mj-brand-primary); }
-.ipd-drop-lead { font-size: 1rem; font-weight: 600; color: var(--mj-text-primary); }
+.ipd-drop-lead { font-size: var(--mjf-body); font-weight: 600; color: var(--mj-text-primary); }
 .ipd-drop-sub { font-size: var(--mjf-label); color: var(--mj-text-muted); }
 
 .ipd-or {

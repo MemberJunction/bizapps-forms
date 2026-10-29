@@ -186,7 +186,7 @@
           title="Your edits are not published yet. Publishing pushes them live."
           (click)="publish()"
         >
-          <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Publish changes
+          <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Publish<span class="fb-publish-more"> changes</span>
         </button>
       }
       @case ('publish') {
@@ -241,58 +241,34 @@
     </div>
   }
 
-  <!-- Tabs -->
-  <nav class="fb-tabs" role="tablist" aria-label="Builder workspace">
-    <button
-      type="button"
-      class="fb-tab"
-      role="tab"
-      [class.is-on]="activeTab === 'build'"
-      [attr.aria-selected]="activeTab === 'build'"
-      (click)="setTab('build')"
-    ><i class="fa-solid fa-list-check" aria-hidden="true"></i> Build</button>
-    <button
-      type="button"
-      class="fb-tab"
-      role="tab"
-      [class.is-on]="activeTab === 'design'"
-      [attr.aria-selected]="activeTab === 'design'"
-      (click)="setTab('design')"
-    ><i class="fa-solid fa-palette" aria-hidden="true"></i> Design</button>
-    <button
-      type="button"
-      class="fb-tab"
-      role="tab"
-      [class.is-on]="activeTab === 'distribute'"
-      [attr.aria-selected]="activeTab === 'distribute'"
-      (click)="setTab('distribute')"
-    ><i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Distribute</button>
-    <button
-      type="button"
-      class="fb-tab"
-      role="tab"
-      [class.is-on]="activeTab === 'automate'"
-      [attr.aria-selected]="activeTab === 'automate'"
-      (click)="setTab('automate')"
-    ><i class="fa-solid fa-bolt" aria-hidden="true"></i> Automate</button>
-    <button
-      type="button"
-      class="fb-tab"
-      role="tab"
-      [class.is-on]="activeTab === 'responses'"
-      [attr.aria-selected]="activeTab === 'responses'"
-      (click)="setTab('responses')"
-    ><i class="fa-solid fa-inbox" aria-hidden="true"></i> Responses</button>
+  <!-- Tabs. One Tab stop: the selected tab is tabindex 0, the rest -1, and the arrow keys move
+       along the strip (builder-tabs.ts). -->
+  <nav class="fb-tabs" role="tablist" aria-label="Builder workspace" (keydown)="onTabKey($event)">
+    @for (item of tabItems; track item.tab) {
+      <button
+        #tabButton
+        type="button"
+        class="fb-tab"
+        role="tab"
+        [id]="tabId(item.tab)"
+        [attr.aria-controls]="panelId(item.tab)"
+        [class.is-on]="activeTab === item.tab"
+        [attr.aria-selected]="activeTab === item.tab"
+        [attr.tabindex]="activeTab === item.tab ? 0 : -1"
+        (click)="setTab(item.tab)"
+      ><i [class]="item.icon" aria-hidden="true"></i> {{ item.label }}</button>
+    }
   </nav>
 
   @if (activeTab === 'automate' && tree) {
-    <mjf-automation-tab class="fb-pane-host" [FormID]="tree.form.ID" [Questions]="mappableQuestions" />
+    <mjf-automation-tab class="fb-pane-host" role="tabpanel" [id]="panelId('automate')" [attr.aria-labelledby]="tabId('automate')" [FormID]="tree.form.ID" [Questions]="mappableQuestions" />
   }
 
   <!-- Created on activation, so the responses query never runs on builder open. -->
   @if (activeTab === 'responses' && tree) {
     <mjf-responses-tab
       class="fb-pane-host"
+      role="tabpanel" [id]="panelId('responses')" [attr.aria-labelledby]="tabId('responses')"
       [FormID]="tree.form.ID"
       [InitialState]="responsesState"
       (StateChange)="onResponsesState($event)"
@@ -305,7 +281,7 @@
        screens in. The Automate and Responses tabs above already gate on `tree` for the same
        reason; this one did not. -->
   @if (activeTab === 'build' && builderReady) {
-    <div class="fb-body">
+    <div class="fb-body" [class.has-selection]="selection.kind !== 'none'" role="tabpanel" [id]="panelId('build')" [attr.aria-labelledby]="tabId('build')">
       <!-- LEFT: palette -->
       <nav class="fb-pane fb-pane--left" aria-label="Add question palette">
         <div class="fb-palette-search">
@@ -746,7 +722,13 @@
       </section>
 
       <!-- RIGHT: properties -->
-      <aside class="fb-pane fb-pane--right" aria-label="Properties">
+      <!-- Below 900px this is a bottom sheet, shown while something is selected (F14). The head is
+           the sheet's own and is hidden at desktop width, where the pane is a column. -->
+      <aside class="fb-pane fb-pane--right" aria-label="Properties" (keydown.escape)="onPropertiesEscape()">
+        <div class="fb-sheet-head">
+          <span class="fb-sheet-title">{{ inspectorTitle }}</span>
+          <button type="button" class="mjf-btn mjf-btn--sm fb-sheet-done" (click)="closeSheet()">Done</button>
+        </div>
         @if (selectedScreen; as screen) {
           <mjf-screen-editor
             [sections]="formSections"
@@ -792,7 +774,7 @@
       </aside>
     </div>
   } @else if (activeTab === 'design') {
-    <div class="fb-design">
+    <div class="fb-design" role="tabpanel" [id]="panelId('design')" [attr.aria-labelledby]="tabId('design')">
       <mjf-design-panel
         [form]="record"
         [definition]="designPreviewDefinition"
@@ -800,7 +782,7 @@
       ></mjf-design-panel>
     </div>
   } @else if (activeTab === 'distribute') {
-    <div class="fb-distribute">
+    <div class="fb-distribute" role="tabpanel" [id]="panelId('distribute')" [attr.aria-labelledby]="tabId('distribute')">
       <mjf-distribution-manager [formId]="record.ID"></mjf-distribution-manager>
     </div>
   }

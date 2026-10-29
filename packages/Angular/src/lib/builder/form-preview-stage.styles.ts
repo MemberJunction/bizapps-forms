@@ -91,7 +91,7 @@ export const PREVIEW_STAGE_STYLES = /* css */ `
   justify-content: center;
   width: 2.75rem;
   height: 2.5rem;
-  font-size: 1.125rem;
+  font-size: var(--mjf-icon);
   border: none;
   border-radius: var(--mj-radius-sm);
   background: transparent;
@@ -116,7 +116,7 @@ export const PREVIEW_STAGE_STYLES = /* css */ `
 
 .ps-width {
   margin-left: auto;
-  font-size: 0.8125rem;
+  font-size: var(--mjf-meta);
   color: var(--mj-text-muted);
   white-space: nowrap;
 }
@@ -156,7 +156,7 @@ export const PREVIEW_STAGE_STYLES = /* css */ `
   min-height: 2.25rem;
   padding: 0.3125rem 0.75rem;
   font: inherit;
-  font-size: 0.8125rem;
+  font-size: var(--mjf-meta);
   border: none;
   border-radius: var(--mj-radius-sm);
   background: transparent;

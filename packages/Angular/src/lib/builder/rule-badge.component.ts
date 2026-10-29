@@ -29,16 +29,16 @@ const RULE_BADGE_CSS = `
 .rb {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   /* Carried here from the canvas's own .fb-q-tags .mjf-badge rule: a parent's scoped styles do
      not reach inside a child component, so leaving it there would have quietly inflated every
      badge the moment this component took over rendering them. */
   padding: 1px 8px;
-  font-size: 0.6875rem;
+  font-size: var(--mjf-label);
   /* Promises a tooltip, and now there is one to show. */
   cursor: help;
 }
-.rb i { font-size: 0.625rem; opacity: 0.8; }
+.rb i { font-size: var(--mjf-icon-sm); opacity: 0.8; }
 
 .rb-tip {
   position: absolute;
@@ -50,7 +50,7 @@ const RULE_BADGE_CSS = `
      column, so stretching to the row would give one sentence the width of the whole card. */
   width: max-content;
   max-width: 320px;
-  padding: 8px 10px;
+  padding: 8px 8px;
   font-size: var(--mjf-label);
   font-weight: 400;
   line-height: 1.45;

@@ -43,7 +43,7 @@ for (const selector of ['.x:disabled', '.x[disabled]', '.x[aria-disabled="true"]
 
 test('disabled-for-content: the selector of a multi-line rule is read from the line that opened it', () => {
   assert.deepEqual(rules(['.x:disabled,', '.y:disabled {', '  color: var(--mj-text-disabled);', '}']), []);
-  assert.deepEqual(rules(['.meta {', '  font-size: 12px;', '  color: var(--mj-text-disabled);', '}']), ['disabled-for-content']);
+  assert.deepEqual(rules(['.meta {', '  font-weight: 600;', '  color: var(--mj-text-disabled);', '}']), ['disabled-for-content']);
 });
 
 test('disabled-for-content: a marker with a reason on the line before allows it', () => {
@@ -58,6 +58,57 @@ test('disabled-for-content: a marker without a reason does not', () => {
     rules(['/* ui-gate: allow-disabled-token */', '.dot { color: var(--mj-text-disabled); }']),
     ['disabled-for-content'],
   );
+});
+
+test('undefined-token: --mj-overlay-scrim is not an MJ token, so its fallback always applies', () => {
+  assert.deepEqual(rules(['  background: var(--mj-overlay-scrim, rgba(9, 17, 24, 0.55));']), ['undefined-token']);
+  assert.deepEqual(rules(['  background: var(--mj-bg-overlay);']), []);
+});
+
+test('palette-primitive: a --mj-color-* step is a palette value, not a theme decision', () => {
+  assert.deepEqual(rules(['  color: var(--mj-status-error, var(--mj-color-error-600));']), ['palette-primitive']);
+  assert.deepEqual(rules(['  color: var(--mj-status-error-text);']), []);
+});
+
+test('focus-ring-is-a-color: the widget may not use --mjf-focus-ring as a shadow', () => {
+  // A form style sets it to a colour (the shipped Contrast preset does), and a colour in a
+  // box-shadow is invalid, so the focus indicator vanished. The shadow is --mjf-focus-shadow.
+  assert.deepEqual(rules(['.b:focus-visible { box-shadow: var(--mjf-focus-ring); }'], WIDGET), ['focus-ring-is-a-color']);
+  assert.deepEqual(rules(['  box-shadow: var(--mjf-card-shadow), var(--mjf-focus-ring);'], WIDGET), ['focus-ring-is-a-color']);
+  assert.deepEqual(rules(['.b:focus-visible { box-shadow: var(--mjf-focus-shadow); }'], WIDGET), []);
+  assert.deepEqual(rules(['.b:focus-visible { outline: 2px solid var(--mjf-focus-ring); }']), []);
+});
+
+test('raw-font-size: Explorer text takes its size from a type token', () => {
+  assert.deepEqual(rules(['.t { font-size: 1.0625rem; }']), ['raw-font-size']);
+  assert.deepEqual(rules(['.t { font-size: 12px; }']), ['raw-font-size']);
+  assert.deepEqual(rules(['.t { font-size: var(--mjf-meta); }']), []);
+  assert.deepEqual(rules(['.t i { font-size: 0.85em; }']), [], 'em is relative to its own text, so it scales with the token');
+});
+
+test('raw-font-size: defining a token is where the raw value belongs', () => {
+  assert.deepEqual(rules(['  --mjf-meta: 0.8125rem;']), []);
+});
+
+test('raw-font-size: the widget keeps its own scale', () => {
+  // Respondent inputs sit at 1rem so iOS does not zoom on focus; that is the widget's to own.
+  assert.deepEqual(rules(['.i { font-size: 1rem; }'], WIDGET), []);
+});
+
+test('off-scale-spacing: gaps, padding and margins sit on the 4px grid', () => {
+  assert.deepEqual(rules(['.a { gap: 10px; }']), ['off-scale-spacing']);
+  assert.deepEqual(rules(['.a { padding: 6px 12px; }']), ['off-scale-spacing']);
+  assert.deepEqual(rules(['.a { margin-bottom: 14px; }']), ['off-scale-spacing']);
+  assert.deepEqual(rules(['.a { padding: 4px 12px 24px; gap: 8px; }']), []);
+});
+
+test('off-scale-spacing: hairlines and nudges of 1–2px are not spacing', () => {
+  assert.deepEqual(rules(['.a { margin-bottom: -1px; padding: 2px 8px; }']), []);
+});
+
+test('off-scale-spacing: only spacing properties, and not in the widget', () => {
+  assert.deepEqual(rules(['.a { width: 22px; border-radius: 6px; }']), []);
+  assert.deepEqual(rules(['.a { gap: 6px; }'], WIDGET), []);
 });
 
 test('a mention inside a comment is prose, not a use', () => {

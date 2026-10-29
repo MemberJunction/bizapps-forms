@@ -59,6 +59,8 @@ import { ResponsesTabComponent, type ResponsesTabState } from '../responses/resp
 import { DEFAULT_RESPONSE_QUERY } from '../responses/responses-query';
 import type { BuilderTab, BuilderView } from '../shared/view-urls';
 import { BuilderUrlSync } from './builder-url-sync';
+import { BUILDER_TAB_ITEMS, tabAfterKey, tabElementId, tabPanelId } from './builder-tabs';
+import { InspectorSheet, SHEET_MEDIA_QUERY } from './inspector-sheet';
 import type { ResponseRecordLink } from '../responses/response-models';
 import { DesignPanelComponent } from './design-panel.component';
 import { FormPreviewModalComponent } from './form-preview-modal.component';
@@ -175,6 +177,9 @@ function draftDefinition(
   return built.ok ? built.definition : null;
 }
 
+/** Numbers each builder instance, so its tab and panel ids are unique in the document. */
+let builderInstanceSeq = 0;
+
 /**
  * The visual form builder — registered as the override for the
  * `MJ_BizApps_Forms: Forms` entity form so that opening a Form record in Explorer
@@ -249,8 +254,59 @@ export class FormBuilderComponent extends BaseFormComponent {
    * What the right-hand pane is showing. ONE value, not a question id beside a screen id: the
    * pane shows a single editor, and two independent fields let it show a screen's properties
    * while a freshly-added question sat highlighted and unreachable on the canvas.
+   *
+   * Every write goes through the setter because, below 900px, selecting is what opens the
+   * Properties sheet and clearing is what closes it (F14). The sheet has to hear about every
+   * change — a delete clears the selection too — or it would think it is still open.
    */
-  protected selection: BuilderSelection = NOTHING_SELECTED;
+  private _selection: BuilderSelection = NOTHING_SELECTED;
+  protected get selection(): BuilderSelection {
+    return this._selection;
+  }
+  protected set selection(next: BuilderSelection) {
+    const opening = this._selection.kind === 'none' && next.kind !== 'none';
+    const closing = this._selection.kind !== 'none' && next.kind === 'none';
+    this._selection = next;
+    if (opening) this.moveFocusIntoSheet();
+    if (closing) this.sheet.Closed();
+  }
+
+  private readonly isNarrow = (): boolean =>
+    typeof matchMedia === 'function' && matchMedia(SHEET_MEDIA_QUERY).matches;
+  private readonly sheet = new InspectorSheet(this.isNarrow);
+
+  /** Escape closes the sheet. At desktop width the pane is a column, and Escape there is not ours. */
+  protected onPropertiesEscape(): void {
+    if (this.isNarrow() && this.selection.kind !== 'none') this.closeSheet();
+  }
+
+  private moveFocusIntoSheet(): void {
+    // Width first: it is false wherever there is no window, so `document` is only read in a browser.
+    if (!this.isNarrow()) return;
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!this.sheet.Opened(active)) return;
+    // The sheet becomes visible on this render; focus can only land on it after.
+    afterNextRender(
+      () => this.host.nativeElement.querySelector<HTMLElement>('.fb-sheet-done')?.focus(),
+      { injector: this.injector },
+    );
+  }
+
+  /** Done or Escape on the Properties sheet: deselect, and return focus to the card that opened it. */
+  protected closeSheet(): void {
+    const returnTo = this.sheet.Closed();
+    this.selection = NOTHING_SELECTED;
+    this.cdr.markForCheck();
+    returnTo?.focus();
+  }
+
+  /** The sheet's heading: what is being edited. */
+  protected get inspectorTitle(): string {
+    if (this.selectedScreen) return this.selectedScreen.Title || 'Screen';
+    if (this.selectedPage) return this.selectedPage.entity.Title || `Section ${this.selectedPageIndex + 1}`;
+    return this.selectedNode?.entity.Prompt || 'Question';
+  }
+
   protected get selectedQuestionId(): string | null {
     return questionId(this.selection);
   }
@@ -266,6 +322,16 @@ export class FormBuilderComponent extends BaseFormComponent {
   /** Live palette filter. At 25 types, scanning seven groups is slower than typing. */
   protected paletteQuery = '';
   protected activeTab: BuilderTab = 'build';
+
+  protected readonly tabItems = BUILDER_TAB_ITEMS;
+  /** Prefix for the tab and panel ids: Explorer can hold several builders open at once. */
+  private readonly tabScope = `fb${++builderInstanceSeq}`;
+  protected tabId(tab: BuilderTab): string {
+    return tabElementId(this.tabScope, tab);
+  }
+  protected panelId(tab: BuilderTab): string {
+    return tabPanelId(this.tabScope, tab);
+  }
 
   /**
    * The Responses tab's table and open response: what it starts on when it mounts, and the last
@@ -591,6 +657,20 @@ export class FormBuilderComponent extends BaseFormComponent {
     // A Responses tab already on screen moves in place; one not yet mounted starts from the state.
     void this.responsesTab?.ApplyState(view.responses);
     this.cdr.markForCheck();
+    this.revealActiveTab();
+  }
+
+  /**
+   * On a phone the strip scrolls, so a link straight to Responses would select a tab that sits
+   * past the edge. A click or an arrow key already brings its tab into view; a URL does not.
+   */
+  private revealActiveTab(): void {
+    afterNextRender(
+      () => this.host.nativeElement
+        .querySelector<HTMLElement>(`#${this.tabId(this.activeTab)}`)
+        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' }),
+      { injector: this.injector },
+    );
   }
 
   /** The Responses tab moved to another page, sort, search or response. */
@@ -2311,6 +2391,17 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.activeTab = tab;
     this.writeUrl();
     this.cdr.markForCheck();
+  }
+
+  /** Arrow keys, Home and End on the tab strip: open the tab and move focus with it. */
+  protected onTabKey(event: KeyboardEvent): void {
+    const next = tabAfterKey(this.activeTab, event.key);
+    if (!next) return;
+    event.preventDefault();
+    this.setTab(next);
+    // Every tab button is always rendered, so the target exists now; only its tabindex waits
+    // for change detection, and focus() does not need it.
+    this.host.nativeElement.querySelector<HTMLButtonElement>(`#${this.tabId(next)}`)?.focus();
   }
 
   /**

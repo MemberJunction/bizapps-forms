@@ -128,7 +128,7 @@ export const SEARCH_DEBOUNCE_MS = 300;
       .rl-sort {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 4px;
         min-height: 24px;
         padding: 0;
         border: 0;
@@ -152,7 +152,7 @@ export const SEARCH_DEBOUNCE_MS = 300;
         font-size: var(--mjf-meta);
         color: var(--mj-text-secondary);
       }
-      .rl-size { display: inline-flex; align-items: center; gap: 6px; }
+      .rl-size { display: inline-flex; align-items: center; gap: 4px; }
       .rl-size select { width: auto; min-height: 32px; padding-block: 2px; }
       .rl-range { font-variant-numeric: tabular-nums; }
       /* While a response opens or a page turns: the rows stay where the reader clicked, visibly on hold. */

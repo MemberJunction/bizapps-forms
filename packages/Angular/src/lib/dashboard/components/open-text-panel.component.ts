@@ -114,7 +114,7 @@ import type { OpenTextInsight } from '../models/reporting.model';
         border-bottom: 1px solid var(--mjf-rule);
         background: var(--mj-bg-surface-sunken);
       }
-      .otp-headings { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+      .otp-headings { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
       .otp-prompt {
         margin: 0;
         font-size: var(--mjf-body);
@@ -127,7 +127,7 @@ import type { OpenTextInsight } from '../models/reporting.model';
         display: flex;
         flex-wrap: wrap;
         align-items: baseline;
-        gap: 5px;
+        gap: 4px;
         margin: 0;
         font-size: var(--mjf-label);
         color: var(--mj-text-muted);
@@ -137,7 +137,7 @@ import type { OpenTextInsight } from '../models/reporting.model';
 
       .otp-rate { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
       .otp-rate-value {
-        font-size: 1.25rem;
+        font-size: var(--mjf-heading);
         font-weight: 650;
         line-height: 1;
         color: var(--mj-text-primary);
@@ -155,8 +155,8 @@ import type { OpenTextInsight } from '../models/reporting.model';
       .otp-theme {
         display: inline-flex;
         align-items: center;
-        gap: 7px;
-        padding: 4px 10px;
+        gap: 8px;
+        padding: 4px 8px;
         border-radius: var(--mjf-radius-pill);
         background: var(--mj-bg-surface-sunken);
         border: 1px solid var(--mj-border-subtle);
@@ -175,8 +175,8 @@ import type { OpenTextInsight } from '../models/reporting.model';
         align-self: flex-start;
         display: inline-flex;
         align-items: center;
-        gap: 7px;
-        padding: 6px 0;
+        gap: 8px;
+        padding: 4px 0;
         font: inherit;
         font-size: var(--mjf-label);
         font-weight: 600;

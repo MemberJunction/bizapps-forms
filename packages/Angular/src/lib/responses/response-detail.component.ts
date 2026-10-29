@@ -289,7 +289,7 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
          a bare link: a border, a radius and a hover it visibly responds to. The arrow
          slides on hover to say which way it goes. */
       .rd-back {
-        padding: 0 14px;
+        padding: 0 12px;
         color: var(--mj-text-secondary);
         background: var(--mj-bg-surface);
         border: 1px solid var(--mj-border-default);
@@ -340,7 +340,7 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
       .answer { padding: var(--mjf-card-pad); }
       .answer + .answer { border-top: 1px solid var(--mjf-rule); }
       .answer dt {
-        margin: 0 0 6px;
+        margin: 0 0 4px;
         font-size: var(--mjf-meta);
         font-weight: 600;
         color: var(--mj-text-secondary);

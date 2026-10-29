@@ -213,7 +213,7 @@ describe('the file control has ONE status display', () => {
 
   it('draws the focus ring on the stand-in, since the input is off screen', () => {
     const css = stripped('form-question.component.css');
-    expect(css).toMatch(/\.mjf-file:focus-within \.mjf-file__pick \{[\s\S]{0,160}--mjf-focus-ring/);
+    expect(css).toMatch(/\.mjf-file:focus-within \.mjf-file__pick \{[\s\S]{0,160}--mjf-focus-shadow/);
     // And positions the clipped input where the control is, so focusing it scrolls to the right
     // place on a failed submit.
     expect(css).toMatch(/\.mjf-file \{[\s\S]{0,300}position: relative;/);

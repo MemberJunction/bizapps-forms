@@ -109,7 +109,7 @@ const FORM_SCREEN_CSS = /* css */ `
 }
 
 .mjf-screen__cta:hover { background: var(--mjf-accent-strong); }
-.mjf-screen__cta:focus-visible { outline: none; box-shadow: var(--mjf-focus-ring); }
+.mjf-screen__cta:focus-visible { outline: none; box-shadow: var(--mjf-focus-shadow); }
 
 .mjf-screen__done-icon {
   display: inline-block;
@@ -192,7 +192,7 @@ const FORM_SCREEN_CSS = /* css */ `
 
 .mjf-screen__social-link:focus-visible {
   outline: none;
-  box-shadow: var(--mjf-focus-ring);
+  box-shadow: var(--mjf-focus-shadow);
 }
 
 @media (prefers-reduced-motion: reduce) {

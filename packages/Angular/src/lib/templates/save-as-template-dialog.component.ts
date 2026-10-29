@@ -51,7 +51,7 @@ const SAVE_TEMPLATE_CSS = /* css */ `
 
 .st-head { display: flex; align-items: center; gap: var(--mjf-gap-sm); }
 .st-head i { color: var(--mjf-viz-fill); }
-.st-head h2 { flex: 1; margin: 0; font-size: 1rem; font-weight: 650; color: var(--mj-text-primary); }
+.st-head h2 { flex: 1; margin: 0; font-size: var(--mjf-section); font-weight: 650; color: var(--mj-text-primary); }
 
 .st-note {
   margin: 0;

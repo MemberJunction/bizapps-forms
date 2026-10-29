@@ -298,6 +298,11 @@ function isAllowed(raw, lines, i) {
  *    The widget defines --mj-brand-on-primary itself, against its own palette, so it is exempt.
  *  - disabled-for-content: --mj-text-disabled is for disabled controls and placeholders. On
  *    readable text it measured 1.93:1 in dark.
+ * F23 added three that are about tokens doing nothing rather than contrast:
+ *  - undefined-token: a var() of a name MJ never defines always takes its raw fallback.
+ *  - palette-primitive: a --mj-color-* step is one fixed colour in both themes.
+ *  - focus-ring-is-a-color: the shipped Contrast style sets --mjf-focus-ring to a colour, and a
+ *    colour inside box-shadow is invalid, so the widget's focus indicator disappeared.
  */
 const TOKEN_RULES = [
   {
@@ -314,7 +319,63 @@ const TOKEN_RULES = [
     allowedSelector: (selector) => /:disabled|\[disabled\]|\[aria-disabled|::?placeholder|\.is-disabled\b/.test(selector),
     message: '--mj-text-disabled is for disabled controls and placeholders; use --mj-text-muted, or mark a decorative glyph',
   },
+  {
+    rule: 'undefined-token',
+    re: /var\(\s*--mj-overlay-scrim\b/,
+    appliesTo: () => true,
+    allowedSelector: () => false,
+    message: 'MJ defines no --mj-overlay-scrim, so the fallback always applies; use var(--mj-bg-overlay)',
+  },
+  {
+    rule: 'palette-primitive',
+    re: /var\(\s*--mj-color-/,
+    appliesTo: () => true,
+    allowedSelector: () => false,
+    message: '--mj-color-* are palette steps that do not follow the theme; use a semantic --mj-* token',
+  },
+  {
+    rule: 'focus-ring-is-a-color',
+    re: /box-shadow:[^;]*var\(\s*--mjf-focus-ring\b/,
+    appliesTo: () => true,
+    allowedSelector: () => false,
+    message: '--mjf-focus-ring is a colour (form styles set it to one); a shadow reads var(--mjf-focus-shadow)',
+  },
+  {
+    rule: 'raw-font-size',
+    re: /font-size:\s*[0-9.]+(rem|px)\b/,
+    appliesTo: isExplorerSurface,
+    allowedSelector: () => false,
+    message: 'use a type token (--mjf-label/-meta/-body/-section/-heading/-title, --mjf-figure*, --mjf-icon*)',
+  },
+  {
+    rule: 'off-scale-spacing',
+    matches: hasOffScaleSpacing,
+    appliesTo: isExplorerSurface,
+    allowedSelector: () => false,
+    message: 'spacing sits on the 4px grid (--mjf-gap-xs/-sm/-md, --mjf-gap, --mjf-stack, --mjf-gutter); 1–2px nudges are allowed',
+  },
 ];
+
+/**
+ * F22: Explorer surfaces share one spacing and type scale. The widget is exempt: it is themed per
+ * form, and its 1rem inputs are what stop iOS zooming on focus.
+ */
+function isExplorerSurface(relPath) {
+  return !relPath.split('\\').join('/').includes('/widget/');
+}
+
+const SPACING_DECL = /(?:^|[\s;{])(?:gap|row-gap|column-gap|padding(?:-[a-z-]+)?|margin(?:-[a-z-]+)?)\s*:\s*([^;}]*)/g;
+
+/** Whether a line sets a gap, padding or margin to a px value that is neither ≤2 nor a multiple of 4. */
+function hasOffScaleSpacing(line) {
+  for (const decl of line.matchAll(SPACING_DECL)) {
+    for (const px of decl[1].matchAll(/(-?\d+(?:\.\d+)?)px/g)) {
+      const value = Math.abs(Number(px[1]));
+      if (value > 2 && value % 4 !== 0) return true;
+    }
+  }
+  return false;
+}
 
 /** `ui-gate: allow-disabled-token — <reason>` on the line before (or the same line) excuses one use. */
 const DISABLED_TOKEN_MARKER = /ui-gate:\s*allow-disabled-token\s*—\s*\S/;
@@ -336,10 +397,10 @@ function selectorFor(lines, i) {
 export function tokenRuleViolations(rawLines, relPath) {
   const lines = stripComments(rawLines);
   const violations = [];
-  for (const { rule, re, appliesTo, allowedSelector } of TOKEN_RULES) {
+  for (const { rule, re, matches, appliesTo, allowedSelector } of TOKEN_RULES) {
     if (!appliesTo(relPath)) continue;
     for (let i = 0; i < lines.length; i++) {
-      if (!re.test(lines[i])) continue;
+      if (!(matches ? matches(lines[i]) : re.test(lines[i]))) continue;
       if (allowedSelector(selectorFor(lines, i))) continue;
       if (rule === 'disabled-for-content' && markedAbove(rawLines, i)) continue;
       violations.push({ rule, line: i + 1, text: rawLines[i].trim().slice(0, 120) });

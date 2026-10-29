@@ -154,7 +154,7 @@ export interface ResponsesTabState {
 
       /* The tab is embedded under a builder header that already names the form, so the
          page title steps down a size from a standalone page's. */
-      .rt-title { font-size: 1.375rem; }
+      .rt-title { font-size: var(--mjf-heading); }
     `,
   ],
 })

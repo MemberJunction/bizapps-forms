@@ -144,7 +144,11 @@
   --mjf-question-size: 1.0625rem;
   --mjf-question-align: left;
   --mjf-pill-radius: 999px;
-  --mjf-focus-ring: 0 0 0 3px color-mix(in srgb, var(--mjf-accent) 35%, transparent);
+  /* A colour here, as it is in Explorer and in every form style that sets it (the shipped
+     Contrast style does). It used to be the whole shadow, so a style's colour landed inside
+     box-shadow, where it is invalid, and the focus indicator disappeared. */
+  --mjf-focus-ring: var(--mjf-accent);
+  --mjf-focus-shadow: 0 0 0 3px color-mix(in srgb, var(--mjf-focus-ring) 35%, transparent);
 
   font-family: var(--mjf-font-body);
   color: var(--mjf-page-ink);
@@ -364,7 +368,7 @@
 
 .mjf-retry:focus-visible {
   outline: none;
-  box-shadow: var(--mjf-focus-ring);
+  box-shadow: var(--mjf-focus-shadow);
 }
 
 @media (prefers-reduced-motion: reduce) {

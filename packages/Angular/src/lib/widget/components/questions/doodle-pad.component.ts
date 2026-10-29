@@ -107,7 +107,7 @@ const DOODLE_PAD_CSS = /* css */ `
   background: var(--mjf-doodle-paper);
   color: var(--mjf-doodle-ink);
 }
-.mjf-doodle__pad:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+.mjf-doodle__pad:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-shadow); }
 
 /* THE PEN PALETTE, and why every hue is mixed toward the page ink.
 
@@ -178,12 +178,12 @@ const DOODLE_PAD_CSS = /* css */ `
    two (WCAG 1.4.1). The width buttons get the same treatment for consistency. */
 .mjf-doodle__pen[aria-pressed='true'], .mjf-doodle__width[aria-pressed='true'] {
   border-color: var(--mjf-accent);
-  box-shadow: var(--mjf-focus-ring);
+  box-shadow: var(--mjf-focus-shadow);
 }
 .mjf-doodle__pen:focus-visible, .mjf-doodle__width:focus-visible {
   outline: none;
   border-color: var(--mjf-accent);
-  box-shadow: var(--mjf-focus-ring);
+  box-shadow: var(--mjf-focus-shadow);
 }
 /* The swatch itself — a dot of the pen's own colour, ringed so a pen that nearly matches the
    button background still has an edge. */
@@ -214,7 +214,7 @@ const DOODLE_PAD_CSS = /* css */ `
   color: var(--mjf-page-ink-soft);
 }
 .mjf-doodle__action:hover:not(:disabled) { background: var(--mjf-page-sunken); }
-.mjf-doodle__action:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+.mjf-doodle__action:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-shadow); }
 .mjf-doodle__action:disabled, .mjf-doodle__pen:disabled, .mjf-doodle__width:disabled { opacity: 0.5; cursor: default; }
 `;
 

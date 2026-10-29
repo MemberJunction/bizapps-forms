@@ -82,7 +82,10 @@ describe('builder Responses tab wiring', () => {
   });
 
   it('offers a tab button that activates it', () => {
-    expect(template()).toContain(`(click)="setTab('responses')"`);
+    // The strip renders one button per BUILDER_TAB_ITEMS entry (F12), so the Responses tab is
+    // there when the list carries it and every button activates its own tab.
+    expect(template()).toContain(`(click)="setTab(item.tab)"`);
+    expect(read(BUILDER, 'builder-tabs.ts')).toMatch(/responses: \{ label: 'Responses'/);
   });
 
   it('scopes the tab to the loaded form, not to every response in the database', () => {

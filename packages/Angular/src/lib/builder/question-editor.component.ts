@@ -68,8 +68,8 @@ const QUESTION_EDITOR_CSS = /* css */ `
    made of forms. */
 .qe-section { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); padding-top: var(--mjf-gap-sm); }
 .qe-points { display: flex; flex-direction: column; gap: 8px; }
-.qe-points-row { display: flex; align-items: center; gap: 10px; }
-.qe-points-label { flex: 1; min-width: 0; font-size: 0.8125rem; color: var(--mj-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qe-points-row { display: flex; align-items: center; gap: 8px; }
+.qe-points-label { flex: 1; min-width: 0; font-size: var(--mjf-meta); color: var(--mj-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .qe-points-input { flex: none; width: 84px; text-align: right; }
 
 .qe-section-title {
@@ -81,8 +81,8 @@ const QUESTION_EDITOR_CSS = /* css */ `
   color: var(--mj-text-muted);
 }
 
-.qe-options { display: flex; flex-direction: column; gap: 6px; }
-.qe-option { display: flex; align-items: center; gap: 6px; }
+.qe-options { display: flex; flex-direction: column; gap: 4px; }
+.qe-option { display: flex; align-items: center; gap: 4px; }
 
 /* The A/B/C badge. Its job is to give an option a name that is stable while the author is
    renaming things and reordering them, so it is keyed to POSITION and never to the label. */
@@ -93,7 +93,7 @@ const QUESTION_EDITOR_CSS = /* css */ `
   justify-content: center;
   min-width: 24px;
   height: 24px;
-  padding: 0 5px;
+  padding: 0 4px;
   font-size: var(--mjf-label);
   font-weight: 600;
   color: var(--mj-brand-primary);
@@ -123,7 +123,7 @@ const QUESTION_EDITOR_CSS = /* css */ `
 /* Indented so the image control reads as belonging to the choice above it rather than as a
    separate option in the list. Its resting state is a single plus, so a list of ten choices is
    ten rows and ten pluses rather than ten stacked upload panels. */
-.qe-option-img { display: block; margin-left: 34px; font-size: var(--mjf-label); }
+.qe-option-img { display: block; margin-left: 32px; font-size: var(--mjf-label); }
 
 .qe-hint { margin: 2px 0 0; font-size: var(--mjf-label); color: var(--mj-text-muted); }
 
@@ -138,7 +138,7 @@ const QUESTION_EDITOR_CSS = /* css */ `
   text-align: center;
 }
 /* ui-gate: allow-disabled-token — decorative icon beside text that says the same thing */
-.qe-empty i { font-size: 1.25rem; color: var(--mj-text-disabled); }
+.qe-empty i { font-size: var(--mjf-icon-lg); color: var(--mj-text-disabled); }
 .qe-empty-title { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
 .qe-empty p { margin: 0; font-size: var(--mjf-label); color: var(--mj-text-muted); max-width: 30ch; }
 `;

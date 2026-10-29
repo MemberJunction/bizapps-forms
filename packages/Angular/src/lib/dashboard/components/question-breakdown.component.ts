@@ -176,8 +176,8 @@ const MAX_CELL_TINT = 0.35;
          coloured block at the top-left of every card in the grid, which read as a row of
          buttons; the hue alone identifies the question's group and lets the prompt be the
          thing the eye lands on. */
-      .qb-glyph { flex: none; width: 18px; margin-top: 2px; text-align: center; font-size: 0.9375rem; }
-      .qb-headings { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+      .qb-glyph { flex: none; width: 18px; margin-top: 2px; text-align: center; font-size: var(--mjf-icon); }
+      .qb-headings { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
       .qb-prompt {
         margin: 0;
         font-size: var(--mjf-body);
@@ -190,7 +190,7 @@ const MAX_CELL_TINT = 0.35;
         display: flex;
         flex-wrap: wrap;
         align-items: baseline;
-        gap: 5px;
+        gap: 4px;
         margin: 0;
         font-size: var(--mjf-label);
         color: var(--mj-text-muted);
@@ -210,7 +210,7 @@ const MAX_CELL_TINT = 0.35;
          score and an acceptance rate. Both are read before the bar under them. */
       .qb-headline { display: flex; flex-direction: column; gap: 2px; }
       .qb-headline-value {
-        font-size: 2.5rem;
+        font-size: var(--mjf-figure);
         font-weight: 650;
         line-height: 1;
         letter-spacing: var(--mj-tracking-tight, -0.03em);
@@ -221,14 +221,14 @@ const MAX_CELL_TINT = 0.35;
 
       .qb-agg { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--mjf-gap-sm); margin: 0; }
       .qb-agg > div {
-        padding: 10px 12px;
+        padding: 8px 12px;
         border-radius: var(--mjf-radius-sm);
         background: var(--mj-bg-surface-sunken);
       }
       .qb-agg dt { font-size: var(--mjf-label); color: var(--mj-text-muted); }
       .qb-agg dd {
         margin: 2px 0 0;
-        font-size: 1.125rem;
+        font-size: var(--mjf-section);
         font-weight: 600;
         color: var(--mj-text-primary);
         font-variant-numeric: tabular-nums;
@@ -238,7 +238,7 @@ const MAX_CELL_TINT = 0.35;
       .qb-matrix-wrap { overflow-x: auto; }
       .qb-matrix { width: 100%; border-collapse: collapse; font-size: var(--mjf-meta); }
       .qb-matrix th,
-      .qb-matrix td { padding: 8px 10px; text-align: center; border-bottom: 1px solid var(--mjf-rule); }
+      .qb-matrix td { padding: 8px 8px; text-align: center; border-bottom: 1px solid var(--mjf-rule); }
       .qb-matrix thead th { font-size: var(--mjf-label); font-weight: 600; color: var(--mj-text-muted); }
       .qb-matrix tbody th { text-align: left; font-weight: 600; color: var(--mj-text-primary); overflow-wrap: anywhere; }
       .qb-matrix .is-off { font-style: italic; color: var(--mj-text-muted); }

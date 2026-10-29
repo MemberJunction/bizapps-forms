@@ -39,19 +39,19 @@ import { UNDO_WINDOW_MS } from './pending-delete';
         display: flex;
         align-items: center;
         gap: 16px;
-        padding: 10px 12px 10px 16px;
+        padding: 8px 12px 8px 16px;
         border: 1px solid var(--mj-border-default);
         border-radius: 8px;
         background: var(--mj-bg-surface-elevated);
         color: var(--mj-text-primary);
         box-shadow: var(--mj-shadow-lg);
-        font-size: 14px;
+        font-size: var(--mjf-body);
       }
       .ut-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .ut-undo {
         flex: none;
         min-height: 32px;
-        padding: 4px 14px;
+        padding: 4px 12px;
         border: 1px solid var(--mj-border-strong);
         border-radius: 6px;
         background: var(--mj-bg-surface);

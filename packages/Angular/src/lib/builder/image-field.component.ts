@@ -37,7 +37,7 @@ import type { ImageUse } from './image-optimize';
 
 const IMAGE_FIELD_CSS = /* css */ `
 :host { display: block; }
-.imf { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.imf { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 
 .imf-head {
   display: flex;
@@ -57,7 +57,7 @@ const IMAGE_FIELD_CSS = /* css */ `
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 32px;
   height: 32px;
   padding: 0;
@@ -76,7 +76,7 @@ const IMAGE_FIELD_CSS = /* css */ `
 /* With text it is a labelled button rather than an icon, so it needs room to breathe. A bare
    plus is only self-explanatory when something beside it already says what is being added —
    in a list of choices nothing does, and the author is left guessing what the button adds. */
-.imf-add--labelled { padding: 0 10px; }
+.imf-add--labelled { padding: 0 8px; }
 .imf-add:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 
 .imf-filled { display: flex; align-items: center; gap: var(--mjf-gap-sm); }

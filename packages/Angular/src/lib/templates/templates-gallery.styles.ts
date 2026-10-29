@@ -35,7 +35,7 @@ export const TEMPLATES_GALLERY_CSS = /* css */ `
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   padding: var(--mjf-card-pad-sm);
   text-align: left;
   cursor: pointer;
@@ -50,7 +50,7 @@ export const TEMPLATES_GALLERY_CSS = /* css */ `
 .tg-card.is-busy { opacity: 0.55; pointer-events: none; }
 
 .tg-card-top { display: flex; align-items: center; gap: var(--mjf-gap-sm); }
-.tg-card-icon { flex: none; width: 20px; font-size: 1.0625rem; color: var(--mjf-viz-fill); }
+.tg-card-icon { flex: none; width: 20px; font-size: var(--mjf-icon); color: var(--mjf-viz-fill); }
 .tg-card-name {
   flex: 1;
   min-width: 0;
@@ -124,7 +124,7 @@ export const TEMPLATES_GALLERY_CSS = /* css */ `
   border-radius: var(--mjf-radius);
   box-shadow: 0 24px 60px -20px color-mix(in srgb, var(--mj-text-primary) 45%, transparent);
 }
-.tg-confirm-title { font-size: 1rem; font-weight: 700; color: var(--mj-text-primary); }
+.tg-confirm-title { font-size: var(--mjf-section); font-weight: 700; color: var(--mj-text-primary); }
 .tg-confirm-body { font-size: var(--mjf-meta); color: var(--mj-text-secondary); line-height: 1.5; }
 .tg-confirm-actions { display: flex; gap: var(--mjf-gap-sm); }
 
