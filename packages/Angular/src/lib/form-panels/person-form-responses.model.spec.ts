@@ -77,6 +77,23 @@ describe('PERSON_FORMS_REGISTRATION', () => {
     expect(r.StockGrids).toEqual([]);
     expect(r.Winners[0].ContributionKey).toBe('forms');
   });
+
+  // The other half of the claim above: naming the join field scopes the panel to that one FK. With
+  // the field omitted, the registration claimed EVERY Form Responses -> People FK, so a second one
+  // would silently vanish into this panel. Fails if `relatedJoinField` is removed.
+  it('leaves a second Form Responses -> People FK to MJ\'s stock grid', () => {
+    const second = { ...REL, RelatedEntityID: '22222222-2222-2222-2222-222222222222', RelatedEntityJoinField: 'ReviewedByPersonID' };
+    const r = ResolveFormContributions({
+      EntityName: PEOPLE,
+      RelatedEntities: [REL, second],
+      IsaChildEntityIDs: [],
+      Registrations: [{ Priority: 0, Metadata: PERSON_FORMS_REGISTRATION }],
+      BakedSectionKeys: [],
+      ShowRelatedEntities: true,
+    });
+    expect(r.StockGrids.map((g) => g.RelatedJoinField)).toEqual(['ReviewedByPersonID']);
+    expect(r.Winners.filter((w) => w.Kind === 'registered').map((w) => w.ContributionKey)).toEqual(['forms']);
+  });
 });
 
 describe('BuildPersonFormResponsesFilter', () => {
