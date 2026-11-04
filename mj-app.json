@@ -65,6 +65,10 @@
       }
     ]
   },
+  "hooks": {
+    "postInstallModule": "@mj-biz-apps/forms-server/dist/install-hooks/magic-link-notice.js",
+    "postUpgradeModule": "@mj-biz-apps/forms-server/dist/install-hooks/magic-link-notice.js"
+  },
   "code": {
     "visibility": "public",
     "sourceDirectory": "packages"
