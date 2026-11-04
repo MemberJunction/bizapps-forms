@@ -1,6 +1,12 @@
 # MJ 6.2.0 upgrade, with the issues that waited for it
 
-Date: 2026-11-04 · Branch: `feat/mj-6-2-upgrade` (from `origin/next` `2f94607`) · One PR into `next`
+Date: 2026-11-04 · Branch: `feat/mj-6-2-upgrade` (from `origin/next` `2f94607`) · One PR into `next` (#352)
+
+> **As built — read this first.** This design was written before the work. Where the shipped PR differs, the PR wins:
+> - **Upgrade of a host that already runs Forms is verified, not "not tested".** It was rehearsed end to end and recorded in #353 (closed): a 6.1.6 host with Forms 0.15.0 was upgraded to MJ 6.2.0, then `mj app upgrade` took Forms to 0.15.1. Forms stayed `Active`, all 11 `dynamicPackages` entries stayed `Enabled: true`, and an anonymous submit succeeded. The bizapps-common migration clash seen during the work was fixed in Common 5.60.0.
+> - **Commit split is five commits, not one bump plus behaviour.** The pin bump (`cc7dd1c`) also carries the compile fixes MJ 6.2 forced: `TotalRowCount` became optional, so `quota.ts` and `response-lookup.ts` now fail closed when it is missing or null, and `ScheduledJobExecutionContext` now requires `Provider`. These went into the bump commit because the bump does not build without them. A separate commit (`1ba1622`) fixes `check:host-truth`. MJ 6.2 CodeGen fails on an `includeSchemas` entry that matches no schema, so pass 1 now accepts exactly that failure (`settlingPassAccepts`).
+> - **The hook (Goal 5)** reads `apps/MJAPI/mj.config.cjs` first, then `mj.config.cjs`. A missing or unloadable config makes it print the instruction with "could not check"; it is not treated as empty. Its payload type takes only `RepoRoot` and `Callbacks.OnWarn`.
+> - **Worktree install:** see the corrected anti-goal below.
 
 ## Intent
 
@@ -115,7 +121,7 @@ Databases kept: `MJ_R62_Fresh`, `MJ_R62_Upgrade`. Hosts kept: `~/Projects/mj62-r
 
 - A green build that is a turbo cache replay (`Cached: 0 cached` must be shown).
 - The dev DB on 6.2 code with an unmigrated core, or migrated without a verified backup.
-- Any `pnpm install` inside `bizapps-forms` or the worktree. That unlinks MJ source and MJ's API stops booting.
+- Any `pnpm install` inside the main `bizapps-forms` checkout. That unlinks MJ source and MJ's API stops booting. (A worktree under `.claude/worktrees/` is a standalone pnpm root with its own `node_modules`, so a frozen install there is safe and gives a CI-faithful build against the published packages. That is what this upgrade did.)
 - CodeGen run against `MJ_ATS_Dev`.
 - A peer range that `mj app install` accepts but npm rejects (the #211/#215 class).
 
