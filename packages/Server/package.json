@@ -26,17 +26,17 @@
     "class-validator": "^0.14.3"
   },
   "peerDependencies": {
-    "@memberjunction/actions": "^6.1.0-edge.6",
-    "@memberjunction/actions-base": "^6.1.0-edge.6",
-    "@memberjunction/core": "^6.1.0-edge.6",
-    "@memberjunction/core-entities": "^6.1.0-edge.6",
-    "@memberjunction/generic-database-provider": "^6.1.0-edge.6",
-    "@memberjunction/global": "^6.1.0-edge.6",
-    "@memberjunction/server": "^6.1.0-edge.6",
-    "@memberjunction/storage": "^6.1.0-edge.6"
+    "@memberjunction/actions": "^6.2.0-edge.8",
+    "@memberjunction/actions-base": "^6.2.0-edge.8",
+    "@memberjunction/core": "^6.2.0-edge.8",
+    "@memberjunction/core-entities": "^6.2.0-edge.8",
+    "@memberjunction/generic-database-provider": "^6.2.0-edge.8",
+    "@memberjunction/global": "^6.2.0-edge.8",
+    "@memberjunction/server": "^6.2.0-edge.8",
+    "@memberjunction/storage": "^6.2.0-edge.8"
   },
   "devDependencies": {
-    "@memberjunction/generic-database-provider": "^6.1.0-edge.6",
+    "@memberjunction/generic-database-provider": "^6.2.0-edge.8",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
     "typescript": "^5.9.3",

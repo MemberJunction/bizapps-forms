@@ -139,6 +139,15 @@ export async function formQuotaReached(
     );
     return true;
   }
+  // MJ 6.2 types TotalRowCount as optional (it is absent under SkipTotalRowCount, which this read
+  // never passes). A successful count without one is a broken contract, so fail closed as above.
+  if (result.TotalRowCount == null) {
+    LogError(
+      `[Forms] Form ${formId}: the form-quota count succeeded but returned no TotalRowCount; ` +
+        'the submission is refused as if the quota were reached.',
+    );
+    return true;
+  }
   return result.TotalRowCount >= settings.quota;
 }
 

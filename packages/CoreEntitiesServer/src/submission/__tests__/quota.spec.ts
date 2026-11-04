@@ -111,4 +111,16 @@ describe('formQuotaReached', () => {
     expect(message).toContain('form-1');
     expect(message).toContain('connection reset by peer');
   });
+
+  it('refuses, and logs, when a successful count carries no TotalRowCount (MJ 6.2 types it optional)', async () => {
+    const noTotal = provider({ count: { TotalRowCount: undefined } });
+    expect(await formQuotaReached(noTotal, 'form-1', { quota: 3 }, USER)).toBe(true);
+    expect(logError).toHaveBeenCalledTimes(1);
+    expect(String(logError.mock.calls[0][0])).toContain('form-1');
+  });
+
+  it('refuses when a successful count carries a null TotalRowCount (null >= quota would fail open)', async () => {
+    const nullTotal = provider({ count: { TotalRowCount: null as unknown as number } });
+    expect(await formQuotaReached(nullTotal, 'form-1', { quota: 3 }, USER)).toBe(true);
+  });
 });
