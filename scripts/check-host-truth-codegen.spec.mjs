@@ -5,6 +5,7 @@ import {
   newCaptureFiles,
   readCliResult,
   readMigrateStart,
+  settlingPassAccepts,
   summarizeCapture,
   workingDatabaseName,
 } from './check-host-truth-codegen.mjs';
@@ -126,4 +127,56 @@ test('workingDatabaseName reads the .env file in either quoting style', () => {
 test('workingDatabaseName ignores a commented-out assignment and a missing file', () => {
   assert.equal(workingDatabaseName({ envFileText: "# DB_DATABASE='MJ_ATS_Dev'\n", processEnv: {} }), null);
   assert.equal(workingDatabaseName({ envFileText: null, processEnv: {} }), null);
+});
+
+// MJ 6.2 made an includeSchemas entry that matches no schema a CodeGen FAILURE (it was a warning).
+// Pass 1 runs before our migrations, so our own schema cannot exist yet and every 6.2 run failed
+// there. Pass 1 may accept exactly that failure, and nothing broader.
+const OWN = ['__mj_BizAppsForms', '__mj_bizappsforms'];
+const FAILED = {
+  command: 'codegen',
+  success: false,
+  data: { skippedDb: false },
+  errors: [{ context: 'MANAGE_METADATA', message: 'Metadata management reported a failure; see the errors logged above' }],
+};
+const UNMATCHED_OURS =
+  '\u001b[37m   includeSchemas entries [__mj_BizAppsForms, __mj_bizappsforms] match no schema in the database; check for a typo or a dropped schema\u001b[0m';
+
+test('settlingPassAccepts accepts a clean run', () => {
+  const ok = { command: 'codegen', success: true, data: { skippedDb: false } };
+  assert.equal(settlingPassAccepts({ result: ok, stderr: '', ownSchemas: OWN }), true);
+});
+
+test('settlingPassAccepts accepts our own not-yet-created schema as the only failure', () => {
+  const stderr =
+    `- Handling SQL Script Execution...\n${UNMATCHED_OURS}\n` +
+    '✖ ERROR managing metadata (refresh applied; downstream will use latest available state)\n' +
+    '✖ MJ CodeGen finished with 1 failure(s) — 494 entities in 26.03s\n';
+  assert.equal(settlingPassAccepts({ result: FAILED, stderr, ownSchemas: OWN }), true);
+});
+
+test('settlingPassAccepts refuses when another schema is the unmatched one', () => {
+  const stderr = '   includeSchemas entry [__mj_SomethingElse] match no schema in the database; check for a typo\n';
+  assert.equal(settlingPassAccepts({ result: FAILED, stderr, ownSchemas: OWN }), false);
+});
+
+test('settlingPassAccepts refuses when any other error was logged alongside', () => {
+  const stderr = `${UNMATCHED_OURS}\n✖ ERROR managing metadata\n✖ Failed to create entity for table Foo\n`;
+  assert.equal(settlingPassAccepts({ result: FAILED, stderr, ownSchemas: OWN }), false);
+});
+
+// MJ's logError lines inside metadata management carry no ✖ (manage-metadata.ts logs e.g.
+// '   Error creating new entities'); they fold into the same single MANAGE_METADATA error.
+test('settlingPassAccepts refuses a plain MJ "Error …" line from the same phase', () => {
+  const stderr =
+    `${UNMATCHED_OURS}\n\u001b[37m   Error creating new entities: Invalid column name 'Foo'\u001b[0m\n` +
+    '✖ ERROR managing metadata (refresh applied; downstream will use latest available state)\n';
+  assert.equal(settlingPassAccepts({ result: FAILED, stderr, ownSchemas: OWN }), false);
+});
+
+test('settlingPassAccepts refuses another phase failing, a skipped database pass, or no result', () => {
+  const twoPhases = { ...FAILED, errors: [...FAILED.errors, { context: 'SQL_GENERATION', message: 'x' }] };
+  assert.equal(settlingPassAccepts({ result: twoPhases, stderr: UNMATCHED_OURS, ownSchemas: OWN }), false);
+  assert.equal(settlingPassAccepts({ result: { ...FAILED, data: { skippedDb: true } }, stderr: UNMATCHED_OURS, ownSchemas: OWN }), false);
+  assert.equal(settlingPassAccepts({ result: null, stderr: UNMATCHED_OURS, ownSchemas: OWN }), false);
 });
