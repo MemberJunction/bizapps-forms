@@ -25,13 +25,12 @@ const REL = {
 };
 
 describe('PERSON_FORMS_REGISTRATION', () => {
-  it('targets People, after-related, with the forms key and no join field', () => {
+  it('targets People, after-related, with the forms key', () => {
     expect(PERSON_FORMS_REGISTRATION.entity).toBe('MJ_BizApps_Common: People');
     expect(PERSON_FORMS_REGISTRATION.slot).toBe('after-related');
     expect(PERSON_FORMS_REGISTRATION.relatedEntity).toBe(RESPONSES);
     expect(PERSON_FORMS_REGISTRATION.contributionKey).toBe('forms');
     expect(PERSON_FORMS_SECTION_KEY).toBe('forms');
-    expect(PERSON_FORMS_REGISTRATION.relatedJoinField).toBeUndefined();
   });
 
   it('claims the stock grid and wins as the only registered contribution', () => {
@@ -62,21 +61,21 @@ describe('PERSON_FORMS_REGISTRATION', () => {
     expect(r.HiddenBakedSectionKeys).toContain(key);
   });
 
-  it('counter-example: adding relatedJoinField leaves a stock grid mounted', () => {
-    // MJ resolver defect, filed as MemberJunction/MJ#4990: with both contributionKey and
-    // relatedJoinField set, the stock grid key is never claimed. If this test flips, MJ fixed it
-    // and the registration may name RespondentPersonID explicitly.
+  it('names RespondentPersonID, so only that FK is claimed and no stock grid mounts (MJ#4990, fixed in 6.2)', () => {
+    // MJ 6.2 claims `related:<entity>:<joinField>` even when the claim also sets a custom
+    // contributionKey (MJ#4990, fixed by MJ PR #4311, first shipped in 6.2.0-edge.3). On 6.1 the
+    // same registration left the stock grid mounted, which is why the 6.2 host floor is required.
+    expect(PERSON_FORMS_REGISTRATION.relatedJoinField).toBe('RespondentPersonID');
     const r = ResolveFormContributions({
       EntityName: PEOPLE,
       RelatedEntities: [REL],
       IsaChildEntityIDs: [],
-      Registrations: [
-        { Priority: 0, Metadata: { ...PERSON_FORMS_REGISTRATION, relatedJoinField: 'RespondentPersonID' } },
-      ],
+      Registrations: [{ Priority: 0, Metadata: PERSON_FORMS_REGISTRATION }],
       BakedSectionKeys: [],
       ShowRelatedEntities: true,
     });
-    expect(r.StockGrids.length).toBeGreaterThan(0);
+    expect(r.StockGrids).toEqual([]);
+    expect(r.Winners[0].ContributionKey).toBe('forms');
   });
 });
 
