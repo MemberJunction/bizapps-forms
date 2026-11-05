@@ -132,6 +132,19 @@
   gap: 0.75rem;
 }
 
+/* Just above the action row; empty (and so hidden) unless a file on this step is uploading. */
+.mjf-wait-note {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  text-align: right;
+  color: var(--mjf-page-ink-muted);
+}
+
+.mjf-wait-note:empty {
+  display: none;
+}
+
 /* Back sits at the far left of the row, the primary at the far right — the two ends a thumb
    reaches for, and the order dialogs in this app already use. */
 .mjf-scroll__actions--stepped {

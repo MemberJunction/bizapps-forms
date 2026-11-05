@@ -28,13 +28,16 @@ import type { mjBizAppsFormsFormUploadEntity } from '@mj-biz-apps/forms-entities
 import { redactStorageKey } from '../storage/read-object';
 import { contentTypeAllowed, getUploadConfig, uploadTooLargeMessage } from './config';
 import type { ParsedFile } from './multipart';
+import type { StageTimer } from '../http/stage-timer';
 import {
   checkEmbedOrigin,
   checkRespondentScope,
   FOREIGN_ORIGIN_MESSAGE,
   FORM_UNAVAILABLE_MESSAGE,
   FORMS_ENTITY,
+  isTerminalResponseStatus,
   resolvePublishedDefinition,
+  type FormResponseStatus,
   withoutQueryEcho,
   type DefinitionRunViewProvider,
   type ScopeMetadataProvider,
@@ -98,6 +101,16 @@ export interface UploadContext {
    * the whole endpoint untestable without a database unless the write can be substituted.
    */
   recordProvenance?: (input: ProvenanceRecordInput) => Promise<boolean>;
+  /**
+   * Records how long each stage took, for the route's `Server-Timing` header. Optional so the
+   * service runs unchanged without one (every existing caller and test).
+   */
+  timer?: StageTimer;
+}
+
+/** Run `work` as the named stage on `ctx`'s timer, or just run it when there is no timer. */
+function stage<T>(ctx: UploadContext, name: string, work: () => Promise<T>): Promise<T> {
+  return ctx.timer ? ctx.timer.measure(name, work) : work();
 }
 
 /** What the provenance writer needs to record one upload. */
@@ -197,7 +210,7 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   if (req.responseId !== undefined && !GUID_SHAPE.test(req.responseId)) {
     return fail(400, 'Invalid "responseId": expected a GUID.');
   }
-  const distCheck = await resolveOpenDistribution(ctx, req);
+  const distCheck = await stage(ctx, 'resolve', () => resolveOpenDistribution(ctx, req));
   if (!distCheck.ok) {
     return distCheck;
   }
@@ -260,6 +273,16 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
     return questionCheck;
   }
 
+  // 3c. The response it names must not be finished. Last of the gates because it is the one that
+  //     reads a row, and every cheaper refusal has had its chance by now; before storage, because
+  //     refusing after the bytes landed is how the orphaned files this gate exists for were made.
+  const responseCheck = await stage(ctx, 'response', () =>
+    refuseIfResponseSealed(ctx, req.responseId, distCheck.resolved?.distributionId),
+  );
+  if (!responseCheck.ok) {
+    return responseCheck;
+  }
+
   // 4. Store bytes + create the MJ: Files record via the canonical MJ storage path.
   //    The ledger records the DEFINITION's spelling of the question id, not the client's: the
   //    match above is case-folded, so writing back what the caller sent would let
@@ -267,6 +290,65 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   //    upload answered — and multipart field values are not trimmed (see multipart.ts), so the
   //    raw string can also carry surrounding whitespace into a uniqueidentifier column.
   return storeFile(ctx, file, req, distCheck.resolved, questionCheck.questionId);
+}
+
+/**
+ * What a respondent reads when their file arrives for a response that was already submitted.
+ * Authored here, like {@link UPLOAD_FAILED_MESSAGE}: the widget shows a body's `error` verbatim.
+ */
+export const RESPONSE_ALREADY_SUBMITTED_MESSAGE =
+  'This response has already been submitted, so the file was not added to it.';
+
+/**
+ * Refuse (409) an upload whose response is already sealed — Complete or Disqualified.
+ *
+ * Such a file can never become an answer: a sealed response is never rewritten. Storing it anyway
+ * made an `MJ: Files` row and a ledger row that nothing would reference — the residue the #248 race
+ * left behind, 21 rows on the dev database — while telling the respondent their upload succeeded.
+ *
+ * Read as the elevated user: the respondent role has no read grant on responses. No `responseId`,
+ * or one with no row yet (an upload before the first autosave), passes: there is nothing sealed to
+ * protect. A read that FAILS refuses with a 503, the same choice `resolveOpenDistribution` makes for
+ * an unreadable form — storing a file we could not prove belongs to an open response is the thing
+ * this gate exists to stop, so it does not fail open.
+ *
+ * Scoped to the distribution the upload already resolved, because the elevated read could otherwise
+ * be used as an oracle: any anonymous caller holding a response id from ANY form would learn from
+ * 409-or-200 whether it was finished. A response elsewhere reads as no row and passes, which is
+ * exactly what this route did before the gate existed — the gate adds no answer outside the caller's
+ * own form. The ownership rule (`responseIsOurs`) cannot be used here: the upload request carries
+ * no `x-session-id`, so every owned row would read as someone else's.
+ */
+async function refuseIfResponseSealed(
+  ctx: UploadContext,
+  responseId: string | undefined,
+  distributionId: string | undefined,
+): Promise<UploadResult> {
+  if (!responseId || !distributionId) {
+    return { ok: true };
+  }
+  // `runUpload` refused a non-GUID `responseId` before this point, and `distributionId` is the
+  // resolved row's own key, so both are safe in the filter.
+  const read = await ctx.runViewProvider.RunView<{ ID: string; Status: FormResponseStatus }>(
+    {
+      EntityName: FORMS_ENTITY.FormResponse,
+      ExtraFilter: `ID='${responseId}' AND FormDistributionID='${distributionId}'`,
+      Fields: ['ID', 'Status'],
+      ResultType: 'simple',
+      MaxRows: 1,
+    },
+    ctx.elevatedUser,
+  );
+  if (!read.Success) {
+    LogError(`[Forms] upload refused for response ${responseId}: its status could not be read: ${read.ErrorMessage}`);
+    return fail(503, UPLOAD_FAILED_MESSAGE);
+  }
+  const status = read.Results[0]?.Status;
+  if (status && isTerminalResponseStatus(status)) {
+    LogStatus(`[Forms] upload refused for response ${responseId}: it is already ${status}.`);
+    return fail(409, RESPONSE_ALREADY_SUBMITTED_MESSAGE);
+  }
+  return { ok: true };
 }
 
 /** Enforce presence, size cap, and content-type allowlist. */
@@ -455,14 +537,16 @@ async function storeFile(
   const pathPrefix = uploadPathPrefix(cfg.pathPrefix);
   let stored: Awaited<ReturnType<UploadStorageEngine['UploadFile']>>;
   try {
-    await ctx.storage.Config(false, writer);
-    stored = await ctx.storage.UploadFile({
-      content: file.data,
-      fileName,
-      mimeType: bareContentType(file.contentType),
-      contextUser: writer,
-      storageAccountId: cfg.storageAccountId,
-      pathPrefix,
+    stored = await stage(ctx, 'store', async () => {
+      await ctx.storage.Config(false, writer);
+      return ctx.storage.UploadFile({
+        content: file.data,
+        fileName,
+        mimeType: bareContentType(file.contentType),
+        contextUser: writer,
+        storageAccountId: cfg.storageAccountId,
+        pathPrefix,
+      });
     });
   } catch (error) {
     // No storage account configured / provider misconfigured / upload failed: a 5xx, never a crash.
@@ -478,7 +562,7 @@ async function storeFile(
 
   if (resolved) {
     const record = ctx.recordProvenance ?? writeProvenanceRow;
-    const recorded = await record({
+    const recorded = await stage(ctx, 'record', () => record({
       writer,
       fileId: stored.FileID,
       providerKey: stored.StoragePath,
@@ -491,7 +575,7 @@ async function storeFile(
       fileName,
       contentType: bareContentType(file.contentType),
       sizeBytes: file.data.length,
-    });
+    }));
     if (!recorded) {
       // Fail closed. A file with no provenance row is unusable downstream — submit will reject
       // it — so returning its id would hand the respondent something that looks like a

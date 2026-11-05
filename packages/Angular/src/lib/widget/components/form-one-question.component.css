@@ -116,6 +116,19 @@
   color: var(--mjf-page-ink-muted);
 }
 
+/* Just above the Back / Next row; empty (and so hidden) unless this question's file is uploading. */
+.mjf-wait-note {
+  margin: 0 0 0.75rem;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  text-align: right;
+  color: var(--mjf-page-ink-muted);
+}
+
+.mjf-wait-note:empty {
+  display: none;
+}
+
 @container mjf (min-width: 640px) {
   .mjf-oneq__card {
     padding: 3rem;

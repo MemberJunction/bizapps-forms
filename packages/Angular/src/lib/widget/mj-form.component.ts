@@ -52,6 +52,7 @@ import {
 
 import {
   API_UNREACHABLE_LOAD_MESSAGE,
+  API_UNREACHABLE_MESSAGE,
   FORM_UNAVAILABLE_MESSAGE,
   FORMS_API_SERVICE,
   FormsApiUnreachableError,
@@ -63,7 +64,7 @@ import { endingScreenFrom } from './core/server-ending';
 import { failureDetail } from './core/failure-detail';
 import { fullForm, projectionForm, type WidgetForm, type WidgetRenderDefinition } from './core/widget-form';
 import { FORMS_API_CONFIG } from './api/forms-api.config';
-import { SAVING_FILE_MESSAGE, submitWaitMessage } from './core/submit-progress';
+import { SAVING_FILE_MESSAGE, SUBMIT_WHEN_ONLINE_MESSAGE, submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
 import { gateWelcomeScreen } from './core/welcome-gate';
 import { prefetchImages } from './core/image-prefetch';
@@ -375,6 +376,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
   private autosave: AutosaveController | null = null;
   /** The `online` handler while registered — kept so ngOnDestroy removes the same function. */
   private onlineListener: (() => void) | null = null;
+  /**
+   * A final submit failed while the browser reported offline, and is to be sent again when it fires
+   * `online` — unless the respondent edits first. See {@link armSubmitWhenOnline}.
+   */
+  private submitWhenOnline = false;
   /** Prefetch of later screens' images; one queue per load (core/prefetch-scheduler.ts). */
   private readonly prefetcher = new PrefetchScheduler(prefetchImages, () => this.destroyed);
   /** Set on destroy: a `load()` still awaiting the network resumes afterwards and must start nothing. */
@@ -412,7 +418,16 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (typeof window === 'undefined' || this.onlineListener) {
       return;
     }
-    this.onlineListener = () => this.autosave?.resume();
+    // One or the other, never both. A submit waiting for the network carries every answer itself,
+    // and its `settle()` is what quiesces the autosave; resuming the autosave first (it was reopened
+    // by the failed submit) put a partial on the wire ahead of it, and a knockout partial then sealed
+    // the response with a second final beside the submit's (PR #354 review). If the submit fails
+    // again it re-arms, and its `returnToEditing` reopens the autosave for the next `online`.
+    this.onlineListener = () => {
+      if (!this.sendSubmitWaitingForNetwork()) {
+        this.autosave?.resume();
+      }
+    };
     window.addEventListener('online', this.onlineListener);
   }
 
@@ -431,6 +446,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /** Fetch (or accept) the form definition, theme the host, and build the runtime. */
   private async load(): Promise<void> {
     this.prefetcher.Cancel();
+    // A submit armed for the old form must not fire against the new one.
+    this.submitWhenOnline = false;
     const generation = ++this.loadGeneration;
     this.waitingForWelcomeImage.set(false);
     this.phase.set('loading');
@@ -684,6 +701,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (this.phase() !== 'ready') {
       return;
     }
+    this.disarmSubmitWhenOnline();
     // Also on a KEYSTROKE, not only on the commit below. The ready line is driven by the same
     // signals and reappears the moment a character lands, so clearing only on blur left the two
     // on screen together for as long as the respondent kept typing — the narrower version of the
@@ -835,9 +853,18 @@ export class MjFormComponent implements OnInit, OnDestroy {
    *
    * Scheduled, never awaited, from inside a save: {@link endEarly} first quiesces the autosave, and
    * the save that delivered this verdict is still the controller's in-flight save until it returns.
+   *
+   * Not while a submit is in flight. A partial already on the wire when Submit was pressed delivers
+   * its verdict while the submit waits for it in `settle()`, and that submit has passed its own
+   * `endingEarly` check — so `endEarly` here put a second final on the wire beside the submit's, with
+   * the same client response id (PR #354 review). The submit carries the same committed answers, and
+   * the server judges a final the same way: it seals the knockout and returns its ending.
    */
   private actOnVerdict(result: FormsSaveResponseOutput, sentKey: string): void {
     if (result.Outcome !== 'ended' || !this.ledger.IsCommitted(sentKey) || this.endingEarly) {
+      return;
+    }
+    if (this.phase() === 'submitting') {
       return;
     }
     void this.endEarly({
@@ -1085,6 +1112,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.phase.set('submitting');
     this.errorText.set('');
     this.uploadFailureShown = '';
+    // This submit replaces any one waiting for the network; it re-arms itself if it fails offline too.
+    this.submitWhenOnline = false;
     // A no-op in Preview, which has no autosave controller.
     await this.autosave?.settle();
     // Before the Preview branch too: Preview's mock uploads take time, and an author testing the
@@ -1115,12 +1144,59 @@ export class MjFormComponent implements OnInit, OnDestroy {
       // The banner shows the fixed sentence; the cause goes to whoever opens the console.
       console.warn(`[mj-form] the response could not be submitted: ${failureDetail(err)}`);
       this.returnToEditing();
+      if (this.armSubmitWhenOnline(err)) {
+        return;
+      }
       const message = err instanceof Error ? err.message : 'Submission failed. Please try again.';
       this.errorText.set(message);
       this.handlePossibleTurnstileFailure(message);
     } finally {
       this.submitTimer.Stop();
     }
+  }
+
+  /**
+   * After a final submit failed for want of a network, promise to send it when the network is back
+   * — and say so — but only when the browser itself reports offline. That is the one case the
+   * promise can be kept: the browser fires `online` when it returns ({@link sendSubmitWaitingForNetwork}).
+   * An unreachable API on a connected device (DNS, CORS, a host that is down) fires nothing, so it
+   * keeps the "try again" sentence. Returns whether it armed.
+   */
+  private armSubmitWhenOnline(err: unknown): boolean {
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    if (!(err instanceof FormsApiUnreachableError) || !offline) {
+      return false;
+    }
+    this.submitWhenOnline = true;
+    this.errorText.set(SUBMIT_WHEN_ONLINE_MESSAGE);
+    return true;
+  }
+
+  /**
+   * The network is back: send the submit the respondent already asked for, once. Re-checks the phase
+   * because the form may have moved on — a reload, a lapsed session — since it was armed. Returns
+   * whether it sent, so the caller does not also resume the autosave.
+   */
+  private sendSubmitWaitingForNetwork(): boolean {
+    if (!this.submitWhenOnline || this.phase() !== 'ready') {
+      return false;
+    }
+    this.submitWhenOnline = false;
+    void this.onSubmit();
+    return true;
+  }
+
+  /**
+   * The respondent changed an answer after an offline submit failed: they are no longer asking for
+   * THAT submit, so it is not sent behind their back. The banner goes back to "try again", which is
+   * now true.
+   */
+  private disarmSubmitWhenOnline(): void {
+    if (!this.submitWhenOnline) {
+      return;
+    }
+    this.submitWhenOnline = false;
+    this.errorText.set(API_UNREACHABLE_MESSAGE);
   }
 
   /**
@@ -1153,13 +1229,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * describes a form that is no longer on screen.
    */
   private async uploadsLanded(form: WidgetForm, rt: FormRuntime): Promise<boolean> {
-    const ids = visibleIdsOf(rt);
-    this.uploads.retryUnsaved(ids);
-    await this.uploads.whenSettled(ids);
+    const failure = await this.uploads.settle(visibleIdsOf(rt));
     if (this.phase() !== 'submitting' || this.form() !== form || this.runtime() !== rt) {
       return false;
     }
-    const failure = this.uploads.failureAmong(ids);
     if (failure) {
       this.returnToEditing();
       this.refuseWithUploadFailure(failure);

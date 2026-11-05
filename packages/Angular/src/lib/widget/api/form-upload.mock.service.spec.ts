@@ -27,11 +27,11 @@ describe('FormsMockUploadService ids', () => {
 });
 
 describe('FormsMockUploadService progress', () => {
-  it('drives the progress callback to completion so the preview bar settles', async () => {
-    const seen: (number | null)[] = [];
+  it('walks the same two phases a live upload does, so an author previews what respondents see', async () => {
+    const seen: string[] = [];
 
-    await new FormsMockUploadService().upload(png(), 'preview', 'q-1', (f) => seen.push(f));
+    await new FormsMockUploadService().upload(png(), 'preview', 'q-1', (f, phase = 'sending') => seen.push(`${phase}:${f}`));
 
-    expect(seen.at(-1)).toBe(1);
+    expect(seen).toEqual(['sending:0', 'sending:1', 'storing:null']);
   });
 });

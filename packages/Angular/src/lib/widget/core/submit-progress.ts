@@ -34,6 +34,14 @@ export const STILL_WORKING_AFTER_MS = 2500;
  */
 export const SAVING_FILE_MESSAGE = 'Saving your file…';
 
+/**
+ * The banner after a final submit failed because the device is offline — said only when the browser
+ * itself reports offline, because that is the case the widget can keep its promise for: it sends
+ * the response again the moment the browser fires `online`.
+ */
+export const SUBMIT_WHEN_ONLINE_MESSAGE =
+  "You appear to be offline. Your answers are still here, and they will be sent as soon as you're back online.";
+
 /** The line to show under the spinner, given how long the submit has been running. */
 export function submitWaitMessage(elapsedMs: number): string {
   return elapsedMs >= STILL_WORKING_AFTER_MS

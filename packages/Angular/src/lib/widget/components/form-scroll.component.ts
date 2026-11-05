@@ -31,6 +31,7 @@ import { FormRuntime } from '../core/form-runtime';
 import { entryKey, sectionEntries, skippedMessage, type SectionEntry } from '../core/section-content';
 import { steppableSections } from '../core/section-stepper';
 import { nothingToSubmit } from '../core/nothing-to-submit';
+import { uploadWaitNote } from '../core/upload-wait-note';
 import { focusIsOutside, focusOnChange } from '../core/focus-on-change';
 import { StepJudge } from '../core/settled-validation';
 import { clampCursor } from '../core/stepper';
@@ -157,6 +158,17 @@ export class FormScrollComponent {
       // its way counts as an answer, matching the submit gate (#328).
       !nothingToSubmit(this.runtime(), this.uploads),
   );
+
+  /** "Still uploading — you can press Submit/Next" while a file in this section is on the wire. */
+  protected readonly uploadWaitNote = computed(() => {
+    const page = this.current();
+    const ids = page ? this.questionsFor(page).map((q) => q.id) : [];
+    return uploadWaitNote({
+      uploading: this.uploads.isUploadingAmong(ids),
+      isLast: this.isLast(),
+      pressed: this.uploads.waiting(),
+    });
+  });
 
   constructor() {
     // A jump firing on the last section shortens the list under the cursor, so re-clamp whenever

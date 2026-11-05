@@ -46,6 +46,7 @@ import { NgTemplateOutlet } from '@angular/common';
 
 import { FORMS_UPLOAD_SERVICE } from '../../api/form-upload.interface';
 import { FormUploadStore, type UploadStatus, type UploadToken } from '../../core/upload-store';
+import { uploadingLine } from '../../core/upload-status-line';
 import {
   autocompleteFor,
   compositeAutocompleteFor,
@@ -169,11 +170,19 @@ export class FormQuestionComponent {
     const value = this.value();
     return typeof value === 'string' && value.trim() !== '';
   });
-  /** Whole-number progress percent for the aria-valuenow / label. */
-  protected readonly uploadPercent = computed(() => {
+  /** True once every byte is sent and the server is storing the file. */
+  protected readonly uploadStoring = computed(() => this.upload().phase === 'storing');
+  /**
+   * Whole-number percent of bytes sent, for the bar and its aria-valuenow — or null while the
+   * transport cannot tell AND while the server is storing, so the bar never sits full ("done") over
+   * a file that is not saved yet.
+   */
+  protected readonly sendingPercent = computed(() => {
     const p = this.uploadProgress();
-    return p === null ? null : Math.round(p * 100);
+    return p === null || this.uploadStoring() ? null : Math.round(p * 100);
   });
+  /** "Uploading resume.pdf — 63%…", then "Saving resume.pdf…" — see {@link uploadingLine}. */
+  protected readonly uploadingText = computed(() => uploadingLine(this.upload()));
 
   protected readonly inputId = computed(() => `mjf-q-${this.question().id}`);
   /**

@@ -94,11 +94,15 @@ describe('#333: a drawing still being exported holds Next until its upload lands
     expect(store.viewFor('q-doodle').status).toBe('uploading');
   });
 
-  it('retryUnsaved and restart do not try to send a reservation, which has no transport call', async () => {
+  it('settle and restart do not try to send a reservation, which has no transport call', async () => {
     const { store } = connected();
-    store.reserve('q-doodle');
-    store.retryUnsaved(['q-doodle']);
+    const token = store.reserve('q-doodle');
+    // settle waits on the reservation (it is a drawing still being made) without trying to send it.
+    const settling = store.settle(['q-doodle']);
     await expect(store.restart('q-doodle')).resolves.toBeUndefined();
     expect(store.viewFor('q-doodle').status).toBe('uploading');
+    // The export that produced nothing ends the reservation, which is what releases the wait.
+    store.release(token);
+    await expect(settling).resolves.toBeNull();
   });
 });

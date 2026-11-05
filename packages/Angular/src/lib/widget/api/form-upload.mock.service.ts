@@ -33,9 +33,12 @@ export class FormsMockUploadService implements IFormsUploadService {
     onProgress?: UploadProgress,
     _responseId?: string,
   ): Promise<UploadedFile> {
+    // The same two phases the real transport reports: bytes going up, then the server storing them.
     onProgress?.(0);
-    await new Promise<void>((resolve) => setTimeout(resolve, SIMULATED_LATENCY_MS));
+    await new Promise<void>((resolve) => setTimeout(resolve, SIMULATED_LATENCY_MS / 2));
     onProgress?.(1);
+    onProgress?.(null, 'storing');
+    await new Promise<void>((resolve) => setTimeout(resolve, SIMULATED_LATENCY_MS / 2));
 
     this.stored += 1;
     return {

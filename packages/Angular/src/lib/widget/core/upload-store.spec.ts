@@ -218,6 +218,48 @@ describe('FormUploadStore — progress', () => {
     store.setProgress(second, 0.3);
     expect(store.viewFor('q-resume').progress).toBe(0.3);
   });
+
+  it('starts an upload in the sending phase', () => {
+    const { store } = connectedStore();
+    store.begin('q-resume', fileNamed('resume.pdf'));
+    expect(store.viewFor('q-resume')).toMatchObject({ status: 'uploading', phase: 'sending', progress: 0 });
+  });
+
+  it('moves to the storing phase when the transport says the bytes are all sent', () => {
+    const { store } = connectedStore();
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+    store.setProgress(token, 1);
+
+    store.setProgress(token, null, 'storing');
+
+    expect(store.viewFor('q-resume')).toMatchObject({ status: 'uploading', phase: 'storing', progress: null });
+  });
+
+  it('carries the phase through the upload it runs, and back to sending for a retry', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const { store } = connectedStore();
+      let attempt = 0;
+      const send = vi.fn<UploadSend>((onProgress) => {
+        attempt++;
+        onProgress(1);
+        onProgress(null, 'storing');
+        return attempt === 1 ? Promise.reject(transient()) : new Promise<UploadedFile>(() => undefined);
+      });
+
+      void store.upload('q-resume', fileNamed('resume.pdf'), send);
+      await vi.advanceTimersByTimeAsync(0);
+      // The first attempt failed after the bytes went up; the retry is asleep, not storing.
+      expect(store.viewFor('q-resume')).toMatchObject({ status: 'uploading', phase: 'sending', progress: null });
+
+      await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[0]);
+      expect(store.viewFor('q-resume')).toMatchObject({ phase: 'storing' });
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('FormUploadStore — edge cases', () => {
@@ -619,7 +661,7 @@ describe('FormUploadStore — upload retries a bad moment by itself', () => {
   });
 });
 
-describe('FormUploadStore — restart and retryUnsaved', () => {
+describe('FormUploadStore — restart and settle', () => {
   let warn: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
     vi.useFakeTimers();
@@ -658,30 +700,56 @@ describe('FormUploadStore — restart and retryUnsaved', () => {
     expect(store.viewFor('q-resume')).toEqual(IDLE_UPLOAD);
   });
 
-  it('restarts the unsaved questions it is given and leaves a refused one alone', async () => {
+  it('settle restarts the unsaved questions it is given, leaves a refused one alone, and names the refusal', async () => {
     const { store, runtime } = connectedStore();
     const resumeSend = scriptedSend(transient(), transient(), transient(), transient(), stored('file-resume'));
     await spendRetries(store, 'q-resume', resumeSend);
-    const refusedSend = scriptedSend(new UploadError('That file was not accepted. Choose a different file.', 'refused'));
+    const refused = 'That file was not accepted. Choose a different file.';
+    const refusedSend = scriptedSend(new UploadError(refused, 'refused'));
     await store.upload('q-transcript', fileNamed('huge.pdf'), refusedSend);
 
-    store.retryUnsaved(['q-resume', 'q-transcript']);
-    await store.whenSettled();
+    const failure = await store.settle(['q-resume', 'q-transcript']);
 
     expect(resumeSend).toHaveBeenCalledTimes(5);
     expect(refusedSend).toHaveBeenCalledTimes(1);
     expect(runtime.valueFor('q-resume')).toBe('file-resume');
-    expect(store.viewFor('q-transcript').failure?.kind).toBe('refused');
+    expect(failure).toEqual({ kind: 'refused', message: refused });
   });
 
-  it('only restarts the questions it is given', async () => {
+  it('settle only restarts the questions it is given', async () => {
     const { store } = connectedStore();
     const send = scriptedSend(transient());
     await spendRetries(store, 'q-resume', send);
 
-    store.retryUnsaved(['q-transcript']);
+    expect(await store.settle(['q-transcript'])).toBeNull();
 
     expect(send).toHaveBeenCalledTimes(4);
+  });
+
+  it('settle waits for an upload in flight and answers null once it lands', async () => {
+    const { store, runtime } = connectedStore();
+    const held = heldSend();
+    void store.upload('q-resume', fileNamed('resume.pdf'), held.send);
+
+    const settling = store.settle(['q-resume']);
+    expect(await isSettled(settling)).toBe(false);
+
+    held.resolve('file-resume');
+
+    expect(await settling).toBeNull();
+    expect(runtime.valueFor('q-resume')).toBe('file-resume');
+  });
+
+  it('settle answers the unsaved failure when the restart fails again', async () => {
+    const { store } = connectedStore();
+    const send = scriptedSend(transient());
+    await spendRetries(store, 'q-resume', send);
+
+    const settling = store.settle(['q-resume']);
+    await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS.reduce((a, b) => a + b, 0));
+
+    expect(await settling).toEqual({ kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE });
+    expect(send).toHaveBeenCalledTimes(8);
   });
 });
 
@@ -748,6 +816,40 @@ describe('FormUploadStore — hasPendingAmong', () => {
     expect(pending()).toBe(true);
     store.succeed(token, 'file-1');
     expect(pending()).toBe(false);
+  });
+});
+
+describe('FormUploadStore — isUploadingAmong', () => {
+  it('is true only while one of the listed questions has an upload on the wire (or a drawing being made)', () => {
+    const { store } = connectedStore();
+    expect(store.isUploadingAmong(['q-resume'])).toBe(false);
+
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+    expect(store.isUploadingAmong(['q-resume'])).toBe(true);
+    expect(store.isUploadingAmong(['q-transcript'])).toBe(false);
+
+    store.succeed(token, 'file-1');
+    expect(store.isUploadingAmong(['q-resume'])).toBe(false);
+
+    store.reserve('q-transcript');
+    expect(store.isUploadingAmong(['q-resume', 'q-transcript'])).toBe(true);
+  });
+
+  it('is false for an unsaved failure: nothing is on the wire until the respondent tries again', () => {
+    const { store } = connectedStore();
+    store.fail(store.begin('q-resume', fileNamed('resume.pdf')), { kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE });
+    expect(store.isUploadingAmong(['q-resume'])).toBe(false);
+  });
+
+  it('can be tracked by a computed', () => {
+    const { store } = connectedStore();
+    const uploading = computed(() => store.isUploadingAmong(['q-resume']));
+    expect(uploading()).toBe(false);
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+    expect(uploading()).toBe(true);
+    store.clear('q-resume');
+    expect(uploading()).toBe(false);
+    expect(token.questionId).toBe('q-resume');
   });
 });
 
