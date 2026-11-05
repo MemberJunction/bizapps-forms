@@ -131,10 +131,16 @@ describe('the upload-wait note is rendered beside the primary button (source tex
   const template = (file: string): string =>
     readFileSync(join(__dirname, file), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
 
-  it.each(['form-scroll.component.html', 'form-one-question.component.html'])('%s', (file) => {
+  it.each([
+    ['form-scroll.component.html', 'mjf-scroll__actions'],
+    ['form-one-question.component.html', 'mjf-oneq__nav'],
+  ])('%s', (file, buttonRow) => {
     const html = template(file);
     // Always rendered, content conditional: a region inserted together with its text is not
     // reliably announced.
     expect(html).toMatch(/<p class="mjf-wait-note" aria-live="polite">\s*@if \(uploadWaitNote\(\); as note\)/);
+    // ABOVE the button row: on a phone the button is often the last thing on screen, and the note
+    // placed under it was off the bottom edge (WebKit, iPhone 13 width).
+    expect(html.indexOf('class="mjf-wait-note"')).toBeLessThan(html.indexOf(buttonRow));
   });
 });

@@ -116,9 +116,9 @@
   color: var(--mjf-page-ink-muted);
 }
 
-/* Under the Back / Next row; empty (and so zero-height) unless this question's file is uploading. */
+/* Just above the Back / Next row; empty (and so hidden) unless this question's file is uploading. */
 .mjf-wait-note {
-  margin: 0.75rem 0 0;
+  margin: 0 0 0.75rem;
   font-size: 0.9375rem;
   line-height: 1.45;
   text-align: right;

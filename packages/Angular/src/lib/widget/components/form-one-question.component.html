@@ -26,6 +26,13 @@
         (focusout)="onBlur(q, $event)"
       />
 
+      <!-- Just above the button the respondent is about to press; see the same note in form-scroll
+           for why above and not below. -->
+      <p class="mjf-wait-note" aria-live="polite">
+        @if (uploadWaitNote(); as note) {
+          {{ note }}
+        }
+      </p>
       <div class="mjf-oneq__nav">
         <button
           type="button"
@@ -47,12 +54,6 @@
           }
         </button>
       </div>
-      <!-- Beside the button the respondent is about to press; see the same note in form-scroll. -->
-      <p class="mjf-wait-note" aria-live="polite">
-        @if (uploadWaitNote(); as note) {
-          {{ note }}
-        }
-      </p>
     </div>
   } @else {
     <p class="mjf-oneq__empty">This form has no questions to display.</p>

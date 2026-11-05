@@ -132,7 +132,7 @@
   gap: 0.75rem;
 }
 
-/* Under the action row; empty (and so zero-height) unless a file on this step is uploading. */
+/* Just above the action row; empty (and so hidden) unless a file on this step is uploading. */
 .mjf-wait-note {
   margin: 0;
   font-size: 0.9375rem;
