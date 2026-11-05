@@ -186,18 +186,21 @@
           </div>
 
           @if (uploadStatus() === 'uploading') {
+            <!-- Two phases: a bar that fills while bytes go up, then an indeterminate one while the
+                 server stores the file. A full bar used to sit there for the whole store, and
+                 "100%" read as done. -->
             <div
               class="mjf-file__progress"
               role="progressbar"
-              aria-label="Uploading file"
-              [attr.aria-valuenow]="uploadPercent()"
-              [attr.aria-valuemin]="uploadPercent() === null ? null : 0"
-              [attr.aria-valuemax]="uploadPercent() === null ? null : 100"
+              [attr.aria-label]="uploadStoring() ? 'Saving file' : 'Uploading file'"
+              [attr.aria-valuenow]="sendingPercent()"
+              [attr.aria-valuemin]="sendingPercent() === null ? null : 0"
+              [attr.aria-valuemax]="sendingPercent() === null ? null : 100"
             >
               <span
                 class="mjf-file__progress-bar"
-                [class.mjf-file__progress-bar--indeterminate]="uploadPercent() === null"
-                [style.width.%]="uploadPercent() ?? 100"
+                [class.mjf-file__progress-bar--indeterminate]="sendingPercent() === null"
+                [style.width.%]="sendingPercent() ?? 100"
               ></span>
             </div>
           }
@@ -207,7 +210,7 @@
               @case ('uploading') {
                 <span>
                   <mjf-icon name="spinner" spin />
-                  Uploading {{ uploadFileName() }}@if (uploadPercent() !== null) { — {{ uploadPercent() }}% }…
+                  {{ uploadingText() }}
                 </span>
               }
               @case ('done') {

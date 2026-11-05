@@ -94,5 +94,13 @@
         }
       </button>
     </div>
+    <!-- Beside the button the respondent is about to press, because that is where the question
+         "will this lose my file?" gets asked. Always rendered; only its content is conditional,
+         because a live region inserted together with its text is not reliably announced. -->
+    <p class="mjf-wait-note" aria-live="polite">
+      @if (uploadWaitNote(); as note) {
+        {{ note }}
+      }
+    </p>
   </form>
 </div>

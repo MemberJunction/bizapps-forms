@@ -21,6 +21,7 @@ import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-enti
 
 import { FormRuntime } from '../core/form-runtime';
 import { nothingToSubmit } from '../core/nothing-to-submit';
+import { uploadWaitNote } from '../core/upload-wait-note';
 import { focusIsOutside, focusOnChange } from '../core/focus-on-change';
 import { StepJudge } from '../core/settled-validation';
 import { clampCursor } from '../core/stepper';
@@ -131,6 +132,12 @@ export class FormOneQuestionComponent {
       // its way counts as an answer, matching the submit gate (#328).
       !nothingToSubmit(this.runtime(), this.uploads),
   );
+
+  /** "Still uploading — you can press Submit/Next" while this question's file is on the wire. */
+  protected readonly uploadWaitNote = computed(() => {
+    const id = this.current()?.id;
+    return uploadWaitNote({ uploading: !!id && this.uploads.isUploadingAmong([id]), isLast: this.isLast() });
+  });
 
   constructor() {
     // When conditional logic resizes the path, re-clamp the stored cursor so it never

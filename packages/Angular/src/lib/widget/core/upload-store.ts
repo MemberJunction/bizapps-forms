@@ -27,7 +27,7 @@ import { computed, signal, type Signal } from '@angular/core';
 
 import { type AnswerValue } from '@mj-biz-apps/forms-entities/contracts';
 
-import { UploadError, type UploadedFile, type UploadProgress } from '../api/form-upload.interface';
+import { UploadError, type UploadedFile, type UploadPhase, type UploadProgress } from '../api/form-upload.interface';
 import { failureDetail } from './failure-detail';
 
 export type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
@@ -70,6 +70,11 @@ export interface UploadView {
   readonly fileName: string;
   /** 0–1 while uploading, or null for an indeterminate phase. */
   readonly progress: number | null;
+  /**
+   * While `status` is `'uploading'`: still sending bytes, or every byte sent and the server storing
+   * the file. Back to `'sending'` for a retry. Meaningless in any other status.
+   */
+  readonly phase: UploadPhase;
   /** Why the upload ended without a stored file, or null. Set only while `status` is `'error'`. */
   readonly failure: UploadFailure | null;
   /**
@@ -94,6 +99,7 @@ export const IDLE_UPLOAD: UploadView = {
   status: 'idle',
   fileName: '',
   progress: null,
+  phase: 'sending',
   failure: null,
   file: null,
 };
@@ -264,7 +270,7 @@ export class FormUploadStore {
       }
       let stored: UploadedFile;
       try {
-        stored = await send((fraction) => this.setProgress(token, fraction));
+        stored = await send((fraction, phase) => this.setProgress(token, fraction, phase));
       } catch (err) {
         if (err instanceof UploadError && err.kind === 'refused') {
           this.fail(token, { kind: 'refused', message: err.message });
@@ -403,6 +409,17 @@ export class FormUploadStore {
   }
 
   /**
+   * True while any of `questionIds` has an upload on the wire, a retry asleep between attempts, or
+   * a drawing still being made (a reservation). Narrower than {@link hasPendingAmong}: an `unsaved`
+   * failure is not uploading — nothing moves until the respondent tries again — and saying "still
+   * uploading" beside its "did not save" line would contradict it. A pure read of the `records`
+   * signal, so a `computed` that calls it tracks it.
+   */
+  public isUploadingAmong(questionIds: readonly string[]): boolean {
+    return !this.isSettled(questionIds);
+  }
+
+  /**
    * Record a successful upload AND store its file as the question's answer.
    *
    * The two are one act, which is the point. They used to be two: the store recorded the
@@ -462,14 +479,16 @@ export class FormUploadStore {
    * Report progress for a running upload; a superseded token is ignored.
    *
    * `null` is a phase, not an absence: the transport reports it when it cannot say how far along
-   * the upload is (no Content-Length), and the bar renders indeterminate for it.
+   * the upload is (no Content-Length), and the bar renders indeterminate for it. `phase` defaults
+   * to `'sending'`, so any report that does not name the storing phase — a byte count, or the
+   * store's own reset before a retry — puts the upload back in the sending phase.
    */
-  public setProgress(token: UploadToken, fraction: number | null): void {
+  public setProgress(token: UploadToken, fraction: number | null, phase: UploadPhase = 'sending'): void {
     const current = this.records().get(token.questionId);
     if (!current || current.seq !== token.seq) {
       return;
     }
-    this.write(token.questionId, { ...current, progress: fraction });
+    this.write(token.questionId, { ...current, progress: fraction, phase });
   }
 
   /**
@@ -495,8 +514,8 @@ export class FormUploadStore {
     if (!record) {
       return IDLE_UPLOAD;
     }
-    const { status, fileName, progress, failure, file } = record;
-    return { status, fileName, progress, failure, file };
+    const { status, fileName, progress, phase, failure, file } = record;
+    return { status, fileName, progress, phase, failure, file };
   }
 
   /** Start a new upload record for `questionId`, superseding any earlier one. */
@@ -505,7 +524,7 @@ export class FormUploadStore {
     fields: { file: File | null; fileName: string; progress: number | null; send: UploadSend | null },
   ): UploadToken {
     const seq = ++this.nextSeq;
-    this.write(questionId, { status: 'uploading', failure: null, seq, ...fields });
+    this.write(questionId, { status: 'uploading', phase: 'sending', failure: null, seq, ...fields });
     // No answer while an upload is in flight: a required FileUpload must not be satisfied by a
     // file that is not stored yet, and a replacement must not leave the old id standing.
     this.commit(questionId, null);

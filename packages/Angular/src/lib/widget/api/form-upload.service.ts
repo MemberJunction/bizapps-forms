@@ -204,8 +204,12 @@ export class FormUploadService implements IFormsUploadService {
           watchForStall();
           onProgress?.(e.lengthComputable && e.total > 0 ? e.loaded / e.total : null);
         };
-        // The body is all sent; the server is now storing it, which can be slow but is not a stall.
-        xhr.upload.onload = (): void => watchForStall();
+        // The body is all sent; the server is now storing it, which can be slow but is not a stall —
+        // and is not finished either, which is what the storing phase tells the respondent.
+        xhr.upload.onload = (): void => {
+          watchForStall();
+          onProgress?.(null, 'storing');
+        };
       }
       xhr.onprogress = (): void => watchForStall();
 

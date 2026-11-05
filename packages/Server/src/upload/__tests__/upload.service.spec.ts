@@ -6,8 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { EntityInfo, EntityUserPermissionInfo, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
-import { runUpload, UPLOAD_FAILED_MESSAGE, type UploadContext, type UploadRequest, type UploadStorageEngine } from '../upload.service';
+import { runUpload, RESPONSE_ALREADY_SUBMITTED_MESSAGE, UPLOAD_FAILED_MESSAGE, type UploadContext, type UploadRequest, type UploadStorageEngine } from '../upload.service';
 import { resetUploadConfigForTests } from '../config';
+import { StageTimer } from '../../http/stage-timer';
 import type { ParsedFile } from '../multipart';
 import { makeDefinition, makeDistribution, makeVersion } from '@mj-biz-apps/forms-core-entities-server/testing';
 import { FOREIGN_ORIGIN_MESSAGE, FORM_UNAVAILABLE_MESSAGE, FORMS_ENTITY } from '@mj-biz-apps/forms-core-entities-server';
@@ -77,13 +78,35 @@ function makeUploadDefinition() {
 
 /** RunView provider that resolves an open published distribution for slug 'public-1'. */
 function runViewProvider(
-  options: { openDistribution?: boolean; allowedOrigins?: string | null; formStatus?: string; formReadFails?: boolean } = {},
+  options: {
+    openDistribution?: boolean;
+    allowedOrigins?: string | null;
+    formStatus?: string;
+    formReadFails?: boolean;
+    /** Existing Form Response rows by id, and their Status. */
+    responses?: Record<string, string>;
+    responseReadFails?: boolean;
+    /** Every Form Response read, with the principal it ran as. */
+    responseReads?: { filter: string | undefined; user: UserInfo | undefined }[];
+  } = {},
 ) {
   const open = options.openDistribution ?? true;
   return {
-    RunView: async <T>(params: RunViewParams): Promise<RunViewResult<T>> => {
+    RunView: async <T>(params: RunViewParams, contextUser?: UserInfo): Promise<RunViewResult<T>> => {
       if (options.formReadFails && params.EntityName === FORMS_ENTITY.Form) {
         return { Success: false, Results: [], RowCount: 0, TotalRowCount: 0, ExecutionTime: 0, ErrorMessage: 'login timeout' } as RunViewResult<T>;
+      }
+      if (params.EntityName === FORM_RESPONSE_ENTITY) {
+        // The upload service passes a plain SQL string; a PlatformSQL object would be a change of shape.
+        const filter = typeof params.ExtraFilter === 'string' ? params.ExtraFilter : undefined;
+        options.responseReads?.push({ filter, user: contextUser });
+        if (options.responseReadFails) {
+          return { Success: false, Results: [], RowCount: 0, TotalRowCount: 0, ExecutionTime: 0, ErrorMessage: 'deadlock victim' } as RunViewResult<T>;
+        }
+        const found = Object.entries(options.responses ?? {})
+          .filter(([id]) => filter?.toLowerCase().includes(id.toLowerCase()))
+          .map(([ID, Status]) => ({ ID, Status }));
+        return { Success: true, Results: found as T[], RowCount: found.length, TotalRowCount: found.length, ExecutionTime: 0, ErrorMessage: '' } as RunViewResult<T>;
       }
       let rows: unknown[] = [];
       if (params.EntityName === FORM_DISTRIBUTION_ENTITY && open) {
@@ -132,6 +155,9 @@ function context(opts: {
   formStatus?: string;
   formReadFails?: boolean;
   noSystemUser?: boolean;
+  responses?: Record<string, string>;
+  responseReadFails?: boolean;
+  responseReads?: { filter: string | undefined; user: UserInfo | undefined }[];
 }): UploadContext {
   return {
     contextUser: USER,
@@ -143,6 +169,9 @@ function context(opts: {
       allowedOrigins: opts.allowedOrigins,
       formStatus: opts.formStatus,
       formReadFails: opts.formReadFails,
+      responses: opts.responses,
+      responseReadFails: opts.responseReadFails,
+      responseReads: opts.responseReads,
     }),
     storage: opts.storage ?? storageEngine().engine,
     // Stubbed rather than hitting the database. The endpoint fails closed when provenance cannot
@@ -684,5 +713,97 @@ describe('runUpload — provenance', () => {
       expect(result.failure?.status).toBe(403);
       expect(upload).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * An upload for a response that is already sealed stores nothing (409).
+ *
+ * The widget now waits for its uploads before it submits, so this is the server's half of the same
+ * rule: a file that arrives after the response it names was finished can never become one of its
+ * answers. Storing it anyway left an `MJ: Files` row and a ledger row no answer would ever reference
+ * — 21 of them on the dev database before the widget waited — and gave the respondent no hint that
+ * their file did not make it in.
+ */
+describe('runUpload — a response that is already submitted', () => {
+  const RESPONSE_ID = '6d63fa23-00af-44de-a74d-7483feabb1aa';
+
+  it.each(['Complete', 'Disqualified'])('refuses (409) an upload for a %s response and stores nothing', async (status) => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(
+      context({ storage: engine, responses: { [RESPONSE_ID]: status } }),
+      request({ responseId: RESPONSE_ID }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.failure).toEqual({ status: 409, error: RESPONSE_ALREADY_SUBMITTED_MESSAGE });
+    expect(upload).not.toHaveBeenCalled();
+    expect(recordedProvenance).toHaveLength(0);
+  });
+
+  it('stores the file for a response that is still a draft', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(
+      context({ storage: engine, responses: { [RESPONSE_ID]: 'Partial' } }),
+      request({ responseId: RESPONSE_ID }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(upload).toHaveBeenCalledOnce();
+  });
+
+  it('stores the file for a response id with no row yet (an upload before the first autosave)', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ storage: engine, responses: {} }), request({ responseId: RESPONSE_ID }));
+
+    expect(result.ok).toBe(true);
+    expect(upload).toHaveBeenCalledOnce();
+  });
+
+  it('reads the response as the system user, by its id — the respondent role cannot read responses', async () => {
+    const responseReads: { filter: string | undefined; user: UserInfo | undefined }[] = [];
+    await runUpload(context({ responses: {}, responseReads }), request({ responseId: RESPONSE_ID }));
+
+    expect(responseReads).toHaveLength(1);
+    expect(responseReads[0].user).toBe(SYSTEM);
+    expect(responseReads[0].filter).toContain(RESPONSE_ID);
+  });
+
+  it('does not read anything when the upload names no response', async () => {
+    const responseReads: { filter: string | undefined; user: UserInfo | undefined }[] = [];
+    const result = await runUpload(context({ responseReads }), request({ responseId: undefined }));
+
+    expect(result.ok).toBe(true);
+    expect(responseReads).toHaveLength(0);
+  });
+
+  it('fails closed (503) when the response cannot be read, and stores nothing', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(
+      context({ storage: engine, responseReadFails: true }),
+      request({ responseId: RESPONSE_ID }),
+    );
+
+    expect(result.failure).toEqual({ status: 503, error: UPLOAD_FAILED_MESSAGE });
+    expect(upload).not.toHaveBeenCalled();
+  });
+});
+
+describe('runUpload — stage timing', () => {
+  it('times the stages a slow upload could be spending its time in, when given a timer', async () => {
+    const timer = new StageTimer();
+    const result = await runUpload(
+      { ...context({ responses: {} }), timer },
+      request({ responseId: '6d63fa23-00af-44de-a74d-7483feabb1aa' }),
+    );
+
+    expect(result.ok).toBe(true);
+    const names = timer.header().split(', ').map((entry) => entry.split(';')[0]);
+    expect(names).toEqual(['resolve', 'response', 'store', 'record']);
+  });
+
+  it('runs exactly as before without one', async () => {
+    const result = await runUpload(context({}), request());
+    expect(result.ok).toBe(true);
   });
 });
