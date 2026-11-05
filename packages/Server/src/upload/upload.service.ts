@@ -276,7 +276,9 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   // 3c. The response it names must not be finished. Last of the gates because it is the one that
   //     reads a row, and every cheaper refusal has had its chance by now; before storage, because
   //     refusing after the bytes landed is how the orphaned files this gate exists for were made.
-  const responseCheck = await stage(ctx, 'response', () => refuseIfResponseSealed(ctx, req.responseId));
+  const responseCheck = await stage(ctx, 'response', () =>
+    refuseIfResponseSealed(ctx, req.responseId, distCheck.resolved?.distributionId),
+  );
   if (!responseCheck.ok) {
     return responseCheck;
   }
@@ -309,16 +311,28 @@ export const RESPONSE_ALREADY_SUBMITTED_MESSAGE =
  * protect. A read that FAILS refuses with a 503, the same choice `resolveOpenDistribution` makes for
  * an unreadable form — storing a file we could not prove belongs to an open response is the thing
  * this gate exists to stop, so it does not fail open.
+ *
+ * Scoped to the distribution the upload already resolved, because the elevated read could otherwise
+ * be used as an oracle: any anonymous caller holding a response id from ANY form would learn from
+ * 409-or-200 whether it was finished. A response elsewhere reads as no row and passes, which is
+ * exactly what this route did before the gate existed — the gate adds no answer outside the caller's
+ * own form. The ownership rule (`responseIsOurs`) cannot be used here: the upload request carries
+ * no `x-session-id`, so every owned row would read as someone else's.
  */
-async function refuseIfResponseSealed(ctx: UploadContext, responseId: string | undefined): Promise<UploadResult> {
-  if (!responseId) {
+async function refuseIfResponseSealed(
+  ctx: UploadContext,
+  responseId: string | undefined,
+  distributionId: string | undefined,
+): Promise<UploadResult> {
+  if (!responseId || !distributionId) {
     return { ok: true };
   }
-  // `runUpload` refused a non-GUID `responseId` before this point, so it is safe in the filter.
+  // `runUpload` refused a non-GUID `responseId` before this point, and `distributionId` is the
+  // resolved row's own key, so both are safe in the filter.
   const read = await ctx.runViewProvider.RunView<{ ID: string; Status: FormResponseStatus }>(
     {
       EntityName: FORMS_ENTITY.FormResponse,
-      ExtraFilter: `ID='${responseId}'`,
+      ExtraFilter: `ID='${responseId}' AND FormDistributionID='${distributionId}'`,
       Fields: ['ID', 'Status'],
       ResultType: 'simple',
       MaxRows: 1,

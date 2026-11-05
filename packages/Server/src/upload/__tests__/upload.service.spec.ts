@@ -83,8 +83,8 @@ function runViewProvider(
     allowedOrigins?: string | null;
     formStatus?: string;
     formReadFails?: boolean;
-    /** Existing Form Response rows by id, and their Status. */
-    responses?: Record<string, string>;
+    /** Existing Form Response rows by id: their Status (in 'dist-1'), or a Status and a distribution. */
+    responses?: Record<string, string | { status: string; distributionId: string }>;
     responseReadFails?: boolean;
     /** Every Form Response read, with the principal it ran as. */
     responseReads?: { filter: string | undefined; user: UserInfo | undefined }[];
@@ -103,9 +103,12 @@ function runViewProvider(
         if (options.responseReadFails) {
           return { Success: false, Results: [], RowCount: 0, TotalRowCount: 0, ExecutionTime: 0, ErrorMessage: 'deadlock victim' } as RunViewResult<T>;
         }
+        // Matched the way SQL would: by id AND by the distribution the filter names (a string entry
+        // lives in the fake distribution, 'dist-1').
         const found = Object.entries(options.responses ?? {})
-          .filter(([id]) => filter?.toLowerCase().includes(id.toLowerCase()))
-          .map(([ID, Status]) => ({ ID, Status }));
+          .map(([ID, row]) => (typeof row === 'string' ? { ID, Status: row, dist: 'dist-1' } : { ID, Status: row.status, dist: row.distributionId }))
+          .filter((row) => filter?.toLowerCase().includes(row.ID.toLowerCase()) && filter.includes(`FormDistributionID='${row.dist}'`))
+          .map(({ ID, Status }) => ({ ID, Status }));
         return { Success: true, Results: found as T[], RowCount: found.length, TotalRowCount: found.length, ExecutionTime: 0, ErrorMessage: '' } as RunViewResult<T>;
       }
       let rows: unknown[] = [];
@@ -155,7 +158,7 @@ function context(opts: {
   formStatus?: string;
   formReadFails?: boolean;
   noSystemUser?: boolean;
-  responses?: Record<string, string>;
+  responses?: Record<string, string | { status: string; distributionId: string }>;
   responseReadFails?: boolean;
   responseReads?: { filter: string | undefined; user: UserInfo | undefined }[];
 }): UploadContext {
@@ -767,6 +770,26 @@ describe('runUpload — a response that is already submitted', () => {
     expect(responseReads).toHaveLength(1);
     expect(responseReads[0].user).toBe(SYSTEM);
     expect(responseReads[0].filter).toContain(RESPONSE_ID);
+  });
+
+  it('only looks inside the distribution the upload resolved, so it says nothing about another form', async () => {
+    // Without the scope, any anonymous caller holding a response id from ANY form could learn
+    // whether it was finished: 409 for sealed, 200 for not. Scoped, a response elsewhere reads as
+    // no row and the upload goes ahead — exactly what happened before this guard existed.
+    const responseReads: { filter: string | undefined; user: UserInfo | undefined }[] = [];
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(
+      context({
+        storage: engine,
+        responseReads,
+        responses: { [RESPONSE_ID]: { status: 'Complete', distributionId: 'dist-other' } },
+      }),
+      request({ responseId: RESPONSE_ID }),
+    );
+
+    expect(responseReads[0].filter).toContain("FormDistributionID='dist-1'");
+    expect(result.ok).toBe(true);
+    expect(upload).toHaveBeenCalledOnce();
   });
 
   it('does not read anything when the upload names no response', async () => {
