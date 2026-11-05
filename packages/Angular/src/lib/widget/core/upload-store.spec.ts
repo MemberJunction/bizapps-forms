@@ -619,7 +619,7 @@ describe('FormUploadStore — upload retries a bad moment by itself', () => {
   });
 });
 
-describe('FormUploadStore — restart and retryUnsaved', () => {
+describe('FormUploadStore — restart and settle', () => {
   let warn: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
     vi.useFakeTimers();
@@ -658,30 +658,56 @@ describe('FormUploadStore — restart and retryUnsaved', () => {
     expect(store.viewFor('q-resume')).toEqual(IDLE_UPLOAD);
   });
 
-  it('restarts the unsaved questions it is given and leaves a refused one alone', async () => {
+  it('settle restarts the unsaved questions it is given, leaves a refused one alone, and names the refusal', async () => {
     const { store, runtime } = connectedStore();
     const resumeSend = scriptedSend(transient(), transient(), transient(), transient(), stored('file-resume'));
     await spendRetries(store, 'q-resume', resumeSend);
-    const refusedSend = scriptedSend(new UploadError('That file was not accepted. Choose a different file.', 'refused'));
+    const refused = 'That file was not accepted. Choose a different file.';
+    const refusedSend = scriptedSend(new UploadError(refused, 'refused'));
     await store.upload('q-transcript', fileNamed('huge.pdf'), refusedSend);
 
-    store.retryUnsaved(['q-resume', 'q-transcript']);
-    await store.whenSettled();
+    const failure = await store.settle(['q-resume', 'q-transcript']);
 
     expect(resumeSend).toHaveBeenCalledTimes(5);
     expect(refusedSend).toHaveBeenCalledTimes(1);
     expect(runtime.valueFor('q-resume')).toBe('file-resume');
-    expect(store.viewFor('q-transcript').failure?.kind).toBe('refused');
+    expect(failure).toEqual({ kind: 'refused', message: refused });
   });
 
-  it('only restarts the questions it is given', async () => {
+  it('settle only restarts the questions it is given', async () => {
     const { store } = connectedStore();
     const send = scriptedSend(transient());
     await spendRetries(store, 'q-resume', send);
 
-    store.retryUnsaved(['q-transcript']);
+    expect(await store.settle(['q-transcript'])).toBeNull();
 
     expect(send).toHaveBeenCalledTimes(4);
+  });
+
+  it('settle waits for an upload in flight and answers null once it lands', async () => {
+    const { store, runtime } = connectedStore();
+    const held = heldSend();
+    void store.upload('q-resume', fileNamed('resume.pdf'), held.send);
+
+    const settling = store.settle(['q-resume']);
+    expect(await isSettled(settling)).toBe(false);
+
+    held.resolve('file-resume');
+
+    expect(await settling).toBeNull();
+    expect(runtime.valueFor('q-resume')).toBe('file-resume');
+  });
+
+  it('settle answers the unsaved failure when the restart fails again', async () => {
+    const { store } = connectedStore();
+    const send = scriptedSend(transient());
+    await spendRetries(store, 'q-resume', send);
+
+    const settling = store.settle(['q-resume']);
+    await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS.reduce((a, b) => a + b, 0));
+
+    expect(await settling).toEqual({ kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE });
+    expect(send).toHaveBeenCalledTimes(8);
   });
 });
 

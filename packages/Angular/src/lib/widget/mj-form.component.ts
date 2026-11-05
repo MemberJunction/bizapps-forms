@@ -1153,13 +1153,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * describes a form that is no longer on screen.
    */
   private async uploadsLanded(form: WidgetForm, rt: FormRuntime): Promise<boolean> {
-    const ids = visibleIdsOf(rt);
-    this.uploads.retryUnsaved(ids);
-    await this.uploads.whenSettled(ids);
+    const failure = await this.uploads.settle(visibleIdsOf(rt));
     if (this.phase() !== 'submitting' || this.form() !== form || this.runtime() !== rt) {
       return false;
     }
-    const failure = this.uploads.failureAmong(ids);
     if (failure) {
       this.returnToEditing();
       this.refuseWithUploadFailure(failure);

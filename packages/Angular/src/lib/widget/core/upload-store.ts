@@ -314,14 +314,36 @@ export class FormUploadStore {
   }
 
   /**
+   * Bring `questionIds`' uploads to rest, and say whether any of them ended without a file.
+   *
+   * The one call a gate makes before it judges answers — a renderer's Next, and the final submit.
+   * Pressing either is the respondent saying "try again", so an `unsaved` upload is restarted first;
+   * then every upload among them is waited for (through retries, for as long as the retry schedule
+   * runs); then the first failure among them, in the order given, is returned, or null when every
+   * one landed or none was started.
+   *
+   * It used to be three calls every gate had to make in order — restart, wait, read the failure —
+   * and two gates spelled that order out separately. A gate that got the order wrong judged a
+   * question whose upload was still running, which is #248 again.
+   *
+   * Never rejects, for the reasons {@link whenSettled} gives. A caller that awaited across other
+   * state (a phase, a reload) re-checks that state itself: this answers for the uploads only.
+   */
+  public async settle(questionIds: readonly string[]): Promise<UploadFailure | null> {
+    this.retryUnsaved(questionIds);
+    await this.whenSettled(questionIds);
+    return this.failureAmong(questionIds);
+  }
+
+  /**
    * Restart every listed question whose upload ended `unsaved`.
    *
    * A `refused` one is left alone on purpose: restarting it would send the same rejected bytes and
-   * show the same verdict, after a wait. Fire-and-forget — the caller learns the outcome through
-   * {@link whenSettled} and {@link failureAmong}. `upload` rejects only on an answer-sink throw
-   * (a wiring bug); left unawaited here, that surfaces as an unhandled rejection, not silence.
+   * show the same verdict, after a wait. Fire-and-forget — {@link settle} waits for the outcome.
+   * `upload` rejects only on an answer-sink throw (a wiring bug); left unawaited here, that surfaces
+   * as an unhandled rejection, not silence.
    */
-  public retryUnsaved(questionIds: readonly string[]): void {
+  private retryUnsaved(questionIds: readonly string[]): void {
     for (const questionId of questionIds) {
       if (this.records().get(questionId)?.failure?.kind === 'unsaved') {
         void this.restart(questionId);
@@ -364,7 +386,7 @@ export class FormUploadStore {
 
   /**
    * True when any of `questionIds` has an answer on its way: an upload in flight, or one that
-   * ended `unsaved` (a submit restarts those, see {@link retryUnsaved}).
+   * ended `unsaved` (a submit restarts those, see {@link settle}).
    *
    * A `refused` failure does NOT count: the same bytes get the same verdict, so no answer is
    * coming and a submit must not wait for one. The store holds `null` for a file question until
