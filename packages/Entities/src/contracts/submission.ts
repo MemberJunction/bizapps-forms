@@ -1,14 +1,13 @@
 /**
- * S1 — Public submit transport types.
+ * S1 — Public submit transport types, and the sentences both sides of a submit say.
  *
- * These mirror the GraphQL `FormSubmissionInput` / `FormSubmissionResult` shapes
- * (PHASE1_DECOMPOSITION §S1). The widget (WP-C) builds a {@link FormSubmissionInput}
- * and the server (WP-B) returns a {@link FormSubmissionResult}. IP-hash is computed
- * server-side from the request and is intentionally absent from these client-facing
- * types.
+ * The retired `SubmitFormResponse` mutation's `FormSubmissionInput` / `FormSubmissionResult` were
+ * removed with #303: the wire shapes are now `Forms.SaveResponse`'s generated
+ * `FormsSaveResponseInput` / `FormsSaveResponseOutput`. What stays here is what the widget and the
+ * server still share — one answer's shape, client telemetry, a field error, and the refusal
+ * sentences. IP-hash is computed server-side from the request and is intentionally absent.
  */
 import type { JSONValue } from './json-value';
-import type { mjBizAppsFormsFormResponseEntity } from '../generated/entity_subclasses';
 
 /** Lightweight client telemetry; IP-hash is derived server-side, not sent here. */
 export interface ClientMeta {
@@ -42,22 +41,6 @@ export interface FormAnswerInput {
   jsonValue?: JSONValue | null;
   /** `MJ: Files` id for FileUpload answers. */
   fileId?: string | null;
-}
-
-/** The payload posted to the S1 `SubmitFormResponse` mutation. */
-export interface FormSubmissionInput {
-  /** Resolves FormDistribution -> Form -> published FormVersion. */
-  distributionSlug: string;
-  /** Echoed back from `PublishedForm`; pins the response to a version. */
-  formVersionId: string;
-  /** `true` => save as `Partial`; `false`/absent => `Complete`. */
-  partial?: boolean;
-  /** ISO-8601 timestamp the respondent began the form. */
-  startedAt?: string;
-  /** Cloudflare Turnstile token; required iff the form/distribution has captcha on. */
-  turnstileToken?: string;
-  clientMeta?: ClientMeta;
-  answers: FormAnswerInput[];
 }
 
 /** A single validation/processing error, optionally tied to a specific question. */
@@ -98,19 +81,3 @@ export const NOTHING_TO_SUBMIT_MESSAGE = 'Please answer at least one question be
  */
 export const CAPTCHA_NOT_CONFIGURED_MESSAGE =
   'This form requires a security check that has not been set up on this server. Please contact the form owner.';
-
-/** The result returned by the S1 `SubmitFormResponse` mutation. */
-export interface FormSubmissionResult {
-  success: boolean;
-  responseId?: string;
-  /**
-   * Persisted `FormResponse` status. DERIVED from the entity rather than restated: the value list
-   * comes from a CHECK constraint, so the next migration that widens it widens this too. It was
-   * `string` with a comment naming only `Partial` and `Complete`, which stopped being true the
-   * moment `Disqualified` shipped — and a caller branching on it had no compile-time help.
-   */
-  status?: mjBizAppsFormsFormResponseEntity['Status'];
-  confirmationMessage?: string;
-  redirectUrl?: string;
-  errors?: FieldError[];
-}

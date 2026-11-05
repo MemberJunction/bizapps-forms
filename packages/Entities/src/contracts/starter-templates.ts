@@ -10,9 +10,10 @@
  * rejects as UNKNOWN_TEMPLATE, and nothing catches it until a user clicks it.
  *
  * So the *identity* of a starter is declared once, here, in the package both sides already
- * depend on. The blueprints stay in forms-actions, keyed by {@link StarterTemplateKey} in a
- * total `Record`, so a key added here fails that package's compile until its blueprint
- * exists. Drift is no longer a thing anyone has to remember.
+ * depend on. The blueprints live server-side (forms-core-entities-server's
+ * `engines/starter-templates.ts`, beside the authoring engine that expands them), keyed by
+ * {@link StarterTemplateKey} in a total `Record`, so a key added here fails that package's
+ * compile until its blueprint exists. Drift is no longer a thing anyone has to remember.
  *
  * These are BUILT-IN and code-authored on purpose — they are not rows. A seeded starter would
  * be deletable, and deleting "Contact form" would delete it for everyone on the host.

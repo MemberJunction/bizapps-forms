@@ -17,6 +17,8 @@ import {
   dropOffSeverity,
   filterForms,
   formatDuration,
+  isOffListLabel,
+  matrixGrid,
   npsSegments,
   percent,
   plural,
@@ -39,6 +41,7 @@ function stats(overrides: Partial<FormSummaryStats> = {}): FormSummaryStats {
     totalResponses: 0,
     completeResponses: 0,
     partialResponses: 0,
+    disqualifiedResponses: 0,
     completionRate: 0,
     typicalCompletionSeconds: null,
     lastSubmittedAt: null,
@@ -140,6 +143,55 @@ describe('completionSegments', () => {
   it('colours by meaning rather than by position', () => {
     const segments = completionSegments(stats({ completeResponses: 1, partialResponses: 1 }));
     expect(segments.map((s) => s.vizClass)).toEqual(['mjf-viz-positive', 'mjf-viz-caution']);
+  });
+
+  it('reports the screened out apart from the unfinished, in the neutral hue — a knockout is not a leak', () => {
+    const segments = completionSegments(stats({ completeResponses: 6, partialResponses: 2, disqualifiedResponses: 2 }));
+    expect(segments.map((s) => [s.label, s.count, s.fraction, s.vizClass])).toEqual([
+      ['Completed', 6, 0.6, 'mjf-viz-positive'],
+      ['Started, not finished', 2, 0.2, 'mjf-viz-caution'],
+      ['Screened out', 2, 0.2, 'mjf-viz-neutral'],
+    ]);
+  });
+});
+
+describe('matrixGrid', () => {
+  const OTHER = 'Other (not an option)';
+  const cell = (rowLabel: string, columnLabel: string, count: number) => ({ rowLabel, columnLabel, count });
+
+  it('lays cell counts out as rows by columns, in the order they arrive, with row totals', () => {
+    const grid = matrixGrid([cell('Venue', 'Good', 3), cell('Venue', 'Poor', 1), cell('Food', 'Good', 0), cell('Food', 'Poor', 2)]);
+    expect(grid).toEqual({
+      columns: ['Good', 'Poor'],
+      rows: [
+        { label: 'Venue', counts: [3, 1], total: 4 },
+        { label: 'Food', counts: [0, 2], total: 2 },
+      ],
+    });
+  });
+
+  it('keeps an authored row nobody answered (a finding) but drops an empty off-list row or column', () => {
+    const grid = matrixGrid([
+      cell('Venue', 'Good', 1),
+      cell('Venue', OTHER, 0),
+      cell('Food', 'Good', 0),
+      cell('Food', OTHER, 0),
+      cell(OTHER, 'Good', 0),
+      cell(OTHER, OTHER, 0),
+    ]);
+    expect(grid.columns).toEqual(['Good']);
+    expect(grid.rows.map((r) => r.label)).toEqual(['Venue', 'Food']);
+  });
+
+  it('keeps the off-list column once an answer landed in it', () => {
+    const grid = matrixGrid([cell('Venue', 'Good', 1), cell('Venue', OTHER, 2), cell(OTHER, 'Good', 0), cell(OTHER, OTHER, 0)]);
+    expect(grid.columns).toEqual(['Good', OTHER]);
+    expect(grid.rows).toEqual([{ label: 'Venue', counts: [1, 2], total: 3 }]);
+  });
+
+  it('recognises the off-list label exactly, not an author\'s own "Other" option', () => {
+    expect(isOffListLabel(OTHER)).toBe(true);
+    expect(isOffListLabel('Other')).toBe(false);
   });
 });
 

@@ -24,10 +24,10 @@ import { fromLocalInputValue, toLocalInputValue } from './local-datetime';
 import { resolveApiOrigin } from '../shared/mj-api-origin';
 import { textToQrSvg } from './qr-code';
 import { readResponseLimit } from './response-limit';
+import { isOpenToResponses } from '@mj-biz-apps/forms-entities';
 import {
   autoShareName,
   credentialMayStillRedeem,
-  isOpenToResponses,
   shareState,
   type ShareState,
 } from './share-state';
@@ -275,13 +275,13 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
       name: autoShareName(this.links.map((l) => l.Name)),
     });
     this.busy = false;
-    if (!created) {
-      this.actionError = 'Could not create a share link. Check the console for details.';
+    if (!created.ok) {
+      this.actionError = created.error;
       this.cdr.markForCheck();
       return;
     }
     await this.reload();
-    this.selectLink(created.ID);
+    this.selectLink(created.distributionId);
     this.view = 'link';
     this.cdr.markForCheck();
   }
@@ -613,11 +613,11 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
    * Run one write that changes this link's access token, then re-read the record.
    *
    * The reload is not optional here, and is what separates these writes from the others.
-   * Pausing, reopening, issuing and reissuing all make the server's lifecycle hook write
-   * `MagicLinkInviteID` / `PublicLinkToken` in a SECOND save that this client's copy of
-   * the record never sees. Skipping the re-read leaves the screen rendering a token that
-   * has been revoked, or none where one was just minted — which the badge reads as "Not
-   * ready" on a link that is live.
+   * Pausing, reopening, issuing and reissuing are Remote Operations: the server writes the
+   * link's status AND its `MagicLinkInviteID` / `PublicLinkToken`, none of which this client's
+   * copy of the record sees. Skipping the re-read leaves the screen rendering the old status, a
+   * token that has been revoked, or none where one was just minted — which the badge reads as
+   * "Not ready" on a link that is live.
    */
   private async runCredentialWrite(write: () => Promise<MutationOutcome>): Promise<void> {
     await this.run(write);

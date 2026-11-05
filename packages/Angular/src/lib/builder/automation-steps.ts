@@ -8,7 +8,7 @@
  *
  * IT ALSO SHOWED THE WRONG ORDER. The list was sorted by `DisplayOrder` alone, but the server
  * sorts Sync BEFORE Async and only then by `DisplayOrder`
- * (`Server/src/public-submit/automation-plan.ts`, `byExecutionModeThenDisplayOrder`). An author who set an async step to
+ * (`CoreEntitiesServer/src/automation/automation-plan.ts`, `byExecutionModeThenDisplayOrder`). An author who set an async step to
  * order 1 and a sync step to order 2 was shown a sequence that would never occur. The order is
  * re-derived here from the same two rules the runner applies, for the same reason
  * {@link shareState} re-derives a link's state from the facts the server gates on: a screen that

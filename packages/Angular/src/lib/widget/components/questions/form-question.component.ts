@@ -33,6 +33,7 @@ import {
   CONTACT_INFO_FIELDS,
   doodlePen,
   isAnswerableQuestionType,
+  missingMatrixRows,
   numericScalePoints,
   opinionScaleBounds,
   ratingScaleMax,
@@ -44,7 +45,8 @@ import {
 import { NgTemplateOutlet } from '@angular/common';
 
 import { FORMS_UPLOAD_SERVICE } from '../../api/form-upload.interface';
-import { FormUploadStore } from '../../core/upload-store';
+import { FormUploadStore, type UploadStatus, type UploadToken } from '../../core/upload-store';
+import { uploadingLine } from '../../core/upload-status-line';
 import {
   autocompleteFor,
   compositeAutocompleteFor,
@@ -54,9 +56,12 @@ import {
   inputTypeFor,
 } from './input-mode';
 import { compositeAnswer, readCompositeParts, sameAnswer, scalarAnswer } from './control-answer';
-import { DoodlePadComponent, type DoodleCapture } from './doodle-pad.component';
+import { DoodlePadComponent, type DoodleExportSink } from './doodle-pad.component';
+import { doodleExportSink } from './doodle-export-sink';
 import { IconComponent } from '../icon.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
+import { questionShape } from './question-shape';
+import { compositeFieldDescribedBy } from './composite-described-by';
 
 /** How long a reordered row takes to travel to its new place. */
 const RANK_TRAVEL_MS = 220;
@@ -77,9 +82,6 @@ function prefersReducedMotion(): boolean {
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
 }
-
-/** UI state of a FileUpload control. */
-type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
 @Component({
   selector: 'mjf-form-question',
@@ -136,16 +138,21 @@ export class FormQuestionComponent {
   protected readonly uploadProgress = computed(() => this.upload().progress);
   /** Display name of the selected/uploaded file (the stored answer is the fileId). */
   protected readonly uploadFileName = computed(() => this.upload().fileName);
-  /** Inline, respondent-facing upload error, or `null`. */
-  protected readonly uploadError = computed(() => this.upload().error);
+  /**
+   * Why this question's upload ended without a file, or `null`. Both the sentence and the kind
+   * come from the store — the kind decides which link the quiet line offers.
+   */
+  protected readonly uploadFailure = computed(() => this.upload().failure);
   /**
    * The file held locally for this question, whatever its upload has done — or `null`.
    *
    * "Local" is the distinction that matters, and the reason it is not called `uploadedFile`: the
-   * file is here from the moment it is chosen or drawn, while it is uploading, and after an
-   * upload has failed. Only {@link answerRecorded} says a file is stored. What this is for is
-   * rendering — the doodle pad repaints itself from it after Angular destroys the control —
-   * and retrying. Read from the store, keyed by question id, for the same reason every other
+   * file is here from the moment it is chosen or its drawing is exported, while it is uploading,
+   * and after an upload has failed. A reservation holds none: while a drawing is still being
+   * exported the question is pending but has no file yet. Only {@link answerRecorded} says a file is stored. What this is for is
+   * rendering — the doodle pad repaints itself from it after Angular destroys the control. (A
+   * retry does not read it: the store restarts from its own record.) Read from the store, keyed
+   * by question id, for the same reason every other
    * upload fact is: this component instance is recycled across questions and cannot be trusted
    * to still be the one the file belongs to.
    */
@@ -163,11 +170,19 @@ export class FormQuestionComponent {
     const value = this.value();
     return typeof value === 'string' && value.trim() !== '';
   });
-  /** Whole-number progress percent for the aria-valuenow / label. */
-  protected readonly uploadPercent = computed(() => {
+  /** True once every byte is sent and the server is storing the file. */
+  protected readonly uploadStoring = computed(() => this.upload().phase === 'storing');
+  /**
+   * Whole-number percent of bytes sent, for the bar and its aria-valuenow — or null while the
+   * transport cannot tell AND while the server is storing, so the bar never sits full ("done") over
+   * a file that is not saved yet.
+   */
+  protected readonly sendingPercent = computed(() => {
     const p = this.uploadProgress();
-    return p === null ? null : Math.round(p * 100);
+    return p === null || this.uploadStoring() ? null : Math.round(p * 100);
   });
+  /** "Uploading resume.pdf — 63%…", then "Saving resume.pdf…" — see {@link uploadingLine}. */
+  protected readonly uploadingText = computed(() => uploadingLine(this.upload()));
 
   protected readonly inputId = computed(() => `mjf-q-${this.question().id}`);
   /**
@@ -180,6 +195,8 @@ export class FormQuestionComponent {
    * `inputId()` instead left every grouped question unnamed to a screen reader (#117).
    */
   protected readonly labelId = computed(() => `${this.inputId()}-label`);
+  /** How the header labels this question: `<label for>`, a named group, or a fieldset legend. */
+  protected readonly shape = computed(() => questionShape(this.question().type));
 
   /**
    * The id of the question's outer container — where focus lands when the control cannot take it.
@@ -205,6 +222,7 @@ export class FormQuestionComponent {
   }
   protected readonly errorId = computed(() => `${this.inputId()}-error`);
   protected readonly statusId = computed(() => `${this.inputId()}-status`);
+  protected readonly failureId = computed(() => `${this.inputId()}-failure`);
 
   /**
    * Whether the file control's status line currently says anything.
@@ -232,6 +250,16 @@ export class FormQuestionComponent {
     return `${this.inputId()}-${field}-error`;
   }
 
+  /** One address field's description: the question's help, then why the field is invalid. */
+  protected compositeDescribedBy(field: string): string | null {
+    return compositeFieldDescribedBy({
+      helpId: this.question().helpText ? this.helpId() : null,
+      fieldErrorId: this.partError(field) ? this.partErrorId(field) : null,
+      groupErrorId: this.errorMessage() ? this.errorId() : null,
+      hasPartErrors: this.hasPartErrors(),
+    });
+  }
+
   /**
    * Whether to mark ONE sub-field as invalid.
    *
@@ -255,6 +283,11 @@ export class FormQuestionComponent {
     }
     if (this.hasFileStatus()) {
       ids.push(this.statusId());
+    }
+    // `aria-invalid` says the file input is wrong; this says why. Only upload questions ever hold
+    // a failure, and of those only the file input reads this list.
+    if (this.uploadFailure()) {
+      ids.push(this.failureId());
     }
     return ids.length ? ids.join(' ') : null;
   });
@@ -594,6 +627,15 @@ export class FormQuestionComponent {
   protected readonly matrixColumns = computed(() =>
     this.question().options.filter((o) => o.matrixAxis === 'Column'),
   );
+  /**
+   * The rows a required Matrix still needs, by row value — asked of the shared contract, the same
+   * one the submit check uses, so the rows marked here are the rows the server would refuse over.
+   * Empty until the question's error is showing: a respondent who has not tried to continue yet is
+   * not shown red rows.
+   */
+  protected readonly matrixMissing = computed(() =>
+    this.errorMessage() ? new Set(missingMatrixRows(this.question(), this.value())) : new Set<string>(),
+  );
 
   private readonly matrixValue = computed<Record<string, string>>(() => {
     const v = this.value();
@@ -613,34 +655,40 @@ export class FormQuestionComponent {
     return out;
   });
 
+  /** The native radio group name for one matrix row: rows must not share a group. */
+  protected matrixName(row: string): string {
+    return `${this.inputId()}-row-${row}`;
+  }
+
   protected isMatrixSelected(row: string, column: string): boolean {
     return this.matrixValue()[row] === column;
   }
 
-  /** Select (or clear) one row's column. */
+  /**
+   * Select one row's column. Rows are native radios, which fire `change` only when they become
+   * checked, so a row cannot be cleared once answered — the same as every other radio question.
+   */
   protected onMatrix(row: string, column: string): void {
-    const next: Record<string, string> = { ...this.matrixValue() };
-    if (next[row] === column) {
-      delete next[row];
-    } else {
-      next[row] = column;
-    }
-    this.valueChange.emit(Object.keys(next).length > 0 ? next : null);
+    this.valueChange.emit({ ...this.matrixValue(), [row]: column });
   }
 
   // --- Doodle --------------------------------------------------------------
 
   /**
-   * A drawing takes the ordinary file-answer path from here.
+   * The pad's exports, wired to the upload store by the subject each one names (#333) — see
+   * {@link doodleExportSink} for what each call does and why a retired reservation drops its file.
    *
-   * Stored against the question the capture NAMES, not against `this.question()`. The export
-   * finishes after the gesture, and this handler is routed by the view — in OneQuestion mode one
-   * pad serves consecutive Doodle questions, so reading the current question here filed the
-   * first one's drawing as the second one's answer.
+   * The upload is stored against the subject the capture names, never `this.question()`: the pad
+   * calls this after an await, often after this component is destroyed or, in OneQuestion mode,
+   * re-pointed at the next Doodle question. It reaches only the store and the uploader, which are
+   * widget-level and outlive this component.
    */
-  protected async onDoodleDrawn(capture: DoodleCapture): Promise<void> {
-    await this.uploadFile(capture.file, capture.subject);
-  }
+  protected readonly doodleExports: DoodleExportSink<UploadToken> = doodleExportSink(
+    this.uploads,
+    async (capture) => {
+      await this.uploadFile(capture.file, capture.subject);
+    },
+  );
 
   protected onDoodleCleared(): void {
     // `clear` also retires the running upload. Without that, a respondent who draws, dislikes it
@@ -765,37 +813,68 @@ export class FormQuestionComponent {
     await this.uploadFile(file, this.question().id);
   }
 
-  /** Re-run the upload for the previously-selected file after a failure. */
-  protected async retryUpload(): Promise<void> {
-    const last = this.localFile();
-    if (last) {
-      await this.uploadFile(last, this.question().id);
-    }
+  /**
+   * "Try again" after the store's retries are spent: run the same file through the same call.
+   *
+   * The store kept both, keyed by this question, so there is nothing for this recycled instance
+   * to remember.
+   */
+  protected retryUpload(): Promise<void> {
+    const restarted = this.uploads.restart(this.question().id);
+    this.focusQuestion();
+    return restarted;
+  }
+
+  /** "Choose again" on a drawing: the pad's own Clear, so the upload clears through `cleared`. */
+  protected chooseDrawingAgain(pad: DoodlePadComponent): void {
+    pad.clear();
+    this.focusQuestion();
   }
 
   /**
-   * Upload one file to the anonymous `/forms/upload` endpoint.
+   * Put focus on this question's container.
    *
-   * The result does NOT travel back through `valueChange`, and that is the whole point. An output
-   * is routed by the view: `(valueChange)="onValueChange(q, $event)"` writes to whichever question
-   * the template is bound to at the moment it fires, which after an `await` is no longer reliably
-   * the question the upload was for. The store commits the answer under the token's own question
-   * id instead — see `succeed` for the two ways that went wrong.
+   * For a failure link that takes itself away: once the failure clears, the button that had focus
+   * is gone, and the file input cannot take it while the restarted upload has it disabled. Left
+   * alone, focus falls to the page and a keyboard or screen-reader user starts over from the top.
+   * The container always renders and has `tabindex="-1"`, so it can always take it.
    */
-  private async uploadFile(file: File, questionId: string): Promise<void> {
-    const token = this.uploads.begin(questionId, file);
-    try {
-      const result = await this.uploader.upload(
-        file,
-        this.distributionSlug(),
-        questionId,
-        (fraction) => this.uploads.setProgress(token, fraction),
-        this.responseId() || undefined,
-      );
-      this.uploads.succeed(token, result.fileId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Upload failed. Please try again.';
-      this.uploads.fail(token, message);
-    }
+  private focusQuestion(): void {
+    this.host.nativeElement.querySelector<HTMLElement>(`#${CSS.escape(this.focusTargetId())}`)?.focus();
+  }
+
+  /**
+   * "Choose again" after the server refused the file: start the question over at the picker.
+   *
+   * The value is reset because a file input fires `change` only when its selection changes, so
+   * a respondent who picks the same path again (say, after shrinking the file on disk) would
+   * otherwise get no response at all. Focus goes to the picker because the link that had it is
+   * gone once the failure clears.
+   */
+  protected chooseAgain(input: HTMLInputElement): void {
+    this.uploads.clear(this.question().id);
+    input.value = '';
+    input.focus();
+  }
+
+  /**
+   * Upload one file to the anonymous `/forms/upload` endpoint, through the store.
+   *
+   * The store runs the call, retries a bad moment, and commits the answer under the question id
+   * the upload was started for. The result does NOT travel back through `valueChange`, and that
+   * is the whole point: an output is routed by the view — `(valueChange)="onValueChange(q,
+   * $event)"` writes to whichever question the template is bound to when it fires — which after
+   * an `await` is no longer reliably the question the upload was for. See the store's `succeed`
+   * for the two ways that went wrong.
+   *
+   * The slug and response id are read here, once, for the same reason: a retry runs up to a
+   * minute later, when this instance may be rendering another question.
+   */
+  private uploadFile(file: File, questionId: string): Promise<void> {
+    const slug = this.distributionSlug();
+    const responseId = this.responseId() || undefined;
+    return this.uploads.upload(questionId, file, (onProgress) =>
+      this.uploader.upload(file, slug, questionId, onProgress, responseId),
+    );
   }
 }

@@ -4,7 +4,7 @@
  *
  * A separate file rather than a new `describe` in `RespondentHostMiddleware.spec.ts` on purpose:
  * that file's fake `@memberjunction/core` `RunView` and its existing 20 tests are unrelated to
- * provider ISOLATION, and mocking `../../automation/isolated-provider` for real here — rather than
+ * provider ISOLATION, and mocking forms-core-entities-server's `withLazyIsolatedProvider` for real here — rather than
  * leaving `Metadata.Provider` to whatever the process happens to hold — keeps this suite in full
  * control of both branches (acquire never called; acquire rejects) without touching that file at
  * all. Harness copied from there: a real express app, real HTTP requests, only the I/O boundaries
@@ -33,7 +33,8 @@ let lastAcquire: ReturnType<typeof vi.fn> | undefined;
 /** What `acquire()` does on the NEXT lease — configured per test, reset in `beforeEach`. */
 let acquireBehavior: () => Promise<DatabaseProviderBase> = async () => ({} as DatabaseProviderBase);
 
-vi.mock('../../automation/isolated-provider', () => ({
+vi.mock('@mj-biz-apps/forms-core-entities-server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mj-biz-apps/forms-core-entities-server')>()),
   withLazyIsolatedProvider: vi.fn(
     async <T>(purpose: string, work: (acquire: () => Promise<DatabaseProviderBase>) => Promise<T>): Promise<T> => {
       leasePurposes.push(purpose);

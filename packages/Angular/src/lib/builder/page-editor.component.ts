@@ -4,8 +4,8 @@ import type { ConditionalRule } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
 import { RulesPanelComponent } from './rules-panel.component';
 import type { JumpTargetOption } from './jump-target-options';
-import type { ConditionalSourceQuestion } from './condition-sources';
-import { parseConditionalRule, serializeConditionalRule } from './json-fields';
+import type { ConditionalSourceQuestion } from '@mj-biz-apps/forms-entities/contracts';
+import { editableConditionalRule, serializeConditionalRule } from './json-fields';
 import type { PageNode } from './builder-models';
 import type { FormSection } from './section-groups';
 
@@ -13,10 +13,10 @@ const PAGE_EDITOR_CSS = /* css */ `
 :host { display: block; }
 .pe { display: flex; flex-direction: column; gap: 16px; }
 .pe-head { display: flex; align-items: center; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--mj-border-default); }
-.pe-head > i { color: var(--mj-brand-primary); font-size: 1rem; }
-.pe-head-title { font-size: 0.8125rem; font-weight: 600; color: var(--mj-text-secondary); }
-.pe-name { font-size: 0.9375rem; font-weight: 600; color: var(--mj-text-primary); margin: 0; }
-.pe-hint { font-size: 0.75rem; color: var(--mj-text-muted); margin: 0; }
+.pe-head > i { color: var(--mj-brand-primary); font-size: var(--mjf-icon); }
+.pe-head-title { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
+.pe-name { font-size: var(--mjf-body); font-weight: 600; color: var(--mj-text-primary); margin: 0; }
+.pe-hint { font-size: var(--mjf-label); color: var(--mj-text-muted); margin: 0; }
 `;
 
 /**
@@ -100,7 +100,7 @@ export class PageEditorComponent {
 
 
   protected get conditionalRule(): ConditionalRule | undefined {
-    return this.page ? parseConditionalRule(this.page.entity.ConditionalRule) : undefined;
+    return this.page ? editableConditionalRule(this.page.entity.ConditionalRule) : undefined;
   }
 
   protected onConditionalChange(rule: ConditionalRule | undefined): void {

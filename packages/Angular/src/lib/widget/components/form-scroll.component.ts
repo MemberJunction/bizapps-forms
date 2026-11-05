@@ -30,7 +30,12 @@ import type { AnswerValue, PublishedFormPage, PublishedFormQuestion } from '@mj-
 import { FormRuntime } from '../core/form-runtime';
 import { entryKey, sectionEntries, skippedMessage, type SectionEntry } from '../core/section-content';
 import { steppableSections } from '../core/section-stepper';
+import { nothingToSubmit } from '../core/nothing-to-submit';
+import { uploadWaitNote } from '../core/upload-wait-note';
+import { focusIsOutside, focusOnChange } from '../core/focus-on-change';
+import { StepJudge } from '../core/settled-validation';
 import { clampCursor } from '../core/stepper';
+import { FormUploadStore } from '../core/upload-store';
 import { FormProgressComponent } from './form-progress.component';
 import { FormQuestionComponent } from './questions/form-question.component';
 import { IconComponent } from './icon.component';
@@ -107,6 +112,16 @@ export class FormScrollComponent {
   );
   protected readonly isFirst = computed(() => this.index() === 0);
   protected readonly isLast = computed(() => this.index() >= this.total() - 1);
+
+  /** The widget's upload store: shared with the step judge and the ready line (#328). */
+  private readonly uploads = inject(FormUploadStore);
+
+  /** Judges a section only once its uploads have landed (#248) — and only once per tap. */
+  private readonly stepJudge = new StepJudge(
+    this.uploads,
+    () => this.current()?.id ?? null,
+  );
+
   protected readonly progress = computed(() => this.runtime().progress());
   /** Empty on a single-section form: "Section 1 of 1" is a step count nobody needs. */
   protected readonly stepLabel = computed(() =>
@@ -139,9 +154,21 @@ export class FormScrollComponent {
       this.runtime().isFormValid() &&
       // ...and the submit would actually be ACCEPTED. `isFormValid` only asks whether any field is
       // in error, which nothing is on a form of blank optional questions — so without this the bar
-      // said "You can submit now." beside the #124 banner refusing that exact submit.
-      !this.runtime().wouldSubmitNothing(),
+      // said "You can submit now." beside the #124 banner refusing that exact submit. An upload on
+      // its way counts as an answer, matching the submit gate (#328).
+      !nothingToSubmit(this.runtime(), this.uploads),
   );
+
+  /** "Still uploading — you can press Submit/Next" while a file in this section is on the wire. */
+  protected readonly uploadWaitNote = computed(() => {
+    const page = this.current();
+    const ids = page ? this.questionsFor(page).map((q) => q.id) : [];
+    return uploadWaitNote({
+      uploading: this.uploads.isUploadingAmong(ids),
+      isLast: this.isLast(),
+      pressed: this.uploads.waiting(),
+    });
+  });
 
   constructor() {
     // A jump firing on the last section shortens the list under the cursor, so re-clamp whenever
@@ -159,14 +186,15 @@ export class FormScrollComponent {
 
     // Move focus to the section itself when it changes, so keyboard and screen-reader users land
     // on the new heading rather than wherever the old Next button used to be — and so the
-    // browser scrolls the top of the section into view on a phone.
-    let lastFocusedId: string | null = null;
+    // browser scrolls the top of the section into view on a phone. The first section does not
+    // take focus from a control outside the form that holds it (the builder's tab strip).
+    const shouldFocus = focusOnChange();
     effect(() => {
       const page = this.current();
-      if (page && page.id !== lastFocusedId) {
-        lastFocusedId = page.id;
-        queueMicrotask(() => this.focusCurrentSection());
-      }
+      if (!page) return;
+      queueMicrotask(() => {
+        if (shouldFocus(page.id, focusIsOutside(this.hostRef.nativeElement))) this.focusCurrentSection();
+      });
     });
   }
 
@@ -233,8 +261,13 @@ export class FormScrollComponent {
    * Validates the section being LEFT and nothing beyond it: a respondent on section one has not
    * reached section three, and showing them its errors would be answering a question they have
    * not been asked.
+   *
+   * Waits for the section's uploads first (#248): a drawing still on the wire has no answer yet,
+   * and judging it now would call it "required". The visible values are committed BEFORE the
+   * wait — they are what the respondent sees at the tap. A `stale` verdict (a second tap, or
+   * Back during the wait) does nothing; see {@link StepJudge}.
    */
-  protected onNext(): void {
+  protected async onNext(): Promise<void> {
     const page = this.current();
     if (!page) {
       return;
@@ -245,8 +278,11 @@ export class FormScrollComponent {
       return;
     }
     const questions = this.questionsFor(page);
-    this.runtime().touchAll(questions);
-    if (!this.runtime().areValid(questions)) {
+    const verdict = await this.stepJudge.judge(this.runtime(), questions);
+    if (verdict === 'stale') {
+      return;
+    }
+    if (verdict === 'invalid') {
       this.focusFirstInvalidIn(questions);
       return;
     }
@@ -288,18 +324,24 @@ export class FormScrollComponent {
    * Validates the WHOLE visible form, not just the last section. Reaching the last section
    * proves each section validated as it was left, which is a different claim from "the form is
    * valid now" — going Back and clearing a required field is one way to break it.
+   *
+   * And waits for the form's uploads before judging it, as {@link onNext} does for a section.
+   * Both event calls run before the first `await`, so they still act on the live event.
    */
-  protected onSubmit(event?: Event): void {
+  protected async onSubmit(event?: Event): Promise<void> {
     event?.preventDefault();
     event?.stopPropagation();
     this.commitVisibleValues();
     if (!this.isLast()) {
-      this.onNext();
+      await this.onNext();
       return;
     }
     const all = this.runtime().visibleAnswerableQuestions();
-    this.runtime().touchAll(all);
-    if (this.runtime().areValid(all)) {
+    const verdict = await this.stepJudge.judge(this.runtime(), all);
+    if (verdict === 'stale') {
+      return;
+    }
+    if (verdict === 'valid') {
       this.submit.emit();
     } else {
       this.revealFirstInvalid(all);
@@ -312,9 +354,12 @@ export class FormScrollComponent {
    * The old renderer simply called `focus()` on the field, which worked because every section
    * was on screen. With one section rendered at a time the field is usually not in the DOM at
    * all, so focusing it does nothing and the form refuses to submit with no visible reason.
+   *
+   * "Invalid" is the judge's word, not `errorFor`'s: a failed upload on an optional question has no
+   * validation error but still refuses the step (#248), and it must still get the focus.
    */
   private revealFirstInvalid(questions: readonly PublishedFormQuestion[]): void {
-    const first = questions.find((question) => this.runtime().errorFor(question));
+    const first = this.stepJudge.firstProblemIn(this.runtime(), questions);
     if (!first) {
       return;
     }
@@ -334,7 +379,7 @@ export class FormScrollComponent {
   }
 
   private focusFirstInvalidIn(questions: readonly PublishedFormQuestion[]): void {
-    const first = questions.find((question) => this.runtime().errorFor(question));
+    const first = this.stepJudge.firstProblemIn(this.runtime(), questions);
     if (!first) {
       return;
     }

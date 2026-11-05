@@ -9,7 +9,7 @@ import { ADDING_HERE, ADDING_TO_LAST, targetPageFor } from './new-question-targe
 
 /**
  * A page carrying the only field the rule reads. The node shape stays real and the cast is
- * confined to the entity inside it — the same shape `snapshot-builder.spec.ts` uses — so a change
+ * confined to the entity inside it — the shape the builder's specs have always used — so a change
  * to `PageNode` itself still breaks this fixture, which is exactly what should happen.
  */
 const page = (id: string, questionIds: readonly string[]): PageNode => ({

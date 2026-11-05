@@ -1,0 +1,13 @@
+{
+  "entity": "MJ: Remote Operations",
+  "filePattern": "**/.*.json",
+  "pull": {
+    "createNewFileIfNotFound": true,
+    "newFileName": ".forms-remote-operations.json",
+    "appendRecordsToExistingFile": true,
+    "updateExistingRecords": true,
+    "ignoreNullFields": true,
+    "ignoreVirtualFields": true,
+    "filter": "CategoryID IN (SELECT ID FROM [__mj].vwRemoteOperationCategories WHERE Name = 'Forms')"
+  }
+}

@@ -37,14 +37,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-
-/**
- * Base path both asset routes hang off. Mirrored by `ASSET_ROUTE` in forms-ng's
- * `widget/core/asset-ref.ts`, which recognises and resolves the stored `/forms/asset/<id>`.
- * Duplicated on purpose: sharing one constant would need a dependency between the two packages.
- * Change both together.
- */
-export const ASSET_ROUTE = '/forms/asset';
+import { ASSET_ROUTE } from '@mj-biz-apps/forms-entities';
 
 /**
  * Storage path prefix that MEANS "publicly readable". Deliberately not configurable — see the
@@ -192,8 +185,8 @@ export function isPublicAssetKey(providerKey: string | null | undefined): provid
  * Absolute URL for one stored asset — returned in the upload response as a CONVENIENCE (it is
  * clickable and loads on its own), not as what the form stores.
  *
- * The builder stores the host-independent `/forms/asset/<id>` (`toAssetRef` in forms-ng's
- * `widget/core/asset-ref.ts`), and every renderer resolves that against the API it is actually
+ * The builder stores the host-independent `/forms/asset/<id>` (`toAssetRef` in
+ * `@mj-biz-apps/forms-entities/contracts`), and every renderer resolves that against the API it is actually
  * talking to — the `<mj-form>` widget against its own `api-url`, the builder against its
  * configured MJAPI (#270). Storing this absolute URL instead is what broke every form authored on
  * one host and served from another: it names whichever MJAPI took the upload, and a published

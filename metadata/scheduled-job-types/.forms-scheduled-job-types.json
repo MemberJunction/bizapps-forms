@@ -1,0 +1,23 @@
+[
+  {
+    "_comments": [
+      "The on-submit automation drain (#303). FormsAutomationDrainDriver lives in",
+      "forms-core-entities-server (automation/outbox/) and registers under this DriverClass.",
+      "It claims due FormAutomationEvent rows under a lease, runs each response's automations, and",
+      "settles the row. The submitting process drains its own events right after commit; this type",
+      "is the durable safety net that picks up retries and anything a crashed process left behind.",
+      "No sync block: seeding ships in the release's consolidated Metadata_Sync."
+    ],
+    "fields": {
+      "Name": "Forms Automation Outbox Drain",
+      "Description": "Runs the on-submit automations MJ Forms queued in its FormAutomationEvent outbox: claims due events under a lease (one drain per event, oldest first per response), runs their steps, and settles each as Complete, a backed-off retry, DeadLetter or Abandoned. Takes no Configuration.",
+      "DriverClass": "FormsAutomationDrainDriver",
+      "DomainRunEntity": "MJ_BizApps_Forms: Form Automation Events",
+      "DomainRunEntityFKey": null,
+      "NotificationsAvailable": false
+    },
+    "primaryKey": {
+      "ID": "13CCEF27-0BE4-4194-945C-53FAD408F69A"
+    }
+  }
+]

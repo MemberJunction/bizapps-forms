@@ -37,16 +37,38 @@ const stripped = (file: string): string =>
 const question = (): string => stripped('form-question.component.ts');
 const pad = (): string => stripped('doodle-pad.component.ts');
 
+/** The `uploadFile` method body: from its signature to the end of the class. */
+const uploadPath = (): string => {
+  const source = question();
+  const start = source.indexOf('private uploadFile(');
+  if (start < 0) {
+    throw new Error('uploadFile not found in form-question.component.ts');
+  }
+  return source.slice(start);
+};
+
 describe('only the newest upload may write the answer', () => {
-  it('takes a token from the store for every upload', () => {
-    expect(question()).toMatch(/const token = this\.uploads\.begin\(questionId, file\);/);
+  it('hands every upload to the store, which takes the token and owns the supersede decision', () => {
+    // The store runs the transport call it is handed, so both outcomes — and every retry — are
+    // written under the store's own token. Both paths matter: a stale SUCCESS overwrites the good
+    // answer, and a stale FAILURE clears an answer the newer upload just stored correctly.
+    expect(uploadPath()).toMatch(/return this\.uploads\.upload\(questionId, file, \(onProgress\) =>/);
+    expect(uploadPath()).toMatch(/this\.uploader\.upload\(file, slug, questionId, onProgress, responseId\)/);
   });
 
-  it('hands both outcomes to the store, which owns the supersede decision', () => {
-    // Both paths matter: a stale SUCCESS overwrites the good answer, and a stale FAILURE clears
-    // an answer the newer upload just stored correctly.
-    expect(question()).toMatch(/this\.uploads\.succeed\(token, result\.fileId\)/);
-    expect(question()).toMatch(/this\.uploads\.fail\(token, message\)/);
+  it('keeps no token, outcome or progress handling of its own', () => {
+    expect(question()).not.toMatch(/this\.uploads\.begin\(/);
+    expect(question()).not.toMatch(/this\.uploads\.succeed\(/);
+    expect(question()).not.toMatch(/this\.uploads\.fail\(/);
+    expect(question()).not.toMatch(/this\.uploads\.setProgress\(/);
+  });
+
+  it('reads the slug and response id once, before the store can retry', () => {
+    // A retry fires up to a minute later, by which time this recycled instance may be rendering
+    // another question; the call it hands the store must not read the view again.
+    expect(uploadPath()).toMatch(
+      /const slug = this\.distributionSlug\(\);\s*const responseId = this\.responseId\(\) \|\| undefined;\s*return this\.uploads\.upload\(/,
+    );
   });
 
   it('never routes an upload result back through the view', () => {
@@ -55,12 +77,7 @@ describe('only the newest upload may write the answer', () => {
     // component serves the whole deck, so the answer landed on the next question; in Scroll the
     // component is destroyed on leaving the page, so the answer was dropped while the store still
     // showed "done". The upload path must not emit at all.
-    const uploadPath = question().slice(question().indexOf('private async uploadFile'));
-    expect(uploadPath).not.toMatch(/valueChange\.emit/);
-  });
-
-  it('routes progress through the token too, so the bar cannot run backwards', () => {
-    expect(question()).toMatch(/\(fraction\) => this\.uploads\.setProgress\(token, fraction\)/);
+    expect(uploadPath()).not.toMatch(/valueChange\.emit/);
   });
 });
 
@@ -79,10 +96,11 @@ describe('upload state belongs to a question, not to this component', () => {
   });
 
   it('retrieves the file it retries — and the one it repaints — by question, not by remembering it', () => {
-    // One projection, from the store's record for THIS question: `viewFor(...).file`. A field on
-    // the component would be the recycled-instance defect again, one indirection further out.
+    // Both come from the store's record for THIS question: the repaint through `viewFor(...).file`,
+    // the retry through `restart(id)`. A field on the component would be the recycled-instance
+    // defect again, one indirection further out.
     expect(question()).toMatch(/localFile = computed\(\(\) => this\.upload\(\)\.file\)/);
-    expect(question()).toMatch(/const last = this\.localFile\(\);/);
+    expect(question()).toMatch(/this\.uploads\.restart\(this\.question\(\)\.id\);/);
   });
 });
 
@@ -108,7 +126,7 @@ describe('a multi-stroke drawing stays correct without deferring the export', ()
   it('relies on the store\'s token, not on ordering, for which image wins', () => {
     // This is what makes exporting per stroke safe: the last upload STARTED wins regardless of
     // which arrives first, and that is the most complete drawing.
-    expect(question()).toMatch(/const token = this\.uploads\.begin\(questionId, file\);/);
+    expect(uploadPath()).toMatch(/return this\.uploads\.upload\(questionId, file,/);
   });
 });
 
@@ -195,7 +213,7 @@ describe('the file control has ONE status display', () => {
 
   it('draws the focus ring on the stand-in, since the input is off screen', () => {
     const css = stripped('form-question.component.css');
-    expect(css).toMatch(/\.mjf-file:focus-within \.mjf-file__pick \{[\s\S]{0,160}--mjf-focus-ring/);
+    expect(css).toMatch(/\.mjf-file:focus-within \.mjf-file__pick \{[\s\S]{0,160}--mjf-focus-shadow/);
     // And positions the clipped input where the control is, so focusing it scrolls to the right
     // place on a failed submit.
     expect(css).toMatch(/\.mjf-file \{[\s\S]{0,300}position: relative;/);
@@ -226,9 +244,9 @@ describe('nothing that finishes late may speak for a pad that has moved on', () 
   });
 
   it('sends the subject with the file rather than letting the view choose one', () => {
-    // `output()` is routed by whatever the template is bound to when it fires, which after an
-    // await is not reliably the question the drawing was made on.
-    expect(pad()).toMatch(/this\.drawn\.emit\(\{\s*subject: claim\.subject,/);
+    // The export ends after an await, when the view is not reliably bound to the question the
+    // drawing was made on.
+    expect(pad()).toMatch(/sink\.delivered\(\{\s*subject: claim\.subject,/);
     expect(question()).toMatch(/await this\.uploadFile\(capture\.file, capture\.subject\);/);
   });
 });
@@ -259,9 +277,11 @@ describe('undo is a change of meaning, so it plays by the same rules as a stroke
 
   it('stops at the restored image rather than erasing it', () => {
     // A repainted PNG is flat pixels with no stroke history, so there is nothing in it to undo.
-    // Undo reads THIS SESSION's strokes and nothing else; `base` is only reachable through Clear.
-    expect(pad()).toMatch(/canUndo = computed\(\(\) => this\.strokes\(\)\.length > 0\)/);
-    expect(pad()).toMatch(/public undo\(\): void \{\s*if \(this\.strokes\(\)\.length === 0\) \{\s*return;/);
+    // Undo reads THIS SESSION's strokes (or a Clear it can take back) and never erases `base`. The
+    // rule itself lives in `undoPad` and is specced in doodle-history.spec.ts ("undo stops at the
+    // base image"); this checks only that the pad still asks it.
+    expect(pad()).toMatch(/canUndo = computed\(\(\) => canUndoPad\(this\.history\(\)\)\)/);
+    expect(pad()).toMatch(/public undo\(\): void \{\s*const next = undoPad\(this\.history\(\)\);\s*if \(!next\) \{\s*return;/);
     // And the button says so, rather than presenting a no-op.
     expect(pad()).toMatch(/\[disabled\]="!canUndo\(\)"/);
   });

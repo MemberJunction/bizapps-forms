@@ -4,13 +4,8 @@
  * from, and under what configuration.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  currentRequestIdentity,
-  forwardableAddress,
-  hashClientIp,
-  resolveClientIp,
-  runWithRequestIdentity,
-} from '../request-identity';
+import { forwardableAddress, hashClientIp, resolveClientIp } from '../request-identity';
+import { currentRequestIdentity, runWithRequestIdentity } from '@mj-biz-apps/forms-core-entities-server';
 
 describe('resolveClientIp', () => {
   it('ignores X-Forwarded-For when no proxy hop is trusted', () => {

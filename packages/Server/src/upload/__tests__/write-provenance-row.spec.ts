@@ -31,7 +31,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 });
 
 import { writeProvenanceRow, type ProvenanceRecordInput } from '../upload.service';
-import { makeContextUser } from '../../public-submit/__tests__/fakes';
+import { makeContextUser } from '@mj-biz-apps/forms-core-entities-server/testing';
 
 /** MJ's shape for a failed statement: the driver's error line, then the echoed batch with its values. */
 const DRIVER_ERROR = 'The INSERT statement conflicted with the FOREIGN KEY constraint "FK_FormUpload_Question".';

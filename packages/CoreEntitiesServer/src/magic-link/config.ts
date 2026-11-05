@@ -67,7 +67,8 @@ export interface MagicLinkProvisioningConfig {
   roleName: string;
 }
 
-const ALL_CHANNELS: readonly DistributionChannelType[] = ['Email', 'Embed', 'PublicLink', 'QR'];
+/** Every `ChannelType` the column's CHECK allows — what `Forms.IssueDistributionLink` accepts. */
+export const DISTRIBUTION_CHANNEL_TYPES: readonly DistributionChannelType[] = ['Email', 'Embed', 'PublicLink', 'QR'];
 const DEFAULT_CHANNELS: readonly DistributionChannelType[] = ['PublicLink', 'Embed', 'QR'];
 
 /**
@@ -127,7 +128,7 @@ function channelsFromEnv(key: string): ReadonlySet<DistributionChannelType> {
   if (raw === undefined || raw.trim() === '') {
     return new Set(DEFAULT_CHANNELS);
   }
-  const valid = new Set<string>(ALL_CHANNELS);
+  const valid = new Set<string>(DISTRIBUTION_CHANNEL_TYPES);
   const tokens = raw
     .split(',')
     .map((s) => s.trim())
@@ -136,7 +137,7 @@ function channelsFromEnv(key: string): ReadonlySet<DistributionChannelType> {
   if (unknown.length > 0) {
     throw new Error(
       `${key} contains ${unknown.map((t) => `'${t}'`).join(', ')}, which is not a distribution channel. ` +
-        `Valid values (case-sensitive): ${ALL_CHANNELS.join(', ')}. Refusing to provision until this is ` +
+        `Valid values (case-sensitive): ${DISTRIBUTION_CHANNEL_TYPES.join(', ')}. Refusing to provision until this is ` +
         `fixed, because a narrowed list REVOKES the credentials of every live link outside it.`,
     );
   }

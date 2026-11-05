@@ -1,8 +1,21 @@
-import { describe, it, expect } from 'vitest';
+import { computed } from '@angular/core';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
 import { FormRuntime } from './form-runtime';
-import { FormUploadStore, IDLE_UPLOAD } from './upload-store';
+import { fullForm } from './widget-form';
+
+/** A runtime over an author's full definition — the kind every case here was written against. */
+const runtimeFor = (definition: PublishedFormDefinition): FormRuntime => new FormRuntime(fullForm(definition));
+import {
+  FormUploadStore,
+  IDLE_UPLOAD,
+  UPLOAD_RETRY_DELAYS_MS,
+  UPLOAD_UNSAVED_MESSAGE,
+  type UploadSend,
+} from './upload-store';
+import { UploadError, type UploadedFile } from '../api/form-upload.interface';
+import { uploadFailure } from '../api/form-upload.service';
 
 const fileNamed = (name: string): File => new File(['x'], name);
 
@@ -37,7 +50,7 @@ function uploadForm(): PublishedFormDefinition {
  * "no answer" means.
  */
 function connectedStore(): { store: FormUploadStore; runtime: FormRuntime } {
-  const runtime = new FormRuntime(uploadForm());
+  const runtime = runtimeFor(uploadForm());
   const store = new FormUploadStore();
   store.connect(runtime);
   return { store, runtime };
@@ -102,7 +115,7 @@ describe('FormUploadStore — the answer, not just the confirmation', () => {
     const { store, runtime } = connectedStore();
     store.succeed(store.begin('q-resume', fileNamed('resume.pdf')), 'file-resume');
 
-    store.connect(new FormRuntime(uploadForm()));
+    store.connect(runtimeFor(uploadForm()));
 
     // A reload mints a new response id; a confirmation carried across would name a file that
     // response never had.
@@ -134,11 +147,11 @@ describe('FormUploadStore — failure', () => {
     const { store, runtime } = connectedStore();
 
     const token = store.begin('q-resume', fileNamed('resume.txt'));
-    store.fail(token, 'Network unavailable.');
+    store.fail(token, { kind: 'unsaved', message: 'Network unavailable.' });
 
     expect(store.viewFor('q-resume')).toMatchObject({
       status: 'error',
-      error: 'Network unavailable.',
+      failure: { kind: 'unsaved', message: 'Network unavailable.' },
       progress: null,
     });
     expect(store.viewFor('q-resume').file?.name).toBe('resume.txt');
@@ -152,7 +165,7 @@ describe('FormUploadStore — failure', () => {
     const second = store.begin('q-resume', fileNamed('final.txt'));
     store.succeed(second, 'file-final');
 
-    store.fail(first, 'Network unavailable.');
+    store.fail(first, { kind: 'unsaved', message: 'Network unavailable.' });
 
     expect(store.viewFor('q-resume')).toMatchObject({ status: 'done', fileName: 'final.txt' });
     expect(runtime.valueFor('q-resume')).toBe('file-final');
@@ -205,6 +218,48 @@ describe('FormUploadStore — progress', () => {
     store.setProgress(second, 0.3);
     expect(store.viewFor('q-resume').progress).toBe(0.3);
   });
+
+  it('starts an upload in the sending phase', () => {
+    const { store } = connectedStore();
+    store.begin('q-resume', fileNamed('resume.pdf'));
+    expect(store.viewFor('q-resume')).toMatchObject({ status: 'uploading', phase: 'sending', progress: 0 });
+  });
+
+  it('moves to the storing phase when the transport says the bytes are all sent', () => {
+    const { store } = connectedStore();
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+    store.setProgress(token, 1);
+
+    store.setProgress(token, null, 'storing');
+
+    expect(store.viewFor('q-resume')).toMatchObject({ status: 'uploading', phase: 'storing', progress: null });
+  });
+
+  it('carries the phase through the upload it runs, and back to sending for a retry', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const { store } = connectedStore();
+      let attempt = 0;
+      const send = vi.fn<UploadSend>((onProgress) => {
+        attempt++;
+        onProgress(1);
+        onProgress(null, 'storing');
+        return attempt === 1 ? Promise.reject(transient()) : new Promise<UploadedFile>(() => undefined);
+      });
+
+      void store.upload('q-resume', fileNamed('resume.pdf'), send);
+      await vi.advanceTimersByTimeAsync(0);
+      // The first attempt failed after the bytes went up; the retry is asleep, not storing.
+      expect(store.viewFor('q-resume')).toMatchObject({ status: 'uploading', phase: 'sending', progress: null });
+
+      await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[0]);
+      expect(store.viewFor('q-resume')).toMatchObject({ phase: 'storing' });
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('FormUploadStore — edge cases', () => {
@@ -222,5 +277,674 @@ describe('FormUploadStore — edge cases', () => {
     const { store } = connectedStore();
 
     expect(store.viewFor('q-never-touched')).toEqual(IDLE_UPLOAD);
+  });
+});
+
+const stored = (fileId: string): UploadedFile => ({ fileId, name: 'f', size: 1, contentType: 'text/plain' });
+
+/** A transport stub: each call takes the next scripted outcome; the last one repeats. */
+function scriptedSend(...outcomes: Array<UploadedFile | Error>) {
+  let calls = 0;
+  const send = vi.fn<UploadSend>(() => {
+    const outcome = outcomes[Math.min(calls++, outcomes.length - 1)];
+    return outcome instanceof Error ? Promise.reject(outcome) : Promise.resolve(outcome);
+  });
+  return send;
+}
+
+/** A transport call that stays on the wire until the test settles it. */
+function heldSend() {
+  let settle: { resolve: (f: UploadedFile) => void; reject: (e: unknown) => void } | null = null;
+  const send = vi.fn<UploadSend>(
+    () => new Promise<UploadedFile>((resolve, reject) => (settle = { resolve, reject })),
+  );
+  return {
+    send,
+    resolve: (fileId: string) => settle?.resolve(stored(fileId)),
+    reject: (err: unknown) => settle?.reject(err),
+  };
+}
+
+/** Has `promise` settled yet? Reads it without waiting for it. */
+async function isSettled(promise: Promise<unknown>): Promise<boolean> {
+  let done = false;
+  void promise.then(() => (done = true));
+  await vi.advanceTimersByTimeAsync(0);
+  return done;
+}
+
+const transient = (): UploadError => new UploadError('Upload failed. Check your connection and try again.', 'transient');
+
+describe('FormUploadStore — whenSettled', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('resolves at once when nothing is uploading', async () => {
+    const { store } = connectedStore();
+
+    expect(await isSettled(store.whenSettled())).toBe(true);
+    expect(store.waiting()).toBe(false);
+  });
+
+  it('waits for an upload in flight, and is released by its success', async () => {
+    const { store } = connectedStore();
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+
+    const settled = store.whenSettled();
+    expect(await isSettled(settled)).toBe(false);
+    expect(store.waiting()).toBe(true);
+
+    store.succeed(token, 'file-resume');
+
+    expect(await isSettled(settled)).toBe(true);
+    expect(store.waiting()).toBe(false);
+  });
+
+  it('is released by a failure', async () => {
+    const { store } = connectedStore();
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+    const settled = store.whenSettled();
+
+    store.fail(token, { kind: 'refused', message: 'That file was not accepted. Choose a different file.' });
+
+    expect(await isSettled(settled)).toBe(true);
+    expect(store.waiting()).toBe(false);
+  });
+
+  it('is released by clearing the only uploading question', async () => {
+    const { store } = connectedStore();
+    store.begin('q-resume', fileNamed('resume.pdf'));
+    const settled = store.whenSettled();
+
+    store.clear('q-resume');
+
+    expect(await isSettled(settled)).toBe(true);
+    expect(store.waiting()).toBe(false);
+  });
+
+  it('keeps waiting through a replacement upload, until the newer one settles', async () => {
+    const { store } = connectedStore();
+    const first = store.begin('q-resume', fileNamed('draft.pdf'));
+    const settled = store.whenSettled(['q-resume']);
+
+    const second = store.begin('q-resume', fileNamed('final.pdf'));
+    store.succeed(first, 'file-draft');
+    expect(await isSettled(settled)).toBe(false);
+
+    store.succeed(second, 'file-final');
+    expect(await isSettled(settled)).toBe(true);
+  });
+
+  it('waits only for the questions it was asked about', async () => {
+    const { store } = connectedStore();
+    store.begin('q-resume', fileNamed('resume.pdf'));
+    const transcript = store.begin('q-transcript', fileNamed('transcript.pdf'));
+
+    const settled = store.whenSettled(['q-transcript']);
+    store.succeed(transcript, 'file-transcript');
+
+    // The resume is still uploading, but that is another section's business.
+    expect(await isSettled(settled)).toBe(true);
+  });
+});
+
+describe('FormUploadStore — upload retries a bad moment by itself', () => {
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    warn.mockRestore();
+  });
+
+  it('logs every transient failure with the question, the attempt and the cause', async () => {
+    const { store } = connectedStore();
+    const send = scriptedSend(new UploadError('Upload cancelled.', 'transient'), stored('file-resume'));
+
+    const running = store.upload('q-resume', fileNamed('resume.pdf'), send);
+    await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[0]);
+    await running;
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0][0]);
+    expect(line).toContain('q-resume');
+    expect(line).toContain('attempt 1');
+    expect(line).toContain('UploadError: Upload cancelled.');
+  });
+
+  it('lets a broken answer sink throw out of upload instead of re-uploading the file', async () => {
+    // A throw from storing the answer is the widget wired wrong, not a bad moment on the wire.
+    // Treating it as transient would re-send bytes the server already stored, and swallow the bug.
+    const store = new FormUploadStore();
+    store.connect({
+      setValue: (_questionId, value) => {
+        if (value === 'file-resume') {
+          throw new Error('sink broke');
+        }
+      },
+    });
+    const send = scriptedSend(stored('file-resume'));
+
+    await expect(store.upload('q-resume', fileNamed('resume.pdf'), send)).rejects.toThrow('sink broke');
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('never reports "done" for a file whose answer could not be stored, and releases the wait', async () => {
+    // "done" with no answer behind it is the #248 symptom again: a submit waiting on this
+    // question would wake, read `null`, and send the response without the file.
+    const store = new FormUploadStore();
+    store.connect({
+      setValue: (_questionId, value) => {
+        if (value === 'file-resume') {
+          throw new Error('sink broke');
+        }
+      },
+    });
+    const send = scriptedSend(stored('file-resume'));
+    const uploading = store.upload('q-resume', fileNamed('resume.pdf'), send);
+    let released = false;
+    void store.whenSettled(['q-resume']).then(() => (released = true));
+
+    await expect(uploading).rejects.toThrow('sink broke');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(store.viewFor('q-resume').status).not.toBe('done');
+    expect(store.failureAmong(['q-resume'])).toEqual({ kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE });
+    expect(released).toBe(true);
+  });
+
+  it('stores the file id when the first attempt lands', async () => {
+    const { store, runtime } = connectedStore();
+    const send = scriptedSend(stored('file-resume'));
+
+    await store.upload('q-resume', fileNamed('resume.pdf'), send);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(store.viewFor('q-resume')).toMatchObject({ status: 'done', failure: null });
+    expect(runtime.valueFor('q-resume')).toBe('file-resume');
+  });
+
+  it('routes the transport’s progress reports to the running upload', async () => {
+    const { store } = connectedStore();
+    const held = heldSend();
+
+    void store.upload('q-resume', fileNamed('resume.pdf'), held.send);
+    await vi.advanceTimersByTimeAsync(0);
+    held.send.mock.calls[0][0](0.4);
+
+    expect(store.viewFor('q-resume').progress).toBe(0.4);
+  });
+
+  it('retries a transient failure at 5 s, 15 s and 60 s — not before — then gives up as unsaved', async () => {
+    const { store, runtime } = connectedStore();
+    const send = scriptedSend(transient());
+
+    void store.upload('q-resume', fileNamed('resume.pdf'), send);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    let calls = 1;
+    for (const delay of UPLOAD_RETRY_DELAYS_MS) {
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(send).toHaveBeenCalledTimes(calls);
+      // Still "uploading" between attempts, so a submit keeps waiting rather than judging.
+      expect(store.viewFor('q-resume')).toMatchObject({ status: 'uploading', progress: null, failure: null });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(send).toHaveBeenCalledTimes(++calls);
+    }
+
+    expect(send).toHaveBeenCalledTimes(4);
+    expect(store.viewFor('q-resume')).toMatchObject({
+      status: 'error',
+      failure: { kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE },
+    });
+    expect(store.viewFor('q-resume').file?.name).toBe('resume.pdf');
+    expect(runtime.valueFor('q-resume')).toBeUndefined();
+
+    // The cap is the cap: no fifth attempt, however long we wait.
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(send).toHaveBeenCalledTimes(4);
+  });
+
+  it('stores the file id when a retry lands', async () => {
+    const { store, runtime } = connectedStore();
+    const send = scriptedSend(transient(), stored('file-resume'));
+
+    const running = store.upload('q-resume', fileNamed('resume.pdf'), send);
+    await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[0]);
+    await running;
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(runtime.valueFor('q-resume')).toBe('file-resume');
+  });
+
+  it('does not retry a refused file, and shows the transport’s sentence', async () => {
+    const { store } = connectedStore();
+    const send = scriptedSend(new UploadError('That file is larger than the 10 MB limit.', 'refused'));
+
+    await store.upload('q-resume', fileNamed('huge.pdf'), send);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(store.viewFor('q-resume')).toMatchObject({
+      status: 'error',
+      failure: { kind: 'refused', message: 'That file is larger than the 10 MB limit.' },
+    });
+  });
+
+  it('retries an upload the rate limiter refused (429), and stores it once the window passes', async () => {
+    // The real classification, not a hand-made UploadError: the bug was in uploadFailure's range.
+    const { store, runtime } = connectedStore();
+    const send = scriptedSend(
+      uploadFailure(429, { error: 'Too many uploads. Please wait 60s and try again.' }),
+      uploadFailure(429, { error: 'Too many uploads. Please wait 55s and try again.' }),
+      uploadFailure(429, { error: 'Too many uploads. Please wait 40s and try again.' }),
+      stored('file-sig'),
+    );
+
+    const running = store.upload('q-resume', fileNamed('doodle.png'), send);
+    await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS.reduce((sum, ms) => sum + ms, 0));
+    await running;
+
+    expect(send).toHaveBeenCalledTimes(4);
+    expect(store.viewFor('q-resume').status).toBe('done');
+    expect(runtime.valueFor('q-resume')).toBe('file-sig');
+  });
+
+  it('retries a plain Error, because a transport that does not classify must not lose the answer', async () => {
+    const { store, runtime } = connectedStore();
+    const send = scriptedSend(new Error('Upload failed: could not read server response.'), stored('file-resume'));
+
+    const running = store.upload('q-resume', fileNamed('resume.pdf'), send);
+    await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[0]);
+    await running;
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(runtime.valueFor('q-resume')).toBe('file-resume');
+  });
+
+  it('stops retrying once a newer upload has replaced this one', async () => {
+    const { store } = connectedStore();
+    const send = scriptedSend(transient());
+
+    void store.upload('q-resume', fileNamed('draft.pdf'), send);
+    await vi.advanceTimersByTimeAsync(0);
+    store.begin('q-resume', fileNamed('final.pdf'));
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(store.viewFor('q-resume')).toMatchObject({ status: 'uploading', fileName: 'final.pdf' });
+  });
+
+  it('stops retrying once the question is cleared', async () => {
+    const { store } = connectedStore();
+    const send = scriptedSend(transient());
+
+    void store.upload('q-resume', fileNamed('resume.pdf'), send);
+    await vi.advanceTimersByTimeAsync(0);
+    store.clear('q-resume');
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(store.viewFor('q-resume')).toEqual(IDLE_UPLOAD);
+  });
+
+  it('stops retrying on a reload, and releases whoever was waiting', async () => {
+    const { store } = connectedStore();
+    const send = scriptedSend(transient());
+
+    void store.upload('q-resume', fileNamed('resume.pdf'), send);
+    await vi.advanceTimersByTimeAsync(0);
+    const settled = store.whenSettled();
+    expect(await isSettled(settled)).toBe(false);
+
+    // A reload mid-sleep: the sleeping retry belongs to a response that no longer exists.
+    const reloaded = runtimeFor(uploadForm());
+    store.connect(reloaded);
+
+    expect(await isSettled(settled)).toBe(true);
+    expect(store.waiting()).toBe(false);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(store.viewFor('q-resume')).toEqual(IDLE_UPLOAD);
+    expect(reloaded.valueFor('q-resume')).toBeUndefined();
+  });
+
+  it('stops retrying once disposed, and releases whoever was waiting', async () => {
+    const { store } = connectedStore();
+    const send = scriptedSend(transient());
+
+    void store.upload('q-resume', fileNamed('resume.pdf'), send);
+    await vi.advanceTimersByTimeAsync(0);
+    const settled = store.whenSettled();
+
+    // The widget is torn down mid-sleep: nobody is left to read what a retry would store.
+    store.dispose();
+
+    expect(await isSettled(settled)).toBe(true);
+    expect(store.waiting()).toBe(false);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(store.viewFor('q-resume')).toEqual(IDLE_UPLOAD);
+  });
+
+  it('writes nothing to the old runtime when an attempt on the wire lands after dispose', async () => {
+    const { store, runtime } = connectedStore();
+    const wire = heldSend();
+    const done = store.upload('q-resume', fileNamed('resume.pdf'), wire.send);
+
+    store.dispose();
+    wire.resolve('file-late');
+    await done;
+
+    expect(runtime.valueFor('q-resume')).toBeUndefined();
+    expect(store.viewFor('q-resume')).toEqual(IDLE_UPLOAD);
+  });
+
+  it('keeps a submit waiting through the retries, and releases it when they are spent', async () => {
+    const { store } = connectedStore();
+    const send = scriptedSend(transient());
+
+    void store.upload('q-resume', fileNamed('resume.pdf'), send);
+    const settled = store.whenSettled(['q-resume']);
+    await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[0] + UPLOAD_RETRY_DELAYS_MS[1]);
+    expect(await isSettled(settled)).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[2]);
+
+    expect(await isSettled(settled)).toBe(true);
+    expect(store.failureAmong(['q-resume'])).toEqual({ kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE });
+  });
+});
+
+describe('FormUploadStore — restart and settle', () => {
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    warn.mockRestore();
+  });
+
+  /** Run `questionId`'s upload through every retry until it is `unsaved`. */
+  async function spendRetries(store: FormUploadStore, questionId: string, send: UploadSend): Promise<void> {
+    const running = store.upload(questionId, fileNamed(`${questionId}.pdf`), send);
+    await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS.reduce((a, b) => a + b, 0));
+    await running;
+  }
+
+  it('restarts an unsaved upload with the same file and transport, and stores the id', async () => {
+    const { store, runtime } = connectedStore();
+    const send = scriptedSend(transient(), transient(), transient(), transient(), stored('file-resume'));
+    await spendRetries(store, 'q-resume', send);
+    expect(store.viewFor('q-resume').failure?.kind).toBe('unsaved');
+
+    await store.restart('q-resume');
+
+    expect(send).toHaveBeenCalledTimes(5);
+    expect(store.viewFor('q-resume')).toMatchObject({ status: 'done', failure: null, fileName: 'q-resume.pdf' });
+    expect(runtime.valueFor('q-resume')).toBe('file-resume');
+  });
+
+  it('does nothing for a question with no upload to restart', async () => {
+    const { store } = connectedStore();
+
+    await store.restart('q-resume');
+
+    expect(store.viewFor('q-resume')).toEqual(IDLE_UPLOAD);
+  });
+
+  it('settle restarts the unsaved questions it is given, leaves a refused one alone, and names the refusal', async () => {
+    const { store, runtime } = connectedStore();
+    const resumeSend = scriptedSend(transient(), transient(), transient(), transient(), stored('file-resume'));
+    await spendRetries(store, 'q-resume', resumeSend);
+    const refused = 'That file was not accepted. Choose a different file.';
+    const refusedSend = scriptedSend(new UploadError(refused, 'refused'));
+    await store.upload('q-transcript', fileNamed('huge.pdf'), refusedSend);
+
+    const failure = await store.settle(['q-resume', 'q-transcript']);
+
+    expect(resumeSend).toHaveBeenCalledTimes(5);
+    expect(refusedSend).toHaveBeenCalledTimes(1);
+    expect(runtime.valueFor('q-resume')).toBe('file-resume');
+    expect(failure).toEqual({ kind: 'refused', message: refused });
+  });
+
+  it('settle only restarts the questions it is given', async () => {
+    const { store } = connectedStore();
+    const send = scriptedSend(transient());
+    await spendRetries(store, 'q-resume', send);
+
+    expect(await store.settle(['q-transcript'])).toBeNull();
+
+    expect(send).toHaveBeenCalledTimes(4);
+  });
+
+  it('settle waits for an upload in flight and answers null once it lands', async () => {
+    const { store, runtime } = connectedStore();
+    const held = heldSend();
+    void store.upload('q-resume', fileNamed('resume.pdf'), held.send);
+
+    const settling = store.settle(['q-resume']);
+    expect(await isSettled(settling)).toBe(false);
+
+    held.resolve('file-resume');
+
+    expect(await settling).toBeNull();
+    expect(runtime.valueFor('q-resume')).toBe('file-resume');
+  });
+
+  it('settle answers the unsaved failure when the restart fails again', async () => {
+    const { store } = connectedStore();
+    const send = scriptedSend(transient());
+    await spendRetries(store, 'q-resume', send);
+
+    const settling = store.settle(['q-resume']);
+    await vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS.reduce((a, b) => a + b, 0));
+
+    expect(await settling).toEqual({ kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE });
+    expect(send).toHaveBeenCalledTimes(8);
+  });
+});
+
+describe('FormUploadStore — failureAmong', () => {
+  it('reports the first failure among the listed questions', () => {
+    const { store } = connectedStore();
+    store.fail(store.begin('q-transcript', fileNamed('t.pdf')), { kind: 'refused', message: 'No.' });
+
+    expect(store.failureAmong(['q-resume', 'q-transcript'])).toEqual({ kind: 'refused', message: 'No.' });
+  });
+
+  it('is null when none of the listed questions failed', () => {
+    const { store } = connectedStore();
+    store.fail(store.begin('q-transcript', fileNamed('t.pdf')), { kind: 'refused', message: 'No.' });
+    store.begin('q-resume', fileNamed('r.pdf'));
+
+    expect(store.failureAmong(['q-resume'])).toBeNull();
+  });
+});
+
+describe('FormUploadStore — hasPendingAmong', () => {
+  it('is true while an upload is in flight', () => {
+    const { store } = connectedStore();
+    store.begin('q-resume', fileNamed('resume.pdf'));
+    expect(store.hasPendingAmong(['q-resume'])).toBe(true);
+  });
+
+  it('is true for an unsaved failure, which a submit can restart', () => {
+    const { store } = connectedStore();
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+    store.fail(token, { kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE });
+    expect(store.hasPendingAmong(['q-resume'])).toBe(true);
+  });
+
+  it('is false for a refused failure: the same bytes get the same verdict', () => {
+    const { store } = connectedStore();
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+    store.fail(token, { kind: 'refused', message: 'Too big.' });
+    expect(store.hasPendingAmong(['q-resume'])).toBe(false);
+  });
+
+  it('is false once the upload has landed', () => {
+    const { store } = connectedStore();
+    store.succeed(store.begin('q-resume', fileNamed('resume.pdf')), 'file-1');
+    expect(store.hasPendingAmong(['q-resume'])).toBe(false);
+  });
+
+  it('is false for a question with no record', () => {
+    const { store } = connectedStore();
+    expect(store.hasPendingAmong(['q-resume'])).toBe(false);
+  });
+
+  it('only looks at the questions it is given', () => {
+    const { store } = connectedStore();
+    store.begin('q-resume', fileNamed('resume.pdf'));
+    expect(store.hasPendingAmong(['q-transcript'])).toBe(false);
+  });
+
+  it('can be tracked by a computed', () => {
+    const { store } = connectedStore();
+    const pending = computed(() => store.hasPendingAmong(['q-resume']));
+    expect(pending()).toBe(false);
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+    expect(pending()).toBe(true);
+    store.succeed(token, 'file-1');
+    expect(pending()).toBe(false);
+  });
+});
+
+describe('FormUploadStore — isUploadingAmong', () => {
+  it('is true only while one of the listed questions has an upload on the wire (or a drawing being made)', () => {
+    const { store } = connectedStore();
+    expect(store.isUploadingAmong(['q-resume'])).toBe(false);
+
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+    expect(store.isUploadingAmong(['q-resume'])).toBe(true);
+    expect(store.isUploadingAmong(['q-transcript'])).toBe(false);
+
+    store.succeed(token, 'file-1');
+    expect(store.isUploadingAmong(['q-resume'])).toBe(false);
+
+    store.reserve('q-transcript');
+    expect(store.isUploadingAmong(['q-resume', 'q-transcript'])).toBe(true);
+  });
+
+  it('is false for an unsaved failure: nothing is on the wire until the respondent tries again', () => {
+    const { store } = connectedStore();
+    store.fail(store.begin('q-resume', fileNamed('resume.pdf')), { kind: 'unsaved', message: UPLOAD_UNSAVED_MESSAGE });
+    expect(store.isUploadingAmong(['q-resume'])).toBe(false);
+  });
+
+  it('can be tracked by a computed', () => {
+    const { store } = connectedStore();
+    const uploading = computed(() => store.isUploadingAmong(['q-resume']));
+    expect(uploading()).toBe(false);
+    const token = store.begin('q-resume', fileNamed('resume.pdf'));
+    expect(uploading()).toBe(true);
+    store.clear('q-resume');
+    expect(uploading()).toBe(false);
+    expect(token.questionId).toBe('q-resume');
+  });
+});
+
+describe('FormUploadStore — reserve and release', () => {
+  it('counts a reservation as pending', () => {
+    const { store } = connectedStore();
+    store.reserve('q-resume');
+    expect(store.hasPendingAmong(['q-resume'])).toBe(true);
+  });
+
+  it('release of a stale token is a no-op', () => {
+    const { store } = connectedStore();
+    const first = store.reserve('q-resume');
+    store.reserve('q-resume');
+    store.release(first);
+    expect(store.viewFor('q-resume').status).toBe('uploading');
+  });
+
+  it('release of the current token writes idle and resolves whenSettled', async () => {
+    const { store } = connectedStore();
+    const token = store.reserve('q-resume');
+    const settled = vi.fn();
+    void store.whenSettled(['q-resume']).then(settled);
+    store.release(token);
+    await Promise.resolve();
+    expect(settled).toHaveBeenCalled();
+    expect(store.viewFor('q-resume').status).toBe('idle');
+  });
+
+  it('clear after reserve resolves whenSettled', async () => {
+    const { store } = connectedStore();
+    store.reserve('q-resume');
+    const settled = vi.fn();
+    void store.whenSettled(['q-resume']).then(settled);
+    store.clear('q-resume');
+    await Promise.resolve();
+    expect(settled).toHaveBeenCalled();
+  });
+
+  it('dispose after reserve resolves whenSettled', async () => {
+    const { store } = connectedStore();
+    store.reserve('q-resume');
+    const settled = vi.fn();
+    void store.whenSettled(['q-resume']).then(settled);
+    store.dispose();
+    await Promise.resolve();
+    expect(settled).toHaveBeenCalled();
+  });
+
+  it('reserve commits null over a stored answer', () => {
+    const { store, runtime } = connectedStore();
+    store.succeed(store.begin('q-resume', fileNamed('resume.pdf')), 'file-1');
+    store.reserve('q-resume');
+    // Committing null clears the answer; the runtime reads a cleared answer as undefined.
+    expect(runtime.valueFor('q-resume')).toBeUndefined();
+  });
+
+  it('a reservation is current once taken', () => {
+    const { store } = connectedStore();
+    expect(store.isCurrent(store.reserve('q-resume'))).toBe(true);
+  });
+
+  it('a reservation is not current after a second reserve', () => {
+    const { store } = connectedStore();
+    const first = store.reserve('q-resume');
+    store.reserve('q-resume');
+    expect(store.isCurrent(first)).toBe(false);
+  });
+
+  it('a reservation is not current after clear', () => {
+    const { store } = connectedStore();
+    const token = store.reserve('q-resume');
+    store.clear('q-resume');
+    expect(store.isCurrent(token)).toBe(false);
+  });
+
+  it('a reservation is not current after dispose', () => {
+    const { store } = connectedStore();
+    const token = store.reserve('q-resume');
+    store.dispose();
+    expect(store.isCurrent(token)).toBe(false);
+  });
+
+  it('a reservation is not current after connect to a new runtime', () => {
+    const { store } = connectedStore();
+    const token = store.reserve('q-resume');
+    store.connect(runtimeFor(uploadForm()));
+    expect(store.isCurrent(token)).toBe(false);
+  });
+
+  it('a reservation is not current once an upload supersedes it', () => {
+    const { store } = connectedStore();
+    const token = store.reserve('q-resume');
+    // A send that never settles: the upload only has to start, which is synchronous.
+    void store.upload('q-resume', fileNamed('doodle.png'), () => new Promise<UploadedFile>(() => undefined));
+    expect(store.isCurrent(token)).toBe(false);
   });
 });

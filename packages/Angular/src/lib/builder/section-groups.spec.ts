@@ -25,7 +25,7 @@
 import { describe, expect, it } from 'vitest';
 import { groupedConditionSources, type FormSection } from './section-groups';
 import { groupedJumpTargets, jumpTargetOptions } from './jump-target-options';
-import { SCORE_SOURCE, type ConditionalSourceQuestion } from './condition-sources';
+import { SCORE_SOURCE, type ConditionalSourceQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
 const SECTIONS: FormSection[] = [
   { id: 'p1', label: 'Contact Information', questionIds: ['q1', 'q2'] },

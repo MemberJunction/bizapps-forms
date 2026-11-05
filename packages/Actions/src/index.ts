@@ -1,9 +1,6 @@
 export * from './generated/action_subclasses';
 export * from './custom/register';
-// The per-response loader is shared with forms-server's automation runner, which needs the same
-// answers the on-submit actions see — re-deriving it there would be a second reading of the same
-// rows, free to drift from this one.
-export * from './custom/shared/form-response-context';
-// `action-provider` (resolveActionProvider, ActionDataProvider, …) is exported via
-// `./custom/register` above — see the comment there for why Server needs it.
+// The response-context loader, the provider seam and the binding executor live in
+// `@mj-biz-apps/forms-core-entities-server` (spec #303 §1), which both this package and
+// forms-server import directly; this package re-exports none of them.
 export * from './custom/binding';

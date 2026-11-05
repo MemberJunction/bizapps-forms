@@ -5,7 +5,7 @@ import { normalizeApiConfig } from './api/forms-api.config';
 import { FORMS_API_SERVICE } from './api/forms-api.interface';
 import { FORMS_UPLOAD_SERVICE } from './api/form-upload.interface';
 import { FormsGraphQLApiService } from './api/forms-api.graphql.service';
-import { FormsMockApiService } from './api/forms-api.mock.service';
+import { FormsOfflineApiService } from './api/forms-api.offline.service';
 import { FormUploadService } from './api/form-upload.service';
 import { FormsMockUploadService } from './api/form-upload.mock.service';
 import { formsWidgetProviders } from './widget-providers';
@@ -22,10 +22,10 @@ function boundTo(config: Parameters<typeof formsWidgetProviders>[0], token: unkn
 }
 
 describe('formsWidgetProviders', () => {
-  it('pairs the mock uploader with the mock transport when there is no endpoint', () => {
+  it('pairs the in-memory uploader with the offline transport when there is no endpoint', () => {
     const preview = normalizeApiConfig({ graphqlUrl: '' });
 
-    expect(boundTo(preview, FORMS_API_SERVICE)).toBe(FormsMockApiService);
+    expect(boundTo(preview, FORMS_API_SERVICE)).toBe(FormsOfflineApiService);
     expect(boundTo(preview, FORMS_UPLOAD_SERVICE)).toBe(FormsMockUploadService);
   });
 

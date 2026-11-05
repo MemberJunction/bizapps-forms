@@ -6,8 +6,8 @@ Then:  pnpm install --lockfile-only
 
 WHY (runbook step 4). On a patch target bump-pins.sh leaves the packages/* peer specifiers alone, and
 pnpm keeps any resolution that still satisfies an unchanged specifier, so every packages/* importer
-stays on the old MJ beside the apps' new one: two MJ copies in CI. It hit 380 entries on both
-6.1.1 -> 6.1.4 and 6.1.4 -> 6.1.5. Removing only the importer lines is not enough, because pnpm
+stays on the old MJ beside the apps' new one: two MJ copies in CI. It hit 380 entries on each of
+6.1.1 -> 6.1.4, 6.1.4 -> 6.1.5 and 6.1.5 -> 6.1.6. Removing only the importer lines is not enough, because pnpm
 re-prefers a surviving packages:/snapshots: block, so this removes both.
 `pnpm update --lockfile-only` is not an alternative: it moves unrelated packages (@types/node 22 -> 25).
 

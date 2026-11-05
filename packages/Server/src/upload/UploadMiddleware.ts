@@ -12,8 +12,8 @@
  * synthesized anonymous `UserInfo` at `req.userPayload.userRecord` + `req.userPayload.sessionId`
  * (which is the caller's `x-session-id` header, NOT an `mj_sid` claim — MJ reads it straight off
  * the request, so it identifies nobody). We contribute this route through {@link GetPostAuthMiddleware} and
- * simply READ that verified payload — the exact same identity the `SubmitFormResponse`
- * GraphQL mutation runs under — instead of re-verifying the token or reinventing JWKS/JWT
+ * simply READ that verified payload — the exact same identity `Forms.SaveResponse` runs under —
+ * instead of re-verifying the token or reinventing JWKS/JWT
  * handling. A missing/invalid token is already rejected upstream (401) and never reaches us
  * (fail-closed). If a payload is somehow absent we still 401 defensively.
  *
@@ -32,12 +32,12 @@ import { FileStorageEngine } from '@memberjunction/storage';
 import { UserCache } from '@memberjunction/generic-database-provider';
 
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
-import { InFlightLimiter } from '../http/in-flight-limiter.js';
-import { currentRequestIdentity } from '../http/request-identity.js';
+import { StageTimer } from '../http/stage-timer.js';
 import { UPLOAD_ROUTE, getUploadConfig, uploadBodyCap, uploadTooLargeMessage } from './config.js';
 import { parseMultipart } from './multipart.js';
 import { runUpload, type UploadContext, type UploadRequest, type UploadStorageEngine } from './upload.service.js';
 import { checkUploadRateLimit } from './upload-rate-limit.js';
+import { InFlightLimiter, currentRequestIdentity } from '@mj-biz-apps/forms-core-entities-server';
 
 /**
  * Process-wide in-flight cap on the anonymous upload endpoint, lazily built from config.
@@ -125,12 +125,20 @@ export class UploadMiddleware extends BaseServerMiddleware {
     }
   }
 
-  /** Buffer the body (size-capped), parse multipart, run the service, and respond JSON. */
+  /**
+   * Buffer the body (size-capped), parse multipart, run the service, and respond JSON.
+   *
+   * Every answer carries a `Server-Timing` header (see {@link StageTimer}): the stages this route
+   * spends its time in, so a slow upload on a real host shows in DevTools where the time went.
+   */
   private async processUpload(req: Request, res: Response): Promise<void> {
+    const timer = new StageTimer();
+    const timed = (): Response => res.set('Server-Timing', timer.header({ total: true }));
+
     const contextUser = userPayloadOf<VerifiedUserPayload>(req)?.userRecord;
     if (!contextUser) {
       // Should not happen (unified auth would have 401'd) — defensive fail-closed.
-      sendJsonError(res, 401, 'Authentication required to upload.');
+      sendJsonError(timed(), 401, 'Authentication required to upload.');
       return;
     }
 
@@ -138,23 +146,23 @@ export class UploadMiddleware extends BaseServerMiddleware {
     // `MJ: Files` row, so the cheapest place to refuse a caller hammering this route is the
     // moment we know who they are — which is on arrival, since the key is their resolved peer
     // IP rather than anything in the (as yet unread) body.
-    if (this.refuseIfRateLimited(req, res)) {
+    if (await this.refuseIfRateLimited(req, timed())) {
       return;
     }
 
-    const bodyResult = await readCappedBody(req, uploadBodyCap(), uploadTooLargeMessage());
+    const bodyResult = await timer.measure('body', () => readCappedBody(req, uploadBodyCap(), uploadTooLargeMessage()));
     if (!bodyResult.ok || !bodyResult.body) {
-      sendJsonError(res, bodyResult.status ?? 400, bodyResult.error ?? 'Failed to read upload.');
+      sendJsonError(timed(), bodyResult.status ?? 400, bodyResult.error ?? 'Failed to read upload.');
       return;
     }
 
     const parsed = parseMultipart(bodyResult.body, req.headers['content-type']);
     if (!parsed.ok) {
-      sendJsonError(res, 400, parsed.reason ?? 'Malformed upload.');
+      sendJsonError(timed(), 400, parsed.reason ?? 'Malformed upload.');
       return;
     }
 
-    const result = await runUpload(this.uploadContextFor(req, contextUser), {
+    const result = await runUpload(this.uploadContextFor(req, contextUser, timer), {
       file: parsed.file,
       distributionSlug: parsed.fields.distributionSlug,
       distributionId: parsed.fields.distributionId,
@@ -163,10 +171,10 @@ export class UploadMiddleware extends BaseServerMiddleware {
     });
     if (!result.ok || !result.success) {
       const failure = result.failure ?? { status: 500, error: 'Upload failed.' };
-      sendJsonError(res, failure.status, failure.error);
+      sendJsonError(timed(), failure.status, failure.error);
       return;
     }
-    res.status(200).set('Cache-Control', 'no-store').json(result.success);
+    timed().status(200).set('Cache-Control', 'no-store').json(result.success);
   }
 
   /**
@@ -177,9 +185,10 @@ export class UploadMiddleware extends BaseServerMiddleware {
    * because the anonymous role holds no `MJ: Files` grant and a provenance row the caller could
    * write would prove nothing about who uploaded the file.
    */
-  private uploadContextFor(req: Request, contextUser: UserInfo): UploadContext {
+  private uploadContextFor(req: Request, contextUser: UserInfo, timer: StageTimer): UploadContext {
     return {
       contextUser,
+      timer,
       // Rides the request-scoped identity store for the same reason `clientIpHash` does a few
       // lines down: this route is contributed through `GetPostAuthMiddleware`, which runs AFTER
       // the pre-auth `requestIdentityHandler`, so the header is reachable here without threading
@@ -201,8 +210,8 @@ export class UploadMiddleware extends BaseServerMiddleware {
    * Returns a boolean rather than throwing because the caller is a route handler that has already
    * written a response by this point; a thrown error there would produce a second one.
    */
-  private refuseIfRateLimited(req: Request, res: Response): boolean {
-    const limit = checkUploadRateLimit({
+  private async refuseIfRateLimited(req: Request, res: Response): Promise<boolean> {
+    const limit = await checkUploadRateLimit({
       clientIpHash: currentRequestIdentity()?.ipHash,
       sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
     });

@@ -28,12 +28,30 @@ module.exports = {
     { type: 'GraphQLServer', directory: './packages/Server/src/generated' },
     { type: 'ActionSubclasses', directory: './packages/Actions/src/generated' },
     { type: 'EntitySubclasses', directory: './packages/Entities/src/generated' },
+    /**
+     * Remote Operation typed bases, emitted from the `MJ: Remote Operations` rows in
+     * metadata/remote-operations/. Into the Entities package because it is the one browser-safe
+     * package every other Forms package (and the widget, via `import type`) already depends on:
+     * the generated bases ARE the operation contract, so a client calls `.Execute()` without
+     * pulling in the server engine.
+     *
+     * Scope: CodeGen resolves an operation's schema from its key's namespace (`Forms.` matches the
+     * `MJ_BizApps_Forms: Forms` entity, so `__mj_BizAppsForms`) and filters by `includeSchemas`
+     * below, so core's own operations are not emitted here.
+     */
+    { type: 'RemoteOperations', directory: './packages/Entities/src/generated' },
     { type: 'DBSchemaJSON', directory: './Schema Files' },
   ],
 
-  /** Build commands run after code generation */
+  /**
+   * Build commands run after code generation, in dependency order. CoreEntitiesServer sits between
+   * Entities and Actions since #303 (Actions and Server import it), so it is rebuilt against the
+   * fresh entities before either; it was missing from this list, the third hand-written package
+   * list to forget it.
+   */
   commands: [
     { workingDirectory: './packages/Entities', command: 'pnpm', args: ['run', 'build'], when: 'after' },
+    { workingDirectory: './packages/CoreEntitiesServer', command: 'pnpm', args: ['run', 'build'], when: 'after' },
     { workingDirectory: './packages/Actions', command: 'pnpm', args: ['run', 'build'], when: 'after' },
     { workingDirectory: './packages/Server', command: 'pnpm', args: ['run', 'build'], when: 'after' },
     { workingDirectory: './packages/Angular', command: 'pnpm', args: ['run', 'build'], when: 'after' },

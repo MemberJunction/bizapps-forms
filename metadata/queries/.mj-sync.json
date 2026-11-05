@@ -1,0 +1,28 @@
+{
+  "entity": "MJ: Queries",
+  "filePattern": "**/.*.json",
+  "defaults": {
+    "Status": "Pending"
+  },
+  "pull": {
+    "createNewFileIfNotFound": true,
+    "newFileName": ".forms-reporting-queries.json",
+    "appendRecordsToExistingFile": true,
+    "updateExistingRecords": true,
+    "ignoreNullFields": true,
+    "ignoreVirtualFields": true,
+    "relatedEntities": {
+      "MJ: Query Parameters": {
+        "entity": "MJ: Query Parameters",
+        "foreignKey": "QueryID"
+      }
+    },
+    "filter": "CategoryID IN (SELECT ID FROM [__mj].vwQueryCategories WHERE Name = 'Forms')",
+    "externalizeFields": [
+      {
+        "field": "SQL",
+        "pattern": "@file:SQL/{Name}.sql"
+      }
+    ]
+  }
+}

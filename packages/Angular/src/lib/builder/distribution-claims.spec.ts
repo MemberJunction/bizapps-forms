@@ -1,24 +1,22 @@
 /**
- * The pure half of the Distribute-tab claim warning (#292): parsing the network payload and
- * producing the copy. `DistributionService.claims` is covered at the bottom with the GraphQL
- * provider mocked, because its only logic is "parse, or log and report the failure".
+ * The pure half of the Distribute-tab claim warning (#292): reading `Forms.GetDistributionClaims`'
+ * answer and producing the copy. `DistributionService.claims` is covered at the bottom through the
+ * real operation class, with the provider it routes through faked, because its only logic is
+ * "read, or log and report the failure".
  */
 import '@angular/compiler';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
+import type { FormsGetDistributionClaimsOutput } from '@mj-biz-apps/forms-entities';
+import { installFakeOperations, refused, succeeded, type FakeOperations } from '../shared/testing/fake-operations';
 
 const logged: string[] = [];
-let executeGQL: (query: string, variables: Record<string, unknown>) => Promise<unknown>;
 
 vi.mock('@memberjunction/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memberjunction/core')>();
   return { ...actual, LogError: (message: string) => logged.push(message) };
 });
-vi.mock('@memberjunction/graphql-dataprovider', () => ({
-  GraphQLDataProvider: { Instance: { ExecuteGQL: (q: string, v: Record<string, unknown>) => executeGQL(q, v) } },
-}));
 
-const { parseClaimsPayload, claimsBySlug, claimNotice, failureNotice, FORM_DISTRIBUTION_CLAIMS_QUERY } =
-  await import('./distribution-claims');
+const { toClaimsResult, claimsBySlug, claimNotice, failureNotice } = await import('./distribution-claims');
 const { DistributionService } = await import('./distribution.service');
 
 const claim = (appName: string, ownerLabel: string, slug = 's', respondentUrl: string | null = null) => ({
@@ -28,46 +26,45 @@ const claim = (appName: string, ownerLabel: string, slug = 's', respondentUrl: s
   respondentUrl,
 });
 
-const serverPayload = {
-  FormDistributionClaims: {
-    claims: [claim('Smoke Consumer', 'Smoke intake step', 'doodle-scroll', 'http://localhost:4131/x?step=1')],
-    failures: [{ appName: 'Smoke Broken', message: 'did not answer (details in the server log)' }],
-  },
+const serverOutput: FormsGetDistributionClaimsOutput = {
+  Claims: [{ AppName: 'Smoke Consumer', Slug: 'doodle-scroll', OwnerLabel: 'Smoke intake step', RespondentURL: 'http://localhost:4131/x?step=1' }],
+  Failures: [{ AppName: 'Smoke Broken', Message: 'did not answer (details in the server log)' }],
 };
+
+let operations: FakeOperations | null = null;
 
 beforeEach(() => {
   logged.length = 0;
 });
 
-describe('parseClaimsPayload', () => {
-  it('accepts the server shape', () => {
-    expect(parseClaimsPayload(serverPayload)).toEqual({
+afterEach(() => {
+  operations?.restore();
+  operations = null;
+});
+
+describe('toClaimsResult', () => {
+  it('reads the operation output into the builder shape', () => {
+    expect(toClaimsResult(serverOutput)).toEqual({
       ok: true,
-      claims: serverPayload.FormDistributionClaims.claims,
-      failures: serverPayload.FormDistributionClaims.failures,
+      claims: [claim('Smoke Consumer', 'Smoke intake step', 'doodle-scroll', 'http://localhost:4131/x?step=1')],
+      failures: [{ appName: 'Smoke Broken', message: 'did not answer (details in the server log)' }],
     });
   });
 
-  it('accepts a null respondentUrl', () => {
-    const result = parseClaimsPayload({ FormDistributionClaims: { claims: [claim('A', 'x')], failures: [] } });
+  it('accepts a null RespondentURL', () => {
+    const result = toClaimsResult({ Claims: [{ AppName: 'A', Slug: 's', OwnerLabel: 'x', RespondentURL: null }], Failures: [] });
     expect(result).toMatchObject({ ok: true, claims: [{ respondentUrl: null }] });
   });
 
   it.each([
-    ['undefined', undefined],
-    ['null', null],
-    ['a string', 'nope'],
-    ['an empty object', {}],
-    ['a null result', { FormDistributionClaims: null }],
-    ['claims not an array', { FormDistributionClaims: { claims: 'x', failures: [] } }],
-    ['failures missing', { FormDistributionClaims: { claims: [] } }],
-    [
-      'a claim without a slug',
-      { FormDistributionClaims: { claims: [{ appName: 'A', ownerLabel: 'o', respondentUrl: null }], failures: [] } },
-    ],
-    ['a failure without a message', { FormDistributionClaims: { claims: [], failures: [{ appName: 'A' }] } }],
-  ])('turns %s into a failure with a message, never an empty success', (_label, payload) => {
-    const result = parseClaimsPayload(payload);
+    ['claims not an array', { Claims: 'x', Failures: [] }],
+    ['failures missing', { Claims: [] }],
+    ['a claim without a slug', { Claims: [{ AppName: 'A', OwnerLabel: 'o', RespondentURL: null }], Failures: [] }],
+    ['a failure without a message', { Claims: [], Failures: [{ AppName: 'A' }] }],
+    ['nothing at all', null],
+  ])('turns %s into a failure with a message, never an empty success', (_label, output) => {
+    // The output crossed the network as JSON, so its type is a promise, not a proof.
+    const result = toClaimsResult(output as unknown as FormsGetDistributionClaimsOutput);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.length).toBeGreaterThan(0);
   });
@@ -134,29 +131,30 @@ describe('failureNotice', () => {
 });
 
 describe('DistributionService.claims', () => {
-  it('sends the query with the form id and parses the answer', async () => {
-    let seen: { query: string; variables: Record<string, unknown> } | null = null;
-    executeGQL = async (query, variables) => {
-      seen = { query, variables };
-      return serverPayload;
-    };
+  it('asks Forms.GetDistributionClaims about the form and reads the answer', async () => {
+    operations = installFakeOperations(() => succeeded(serverOutput));
     const result = await new DistributionService().claims('form-9');
-    expect(seen).toEqual({ query: FORM_DISTRIBUTION_CLAIMS_QUERY, variables: { formId: 'form-9' } });
+    expect(operations.calls).toEqual([{ key: 'Forms.GetDistributionClaims', input: { FormID: 'form-9' } }]);
     expect(result.ok).toBe(true);
   });
 
-  it('logs the form id and returns a failure when the request throws', async () => {
-    executeGQL = async () => {
-      throw new Error('network down');
-    };
+  it('logs the form id and returns the server\'s refusal', async () => {
+    operations = installFakeOperations(() => refused('Not authorized'));
     const result = await new DistributionService().claims('form-9');
-    expect(result).toEqual({ ok: false, error: 'network down' });
+    expect(result).toEqual({ ok: false, error: 'Not authorized' });
     expect(logged.join('\n')).toContain('form-9');
+    expect(logged.join('\n')).toContain('Not authorized');
+  });
+
+  it('returns a failure — never "no claims" — when the request never reaches the server', async () => {
+    operations = installFakeOperations(() => Promise.reject(new Error('network down')));
+    const result = await new DistributionService().claims('form-9');
+    expect(result.ok).toBe(false);
     expect(logged.join('\n')).toContain('network down');
   });
 
   it('logs the form id when the server sends an answer the builder cannot read', async () => {
-    executeGQL = async () => ({ FormDistributionClaims: { claims: 'nope' } });
+    operations = installFakeOperations(() => succeeded({ Claims: 'nope' }));
     const result = await new DistributionService().claims('form-9');
     expect(result.ok).toBe(false);
     expect(logged.join('\n')).toContain('form-9');

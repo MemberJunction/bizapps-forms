@@ -23,7 +23,6 @@
 import { LogError, LogErrorEx } from '@memberjunction/core';
 import type { EntityInfo, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 
-import { FORM_ENTITY } from '../public-submit/entity-names.js';
 import {
   assetPathPrefix,
   assetTooLargeMessage,
@@ -35,6 +34,7 @@ import type { ParsedFile } from '../upload/multipart.js';
 import { MAX_CACHED_ASSET_ENTRY_BYTES } from './asset-byte-cache.js';
 import type { ByteBudgetCache } from './asset-byte-cache.js';
 import { describeReadFallback, readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
+import { FORMS_ENTITY } from '@mj-biz-apps/forms-core-entities-server';
 
 /** Entity-definition lookup — satisfied by a global `Metadata` and by a per-request provider. */
 export interface AssetMetadataProvider {
@@ -196,9 +196,9 @@ export async function runAssetUpload(
  * identity-mode check — see the file header for why an anonymous session fails it.
  */
 export function checkAuthorScope(provider: AssetMetadataProvider, user: UserInfo): AssetUploadResult {
-  const entity = provider.EntityByName(FORM_ENTITY);
+  const entity = provider.EntityByName(FORMS_ENTITY.Form);
   if (!entity) {
-    return failUpload(500, `Entity "${FORM_ENTITY}" is not present in metadata.`);
+    return failUpload(500, `Entity "${FORMS_ENTITY.Form}" is not present in metadata.`);
   }
   if (!entity.GetUserPermisions(user).CanUpdate) {
     return failUpload(403, 'You do not have permission to upload images for this form.');
@@ -243,7 +243,7 @@ async function resolveForm(
   // quote — so the filter interpolates it directly rather than adding a second escaping rule.
   const view = await ctx.runViewProvider.RunView<{ ID: string }>(
     {
-      EntityName: FORM_ENTITY,
+      EntityName: FORMS_ENTITY.Form,
       ExtraFilter: `ID = '${wanted}'`,
       ResultType: 'simple',
       Fields: ['ID'],

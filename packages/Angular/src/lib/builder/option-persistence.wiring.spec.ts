@@ -1,8 +1,8 @@
 /**
  * Structural guards for persisting an OPTION edit.
  *
- * These components use `inject()` and cannot be instantiated in this suite's node environment,
- * so what is checkable is the source. The decision below is invisible to a unit test of the pure
+ * The question editor's emission and the builder template's binding are checked in the source; the
+ * builder's handler is executed in `form-builder.verbs.spec.ts`. The decision below is invisible to a unit test of the pure
  * helpers, and it loses authored work silently.
  *
  * THE DEFECT. `setOptionImage` and `setOptionLabel` mutate a `FormQuestionOption` entity and then
@@ -32,7 +32,6 @@ const stripped = (file: string): string =>
 
 const editor = (): string => stripped('question-editor.component.ts');
 const editorHtml = (): string => stripped('question-editor.component.html');
-const builder = (): string => stripped('form-builder.component.ts');
 const builderHtml = (): string => stripped('form-builder.component.html');
 
 describe('an option edit reaches the database', () => {
@@ -53,11 +52,8 @@ describe('an option edit reaches the database', () => {
     expect(builderHtml()).toMatch(/\(optionChanged\)="onOptionChanged\(\$event\)"/);
   });
 
-  it('the builder saves the OPTION, not the question that owns it', () => {
-    expect(builder()).toMatch(
-      /onOptionChanged\(option:[\s\S]{0,300}this\.state\.saveDebounced\(option\)/,
-    );
-  });
+  // That the builder then saves the OPTION, not the question that owns it, is EXECUTED in
+  // `form-builder.verbs.spec.ts` (#303).
 });
 
 describe('the picture-choice image control is wired to that path', () => {

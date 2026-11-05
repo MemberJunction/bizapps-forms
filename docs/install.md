@@ -38,16 +38,16 @@ are in [`migrations/README.md`](../migrations/README.md).
 
 ## 2. Read the MJ version, never recall it
 
-The supported range and the exact pin live in the files an upgrade actually edits. Restating
+The supported range and the pin live in the files an upgrade actually edits. Restating
 either in prose is how the README came to claim a pin two majors behind what the repo was
 building against.
 
 ```bash
 node -p "require('./mj-app.json').mjVersionRange"                                   # supported range
-node -p "require('./apps/MJAPI/package.json').dependencies['@memberjunction/core']" # the exact pin
+node -p "require('./apps/MJAPI/package.json').dependencies['@memberjunction/core']" # the pin (caret floor)
 ```
 
-**Pinning model:** `apps/*` use exact `X.Y.Z` in `dependencies`; `packages/*` declare MJ only
+**Pinning model:** `apps/*` use a caret floor `^X.Y.Z` in `dependencies`; `packages/*` declare MJ only
 as caret `^X.Y.Z` `peerDependencies` and carry no MJ `dependencies` at all.
 
 **Upgrading MJ is a database operation, not just a pin bump.** Bumping npm versions leaves the
@@ -113,6 +113,34 @@ Beyond the `magicLink` block in the [README](../README.md#-install-into-a-host-a
   packages — the mirror image of what this repo does.
 - `mj app remove` retires the rows Forms wrote into the shared `__mj` schema, via
   `migrations-teardown/`.
+- **`READ_COMMITTED_SNAPSHOT ON`** on the host database (since #303). No migration sets it — it is a
+  database-wide setting and switching it needs exclusive access:
+  `ALTER DATABASE [<db>] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;`. Without it,
+  any two concurrent authoring transactions (publish, clone, structural saves, saving a link
+  against archiving its form) can deadlock, and one is rolled back and fails. MJAPI logs an error
+  at boot when it is off; set `FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT=true` to refuse to boot instead.
+- **MJ's scheduler** (`scheduledJobs` in the host's `mj.config.cjs`, on by default) with a
+  `systemUserEmail` that names an existing user. On-submit automations run from an outbox: the
+  submitting process runs them right after the save, and the *Forms — Automation Outbox Sweep* job
+  this release seeds runs retries and recovers anything a stopped process left behind. With the
+  scheduler off, first attempts still run; retries wait until some host runs the sweep. Details and
+  the operator runbook: [`local-host.md` §5](local-host.md#5-host-requirements-since-303-the-automation-outbox-and-read_committed_snapshot)
+  and [Operating the automation outbox](local-host.md#operating-the-automation-outbox).
+
+### The MJAPI database login needs only MJ's three roles
+
+The SQL login MJAPI connects with needs membership of `cdp_Developer`, `cdp_Integration` and
+`cdp_UI`, and nothing more: not `db_owner`, and no rights on any Forms table. Those roles get
+`SELECT` on views and `EXECUTE` on procedures only, so every write Forms makes outside an entity
+save — the response-slot count, the row locks on a submit and the automation-outbox claim, settle,
+renew and replay — runs as a stored procedure granted to `cdp_Developer` and `cdp_Integration`
+(since #338; before it, a roles-only login refused every submit with "Something went wrong while
+submitting your response"). Do not grant table rights to make something work; a refusal on a
+`__mj_BizAppsForms` table is a Forms defect to report.
+
+A host with `MJ: Entity Field Permissions` rows on an entity that a Forms automation binds to must
+add a row for the `Forms Automation Runner` role on that entity, or the automation fails with MJ's
+"Field … does not exist on entity … or you do not have access to it".
 
 ---
 
@@ -196,9 +224,9 @@ too) the first time a request arrives carrying `X-Forwarded-For` while `FORMS_TR
 Forms' own internal magic-link redeem call is excluded — but the warning is a symptom check,
 not a substitute for setting the variable at deploy time.
 
-The public-submit path is bounded by a second set of env vars, all read once at process start by
-`packages/Server/src/public-submit/config.ts` (its header comment is the source of truth; this
-table mirrors it):
+The public-submit path (`Forms.SaveResponse`) is bounded by a second set of env vars, all read once at
+process start by `packages/CoreEntitiesServer/src/submission/config.ts` (its header comment is the
+source of truth; this table mirrors it):
 
 | Variable | Default | What it bounds |
 |---|---|---|
@@ -208,9 +236,20 @@ table mirrors it):
 | `FORMS_COMPLETION_MAX` | `20` | COMPLETED submissions per window, per (client IP, distribution) — tighter than the save cap because a completion fires on-submit automations. |
 | `FORMS_KNOCKOUT_MAX` | same as `FORMS_COMPLETION_MAX` | Disqualifying submits per window, per (caller, distribution) — its own bucket so a burst of ineligible respondents cannot lock out real completions. |
 | `FORMS_RATELIMIT_WINDOW_MS` | `60000` | Sliding-window length, in ms, for every ceiling above. |
-| `FORMS_RATELIMIT_MAX_KEYS` | `50000` | Buckets the in-memory window store retains before evicting the least-recently-charged. |
+| `FORMS_RATELIMIT_MAX_KEYS` | `50000` | Buckets the per-process window store retains before evicting the least-recently-charged. Not used by the shared Redis store, where each bucket expires one window after its last hit. |
 | `FORMS_SUBMIT_MAX_IN_FLIGHT` | `50` | Simultaneous in-flight submit-pipeline runs, process-wide — bounds concurrency, not rate. |
 | `FORMS_MAX_PARTIALS_PER_VERSION` | `10000` | Durable ceiling on `Partial` + `Disqualified` rows a single published version may accumulate — the only bound here with no per-window reset. |
+
+**Shared or per-process.** When MJAPI runs with `REDIS_URL` set, MJ installs its Redis
+`LocalStorageProvider`, and Forms keeps every window above (submit, autosave, completion, knockout,
+and the redeem, resume and upload caps) in that Redis, so one respondent has one budget however many
+API instances sit behind the load balancer. Without `REDIS_URL` each process keeps its own windows,
+and a deployment of N instances admits about N times each cap. Forms opens no Redis connection of
+its own. If Redis becomes unreachable, each instance counts on its own until Redis answers again and
+logs one error per outage. `FORMS_RATELIMIT_MAX_KEYS` applies only to the per-process store. The
+in-flight caps (`FORMS_SUBMIT_MAX_IN_FLIGHT`, `FORMS_REDEEM_MAX_IN_FLIGHT` and the upload in-flight
+cap) stay per-process by design: they bound one process's sockets, connection pool and memory, and a
+shared count would let an instance that crashed keep its slots for good.
 
 Every per-IP ceiling in that table only bounds what its name says when `FORMS_TRUSTED_PROXY_HOPS`
 is set correctly for the deployment's actual topology — which is why the two subjects share this

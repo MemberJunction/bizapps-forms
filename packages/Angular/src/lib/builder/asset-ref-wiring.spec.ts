@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 /**
  * SOURCE-PRESENCE SMOKE for the builder's #270 wiring — it asserts the calls still exist, not
  * that they behave. These components cannot be instantiated in the vitest node env (no Angular
- * JIT), so the behaviour is covered where it lives: `widget/core/asset-ref.spec.ts` for the pure
- * transforms and `snapshot-builder.spec.ts` for publish. What this guards is the seam a refactor
+ * JIT), so the behaviour is covered where it lives: the contracts' `asset-ref.spec.ts` for the pure
+ * transforms and the contracts' `snapshot-builder.spec.ts` for publish. What this guards is the seam a refactor
  * could silently drop — a builder that stores the uploading API's absolute URL again, or a preview
  * that renders a stored `/forms/asset/<id>` against Explorer's origin and 404s.
  */

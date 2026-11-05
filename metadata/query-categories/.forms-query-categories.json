@@ -1,0 +1,17 @@
+[
+  {
+    "_comments": [
+      "Must push before metadata/queries, which @lookups it by name; directoryOrder in",
+      "metadata/.mj-sync.json puts this folder first ('queries' sorts before 'query-categories')."
+    ],
+    "fields": {
+      "Name": "Forms",
+      "ParentID": null,
+      "Description": "MJ Forms reporting read models: response counts, answer breakdowns and the page funnel, aggregated in SQL for FormReportingEngine instead of in the browser over every answer row.",
+      "UserID": "@lookup:MJ: Users.Name=System"
+    },
+    "primaryKey": {
+      "ID": "38044DBA-A933-4A8D-A5B6-25EC82210B93"
+    }
+  }
+]

@@ -17,7 +17,7 @@
  * The returned `fileId` is the `MJ: Files` record ID the widget submits as the answer's
  * `FileID` (that column already exists on FormResponseAnswer).
  */
-import { LogError, Metadata } from '@memberjunction/core';
+import { LogError, LogStatus, Metadata } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import { answerColumnFor, isFormQuestionType } from '@mj-biz-apps/forms-entities';
 import { randomUUID } from 'node:crypto';
@@ -25,14 +25,23 @@ import { inspect } from 'node:util';
 
 
 import type { mjBizAppsFormsFormUploadEntity } from '@mj-biz-apps/forms-entities';
-import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names';
-import { checkRespondentScope, type ScopeMetadataProvider } from '../public-submit/scope-check.service';
-import { resolvePublishedDefinition, type DefinitionRunViewProvider } from '../public-submit/definition-loader.service';
-import { withoutQueryEcho } from '../public-submit/persistence.service';
 import { redactStorageKey } from '../storage/read-object';
-import { checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE } from '../http/embed-origin';
 import { contentTypeAllowed, getUploadConfig, uploadTooLargeMessage } from './config';
 import type { ParsedFile } from './multipart';
+import type { StageTimer } from '../http/stage-timer';
+import {
+  checkEmbedOrigin,
+  checkRespondentScope,
+  FOREIGN_ORIGIN_MESSAGE,
+  FORM_UNAVAILABLE_MESSAGE,
+  FORMS_ENTITY,
+  isTerminalResponseStatus,
+  resolvePublishedDefinition,
+  type FormResponseStatus,
+  withoutQueryEcho,
+  type DefinitionRunViewProvider,
+  type ScopeMetadataProvider,
+} from '@mj-biz-apps/forms-core-entities-server';
 
 /** What the service needs about the just-parsed request. */
 export interface UploadRequest {
@@ -78,8 +87,8 @@ export interface UploadContext {
    * The principal the File row and the provenance row are written as.
    *
    * Separate from `contextUser` on purpose: eligibility is checked against the anonymous caller,
-   * and only the WRITE runs elevated. Falls back to the caller when absent, which keeps existing
-   * tests honest — but the middleware always supplies it.
+   * and only the WRITE (and the form-status read) runs elevated. Absent means the host has no system
+   * user: a configuration error, refused before anything is read or stored.
    */
   elevatedUser?: UserInfo;
   /** The anonymous session id, a fallback correlation key for provenance. */
@@ -92,6 +101,16 @@ export interface UploadContext {
    * the whole endpoint untestable without a database unless the write can be substituted.
    */
   recordProvenance?: (input: ProvenanceRecordInput) => Promise<boolean>;
+  /**
+   * Records how long each stage took, for the route's `Server-Timing` header. Optional so the
+   * service runs unchanged without one (every existing caller and test).
+   */
+  timer?: StageTimer;
+}
+
+/** Run `work` as the named stage on `ctx`'s timer, or just run it when there is no timer. */
+function stage<T>(ctx: UploadContext, name: string, work: () => Promise<T>): Promise<T> {
+  return ctx.timer ? ctx.timer.measure(name, work) : work();
 }
 
 /** What the provenance writer needs to record one upload. */
@@ -191,16 +210,17 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   if (req.responseId !== undefined && !GUID_SHAPE.test(req.responseId)) {
     return fail(400, 'Invalid "responseId": expected a GUID.');
   }
-  const distCheck = await resolveOpenDistribution(ctx, req);
+  const distCheck = await stage(ctx, 'resolve', () => resolveOpenDistribution(ctx, req));
   if (!distCheck.ok) {
     return distCheck;
   }
 
   // 3a. Embed origin (#203). A distribution may name the browser origins permitted to use its
-  //     link; this refuses everyone else, exactly as the submit pipeline's gate 2a does.
+  //     link; this refuses everyone else, exactly as `FormSubmissionEngine`'s embed-origin gate does.
   //
-  //     THIS IS THE THIRD DOOR, and it was the one the origin gate first missed. `PublishedForm`
-  //     and `SubmitFormResponse` are the two the change reasons about, because enumerating
+  //     THIS IS THE THIRD DOOR, and it was the one the origin gate first missed. The read and the
+  //     save (then `PublishedForm` / `SubmitFormResponse`, now the two respondent Remote Operations)
+  //     are the two the change reasons about, because enumerating
   //     `@Query`/`@Mutation` finds them; this route is Express middleware contributed through
   //     `GetPostAuthMiddleware`, so it is invisible to that enumeration while being reachable by
   //     the same widget, on the same public path, with the same anonymous session, through the
@@ -214,11 +234,11 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   //     IT DOES NOT PRECEDE THE RATE LIMITER, AND THAT IS THE ONE PLACE THIS DOOR DIVERGES FROM THE
   //     SUBMIT PIPELINE -- deliberately, so do not "fix" it by moving this gate earlier. On the
   //     submit path the whole sequence lives in one function, so `checkEmbedOrigin` genuinely
-  //     precedes `charge` (`submit-pipeline.ts:509` then `:526`) and a refused request spends no
+  //     precedes `charge` (`FormSubmissionEngine.saveResponse`) and a refused request spends no
   //     budget. Here the per-caller window is charged one layer up, in the Express middleware:
-  //     `processUpload` -> `refuseIfRateLimited` (`UploadMiddleware.ts:141`) -> `checkUploadRateLimit`
-  //     -> `FormsRateLimiter.Instance.charge` (`upload-rate-limit.ts:50`), all of it before
-  //     `runUpload` is called at all (`:157`). So an origin refusal here HAS already cost the caller
+  //     `processUpload` -> `refuseIfRateLimited` (`UploadMiddleware.ts`) -> `checkUploadRateLimit`
+  //     -> `FormsRateLimiter.Instance.charge` (`upload-rate-limit.ts`), all of it before
+  //     `runUpload` is called at all. So an origin refusal here HAS already cost the caller
   //     one upload slot (of `FORMS_UPLOAD_IP_MAX`, default 30) whenever a peer address resolved --
   //     `checkUploadRateLimit` no-ops when it cannot derive an identity.
   //
@@ -253,6 +273,16 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
     return questionCheck;
   }
 
+  // 3c. The response it names must not be finished. Last of the gates because it is the one that
+  //     reads a row, and every cheaper refusal has had its chance by now; before storage, because
+  //     refusing after the bytes landed is how the orphaned files this gate exists for were made.
+  const responseCheck = await stage(ctx, 'response', () =>
+    refuseIfResponseSealed(ctx, req.responseId, distCheck.resolved?.distributionId),
+  );
+  if (!responseCheck.ok) {
+    return responseCheck;
+  }
+
   // 4. Store bytes + create the MJ: Files record via the canonical MJ storage path.
   //    The ledger records the DEFINITION's spelling of the question id, not the client's: the
   //    match above is case-folded, so writing back what the caller sent would let
@@ -260,6 +290,65 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   //    upload answered — and multipart field values are not trimmed (see multipart.ts), so the
   //    raw string can also carry surrounding whitespace into a uniqueidentifier column.
   return storeFile(ctx, file, req, distCheck.resolved, questionCheck.questionId);
+}
+
+/**
+ * What a respondent reads when their file arrives for a response that was already submitted.
+ * Authored here, like {@link UPLOAD_FAILED_MESSAGE}: the widget shows a body's `error` verbatim.
+ */
+export const RESPONSE_ALREADY_SUBMITTED_MESSAGE =
+  'This response has already been submitted, so the file was not added to it.';
+
+/**
+ * Refuse (409) an upload whose response is already sealed — Complete or Disqualified.
+ *
+ * Such a file can never become an answer: a sealed response is never rewritten. Storing it anyway
+ * made an `MJ: Files` row and a ledger row that nothing would reference — the residue the #248 race
+ * left behind, 21 rows on the dev database — while telling the respondent their upload succeeded.
+ *
+ * Read as the elevated user: the respondent role has no read grant on responses. No `responseId`,
+ * or one with no row yet (an upload before the first autosave), passes: there is nothing sealed to
+ * protect. A read that FAILS refuses with a 503, the same choice `resolveOpenDistribution` makes for
+ * an unreadable form — storing a file we could not prove belongs to an open response is the thing
+ * this gate exists to stop, so it does not fail open.
+ *
+ * Scoped to the distribution the upload already resolved, because the elevated read could otherwise
+ * be used as an oracle: any anonymous caller holding a response id from ANY form would learn from
+ * 409-or-200 whether it was finished. A response elsewhere reads as no row and passes, which is
+ * exactly what this route did before the gate existed — the gate adds no answer outside the caller's
+ * own form. The ownership rule (`responseIsOurs`) cannot be used here: the upload request carries
+ * no `x-session-id`, so every owned row would read as someone else's.
+ */
+async function refuseIfResponseSealed(
+  ctx: UploadContext,
+  responseId: string | undefined,
+  distributionId: string | undefined,
+): Promise<UploadResult> {
+  if (!responseId || !distributionId) {
+    return { ok: true };
+  }
+  // `runUpload` refused a non-GUID `responseId` before this point, and `distributionId` is the
+  // resolved row's own key, so both are safe in the filter.
+  const read = await ctx.runViewProvider.RunView<{ ID: string; Status: FormResponseStatus }>(
+    {
+      EntityName: FORMS_ENTITY.FormResponse,
+      ExtraFilter: `ID='${responseId}' AND FormDistributionID='${distributionId}'`,
+      Fields: ['ID', 'Status'],
+      ResultType: 'simple',
+      MaxRows: 1,
+    },
+    ctx.elevatedUser,
+  );
+  if (!read.Success) {
+    LogError(`[Forms] upload refused for response ${responseId}: its status could not be read: ${read.ErrorMessage}`);
+    return fail(503, UPLOAD_FAILED_MESSAGE);
+  }
+  const status = read.Results[0]?.Status;
+  if (status && isTerminalResponseStatus(status)) {
+    LogStatus(`[Forms] upload refused for response ${responseId}: it is already ${status}.`);
+    return fail(409, RESPONSE_ALREADY_SUBMITTED_MESSAGE);
+  }
+  return { ok: true };
 }
 
 /** Enforce presence, size cap, and content-type allowlist. */
@@ -293,7 +382,7 @@ function validateFile(file: ParsedFile | undefined): UploadResult {
 export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<boolean> {
   try {
     const row = await new Metadata().GetEntityObject<mjBizAppsFormsFormUploadEntity>(
-      FORM_UPLOAD_ENTITY,
+      FORMS_ENTITY.FormUpload,
       input.writer,
     );
     if (!row) {
@@ -356,9 +445,24 @@ async function resolveOpenDistribution(
   if (!slug) {
     return fail(400, 'Missing required field "distributionSlug" (or "distributionId").');
   }
-  const loaded = await resolvePublishedDefinition(ctx.runViewProvider, slug, ctx.contextUser);
+  // The same link resolution `Forms.SaveResponse` runs (FormSubmissionEngine): an upload is refused
+  // for exactly the links a save would be, archived forms included. The form's own `Status` is read
+  // as the elevated principal — the respondent role has no grant on `Forms`, so without one every
+  // upload would read as "form not published". That is a host configuration error, said as one.
+  if (!ctx.elevatedUser) {
+    LogError(
+      `[Forms] upload refused for ${slug}: MJ has no system user on this host, so the form's status cannot be read ` +
+        'and the upload cannot be recorded. Check the host user configuration (UserCache.GetSystemUser).',
+    );
+    return fail(500, UPLOAD_FAILED_MESSAGE);
+  }
+  const loaded = await resolvePublishedDefinition(ctx.runViewProvider, slug, ctx.contextUser, ctx.elevatedUser);
   if (!loaded.ok || !loaded.value) {
-    return fail(404, `Form unavailable (${loaded.failure ?? 'not-found'}).`);
+    // The reason is for the operator; the respondent gets one fixed sentence for every reason, as
+    // `Forms.SaveResponse` answers (re-review N2). A status that could not be READ is the database's
+    // failure, not a missing form: a 503 with the generic upload failure, never a 404.
+    LogStatus(`[Forms] upload refused for ${slug}: ${loaded.failure ?? 'not-found'}.`);
+    return loaded.failure === 'form-unreadable' ? fail(503, UPLOAD_FAILED_MESSAGE) : fail(404, FORM_UNAVAILABLE_MESSAGE);
   }
   return {
     ok: true,
@@ -423,19 +527,26 @@ async function storeFile(
   // (F-SEC-2); and a provenance row the caller could write would prove nothing, since every
   // IncludeInAPI entity has a generated CreateRecord mutation gated on the caller's own roles.
   // Eligibility was already checked against the caller above — only the WORK runs elevated.
-  const writer = ctx.elevatedUser ?? ctx.contextUser;
+  const writer = ctx.elevatedUser;
+  if (!writer) {
+    // Deliberately restated: `resolveOpenDistribution` has already refused (and logged) a host with
+    // no system user, but this function WRITES, and must never fall back to writing as the caller.
+    return fail(500, UPLOAD_FAILED_MESSAGE);
+  }
   const fileName = safeFileName(file.filename);
   const pathPrefix = uploadPathPrefix(cfg.pathPrefix);
   let stored: Awaited<ReturnType<UploadStorageEngine['UploadFile']>>;
   try {
-    await ctx.storage.Config(false, writer);
-    stored = await ctx.storage.UploadFile({
-      content: file.data,
-      fileName,
-      mimeType: bareContentType(file.contentType),
-      contextUser: writer,
-      storageAccountId: cfg.storageAccountId,
-      pathPrefix,
+    stored = await stage(ctx, 'store', async () => {
+      await ctx.storage.Config(false, writer);
+      return ctx.storage.UploadFile({
+        content: file.data,
+        fileName,
+        mimeType: bareContentType(file.contentType),
+        contextUser: writer,
+        storageAccountId: cfg.storageAccountId,
+        pathPrefix,
+      });
     });
   } catch (error) {
     // No storage account configured / provider misconfigured / upload failed: a 5xx, never a crash.
@@ -451,7 +562,7 @@ async function storeFile(
 
   if (resolved) {
     const record = ctx.recordProvenance ?? writeProvenanceRow;
-    const recorded = await record({
+    const recorded = await stage(ctx, 'record', () => record({
       writer,
       fileId: stored.FileID,
       providerKey: stored.StoragePath,
@@ -464,7 +575,7 @@ async function storeFile(
       fileName,
       contentType: bareContentType(file.contentType),
       sizeBytes: file.data.length,
-    });
+    }));
     if (!recorded) {
       // Fail closed. A file with no provenance row is unusable downstream — submit will reject
       // it — so returning its id would hand the respondent something that looks like a

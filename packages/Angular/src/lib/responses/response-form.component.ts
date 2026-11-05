@@ -1,14 +1,11 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { CompositeKey, LogError } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
-import type {
-  mjBizAppsFormsFormResponseEntity,
-  PublishedFormQuestion,
-} from '@mj-biz-apps/forms-entities';
+import type { mjBizAppsFormsFormResponseEntity } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
-import { FORMS_UI_CSS } from '../shared';
-import { ResponsesDataService } from './responses-data.service';
+import { FORMS_UI_CSS, failureMessage } from '../shared';
+import { readResponseDetail } from './response-reads';
 import type { ResponseDetail, ResponseRecordLink } from './response-models';
 import { FormsResponseDetailComponent } from './response-detail.component';
 
@@ -26,16 +23,16 @@ import { FormsResponseDetailComponent } from './response-detail.component';
  * Note for reviewers: the generated `mjBizAppsFormsFormResponseFormComponent` stays
  * declared in `generated-forms.module.ts`. It is not deleted, it is outranked.
  *
- * Answers are labelled from the version THIS RESPONSE pinned (`record.FormVersionID`), not
- * the form's latest published one: the response was given against that definition, and
- * relabelling it with a later version's prompts would misreport what the person was asked.
+ * Answers are labelled from the version THIS RESPONSE pinned (`Forms.GetResponseDetail` with no
+ * label version), not the form's latest published one: the response was given against that
+ * definition, and relabelling it with a later version's prompts would misreport what the person
+ * was asked. A pinned version with no readable definition is said so by the detail view itself.
  */
 @RegisterClass(BaseFormComponent, FORMS_ENTITY.FormResponse, 10)
 @Component({
   selector: 'mjf-response-form',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [ResponsesDataService],
   imports: [FormsResponseDetailComponent],
   template: `
     <div class="mjf-page rf">
@@ -51,11 +48,6 @@ import { FormsResponseDetailComponent } from './response-detail.component';
           <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span>{{ e }}</span>
         </p>
       }
-      @if (labelWarning; as w) {
-        <p class="rf-warn" role="status">
-          <i class="fa-solid fa-circle-info" aria-hidden="true"></i> <span>{{ w }}</span>
-        </p>
-      }
 
       @if (busy) {
         <p class="mjf-state"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading…</p>
@@ -63,6 +55,7 @@ import { FormsResponseDetailComponent } from './response-detail.component';
         <mj-forms-response-detail
           [Detail]="d"
           [ShowBack]="false"
+          (Reload)="reloadDetail()"
           (OpenRecord)="openLinkedRecord($event)"></mj-forms-response-detail>
       }
 
@@ -103,21 +96,7 @@ import { FormsResponseDetailComponent } from './response-detail.component';
 
       /* Opened as an entity record rather than as a page of its own, so the form's name
          is a heading, not the app title. */
-      .rf-title { font-size: 1.5rem; }
-
-      .rf-warn {
-        display: flex;
-        align-items: flex-start;
-        gap: var(--mjf-gap-sm);
-        margin: 0;
-        padding: 12px 16px;
-        font-size: var(--mjf-meta);
-        line-height: 1.5;
-        border: 1px solid var(--mj-status-warning-border);
-        border-radius: var(--mjf-radius-sm);
-        background: var(--mj-status-warning-bg);
-        color: var(--mj-status-warning-text);
-      }
+      .rf-title { font-size: var(--mjf-heading); }
 
       /* Collapsed by default: the audit fields matter to whoever is debugging a dedupe
          or a session, and to nobody else reading the response. */
@@ -139,7 +118,7 @@ import { FormsResponseDetailComponent } from './response-detail.component';
       .rf-raw-grid {
         display: grid;
         grid-template-columns: minmax(150px, max-content) 1fr;
-        gap: 6px var(--mjf-stack);
+        gap: 4px var(--mjf-stack);
         margin: var(--mjf-gap-sm) 0 0;
       }
       .rf-raw-grid dt { font-weight: 600; color: var(--mj-text-muted); }
@@ -156,68 +135,52 @@ import { FormsResponseDetailComponent } from './response-detail.component';
 export class ResponseFormComponent extends BaseFormComponent {
   declare public record: mjBizAppsFormsFormResponseEntity;
 
-  private readonly data = inject(ResponsesDataService);
-
   protected busy = true;
   protected detail: ResponseDetail | null = null;
   protected error: string | null = null;
-
-  /** Set when answers could not be labelled, so a bare answer list is not read as complete. */
-  protected labelWarning: string | null = null;
 
   protected get respondent(): string {
     return this.record.RespondentPerson || 'an anonymous respondent';
   }
 
+  /** Bumped by every read, so only the latest one lands when two overlap. */
+  private readGeneration = 0;
+
   override async ngOnInit(): Promise<void> {
     await super.ngOnInit();
-    await this.loadDetail();
-  }
-
-  private async loadDetail(): Promise<void> {
-    this.busy = true;
-    this.error = null;
-    try {
-      this.detail = await this.data.loadResponseDetail(
-        this.record.ID,
-        await this.loadQuestions(),
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load this response.';
-      this.error = message;
-      LogError(`ResponseFormComponent: loading response ${this.record.ID} failed — ${message}`);
-    } finally {
-      this.busy = false;
-      this.cdr.markForCheck();
-    }
+    // `busy` starts true, so the first open shows "Loading…" until this lands.
+    await this.readDetail('load');
   }
 
   /**
-   * The pinned version's questions.
-   *
-   * A version with no `DefinitionSnapshot` is a real (if rare) state — a response written
-   * against a version whose snapshot was never populated. Rather than failing the whole
-   * page, we continue with no labels and SAY SO: unlabelled answers are dropped by the
-   * builder, and an answer list silently shortened to nothing is worse than an explained
-   * one. The underlying error is logged, not swallowed.
+   * The re-read the detail asks for after a replay changed the response. `busy` is left alone: the
+   * template draws "Loading…" instead of the detail while it is set, which would destroy the open
+   * detail (its inline state, its scroll). The old detail stays until the new one lands, and stays
+   * under the error banner if the read fails — as the Responses tab's `ReloadDetail` does.
    */
-  private async loadQuestions(): Promise<PublishedFormQuestion[]> {
+  protected async reloadDetail(): Promise<void> {
+    await this.readDetail('reload');
+  }
+
+  private async readDetail(verb: 'load' | 'reload'): Promise<void> {
+    const generation = ++this.readGeneration;
+    this.error = null;
     try {
-      return await this.data.loadQuestionsForVersion(this.record.FormVersionID);
+      const detail = await readResponseDetail(this.record.ID);
+      if (generation === this.readGeneration) {
+        this.detail = detail;
+      }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'unknown error';
-      // Says only what is true. The raw section below carries audit fields — ids,
-      // timestamps, SourceMetadata — and NOT the answers, so promising otherwise sent
-      // people looking for data that was never there.
-      this.labelWarning =
-        'This response’s form version has no published definition, so its answers cannot be ' +
-        'labelled and are not shown. The answers are still stored; re-publishing a version ' +
-        'of this form restores the labels.';
-      LogError(
-        `ResponseFormComponent: no published definition for version ` +
-          `${this.record.FormVersionID} of response ${this.record.ID} — ${message}`,
-      );
-      return [];
+      const message = failureMessage(err, `Failed to ${verb} this response.`);
+      LogError(`ResponseFormComponent: ${verb === 'load' ? 'loading' : 'reloading'} response ${this.record.ID} failed — ${message}`);
+      if (generation === this.readGeneration) {
+        this.error = message;
+      }
+    } finally {
+      if (generation === this.readGeneration) {
+        this.busy = false;
+        this.cdr.markForCheck();
+      }
     }
   }
 

@@ -16,7 +16,7 @@ import { MjFormComponent } from '../widget/mj-form.component';
 import { normalizeApiConfig } from '../widget/api/forms-api.config';
 import { formsWidgetProviders } from '../widget/widget-providers';
 import { sameScreen, type ShownScreen } from '../widget/core/shown-screen';
-import { mapDefinitionAssets, mapStyleTokenAssets, resolveAssetUrl } from '../widget/core/asset-ref';
+import { mapDefinitionAssets, mapStyleTokenAssets, resolveAssetUrl } from '@mj-biz-apps/forms-entities/contracts';
 import { resolveApiBase } from '../shared/mj-api-origin';
 import { PREVIEW_DEVICES, stageHeight, stageWidth, type PreviewDevice } from './preview-devices';
 import { PREVIEW_STAGE_STYLES } from './form-preview-stage.styles';

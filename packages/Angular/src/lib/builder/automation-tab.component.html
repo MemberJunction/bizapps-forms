@@ -394,10 +394,10 @@
             <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
             <span>
               {{ summary() }}
-              <!-- True whether or not the deployment runs hooks blocking: persistence happens
-                   before dispatch either way, so the guarantee below holds in both modes. A note
-                   promising "the respondent never waits" would not — that one is a default an
-                   operator can flip with FORMS_HOOKS_BLOCKING. -->
+              <!-- True by construction: the answers commit in the same transaction as the outbox
+                   event that schedules these steps, and the automation drain runs them afterwards
+                   (#303). A step that fails or takes its time never touches the
+                   stored response. -->
               <span class="at-summary-note">
                 Their answers are saved before any of this runs, so a step that fails or takes its
                 time never costs someone their submission.
@@ -410,6 +410,10 @@
               <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
               <span>{{ actionError() }}</span>
             </div>
+          }
+
+          @if (seededNote()) {
+            <p class="at-summary-note" role="status">{{ seededNote() }}</p>
           }
 
           @if (selected(); as step) {

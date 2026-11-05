@@ -1,0 +1,19 @@
+[
+  {
+    "_comments": [
+      "One category for the whole Forms API surface. Eighteen operations is a catalog a person or an",
+      "agent can scan in one list; splitting it would only add a click.",
+      "",
+      "A fixed UUID rather than a lookup target: every operation row @lookups this category by name,",
+      "and a stable id means a re-push against a rebuilt database resolves to the same row."
+    ],
+    "fields": {
+      "Name": "Forms",
+      "Description": "MJ Forms: publish, clone, template, archive and restore forms; issue and manage share links; configure on-submit automations; report on responses; and the respondent read and save path.",
+      "ParentID": null
+    },
+    "primaryKey": {
+      "ID": "180A2931-7AAE-4545-9F2C-FD933176DC3D"
+    }
+  }
+]

@@ -30,8 +30,12 @@ import { RegisterClass } from '@memberjunction/global';
 import type { UserInfo } from '@memberjunction/core';
 import { mjBizAppsFormsFormResponseAnswerEntity, type FormQuestionType } from '@mj-biz-apps/forms-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
-import { loadFormResponseContext, type AnswerWithType } from '../shared/form-response-context';
-import { resolveActionProvider, type ActionDataProvider } from '../shared/action-provider';
+import {
+  type ActionDataProvider,
+  type AnswerWithType,
+  loadFormResponseContext,
+  resolveActionProvider,
+} from '@mj-biz-apps/forms-core-entities-server';
 import {
   AIPromptResponseAnalyzerModel,
   type ResponseAnalyzerModel,

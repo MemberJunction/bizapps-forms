@@ -28,9 +28,14 @@ const { mintSpy, revokeSpy, inviteForSpy, revokeInviteSpy, recordedProviders, sc
 
 vi.mock('../../magic-link/resume-invites.service', () => ({
   mintResponseInvite: mintSpy,
-  revokeResponseInvites: revokeSpy,
   findInviteByRawToken: inviteForSpy,
   revokeInviteById: revokeInviteSpy,
+}));
+// `revokeResponseInvites` moved to forms-core-entities-server with #303 Task 8 (the submit engine
+// revokes a sealed response's links too); the rest of that package is the real thing.
+vi.mock('@mj-biz-apps/forms-core-entities-server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mj-biz-apps/forms-core-entities-server')>()),
+  revokeResponseInvites: revokeSpy,
 }));
 
 vi.mock('@memberjunction/core', async (importOriginal) => {

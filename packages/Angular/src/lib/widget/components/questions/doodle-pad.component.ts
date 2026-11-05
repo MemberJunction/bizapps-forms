@@ -46,6 +46,7 @@ import {
 
 import { PadCaptures, type CaptureClaim } from './pad-captures';
 import { addStroke, drawStroke, type DoodlePoint, type DoodleStroke } from './doodle-strokes';
+import { canUndoPad, clearPad, undoPad, type ClearedDrawing, type PadHistory } from './doodle-history';
 import { IconComponent } from '../icon.component';
 
 /**
@@ -106,7 +107,7 @@ const DOODLE_PAD_CSS = /* css */ `
   background: var(--mjf-doodle-paper);
   color: var(--mjf-doodle-ink);
 }
-.mjf-doodle__pad:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+.mjf-doodle__pad:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-shadow); }
 
 /* THE PEN PALETTE, and why every hue is mixed toward the page ink.
 
@@ -177,12 +178,12 @@ const DOODLE_PAD_CSS = /* css */ `
    two (WCAG 1.4.1). The width buttons get the same treatment for consistency. */
 .mjf-doodle__pen[aria-pressed='true'], .mjf-doodle__width[aria-pressed='true'] {
   border-color: var(--mjf-accent);
-  box-shadow: var(--mjf-focus-ring);
+  box-shadow: var(--mjf-focus-shadow);
 }
 .mjf-doodle__pen:focus-visible, .mjf-doodle__width:focus-visible {
   outline: none;
   border-color: var(--mjf-accent);
-  box-shadow: var(--mjf-focus-ring);
+  box-shadow: var(--mjf-focus-shadow);
 }
 /* The swatch itself — a dot of the pen's own colour, ringed so a pen that nearly matches the
    button background still has an edge. */
@@ -213,7 +214,7 @@ const DOODLE_PAD_CSS = /* css */ `
   color: var(--mjf-page-ink-soft);
 }
 .mjf-doodle__action:hover:not(:disabled) { background: var(--mjf-page-sunken); }
-.mjf-doodle__action:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+.mjf-doodle__action:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-shadow); }
 .mjf-doodle__action:disabled, .mjf-doodle__pen:disabled, .mjf-doodle__width:disabled { opacity: 0.5; cursor: default; }
 `;
 
@@ -316,15 +317,22 @@ export class DoodlePadComponent {
    */
   public readonly recorded = input<boolean>(false);
   /**
-   * Emitted once a stroke settles, carrying the drawing AND the subject it was drawn on.
+   * Where each export reports its life: when it starts, and how it ends.
    *
-   * The subject travels with the file because the export finishes later than the gesture that
-   * started it, and an `output()` is routed by whatever the view is bound to when it fires. In
-   * OneQuestion mode one pad instance serves consecutive Doodle questions, so a respondent
-   * who advances while `toBlob` is still encoding had the first question's drawing stored as the
-   * SECOND question's answer. Naming the subject here is what makes that impossible to express.
+   * Functions the parent hands in rather than an `output()`, because the export outlives the
+   * gesture and often the component. Next and Submit destroy the section while `toBlob` is still
+   * encoding; an `output()` emit after destruction is dropped with NG0953, and the drawing with
+   * it, under a pad that said "Drawn.". A function the parent passed in is still callable then.
+   * And `started` is how Next learns there is anything to wait for at all: it is called before
+   * the export's first await, so from the moment the pen lifts the store holds a record for it.
+   *
+   * The subject travels with the capture because the export finishes later than the gesture
+   * that started it, and the parent's view is routed by whatever it is bound to when the export
+   * ends. In OneQuestion mode one pad instance serves consecutive Doodle questions, so a
+   * respondent who advances mid-encode had the first question's drawing stored as the SECOND
+   * question's answer. Naming the subject here is what makes that impossible to express.
    */
-  public readonly drawn = output<DoodleCapture>();
+  public readonly exportSink = input.required<DoodleExportSink<unknown>>();
   /** Emitted when the respondent clears the pad, or undoes back to an empty one. */
   public readonly cleared = output<void>();
   /**
@@ -365,8 +373,21 @@ export class DoodlePadComponent {
    */
   protected readonly hasInk = computed(() => this.base() !== null || this.strokes().length > 0);
 
-  /** Whether undo has anything left to take back — this session's strokes, and nothing else. */
-  protected readonly canUndo = computed(() => this.strokes().length > 0);
+  /** What the last Clear wiped, while one Undo can still put it back (see `doodle-history.ts`). */
+  private readonly clearedDrawing = signal<ClearedDrawing<HTMLCanvasElement, DoodleStroke> | null>(null);
+
+  /** Whether undo has anything left to take back: this session's strokes, or a Clear. */
+  protected readonly canUndo = computed(() => canUndoPad(this.history()));
+
+  private history(): PadHistory<HTMLCanvasElement, DoodleStroke> {
+    return { base: this.base(), strokes: this.strokes(), cleared: this.clearedDrawing() };
+  }
+
+  private applyHistory(pad: PadHistory<HTMLCanvasElement, DoodleStroke>): void {
+    this.base.set(pad.base);
+    this.strokes.set(pad.strokes);
+    this.clearedDrawing.set(pad.cleared);
+  }
 
   /**
    * The pen in the respondent's hand: their pick, or the author's default until they pick.
@@ -489,12 +510,11 @@ export class DoodlePadComponent {
     // A settle timer looks like the obvious improvement here — a drawing is many strokes and
     // each one starts its own upload — and it was tried. It cannot be made safe. The
     // window it opens is real time in which the pad already reads "Drawn." and the respondent
-    // can tap Next or Submit, which destroys this component with the export still pending; and it
-    // cannot be flushed on the way out, because `output()` registers its OWN destroy hook in a
-    // field initializer that runs BEFORE any hook a constructor adds, so by then `emit()` only
-    // logs "Unexpected emit for destroyed OutputRef" and returns. `emitPng` is async besides, so
-    // the emit lands after destruction regardless. The respondent would be left with a null answer
-    // under a pad that says "Drawn." — a worse bug than the one being optimised away.
+    // can tap Next or Submit, which destroys this component with no export yet started — so
+    // nothing has reserved the question in the upload store, Next does not wait, and nothing is
+    // left to flush on the way out. The respondent would be left with a null answer under a pad
+    // that says "Drawn." — a worse bug than the one being optimised away. Exporting at once is
+    // what lets `emitPng` report `started` in this very turn, before Next can be tapped.
     //
     // Correctness does not depend on coalescing anyway: every upload carries a generation stamp
     // (see FormQuestionComponent.uploadFile), so the LAST one started wins no matter which
@@ -520,16 +540,21 @@ export class DoodlePadComponent {
    * showing the stroke just removed would put the artifact and the screen quietly out of step —
    * and the respondent would have no way to tell. Undoing back to a genuinely empty pad drops the
    * answer instead, exactly as Clear does, so no orphan file is left behind.
+   *
+   * UNDO AFTER CLEAR puts the whole drawing back — base image included — and re-exports it, so the
+   * answer Clear withdrew is stored again. Clear was otherwise the one control on the form that
+   * destroyed work with no way back (UI audit F07).
    */
   public undo(): void {
-    if (this.strokes().length === 0) {
+    const next = undoPad(this.history());
+    if (!next) {
       return;
     }
     // An undo changes what the pad MEANS, so it retires the in-flight work for the same reasons a
     // new stroke and Clear do: a repaint would bury the result under the stored image, and the
     // previous stroke's export describes a drawing that no longer exists.
     this.captures.supersede();
-    this.strokes.update((strokes) => strokes.slice(0, -1));
+    this.applyHistory(next);
     this.paint();
     if (this.hasInk()) {
       void this.emitPng();
@@ -582,6 +607,8 @@ export class DoodlePadComponent {
       }
     }
     this.strokes.set(unbaked.length > 0 ? [...unbaked, ...strokes] : strokes);
+    // A new stroke starts a new history: Undo must not bring back a drawing Clear wiped before it.
+    this.clearedDrawing.set(null);
   }
 
   /**
@@ -686,14 +713,18 @@ export class DoodlePadComponent {
   /**
    * Wipe the pad and tell the parent the answer is gone.
    *
-   * Superseding is half the work. The parent retires the running UPLOAD, which is not the same
-   * thing: an export still encoding has not started its upload yet, so there is nothing there to
-   * retire — it would begin a fresh one afterwards and commit the drawing the respondent has
-   * just withdrawn, leaving a stored drawing under an empty pad.
+   * Two things stop an export still encoding from storing the drawing the respondent has just
+   * withdrawn. Superseding here stops it first: the export finds its claim stale and releases
+   * instead of delivering. The parent's `clear` retires what the store holds — the running upload,
+   * or that export's reservation — so a delivery that got past the claim would still be dropped by
+   * the export sink, which uploads only while its reservation is current. Superseding also stops a
+   * repaint still decoding from painting the stored image back over the empty pad.
    */
   public clear(): void {
     this.captures.supersede();
-    this.resetDrawing();
+    // Keeps what it wiped, so the next Undo can restore it — see `doodle-history.ts`.
+    this.applyHistory(clearPad(this.history()));
+    this.current = null;
     const canvas = this.pad()?.nativeElement;
     const ctx = canvas?.getContext('2d');
     if (canvas && ctx) {
@@ -713,6 +744,7 @@ export class DoodlePadComponent {
   private resetDrawing(): void {
     this.base.set(null);
     this.strokes.set([]);
+    this.clearedDrawing.set(null);
     this.current = null;
   }
 
@@ -799,40 +831,79 @@ export class DoodlePadComponent {
    * `toBlob` on the live canvas would export the strokes over transparency, and a dark-ink
    * drawing on a transparent background disappears entirely against a dark viewer. Compositing
    * onto the paper colour first makes the artifact self-contained.
+   *
+   * EVERY EXPORT IS RESERVED, AND EVERY RESERVATION ENDS. `started` runs before the first await,
+   * so the question is `uploading` in the store in the same turn as the pointer-up (or undo) that
+   * called this. Every path out then ends in exactly one of `delivered` or `released`: the
+   * `finally` releases unless the hand-over returned, which covers the no-canvas exits, a failed
+   * encode, a superseded export and any throw. An orphaned reservation would hold Next for ever.
+   *
+   * `released` gets back the reservation `started` returned, not the subject. Two quick strokes
+   * mean export 1 can end (superseded) after export 2 has reserved the same question; releasing
+   * by subject would free export 2's reservation and let Next through mid-encode. Handing back
+   * export 1's own, now stale, reservation lets the store recognise it and ignore it.
    */
   private async emitPng(): Promise<void> {
     const claim = this.captures.claim(this.subject());
-    const canvas = this.pad()?.nativeElement;
-    if (!canvas) {
-      return;
-    }
-    const flat = document.createElement('canvas');
-    flat.width = canvas.width;
-    flat.height = canvas.height;
-    const ctx = flat.getContext('2d');
-    if (!ctx) {
-      return;
-    }
-    ctx.fillStyle = getComputedStyle(canvas).backgroundColor;
-    ctx.fillRect(0, 0, flat.width, flat.height);
-    ctx.drawImage(canvas, 0, 0);
+    const sink = this.exportSink();
+    const reservation = sink.started(claim.subject);
+    let delivered = false;
+    try {
+      const canvas = this.pad()?.nativeElement;
+      if (!canvas) {
+        return;
+      }
+      const flat = document.createElement('canvas');
+      flat.width = canvas.width;
+      flat.height = canvas.height;
+      const ctx = flat.getContext('2d');
+      if (!ctx) {
+        return;
+      }
+      ctx.fillStyle = getComputedStyle(canvas).backgroundColor;
+      ctx.fillRect(0, 0, flat.width, flat.height);
+      ctx.drawImage(canvas, 0, 0);
 
-    const blob = await new Promise<Blob | null>((resolve) => flat.toBlob(resolve, 'image/png'));
-    if (!blob) {
-      console.warn(
-        `[mj-form] the browser could not encode the drawing made for "${claim.subject}", so ` +
-          'this stroke was not stored. The respondent can draw again.',
-      );
-      return;
+      const blob = await new Promise<Blob | null>((resolve) => flat.toBlob(resolve, 'image/png'));
+      if (!blob) {
+        console.warn(
+          `[mj-form] the browser could not encode the drawing made for "${claim.subject}", so ` +
+            'this stroke was not stored. The respondent can draw again.',
+        );
+        return;
+      }
+      if (!this.captures.mayEmit(claim)) {
+        return;
+      }
+      const file = new File([blob], 'doodle.png', { type: 'image/png' });
+      sink.delivered({ subject: claim.subject, file }, reservation);
+      delivered = true;
+    } finally {
+      if (!delivered) {
+        sink.released(reservation);
+      }
     }
-    if (!this.captures.mayEmit(claim)) {
-      return;
-    }
-    this.drawn.emit({
-      subject: claim.subject,
-      file: new File([blob], 'doodle.png', { type: 'image/png' }),
-    });
   }
+}
+
+/**
+ * The parent's side of an export: told when one starts, and how it ends.
+ *
+ * Generic over the reservation so the pad never learns what the store's token is; it only hands
+ * back what `started` gave it. Method syntax on purpose: method parameters are checked
+ * bivariantly, so a `DoodleExportSink<UploadToken>` binds to the pad's `DoodleExportSink<unknown>`.
+ */
+export interface DoodleExportSink<R> {
+  /** An export began for `subject`. Called synchronously, before the export awaits anything. */
+  started(subject: string): R;
+  /**
+   * The export produced a file. Ends the export; `released` will not follow. Gets back the
+   * reservation `started` returned, so the parent can drop a file whose reservation was retired
+   * (the widget torn down or reloaded) while it encoded.
+   */
+  delivered(capture: DoodleCapture, reservation: R): void;
+  /** The export ended without a file (failed, superseded, or no canvas). Ends the export. */
+  released(reservation: R): void;
 }
 
 /** One finished capture: the drawing, and the subject it was made for. */

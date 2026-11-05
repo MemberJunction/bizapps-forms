@@ -8,7 +8,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
  * read a prior outcome and never wrote one, which under an `AlwaysCreate` rule meant a second
  * invocation silently created a second business record, with nothing in the ledger to show either
  * had run. These tests pin the ledger participation rather than the executor's own logic, which is
- * covered in binding-executor.spec.ts.
+ * covered in forms-core-entities-server's binding-executor.spec.ts.
  */
 
 /** Ledger rows keyed by the filter the reader builds; empty means "never run". */
@@ -73,7 +73,8 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   return { ...actual, Metadata, RunView, LogError: () => {} };
 });
 
-vi.mock('../../shared/form-response-context', () => ({
+vi.mock('@mj-biz-apps/forms-core-entities-server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mj-biz-apps/forms-core-entities-server')>()),
   loadFormResponseContext: async () => ({
     status: 'loaded',
     context: {

@@ -59,7 +59,8 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
  * REAL implementations, which ask the real `Metadata.Provider` (unset in a unit test) for an
  * independent instance and reject every request with a 500.
  */
-vi.mock('../../automation/isolated-provider', () => ({
+vi.mock('@mj-biz-apps/forms-core-entities-server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mj-biz-apps/forms-core-entities-server')>()),
   withLazyIsolatedProvider: async <T>(
     _purpose: string,
     work: (acquire: () => Promise<Record<string, never>>) => Promise<T>,

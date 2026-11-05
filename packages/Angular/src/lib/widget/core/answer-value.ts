@@ -14,6 +14,8 @@
  */
 import {
   answerColumnFor,
+  answerValueOf,
+  coerceAnswerToNumber,
   isAnswerableQuestionType,
   type AnswerValue,
   type FormAnswerInput,
@@ -49,6 +51,17 @@ export function toAnswerInputs(
 }
 
 /**
+ * The value the server will judge for this question — what {@link toAnswerInputs} would send,
+ * read back the way the server reads it (`answerValueOf`), or `undefined` when nothing is sent.
+ *
+ * The widget's per-field verdict judges THIS, not the held value, so the message under a field and
+ * the whole-form verdict (`validateAnswers` over the payload) cannot disagree about one answer.
+ */
+export function transmittedValue(question: PublishedFormQuestion, value: AnswerValue): AnswerValue {
+  return isSubmittable(value) ? answerValueOf(toAnswerInput(question, value)) : undefined;
+}
+
+/**
  * Whether a held value is worth sending at all.
  *
  * Deliberately NOT {@link isAnswerSupplied} from the contract, which is the "does this count as
@@ -76,8 +89,14 @@ function toAnswerInput(question: PublishedFormQuestion, value: AnswerValue): For
   const base: FormAnswerInput = { questionId: question.id };
   const column: QuestionAnswerColumn = answerColumnFor(question.type);
   switch (column) {
-    case 'numeric':
-      return { ...base, numericValue: typeof value === 'number' ? value : Number(value) };
+    case 'numeric': {
+      // A held value that is not a decimal number goes as the text it is, never through
+      // `Number()`: `Number(' ')` is 0, which turned a blank answer into a stored zero the
+      // respondent never gave. The server reads `textValue` as a numeric spelling too, so a blank
+      // reads as unanswered and anything else as "Enter a number." — on both sides.
+      const numeric = coerceAnswerToNumber(value);
+      return numeric !== undefined ? { ...base, numericValue: numeric } : { ...base, textValue: String(value) };
+    }
     case 'boolean':
       return { ...base, booleanValue: Boolean(value) };
     case 'date':

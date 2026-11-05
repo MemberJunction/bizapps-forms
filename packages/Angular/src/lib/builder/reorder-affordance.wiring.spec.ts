@@ -51,11 +51,16 @@ const builderHtml = (): string => stripped('form-builder.component.html');
  * off a neighbouring button — the Delete button sits in the same `<div>` and carries a
  * `[disabled]` of its own.
  */
+/**
+ * The move button for `label` ('Move up' / 'Move down'). Since UI audit F05 its accessible name
+ * carries the question ("Move Email up"), so it is found by the bound label's direction word.
+ */
 function disabledExpression(label: string): string {
+  const direction = label.endsWith('up') ? 'up' : 'down';
   const chunk = builderHtml()
     .split('<button')
-    .find((part) => part.includes(`aria-label="${label}"`));
-  expect(chunk, `no <button aria-label="${label}"> in the builder template`).toBeDefined();
+    .find((part) => part.includes(`[attr.aria-label]="'Move ' + node.entity.Prompt + ' ${direction}'"`));
+  expect(chunk, `no "${label}" <button> in the builder template`).toBeDefined();
   const match = /\[disabled\]="([^"]*)"/.exec(chunk ?? '');
   expect(match, `the "${label}" button has no [disabled] binding`).not.toBeNull();
   return match![1];

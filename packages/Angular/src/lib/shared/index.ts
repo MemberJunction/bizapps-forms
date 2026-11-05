@@ -1,16 +1,9 @@
 /**
  * Cross-area primitives — used by the builder, the reporting dashboard, Forms home and the
- * responses surface alike. Nothing Angular, nothing that does I/O.
+ * responses surface alike. Nothing Angular, nothing that does I/O. How a stored answer reads
+ * (`renderAnswer` and friends) is a contract: import it from `@mj-biz-apps/forms-entities`.
  */
 export { FORMS_ENTITY, MJ_CORE_ENTITY } from './entity-names';
-export {
-  CHOICE_TYPES,
-  NUMERIC_TYPES,
-  TEXT_TYPES,
-  extractChoiceValues,
-  renderAnswer,
-  respondentLabel,
-} from './answer-values';
 export { toDate } from './runview-dates';
 export { failureMessage } from './failure-message';
 export { flattenQuestions } from './published-questions';

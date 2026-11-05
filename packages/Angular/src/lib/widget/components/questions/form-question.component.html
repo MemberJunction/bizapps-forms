@@ -9,14 +9,19 @@
       }
     </div>
   } @else {
-    <label class="mjf-question__label" [id]="labelId()" [attr.for]="inputId()">
-      <span class="mjf-question__prompt">{{ q.prompt }}</span>
-      @if (q.isRequired) {
-        <span class="mjf-question__required" aria-hidden="true">*</span>
-        <span class="mjf-visually-hidden">(required)</span>
-      }
-    </label>
-    @if (q.helpText) {
+    <!-- The header follows the question's shape (UI audit F11). A <label for> only names a single
+         labelable control; a group or a matrix is named by this element's id through
+         aria-labelledby; an address's header is its fieldset's <legend>, in that template. -->
+    @if (shape() === 'control') {
+      <label class="mjf-question__label" [id]="labelId()" [attr.for]="inputId()">
+        <ng-container *ngTemplateOutlet="questionHeading" />
+      </label>
+    } @else if (shape() !== 'fieldset') {
+      <span class="mjf-question__label" [id]="labelId()">
+        <ng-container *ngTemplateOutlet="questionHeading" />
+      </span>
+    }
+    @if (q.helpText && shape() !== 'fieldset') {
       <p class="mjf-question__help" [id]="helpId()">{{ q.helpText }}</p>
     }
 
@@ -52,7 +57,7 @@
           />
         }
         @case ('SingleChoice') {
-          <div class="mjf-choices" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-choices" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (opt of q.options; track opt.id) {
               <button
                 type="button"
@@ -103,7 +108,7 @@
           </select>
         }
         @case ('Rating') {
-          <div class="mjf-rating" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-rating" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (star of ratingScale(); track star) {
               <button
                 type="button"
@@ -120,7 +125,7 @@
           </div>
         }
         @case ('NPS') {
-          <div class="mjf-nps" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-nps" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (n of npsScale; track n) {
               <button
                 type="button"
@@ -135,7 +140,7 @@
           </div>
         }
         @case ('YesNo') {
-          <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-yesno" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             <button type="button" role="radio" class="mjf-choice mjf-yesno__btn"
               [class.mjf-choice--selected]="booleanValue() === true"
               [attr.aria-checked]="booleanValue() === true" (click)="onYesNo(true)">Yes</button>
@@ -181,18 +186,21 @@
           </div>
 
           @if (uploadStatus() === 'uploading') {
+            <!-- Two phases: a bar that fills while bytes go up, then an indeterminate one while the
+                 server stores the file. A full bar used to sit there for the whole store, and
+                 "100%" read as done. -->
             <div
               class="mjf-file__progress"
               role="progressbar"
-              aria-label="Uploading file"
-              [attr.aria-valuenow]="uploadPercent()"
-              [attr.aria-valuemin]="uploadPercent() === null ? null : 0"
-              [attr.aria-valuemax]="uploadPercent() === null ? null : 100"
+              [attr.aria-label]="uploadStoring() ? 'Saving file' : 'Uploading file'"
+              [attr.aria-valuenow]="sendingPercent()"
+              [attr.aria-valuemin]="sendingPercent() === null ? null : 0"
+              [attr.aria-valuemax]="sendingPercent() === null ? null : 100"
             >
               <span
                 class="mjf-file__progress-bar"
-                [class.mjf-file__progress-bar--indeterminate]="uploadPercent() === null"
-                [style.width.%]="uploadPercent() ?? 100"
+                [class.mjf-file__progress-bar--indeterminate]="sendingPercent() === null"
+                [style.width.%]="sendingPercent() ?? 100"
               ></span>
             </div>
           }
@@ -202,7 +210,7 @@
               @case ('uploading') {
                 <span>
                   <mjf-icon name="spinner" spin />
-                  Uploading {{ uploadFileName() }}@if (uploadPercent() !== null) { — {{ uploadPercent() }}% }…
+                  {{ uploadingText() }}
                 </span>
               }
               @case ('done') {
@@ -225,18 +233,28 @@
             }
           </p>
 
-          @if (uploadStatus() === 'error') {
-            <p class="mjf-file__error" role="alert">
-              <mjf-icon name="triangle-exclamation" />
-              {{ uploadError() }}
-            </p>
-            <button type="button" class="mjf-file__retry" (click)="retryUpload()">
-              <mjf-icon name="rotate-right" /> Retry upload
-            </button>
-          }
+          <!-- One quiet line for the two failures a respondent must act on; the store has already
+               retried every bad moment it could. Polite, not an alert: nothing here is urgent
+               enough to interrupt. The live region is always rendered and only its content is
+               conditional, because a region inserted together with its text is not reliably
+               announced. -->
+          <p class="mjf-file__failed" [id]="failureId()" aria-live="polite">
+            @if (uploadFailure(); as failure) {
+              {{ failure.message }}
+              @if (failure.kind === 'refused') {
+                <button type="button" class="mjf-file__failed-link" (click)="chooseAgain(fileInput)">
+                  Choose again
+                </button>
+              } @else {
+                <button type="button" class="mjf-file__failed-link" (click)="retryUpload()">
+                  Try again
+                </button>
+              }
+            }
+          </p>
         }
         @case ('PictureChoice') {
-          <div class="mjf-pics" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-pics" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (opt of q.options; track opt.id) {
               <button
                 type="button"
@@ -263,7 +281,7 @@
         }
         @case ('OpinionScale') {
           <div class="mjf-scale">
-            <div class="mjf-scale__row" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+            <div class="mjf-scale__row" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
               @for (point of scalePoints(); track point) {
                 <button
                   type="button"
@@ -294,6 +312,7 @@
             #rankList
             class="mjf-rank"
             cdkDropList
+            [attr.aria-labelledby]="labelId()"
             [attr.aria-describedby]="describedBy()"
             (cdkDropListDropped)="onRankDrop($event.previousIndex, $event.currentIndex)"
           >
@@ -333,7 +352,7 @@
         }
         @case ('Matrix') {
           <div class="mjf-matrix-wrap">
-            <table class="mjf-matrix" [attr.aria-describedby]="describedBy()">
+            <table class="mjf-matrix" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
               <thead>
                 <tr>
                   <td class="mjf-matrix__corner"></td>
@@ -344,19 +363,26 @@
               </thead>
               <tbody>
                 @for (row of matrixRows(); track row.id) {
-                  <tr>
+                  <tr [class.mjf-matrix__row--missing]="matrixMissing().has(row.value)">
                     <th scope="row" class="mjf-matrix__row">{{ row.label }}</th>
                     @for (col of matrixColumns(); track col.id) {
                       <td class="mjf-matrix__cell">
-                        <button
-                          type="button"
-                          role="radio"
-                          class="mjf-matrix__pick"
-                          [class.mjf-matrix__pick--selected]="isMatrixSelected(row.value, col.value)"
-                          [attr.aria-checked]="isMatrixSelected(row.value, col.value)"
-                          [attr.aria-label]="row.label + ': ' + col.label"
-                          (click)="onMatrix(row.value, col.value)"
-                        ><span class="mjf-choice__mark" aria-hidden="true"></span></button>
+                        <!-- Native radios, one name per row: the browser makes each row its own
+                             group ("2 of 4") with arrow keys, which role="radio" buttons in table
+                             cells never were (UI audit F11). The visible mark is unchanged. -->
+                        <label class="mjf-matrix__pick" [class.mjf-matrix__pick--selected]="isMatrixSelected(row.value, col.value)">
+                          <input
+                            type="radio"
+                            class="mjf-matrix__input"
+                            [name]="matrixName(row.value)"
+                            [value]="col.value"
+                            [checked]="isMatrixSelected(row.value, col.value)"
+                            [attr.aria-label]="row.label + ': ' + col.label"
+                            [attr.aria-invalid]="matrixMissing().has(row.value) || null"
+                            (change)="onMatrix(row.value, col.value)"
+                          />
+                          <span class="mjf-choice__mark" aria-hidden="true"></span>
+                        </label>
                       </td>
                     }
                   </tr>
@@ -387,7 +413,7 @@
                 {{ legalTerms() }}
               </div>
             }
-            <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
+            <div class="mjf-yesno" role="radiogroup" [attr.aria-required]="q.isRequired" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
               <button type="button" role="radio" class="mjf-choice mjf-yesno__btn"
                 [class.mjf-choice--selected]="booleanValue() === true"
                 [attr.aria-checked]="booleanValue() === true" (click)="onYesNo(true)">I accept</button>
@@ -409,12 +435,13 @@
                at the next question without destroying it, and both must put the right drawing
                back. See the component for what each binding closes. -->
           <mjf-doodle-pad
+            #pad
             [label]="q.prompt"
             [subject]="q.id"
             [drawing]="localFile()"
             [recorded]="answerRecorded()"
             [pen]="pen()"
-            (drawn)="onDoodleDrawn($event)"
+            [exportSink]="doodleExports"
             (cleared)="onDoodleCleared()"
           />
           @if (uploadStatus() === 'uploading') {
@@ -422,15 +449,22 @@
               <mjf-icon name="spinner" spin /> Saving drawing…
             </p>
           }
-          @if (uploadStatus() === 'error') {
-            <p class="mjf-file__error" role="alert">
-              <mjf-icon name="triangle-exclamation" />
-              {{ uploadError() }}
-            </p>
-            <button type="button" class="mjf-file__retry" (click)="retryUpload()">
-              <mjf-icon name="rotate-right" /> Retry
-            </button>
-          }
+          <!-- The same quiet line as a file question. "Choose again" clears the pad itself, which
+               emits `cleared` and so clears the upload by the one path Clear already takes. -->
+          <p class="mjf-file__failed" [id]="failureId()" aria-live="polite">
+            @if (uploadFailure(); as failure) {
+              {{ failure.message }}
+              @if (failure.kind === 'refused') {
+                <button type="button" class="mjf-file__failed-link" (click)="chooseDrawingAgain(pad)">
+                  Choose again
+                </button>
+              } @else {
+                <button type="button" class="mjf-file__failed-link" (click)="retryUpload()">
+                  Try again
+                </button>
+              }
+            }
+          </p>
         }
         @default {
           <!-- ShortText · Email · Phone · Website · Date · Time -->
@@ -467,6 +501,14 @@
      fall-through, so one template shared by two cases is how the two stay one control. -->
 <ng-template #compositeControl>
   @let cq = question();
+  <!-- The question is the fieldset's legend, so every field is announced inside it (UI audit F11). -->
+  <fieldset class="mjf-composite-set">
+  <legend class="mjf-question__label" [id]="labelId()">
+    <ng-container *ngTemplateOutlet="questionHeading" />
+  </legend>
+  @if (cq.helpText) {
+    <p class="mjf-question__help" [id]="helpId()">{{ cq.helpText }}</p>
+  }
   <div class="mjf-composite">
     @for (field of compositeFields(); track field) {
       @let fieldError = partError(field);
@@ -480,7 +522,7 @@
           [value]="compositePart(field)"
           [attr.aria-required]="cq.isRequired"
           [attr.aria-invalid]="compositeInvalid(field)"
-          [attr.aria-describedby]="fieldError ? partErrorId(field) : null"
+          [attr.aria-describedby]="compositeDescribedBy(field)"
           (input)="syncComposite()"
           (change)="syncComposite()"
         />
@@ -490,10 +532,21 @@
       </div>
     }
   </div>
+  </fieldset>
   @if (hasPartErrors()) {
     <!-- The visible messages sit beside their own inputs, which is right for sighted users but
          announces nothing when validation fires on pressing Next. One hidden alert carries the
          summary (the same messages joined) so the announcement survives the split. -->
     <p class="mjf-visually-hidden" role="alert">{{ errorMessage() }}</p>
+  }
+</ng-template>
+
+<!-- The question's visible heading, shared by the three header shapes. -->
+<ng-template #questionHeading>
+  @let hq = question();
+  <span class="mjf-question__prompt">{{ hq.prompt }}</span>
+  @if (hq.isRequired) {
+    <span class="mjf-question__required" aria-hidden="true">*</span>
+    <span class="mjf-visually-hidden">(required)</span>
   }
 </ng-template>

@@ -27,8 +27,11 @@ import { RegisterClass } from '@memberjunction/global';
 import { LogError, LogStatus } from '@memberjunction/core';
 import { parseFormSettings } from '@mj-biz-apps/forms-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
-import { loadFormResponseContext, type AnswerWithType } from '../shared/form-response-context';
-import { resolveActionProvider } from '../shared/action-provider';
+import {
+  type AnswerWithType,
+  loadFormResponseContext,
+  resolveActionProvider,
+} from '@mj-biz-apps/forms-core-entities-server';
 
 /** A single confirmation email to deliver. */
 export interface ConfirmationEmail {

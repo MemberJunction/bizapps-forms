@@ -2,20 +2,29 @@ import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
+  ElementRef,
   inject,
+  ViewChild,
+  ViewChildren,
 } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { DatePipe, Location } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { BaseDashboard } from '@memberjunction/ng-shared';
 import type { ResourceData } from '@memberjunction/core-entities';
-import { BaseEntity, CompositeKey, LogError } from '@memberjunction/core';
-import { MJGlobal, MJEventType, RegisterClass } from '@memberjunction/global';
+import { CompositeKey, LogError } from '@memberjunction/core';
+import { RegisterClass } from '@memberjunction/global';
 import type { ActionParam } from '@memberjunction/actions-base';
 
 import { FORMS_UI_CSS, failureMessage } from '../shared';
+import { homeViewFromParams, homeViewToParams } from '../shared/view-urls';
+import { onFormsWrite, type FormsWriteSubscription } from '../shared/forms-writes';
+import { CoalescedLoad } from '../shared/coalesced-load';
+import { RowActivateDirective } from '../shared/row-activate.directive';
 import { FormsHomeService } from './forms-home.service';
+import { homeListState, type HomeListState } from './home-list-state';
 import { FORMS_HOME_CSS } from './forms-home-dashboard.styles';
 import { totalResponses } from './home-aggregations';
+import { isFormsHomeUrl } from './home-route';
 import {
   HOME_ACTION,
   HOME_ENTITY,
@@ -23,7 +32,6 @@ import {
   type FormSummaryRow,
 } from './home-models';
 import { TemplatesGalleryComponent, type TemplateChoice } from '../templates/templates-gallery.component';
-import { FormCloneService } from '../templates/form-clone.service';
 
 /**
  * Status -> badge tone. Total over `FormStatus`, so widening the CHECK constraint
@@ -46,25 +54,44 @@ const STATUS_TONE: Record<FormStatus, string> = {
  */
 const ARCHIVED_STATUS: FormStatus = 'Closed';
 
+/**
+ * How long a burst of Form writes elsewhere settles before the grid re-reads once. An open builder
+ * writes the Form row on every structural edit (it is the graph's root), so an undebounced grid
+ * behind it re-read itself per reorder.
+ */
+const FORM_WRITE_DEBOUNCE_MS = 750;
+
 /** Headline for an authoring failure, whether the action threw or reported `success: false`. */
 const AUTHORING_FAILED = 'The authoring action failed.';
 
-/**
- * The handle returned by subscribing to MJGlobal's event stream.
- *
- * Derived from the API rather than imported as `rxjs`'s `Subscription`: rxjs is not a dependency
- * of this package (it arrives through Angular in the host), so naming the type directly fails the
- * package's own typecheck. Deriving it keeps the shape correct without inventing a dependency.
- */
-type EventSubscription = ReturnType<ReturnType<MJGlobal['GetEventListener']>['subscribe']>;
 
 /** "1 form" / "12 forms" — the list page says both numbers out loud a lot. */
 function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/**
+ * The narrow slices of the template's elements that focus restoration uses. Structural, so the real
+ * `ElementRef` / `QueryList` satisfy them and a test can supply a plain double without a DOM.
+ */
+interface FocusTarget {
+  nativeElement: Pick<HTMLElement, 'focus'>;
+}
+interface TriggerRef {
+  nativeElement: Pick<HTMLButtonElement, 'focus' | 'dataset'>;
+}
+interface TriggerLookup {
+  find(predicate: (trigger: TriggerRef) => boolean): TriggerRef | undefined;
+}
+
+/** What the archive handlers need of a DOM event; a test double need only offer this. */
+type StoppableEvent = Pick<Event, 'stopPropagation'>;
+
 /** Which authoring panel (if any) is open. */
 type AuthoringPanel = 'none' | 'ai' | 'template';
+
+/** How long typing in the search pauses before the URL follows it, so Back does not step letter by letter. */
+export const HOME_URL_DEBOUNCE_MS = 400;
 
 /**
  * Forms home / studio — the first-class MJExplorer "Forms" surface
@@ -73,12 +100,13 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
  * metadata record (DriverClass) and the Forms app nav item are authored
  * alongside this component.
  *
- * It lists every form (RunView, read-only) and offers three ways to create one:
+ * It lists every form (read-only; `../shared/form-catalog`) and offers four ways to create one:
  *  - "New form" — opens a blank Form record; the WP-D entity-form override
  *    (@RegisterClass(BaseFormComponent, 'MJ_BizApps_Forms: Forms')) renders the
  *    visual builder for the new record.
  *  - "Author with AI" — runs `Forms: Generate Form From Brief` with a Brief.
- *  - "From template" — runs `Forms: Create Form From Template` with a TemplateKey.
+ *  - "From template", a starter — runs `Forms: Create Form From Template` with a TemplateKey.
+ *  - "From template", a saved one — `Forms.CreateFormFromTemplate` copies it on the server.
  *
  * Clicking a row, or finishing an authoring action, opens that Form record via
  * the container-handled `OpenEntityRecord` event — which renders the builder.
@@ -90,19 +118,25 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
   selector: 'mj-forms-home-dashboard',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [FormsHomeService, FormCloneService],
-  imports: [FormsModule, DatePipe, TemplatesGalleryComponent],
+  providers: [FormsHomeService],
+  imports: [FormsModule, DatePipe, TemplatesGalleryComponent, RowActivateDirective],
   templateUrl: './forms-home-dashboard.component.html',
   styles: [FORMS_UI_CSS, FORMS_HOME_CSS],
 })
 export class FormsHomeDashboardComponent extends BaseDashboard {
   private readonly data = inject(FormsHomeService);
-  private readonly clone = inject(FormCloneService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly location = inject(Location);
 
   public loading = false;
   public busy = false;
   public errorMessage: string | null = null;
+  /**
+   * Why the last read of the list failed, or null. Kept apart from `errorMessage`, which any later
+   * action overwrites: the failed card shows THIS, so an unrelated message (an authoring
+   * refusal, a copy warning) never appears under "Couldn’t load your forms."
+   */
+  public listLoadError: string | null = null;
 
   public forms: FormSummaryRow[] = [];
   /** `forms` narrowed by `query`. Maintained by `applyFilter`, not recomputed in the template. */
@@ -114,7 +148,36 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   public brief = '';
 
   /** MJGlobal subscription behind {@link watchForFormChanges}; released on destroy. */
-  private formChanges?: EventSubscription;
+  private formChanges?: FormsWriteSubscription;
+  /**
+   * The row whose Archive is waiting for its second click, or null. At most one row asks at a time:
+   * asking about another row, opening a row, Cancel and Escape all clear it.
+   */
+  public confirmingArchive: string | null = null;
+
+  /**
+   * The confirm button exists only while a row is asking, so the setter running with an element is
+   * the moment to move focus onto it: a keyboard user who pressed the icon button lands on the
+   * answer instead of on a button that has just disappeared.
+   */
+  @ViewChild('archiveConfirmButton')
+  private set archiveConfirmButton(ref: ElementRef<HTMLButtonElement> | undefined) {
+    ref?.nativeElement.focus();
+  }
+
+  /** Every row's Archive/Restore icon, found by `data-row-id` when focus has to return to one. */
+  @ViewChildren('archiveTrigger')
+  protected archiveTriggers?: TriggerLookup;
+
+  /** Stable focus target (`tabindex="-1"`) for when the row that held focus is gone. */
+  @ViewChild('pageTitle')
+  protected pageTitle?: FocusTarget;
+
+  /** Unregisters the {@link watchForReturn} listener; released on destroy. */
+  private stopWatchingUrl?: () => void;
+  /** Whether the last URL this page saw was its own route; a re-read fires on ARRIVAL only. */
+  private onHomeRoute = true;
+  private urlWriteTimer: ReturnType<typeof setTimeout> | null = null;
 
   public async GetResourceDisplayName(_data: ResourceData): Promise<string> {
     return 'Forms';
@@ -125,17 +188,85 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   }
 
   protected initDashboard(): void {
-    // Nothing to set up beyond the injected service.
+    this.watchForReturn();
   }
 
-  protected loadData(): void {
-    void this.loadForms();
+  /**
+   * Re-read when the user navigates back to this page.
+   *
+   * The Explorer wrapper calls `Refresh()` once, at mount, and a respondent's `FormResponse` is
+   * written server-side, so nothing in this browser hears it: the response counts shown after a
+   * trip to another tab were the ones read at mount (F10). `Location.onUrlChange` fires on every
+   * pushState the Explorer router makes; when the new URL is this dashboard's own route
+   * ({@link isFormsHomeUrl}: `/app/forms`, `/app/forms/Forms`) the list is read again.
+   * `@angular/router` is not a dependency of this package, hence `Location`. `loadForms` is
+   * coalesced, so a navigation during a read queues one follow-up, never a second read.
+   *
+   * Deliberately not done: polling or a push channel. A count that changes while this page is on
+   * screen still waits for the next visit or a host Refresh.
+   */
+  private watchForReturn(): void {
+    if (this.stopWatchingUrl) {
+      return;
+    }
+    this.stopWatchingUrl = this.location.onUrlChange((url) => {
+      // On ARRIVAL only: this page writes its own search into the URL (F09), and a URL change that
+      // never left the page is not a return to it.
+      const arrived = isFormsHomeUrl(url) && !this.onHomeRoute;
+      this.onHomeRoute = isFormsHomeUrl(url);
+      if (!arrived) {
+        return;
+      }
+      // Not floating: the coalescer never rejects, and `readForms` shows its own failure.
+      void this.loadForms();
+    });
+  }
+
+  /**
+   * The one list read: the mount-time load joins it; a host Refresh, the reload after this page's
+   * own writes and a write heard elsewhere all re-request it through {@link loadForms}, so no two
+   * reads ever overlap and settle out of order.
+   */
+  private readonly openLoad = new CoalescedLoad((signal) => this.readForms(signal), { label: 'Forms home list' });
+
+  /**
+   * The mount-time load (`BaseDashboard.ngOnInit`), joining one already in flight: MJ's dashboard
+   * host calls `Refresh()` on the instance it creates, so without the join opening the dashboard
+   * read the list twice.
+   *
+   * Returns the load, so `BaseDashboard` (which awaits `loadData` and then calls
+   * `NotifyLoadComplete`) signals load-complete when the list is in. The base declares `void`; a
+   * promise-returning override is what it awaits.
+   */
+  protected loadData(): Promise<void> {
     this.watchForFormChanges();
+    return this.openLoad.join();
   }
 
-  public ngOnDestroy(): void {
+  /**
+   * A host Refresh reads again. One that arrives during a load is not dropped into it (it asked for
+   * data read after it asked): it queues one follow-up that starts when that load settles. The base
+   * then reaches {@link loadData}, whose join returns that follow-up, so load-complete waits for it.
+   */
+  public override Refresh(): Promise<void> {
+    // Not floating: the coalescer never rejects, and the base's `loadData` below joins this same load.
+    void this.loadForms();
+    return super.Refresh();
+  }
+
+  /** Set on destroy so a write that settles afterwards does not render or focus a dead view. */
+  private destroyed = false;
+
+  public override ngOnDestroy(): void {
+    this.destroyed = true;
     this.formChanges?.unsubscribe();
     this.formChanges = undefined;
+    this.stopWatchingUrl?.();
+    this.stopWatchingUrl = undefined;
+    this.clearUrlTimer();
+    // BaseResourceComponent's teardown ends MJ's query-param subscriptions, which this page now
+    // relies on (F09); shadowing it without the call left them running after the page was gone.
+    super.ngOnDestroy();
   }
 
   /**
@@ -143,45 +274,66 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
    *
    * The list used to load once. Rename a form in the builder, come back, and the old name was
    * still there — the row had not changed, the page had simply never asked again. Polling would
-   * have papered over it; MJ already broadcasts the fact. Every `BaseEntity.Save()` and
-   * `.Delete()` raises an MJGlobal `ComponentEvent` tagged `BaseEntity.BaseEventCode`, so the
-   * list listens for the ones that concern Forms rows and re-reads.
+   * have papered over it; `onFormsWrite` hears every Forms row written elsewhere — a record's own
+   * save or delete, or an announced operation (a publish, a clone) — and the list re-reads.
    *
    * Deliberately narrow. It reacts to the Forms entity only — a save anywhere else in the
    * Explorer must not trigger a reload here — and it skips reloads while this surface is itself
-   * mid-write, because `loadForms` already runs at the end of those.
+   * mid-write, because `loadForms` already runs at the end of those. A write heard while a read
+   * is in flight is not skipped: that read may have started before the write, so `loadForms`
+   * queues one more behind it.
    */
   private watchForFormChanges(): void {
     if (this.formChanges) {
       return;
     }
-    this.formChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
-      if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
+    this.formChanges = onFormsWrite(HOME_ENTITY.forms, ['save', 'delete'], () => {
+      if (this.busy) {
         return;
       }
-      const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
-      if (args?.type !== 'save' && args?.type !== 'delete') {
-        return;
-      }
-      if (args.baseEntity?.EntityInfo?.Name !== HOME_ENTITY.forms) {
-        return;
-      }
-      if (this.busy || this.loading) {
-        return;
-      }
+      // Not floating: the coalescer never rejects, and `readForms` shows its own failure.
       void this.loadForms();
-    });
+    }, { debounceMs: FORM_WRITE_DEBOUNCE_MS, shouldHandle: () => !this.busy });
   }
 
-  public async loadForms(): Promise<void> {
+  /**
+   * Re-reads the list after the current read, if one is in flight: one follow-up shared by every
+   * caller who asks meanwhile, never a second read alongside it. Resolves once the list on screen
+   * reflects a read that started after this call.
+   */
+  public loadForms(): Promise<void> {
+    return this.openLoad.again();
+  }
+
+  /**
+   * The read itself; only {@link openLoad} runs it. `signal` aborts when the coalescer abandons the
+   * read at its timeout: the page then says so and ends the loading state at once, and the late
+   * rows, if they come, are not applied (a newer read owns the list by then).
+   */
+  private async readForms(signal: AbortSignal): Promise<void> {
+    signal.addEventListener(
+      'abort',
+      () => {
+        this.fail(signal.reason, 'Failed to load forms.');
+        this.listLoadError = this.errorMessage;
+        this.endLoad();
+      },
+      { once: true },
+    );
     this.beginLoad();
     try {
-      this.forms = await this.data.loadForms();
+      const rows = await this.data.loadForms();
+      if (signal.aborted) return;
+      this.forms = rows;
+      this.listLoadError = null;
       this.applyFilter();
     } catch (err) {
+      // Abandoned: the coalescer logs this late failure; the page already says the read failed.
+      if (signal.aborted) throw err;
       this.fail(err, 'Failed to load forms.');
+      this.listLoadError = this.errorMessage;
     } finally {
-      this.endLoad();
+      if (!signal.aborted) this.endLoad();
     }
   }
 
@@ -221,6 +373,31 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.cdr.markForCheck();
   }
 
+  /** Which of loading / failed / first run / all archived / no match / list the page shows. */
+  public get listState(): HomeListState {
+    return homeListState({
+      loading: this.loading,
+      failed: this.listLoadError !== null,
+      total: this.forms.length,
+      archived: this.archivedCount,
+      visible: this.visibleForms.length,
+      query: this.query,
+      showArchived: this.showArchived,
+    });
+  }
+
+  /**
+   * What the top banner says, or null. Every message shows there except a list failure the failed
+   * card is already telling. Asked of `listState`, not of the message alone: a reload that fails
+   * under a list already on screen renders no failed card, so the banner is its only place.
+   */
+  public get bannerMessage(): string | null {
+    if (this.errorMessage === null) {
+      return null;
+    }
+    return this.errorMessage === this.listLoadError && this.listState === 'failed' ? null : this.errorMessage;
+  }
+
   public get archivedCount(): number {
     return this.forms.filter((f) => f.status === ARCHIVED_STATUS).length;
   }
@@ -228,6 +405,42 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   public toggleArchived(): void {
     this.showArchived = !this.showArchived;
     this.applyFilter();
+    this.writeUrl();
+  }
+
+  /** The search box: narrows at once; the URL follows once typing pauses. */
+  public setQuery(text: string): void {
+    this.query = text;
+    this.applyFilter();
+    this.clearUrlTimer();
+    this.urlWriteTimer = setTimeout(() => {
+      this.urlWriteTimer = null;
+      this.writeUrl();
+    }, HOME_URL_DEBOUNCE_MS);
+  }
+
+  /**
+   * A link, a reload or back / forward named a search and toggle (UI audit F09). MJ delivers these
+   * with its own write-back suppressed, so applying them here does not rewrite the URL.
+   */
+  protected override OnQueryParamsChanged(params: Record<string, string>, _source: 'popstate' | 'deeplink'): void {
+    const view = homeViewFromParams(params);
+    this.clearUrlTimer();
+    this.query = view.query;
+    this.showArchived = view.showArchived;
+    this.applyFilter();
+  }
+
+  private writeUrl(): void {
+    this.clearUrlTimer();
+    this.UpdateQueryParams(homeViewToParams({ query: this.query, showArchived: this.showArchived }));
+  }
+
+  private clearUrlTimer(): void {
+    if (this.urlWriteTimer !== null) {
+      clearTimeout(this.urlWriteTimer);
+      this.urlWriteTimer = null;
+    }
   }
 
   public isArchived(row: FormSummaryRow): boolean {
@@ -235,25 +448,91 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   }
 
   /**
-   * Archives a form, or restores an archived one to Draft.
+   * The Archive icon's click. Restoring opens nothing and is one click; archiving asks first
+   * (F11) — one stray click used to close the form's share links with no question.
    *
-   * Not a delete, and not labelled as one: see `FormsHomeService.setStatus` for why the
-   * schema cannot support removing a form without destroying the responses it collected.
-   * Restore returns it to Draft rather than Published, so bringing a form back never
-   * silently reopens a public link.
+   * There is deliberately no Undo toast: a true undo would reopen the links, which is a server-side
+   * decision (`Forms.RestoreForm` keeps them closed on purpose).
+   */
+  public async requestArchive(row: FormSummaryRow): Promise<void> {
+    if (this.isArchived(row)) {
+      await this.toggleArchive(row);
+      return;
+    }
+    this.confirmingArchive = row.id;
+    this.cdr.markForCheck();
+  }
+
+  /** The question the inline confirm asks; the form's name is in it so the row cannot be mistaken. */
+  public archiveQuestion(row: FormSummaryRow): string {
+    return `Archive "${row.name}"? Its open share links close and respondents see "no longer accepting responses". Restore brings it back, but the links stay closed.`;
+  }
+
+  /**
+   * `event` is the button's own click, stopped here as a second guard. The first is the row itself:
+   * `mjfRowActivate` ignores any click that starts in a button. The stop still matters if this
+   * button is ever moved out of the row's control check, because the confirm re-renders as soon as
+   * the state clears and removes the wrapper's own `(click)` stop mid-dispatch.
+   */
+  public async confirmArchive(row: FormSummaryRow, event?: StoppableEvent): Promise<void> {
+    event?.stopPropagation();
+    this.confirmingArchive = null;
+    await this.toggleArchive(row);
+    // The user may have navigated away during the archive; a destroyed view cannot be rendered.
+    if (this.destroyed) {
+      return;
+    }
+    // The row usually leaves the list (archived forms are hidden); focus must not fall to <body>.
+    if (this.visibleForms.some((r) => r.id === row.id)) {
+      this.focusArchiveTrigger(row.id);
+    } else {
+      this.pageTitle?.nativeElement.focus();
+    }
+  }
+
+  /** Stops its own click as a second guard, for the reason given on {@link confirmArchive}. */
+  public cancelArchive(event?: StoppableEvent): void {
+    event?.stopPropagation();
+    const rowId = this.confirmingArchive;
+    this.confirmingArchive = null;
+    this.cdr.markForCheck();
+    if (rowId) {
+      this.focusArchiveTrigger(rowId);
+    }
+  }
+
+  /**
+   * Gives focus back to a row's Archive/Restore icon once the confirm that replaced it is gone
+   * (WCAG 2.4.3: a keyboard user otherwise restarts Tab from the top of the page). The icon is
+   * re-created by the view update, so render synchronously first; `detectChanges` is the one way
+   * to know the element exists before asking for it.
+   */
+  private focusArchiveTrigger(rowId: string): void {
+    this.cdr.detectChanges();
+    this.archiveTriggers?.find((t) => t.nativeElement.dataset['rowId'] === rowId)?.nativeElement.focus();
+  }
+
+  /**
+   * Archives a form, or restores an archived one.
+   *
+   * Not a delete, and not labelled as one: every child table holds a plain FK to the form, and
+   * a form that collected responses must keep them, so `Forms.ArchiveForm` moves it to `Closed`
+   * and closes its share links in the same transaction. `Forms.RestoreForm` brings it back to
+   * `Published` when it has a published version (else `Draft`) — but its links stay closed, so
+   * restoring never silently reopens a public link.
    */
   public async toggleArchive(row: FormSummaryRow): Promise<void> {
-    const next: FormStatus = this.isArchived(row) ? 'Draft' : ARCHIVED_STATUS;
-    const action = `Could not ${next === ARCHIVED_STATUS ? 'archive' : 'restore'} this form.`;
+    const restoring = this.isArchived(row);
+    const action = `Could not ${restoring ? 'restore' : 'archive'} this form.`;
     this.busy = true;
     this.errorMessage = null;
     this.cdr.markForCheck();
     try {
-      // A failed Save() RETURNS its message rather than throwing, so this is the usual failure
-      // path, not the catch below — it needs the same "what failed" prefix.
-      const failure = await this.data.setStatus(row.id, next);
-      if (failure) {
-        this.fail(new Error(failure), action);
+      // An operation reports a refusal as a result rather than a throw, so this is the usual
+      // failure path, not the catch below — it needs the same "what failed" prefix.
+      const outcome = restoring ? await this.data.restore(row.id) : await this.data.archive(row.id);
+      if (!outcome.ok) {
+        this.fail(new Error(outcome.error), action);
         return;
       }
       await this.loadForms();
@@ -269,6 +548,7 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
 
   /** Opens an existing form record (renders the WP-D builder). */
   public openForm(row: FormSummaryRow): void {
+    this.confirmingArchive = null;
     this.OpenEntityRecord.emit({
       EntityName: HOME_ENTITY.forms,
       RecordPKey: CompositeKey.FromID(row.id),
@@ -314,8 +594,8 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
    *
    * The two kinds take different roads and the author must not be able to tell: a starter is a
    * blueprint that lives in code, so the server action expands it; a saved template is a Form
-   * row, so it is deep-copied here. Both end with the same thing on screen — the new draft open
-   * in the builder.
+   * row, so the server deep-copies it (`Forms.CreateFormFromTemplate`). Both end with the same
+   * thing on screen — the new draft open in the builder.
    */
   public async useTemplate(choice: TemplateChoice): Promise<void> {
     if (choice.kind === 'starter') {
@@ -332,21 +612,23 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.errorMessage = null;
     this.cdr.markForCheck();
     try {
-      const result = await this.clone.cloneForm(choice.templateId, {
-        name: choice.name,
-        isTemplate: false,
-      });
-      // Warnings describe references the copy could not carry over. They are shown rather than
-      // logged and forgotten, because the author is the only person who can fix a dropped rule.
-      if (result.warnings.length > 0) {
-        this.errorMessage = result.warnings.join(' ');
+      const outcome = await this.data.createFromTemplate(choice.templateId, choice.name);
+      if (!outcome.ok) {
+        this.fail(new Error(outcome.error), `Could not create a form from "${choice.name}".`);
+        return;
       }
       this.closePanel();
       this.OpenEntityRecord.emit({
         EntityName: HOME_ENTITY.forms,
-        RecordPKey: CompositeKey.FromID(result.formId),
+        RecordPKey: CompositeKey.FromID(outcome.output.FormID),
       });
       await this.loadForms();
+      // Warnings describe references the copy could not carry over. They are shown rather than
+      // logged and forgotten, because the author is the only person who can fix a dropped rule —
+      // and AFTER the reload, whose start clears the alert: set before it, they were wiped unseen.
+      if (outcome.output.Warnings.length > 0) {
+        this.errorMessage = outcome.output.Warnings.join(' ');
+      }
     } catch (err) {
       this.fail(err, `Could not create a form from "${choice.name}".`);
     } finally {
@@ -410,11 +692,15 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.cdr.markForCheck();
   }
 
-  /** Alert, log and emitted Error all say what failed; the original failure rides along as `cause`. */
+  /**
+   * Alert and log say what failed; the original failure is logged with it. Never emitted as
+   * `BaseDashboard.Error`: MJ's host answers that, during the first load, by replacing the whole
+   * page with "Unable to Load Dashboard" (UI audit F01), and every failure here has a state on
+   * the page with a way out. Same rule as the reporting dashboard's `fail`.
+   */
   private fail(err: unknown, action: string): void {
     const message = failureMessage(err, action);
     this.errorMessage = message;
-    LogError(message);
-    this.Error.emit(new Error(message, { cause: err }));
+    LogError(message, undefined, err);
   }
 }

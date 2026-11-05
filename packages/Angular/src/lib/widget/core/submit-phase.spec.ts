@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { FormSubmissionResult } from '@mj-biz-apps/forms-entities/contracts';
+import type { FormsSaveResponseOutput } from '@mj-biz-apps/forms-entities';
 import { outcomeForResult, shouldIgnoreSubmit, type WidgetPhase } from './submit-phase';
 
 describe('shouldIgnoreSubmit (double-submit guard)', () => {
@@ -24,23 +24,23 @@ describe('shouldIgnoreSubmit (double-submit guard)', () => {
 
 describe('outcomeForResult (done-transition)', () => {
   it('a successful result with NO redirect reaches done and does not redirect', () => {
-    const res: FormSubmissionResult = { success: true, responseId: 'r1', status: 'Complete' };
+    const res: FormsSaveResponseOutput = { Success: true, ResponseID: 'r1', Status: 'Complete', Outcome: 'ended', Errors: [] };
     expect(outcomeForResult(res)).toEqual({ phase: 'done', redirect: false });
   });
 
   it('a successful result WITH a redirect reaches done AND redirects', () => {
-    const res: FormSubmissionResult = { success: true, responseId: 'r1', redirectUrl: 'https://x/y' };
+    const res: FormsSaveResponseOutput = { Success: true, ResponseID: 'r1', Status: 'Complete', Outcome: 'ended', RedirectURL: 'https://x/y', Errors: [] };
     expect(outcomeForResult(res)).toEqual({ phase: 'done', redirect: true });
   });
 
   it('a failed result returns to ready (never done), never redirects', () => {
-    const res: FormSubmissionResult = { success: false, errors: [{ message: 'bad' }] };
+    const res: FormsSaveResponseOutput = { Success: false, ResponseID: null, Status: null, Outcome: 'continue', Errors: [{ QuestionID: null, Message: 'bad' }] };
     expect(outcomeForResult(res)).toEqual({ phase: 'ready', redirect: false });
   });
 
   it('an empty success (no id, no redirect) still reaches the confirmation screen', () => {
     // Regression: a scroll-mode submit that returns success must show the thank-you screen.
-    const res: FormSubmissionResult = { success: true };
+    const res: FormsSaveResponseOutput = { Success: true, ResponseID: null, Status: null, Outcome: 'ended', Errors: [] };
     expect(outcomeForResult(res).phase).toBe('done');
   });
 });

@@ -27,11 +27,11 @@ import {
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
 import { RulesPanelComponent } from './rules-panel.component';
-import type { ConditionalSourceQuestion } from './condition-sources';
+import type { ConditionalSourceQuestion } from '@mj-biz-apps/forms-entities/contracts';
 import { ImageFieldComponent } from './image-field.component';
 import { SettingRowComponent } from './setting-row.component';
 import { isOptionalOpen, toggleOptional } from './optional-setting';
-import { parseConditionalRule, serializeConditionalRule } from './json-fields';
+import { editableConditionalRule, serializeConditionalRule } from './json-fields';
 import type { FormSection } from './section-groups';
 
 const SCREEN_EDITOR_CSS = /* css */ `
@@ -47,7 +47,7 @@ const SCREEN_EDITOR_CSS = /* css */ `
 }
 /* The glyph takes its screen's hue; the title stays on a token. Same split as the type
    pills — the palette is measured for graphics, not for text. */
-.se-head > i { color: var(--mjf-viz-fill); font-size: 1rem; }
+.se-head > i { color: var(--mjf-viz-fill); font-size: var(--mjf-icon); }
 .se-head-title { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
 
 .se-section { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); padding-top: var(--mjf-gap-sm); }
@@ -344,7 +344,7 @@ export class ScreenEditorComponent {
   }
 
   protected get conditionalRule(): ConditionalRule | undefined {
-    return this.screen ? parseConditionalRule(this.screen.ConditionalRule) : undefined;
+    return this.screen ? editableConditionalRule(this.screen.ConditionalRule) : undefined;
   }
 
   protected setTitle(value: string): void {

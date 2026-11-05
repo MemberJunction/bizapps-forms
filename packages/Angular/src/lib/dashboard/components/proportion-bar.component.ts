@@ -44,7 +44,7 @@ import { percent, type ProportionSegment } from '../reporting-view-model';
     `
       :host { display: block; }
 
-      .pb { display: flex; flex-direction: column; gap: 10px; }
+      .pb { display: flex; flex-direction: column; gap: 8px; }
 
       .pb-track {
         display: flex;
@@ -62,7 +62,7 @@ import { percent, type ProportionSegment } from '../reporting-view-model';
       .pb-legend {
         display: flex;
         flex-wrap: wrap;
-        gap: 6px 20px;
+        gap: 4px 20px;
         margin: 0;
         padding: 0;
         list-style: none;

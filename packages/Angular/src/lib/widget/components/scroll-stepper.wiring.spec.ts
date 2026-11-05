@@ -54,20 +54,21 @@ describe('the cursor counts sections, not pages', () => {
 
 describe('advancing is a checkpoint, not a submit', () => {
   it('validates the section being left, and only that section', () => {
-    const body = methodBody('protected onNext');
-    expect(body).toMatch(/questionsFor\(/);
-    expect(body).toMatch(/touchAll\(/);
-    expect(body).toMatch(/areValid\(/);
+    // The touch-and-validate itself happens in the judge once the section's uploads land (#248);
+    // `next-waits-for-uploads.wiring.spec.ts` pins that, `settled-validation.spec.ts` tests it.
+    const body = methodBody('protected async onNext');
+    expect(body).toMatch(/const questions = this\.questionsFor\(page\)/);
+    expect(body).toMatch(/stepJudge\.judge\(this\.runtime\(\), questions\)/);
   });
 
   it('banks progress and judges a knockout once the section is behind us', () => {
-    const body = methodBody('protected onNext');
+    const body = methodBody('protected async onNext');
     expect(body).toMatch(/progressChange\.emit\(\)/);
     expect(body).toMatch(/commitChange\.emit\(\)/);
   });
 
   it('only the last section submits', () => {
-    expect(methodBody('protected onNext')).toMatch(/isLast\(\)[\s\S]*?submit\.emit\(\)/);
+    expect(methodBody('protected async onNext')).toMatch(/isLast\(\)[\s\S]*?submit\.emit\(\)/);
   });
 });
 
@@ -84,7 +85,7 @@ describe('a submit still answers for the whole form', () => {
     // Reaching the last section proves each section validated as it was left, which is not the
     // same claim as "the form is valid now" — going Back and clearing a required field is one
     // way to break it.
-    expect(methodBody('protected onSubmit')).toMatch(/visibleAnswerableQuestions\(\)/);
+    expect(methodBody('protected async onSubmit')).toMatch(/visibleAnswerableQuestions\(\)/);
   });
 
   it('takes the respondent back to the section holding the problem', () => {
@@ -99,7 +100,7 @@ describe('a submit still answers for the whole form', () => {
   it('keeps the native submit from navigating', () => {
     // Without preventDefault the browser runs its default GET submit, which unmounts the widget
     // mid-request and loses the answers.
-    expect(methodBody('protected onSubmit')).toMatch(/preventDefault\(\)/);
+    expect(methodBody('protected async onSubmit')).toMatch(/preventDefault\(\)/);
   });
 });
 
@@ -148,14 +149,14 @@ describe('the respondent can go back', () => {
  */
 describe('the inner form is this component\'s business alone', () => {
   it('stops the native submit from bubbling out of the component', () => {
-    const body = methodBody('protected onSubmit');
+    const body = methodBody('protected async onSubmit');
     expect(body).toMatch(/stopPropagation\(\)/);
   });
 
   it('and still prevents the default navigation', () => {
     // Two different jobs: stopPropagation keeps the parent from seeing it, preventDefault keeps
     // the browser from running a GET navigation that unmounts the widget mid-request.
-    expect(methodBody('protected onSubmit')).toMatch(/preventDefault\(\)/);
+    expect(methodBody('protected async onSubmit')).toMatch(/preventDefault\(\)/);
   });
 
   it('the only way out is the output, which the parent listens to', () => {

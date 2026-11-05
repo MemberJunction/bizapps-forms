@@ -1,7 +1,9 @@
 /**
  * LLM Designer step — turns a natural-language brief into a validated
- * {@link FormBlueprint}. This is the *only* place an LLM is involved in AI authoring;
- * everything downstream (the Builder) is deterministic.
+ * {@link DesignerBlueprint}: the form's content, never its on-submit side effects (a reply
+ * carrying `automations` / `onSubmitMode` is refused and logged, #303 security). This is the
+ * *only* place an LLM is involved in AI authoring; everything downstream (the Builder) is
+ * deterministic.
  *
  * Framework-correct model selection: the model/vendor/key is resolved by MemberJunction
  * from metadata — this code does **not** name a vendor or model. We run a named MJ
@@ -17,8 +19,9 @@
 import { AIEngine } from '@memberjunction/aiengine';
 import { AIPromptParams } from '@memberjunction/ai-core-plus';
 import { AIPromptRunner } from '@memberjunction/ai-prompts';
-import type { UserInfo } from '@memberjunction/core';
-import { parseFormBlueprint, type FormBlueprint } from './form-blueprint';
+import { LogError, type UserInfo } from '@memberjunction/core';
+import type { DesignerBlueprint } from '@mj-biz-apps/forms-entities';
+import { DesignerSideEffectError, parseDesignerBlueprint } from './form-blueprint';
 
 /**
  * Data passed to the Form Designer AI Prompt's template. `Brief` is the user's
@@ -74,7 +77,7 @@ export class AIPromptFormDesignerModel implements FormDesignerModel {
     // slightly-malformed JSON (trailing commas, stray fences) before giving up.
     params.attemptJSONRepair = true;
 
-    const result = await new AIPromptRunner().ExecutePrompt<FormBlueprint>(params);
+    const result = await new AIPromptRunner().ExecutePrompt<DesignerBlueprint>(params);
     if (!result.success) {
       throw new Error(
         `AI Prompt "${FORM_DESIGNER_PROMPT_NAME}" failed to run: ${result.errorMessage ?? 'unknown error'}`,
@@ -94,10 +97,10 @@ export class AIPromptFormDesignerModel implements FormDesignerModel {
 /**
  * Coerce the prompt run's output into the JSON text the Designer parses. With
  * `ResponseFormat='JSON'` the runner may surface a parsed object in `result`; we
- * re-stringify it so the single {@link parseFormBlueprint} validation path applies.
+ * re-stringify it so the single {@link parseDesignerBlueprint} validation path applies.
  * Otherwise we use the raw model text.
  */
-function designerOutputText(rawResult: string | undefined, parsed: FormBlueprint | undefined): string {
+function designerOutputText(rawResult: string | undefined, parsed: DesignerBlueprint | undefined): string {
   if (parsed !== undefined && parsed !== null) {
     return JSON.stringify(parsed);
   }
@@ -117,15 +120,23 @@ export async function designFormFromBrief(
   brief: string,
   model: FormDesignerModel,
   contextUser: UserInfo,
-): Promise<FormBlueprint> {
+): Promise<DesignerBlueprint> {
   let lastError: unknown;
   let promptData: FormDesignerPromptData = { Brief: brief };
 
   for (let attempt = 1; attempt <= MAX_DESIGNER_ATTEMPTS; attempt++) {
     const raw = await model.design(promptData, contextUser);
     try {
-      return parseFormBlueprint(raw);
+      return parseDesignerBlueprint(raw);
     } catch (error) {
+      if (error instanceof DesignerSideEffectError) {
+        // Refused like any invalid reply, but logged: a model authoring side effects usually means
+        // the brief carried instructions to (#303 security), and someone should be able to see it.
+        LogError(
+          `[Forms] Designer attempt ${attempt} for user ${contextUser?.ID ?? '(none)'} tried to author on-submit ` +
+            `side effects (${error.keys.join(', ')}); refused. Brief: ${JSON.stringify(brief.slice(0, 200))}`,
+        );
+      }
       lastError = error;
       promptData = { Brief: brief, PreviousAttempt: raw, ValidationError: errorText(error) };
     }

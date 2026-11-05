@@ -21,7 +21,7 @@ import {
   foldQuestionId,
   isAnswerableQuestionType,
   type AnswerValue,
-  type PublishedFormDefinition,
+  type PublishedFormPage,
   type PublishedFormQuestion,
   type ResumeSnapshot,
   type StoredAnswerRow,
@@ -50,7 +50,7 @@ export interface PrefillTarget {
  */
 export function prefillFromResume(
   target: PrefillTarget,
-  definition: Pick<PublishedFormDefinition, 'pages'>,
+  definition: { readonly pages: readonly PublishedFormPage[] },
   snapshot: ResumeSnapshot,
 ): PrefillResult {
   const questions = questionsById(definition);
@@ -78,7 +78,7 @@ export function prefillFromResume(
 }
 
 /** Every ANSWERABLE question of the definition, keyed by its folded id. */
-function questionsById(definition: Pick<PublishedFormDefinition, 'pages'>): Map<string, PublishedFormQuestion> {
+function questionsById(definition: { readonly pages: readonly PublishedFormPage[] }): Map<string, PublishedFormQuestion> {
   const map = new Map<string, PublishedFormQuestion>();
   for (const page of definition.pages) {
     for (const question of page.questions) {

@@ -10,16 +10,41 @@
  *     handled here — the id lives only for this widget instance),
  *   - is fail-soft: a rejected save never blocks or interrupts the respondent. It is surfaced via
  *     `status` (`'error'`, never a throw out of the controller) AND retried on its own, on a
- *     capped backoff (`RETRY_DELAYS_MS`) — once the cap is spent the status just stays `'error'`;
- *     the next edit re-arms the normal debounce (not another backoff retry — `failedAttempts`
+ *     capped backoff (`RETRY_DELAYS_MS`) — once the cap is spent the status stays `'error'`, the
+ *     host is told (`AutosaveHooks.onRetriesSpent`), and the next edit re-arms the normal debounce (not another backoff retry — `failedAttempts`
  *     resets only on a success), and a final submit carries every answer anyway.
+ *   - told when the network is back: `resume()` is the host's "the road reopened" signal. It re-sends
+ *     a failed save at once and restarts the backoff, so a failing flush re-enters the capped
+ *     schedule from its first delay rather than from where the last run stopped. `settle()` and
+ *     `cancel()` quiesce the controller (the final submit is about to send every answer itself), and a
+ *     quiesced controller ignores `resume()` until the next `ping()`, `flushNow()` or `reopen()` (the host returned the form to editing, e.g. after a
+ *     refused or failed submit) — otherwise an
+ *     `online` event during the submit would put a partial on the wire beside the final write.
  *
  * Framework-free (takes injected `setTimeout`/`clearTimeout`) so it is unit-testable
  * with fake timers and no Angular. The component wires it to signals + the API.
  */
 
-/** What the controller asks the host to do: persist the current partial, return its id. */
-export type AutosaveFn = () => Promise<string | undefined>;
+import { failureDetail } from './failure-detail';
+
+/**
+ * The host's answer when there was nothing to send — the payload was exactly what the server last
+ * accepted, or a fresh form with nothing in it (#303 Task 10c fix round 1). No request was made, so
+ * the controller must not report `saved` for it.
+ */
+export const NOTHING_TO_SAVE: unique symbol = Symbol('nothing-to-save');
+
+/** What the controller asks the host to do: persist the current partial, return its id — or say there was nothing to. */
+export type AutosaveFn = () => Promise<string | undefined | typeof NOTHING_TO_SAVE>;
+
+/** Optional hooks into the controller's lifecycle. */
+export interface AutosaveHooks {
+  /**
+   * The capped backoff is spent and the last retry failed: nothing will retry until the next edit.
+   * Called once per run of failures — the host's cue to tell the respondent.
+   */
+  onRetriesSpent?: () => void;
+}
 
 /** Observable status for a subtle "saving…/saved" indicator. */
 export type AutosaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
@@ -60,12 +85,23 @@ export class AutosaveController {
   private currentStatus: AutosaveStatus = 'idle';
   /** How many consecutive failures the backoff has already spent; reset to 0 on any success. */
   private failedAttempts = 0;
+  /** The last status a save run SETTLED on (idle / saved / error) — restored when a save sends nothing. */
+  private settledStatus: AutosaveStatus = 'idle';
+  /**
+   * `settle()` or `cancel()` ran and nothing has asked for a save since. While set, {@link resume}
+   * does nothing: a failed save leaves `settledStatus` at 'error', which alone would let a late
+   * `online` event write a partial concurrently with the final submit that quiesced us. Cleared by
+   * `ping()`, `flushNow()` and `reopen()`, the paths a form uses once a refused or failed submit
+   * returns it to editing.
+   */
+  private quiesced = false;
 
   constructor(
     private readonly save: AutosaveFn,
     private readonly onStatus: AutosaveStatusListener = () => {},
     private readonly debounceMs: number = DEFAULT_DEBOUNCE_MS,
     private readonly timers: TimerApi = globalTimers(),
+    private readonly hooks: AutosaveHooks = {},
   ) {}
 
   public get status(): AutosaveStatus {
@@ -82,12 +118,14 @@ export class AutosaveController {
       this.rearm = true;
       return;
     }
+    this.quiesced = false;
     this.setStatus('pending');
     this.arm();
   }
 
   /** Cancel any pending timer (e.g. on final submit, which persists everything). */
   public cancel(): void {
+    this.quiesced = true;
     this.clearTimer();
     this.rearm = false;
   }
@@ -102,6 +140,7 @@ export class AutosaveController {
    * caller is about to send every answer itself.
    */
   public async settle(): Promise<void> {
+    this.quiesced = true;
     this.clearTimer();
     this.rearm = false;
     if (this.inFlightSave) {
@@ -135,6 +174,7 @@ export class AutosaveController {
     if (this.disposed) {
       return;
     }
+    this.quiesced = false;
     if (this.inFlightSave) {
       await this.inFlightSave;
     }
@@ -146,6 +186,32 @@ export class AutosaveController {
     }
     this.flush();
     await this.inFlightSave;
+  }
+
+  /**
+   * The host's "the road reopened" signal (the browser's `online` event). Re-sends a save that
+   * failed — whether a backoff retry is still pending or the cap is already spent — without waiting
+   * for the respondent's next edit. The backoff restarts from its first delay, so if this flush
+   * fails too it re-enters the capped schedule. A no-op when the last save did not fail (nothing to
+   * recover), while quiesced by `settle()`/`cancel()`, or after {@link dispose}.
+   */
+  public resume(): void {
+    if (this.disposed || this.quiesced || this.settledStatus !== 'error') {
+      return;
+    }
+    this.clearTimer();
+    this.failedAttempts = 0;
+    this.flush();
+  }
+
+  /**
+   * The host returned the form to editing after a `settle()`/`cancel()` (a submit that was refused
+   * or failed). Ends the quiesced state WITHOUT sending anything, so a later {@link resume} can
+   * recover a failed autosave. Not `ping()`/`flushNow()`: those would put a partial on the wire
+   * right behind the submit that just failed.
+   */
+  public reopen(): void {
+    this.quiesced = false;
   }
 
   /** Stop all activity; a controller is dead after this. */
@@ -186,14 +252,15 @@ export class AutosaveController {
   private async runSave(): Promise<void> {
     let failed = false;
     try {
-      await this.save();
+      const outcome = await this.save();
       this.failedAttempts = 0;
-      this.setStatus('saved');
+      // Nothing sent is not a save: the indicator goes back to whatever it said before this run.
+      this.setStatus(outcome === NOTHING_TO_SAVE ? this.settledStatus : 'saved');
     } catch (err) {
       failed = true;
       // Never swallow silently: a background autosave still failed, and this is the only place
       // that says so. `status` tells the UI; this gives whoever reads the console the cause.
-      console.warn('[mj-forms] autosave failed', err);
+      console.warn(`[mj-forms] autosave failed: ${failureDetail(err)}`, err);
       this.setStatus('error');
     } finally {
       this.inFlight = false;
@@ -221,6 +288,12 @@ export class AutosaveController {
    */
   private scheduleRetry(): void {
     if (this.failedAttempts >= RETRY_DELAYS_MS.length) {
+      // The explicit cap-hit case: no further automatic retry, and the host is told so it can say so.
+      // `failedAttempts` stays at the cap, so a later failure before any success does not re-announce.
+      if (this.failedAttempts === RETRY_DELAYS_MS.length) {
+        this.failedAttempts++;
+        this.hooks.onRetriesSpent?.();
+      }
       return;
     }
     const delay = RETRY_DELAYS_MS[this.failedAttempts++];
@@ -240,6 +313,9 @@ export class AutosaveController {
 
   private setStatus(status: AutosaveStatus): void {
     this.currentStatus = status;
+    if (status === 'idle' || status === 'saved' || status === 'error') {
+      this.settledStatus = status;
+    }
     this.onStatus(status);
   }
 }

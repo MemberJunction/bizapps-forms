@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { isOpenToResponses } from '@mj-biz-apps/forms-entities';
 
 import {
   autoShareName,
   formReach,
   credentialMayStillRedeem,
-  isOpenToResponses,
   shareState,
   SHARE_LINK_FIELDS,
   type ShareLinkFacts,
@@ -282,8 +282,9 @@ describe('what a paused link is told about its token', () => {
 });
 
 describe('isOpenToResponses', () => {
-  // The predicate behind the "Open to responses" switch. It exists as one exported function
-  // because it had been written out three times — in `stateKind`, in the switch's own
+  // The predicate behind the "Open to responses" switch — the contracts' (`share-link.ts`), shared
+  // with the server's distribution engine; these pin that the share state agrees with it. It
+  // exists as one function because it had been written out three times — in `stateKind`, in the switch's own
   // `[class.is-on]`, and in `toggleOpen`'s `reopening` — and two of the three copies were
   // wrong in the same way: they read `Status` alone.
   it('needs BOTH halves, because that is what the server needs', () => {

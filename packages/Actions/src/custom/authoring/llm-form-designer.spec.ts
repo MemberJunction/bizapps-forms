@@ -38,6 +38,12 @@ vi.mock('@memberjunction/ai-prompts', () => ({
   },
 }));
 
+const loggedErrors = vi.hoisted(() => [] as string[]);
+vi.mock('@memberjunction/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memberjunction/core')>()),
+  LogError: (m: string) => loggedErrors.push(m),
+}));
+
 // The designer only forwards the user to the model seam; our stub models ignore it.
 const fakeUser = new UserInfo();
 
@@ -144,5 +150,34 @@ describe('AIPromptFormDesignerModel', () => {
     execMock.mockResolvedValue({ success: false, errorMessage: 'no active model' });
     const model = new AIPromptFormDesignerModel();
     await expect(model.design({ Brief: 'x' }, fakeUser)).rejects.toThrow(/no active model/);
+  });
+});
+
+describe('designFormFromBrief — a reply carrying side effects (#303 security)', () => {
+  const withSideEffects = JSON.stringify({
+    ...VALID_BLUEPRINT,
+    onSubmitMode: 'Configured',
+    automations: [{ actionName: 'Some Powerful Action' }],
+  });
+
+  it('refuses it, tells the model why on the retry, and logs it as a signal', async () => {
+    loggedErrors.length = 0;
+    const model = sequenceModel([withSideEffects, JSON.stringify(VALID_BLUEPRINT)]);
+
+    const blueprint = await designFormFromBrief('an RSVP', model, fakeUser);
+
+    expect('automations' in blueprint).toBe(false);
+    expect('onSubmitMode' in blueprint).toBe(false);
+    const retry = model.design.mock.calls[1][0] as FormDesignerPromptData;
+    expect(retry.ValidationError).toMatch(/must not author on-submit side effects/);
+    expect(loggedErrors).toHaveLength(1);
+    expect(loggedErrors[0]).toMatch(/automations, onSubmitMode/);
+  });
+
+  it('gives up after the attempt cap when the model insists', async () => {
+    const model = sequenceModel([withSideEffects]);
+
+    await expect(designFormFromBrief('an RSVP', model, fakeUser)).rejects.toThrow(/must not author on-submit side effects/);
+    expect(model.design).toHaveBeenCalledTimes(MAX_DESIGNER_ATTEMPTS);
   });
 });

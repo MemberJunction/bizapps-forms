@@ -68,7 +68,7 @@ export function availableScreens(definition: PublishedFormDefinition | null): Sh
  * literally would blank the preview — a silent wrong answer in place of a refused one.
  */
 export function resolveShownScreen(
-  definition: PublishedFormDefinition,
+  definition: { readonly welcomeScreen?: PublishedFormScreen; readonly endScreens: readonly PublishedFormScreen[] },
   selection: ShownScreen,
 ): ScreenTarget | null {
   switch (selection.kind) {

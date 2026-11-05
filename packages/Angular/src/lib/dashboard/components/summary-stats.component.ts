@@ -41,6 +41,9 @@ import { FormsProportionBarComponent } from './proportion-bar.component';
         @if (stats.partialResponses > 0) {
           <span class="ss-hero-sub">{{ inProgressLabel }}</span>
         }
+        @if (stats.disqualifiedResponses > 0) {
+          <span class="ss-hero-sub">{{ screenedOutLabel }}</span>
+        }
       </div>
 
       <div class="ss-split">
@@ -87,7 +90,7 @@ import { FormsProportionBarComponent } from './proportion-bar.component';
 
       .ss-hero { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
       .ss-hero-value {
-        font-size: 3.25rem;
+        font-size: var(--mjf-figure-lg);
         font-weight: 650;
         line-height: 1;
         letter-spacing: var(--mj-tracking-tight, -0.03em);
@@ -97,7 +100,7 @@ import { FormsProportionBarComponent } from './proportion-bar.component';
       .ss-hero-label { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
       .ss-hero-sub { font-size: var(--mjf-label); color: var(--mj-text-muted); }
 
-      .ss-split { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+      .ss-split { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
       .ss-none { margin: 0; font-size: var(--mjf-meta); color: var(--mj-text-muted); }
 
       /* A vertical rule rather than a card of its own — these two are footnotes to the
@@ -105,7 +108,7 @@ import { FormsProportionBarComponent } from './proportion-bar.component';
       .ss-facts {
         display: flex;
         flex-direction: column;
-        gap: 14px;
+        gap: 12px;
         margin: 0;
         padding-left: var(--mjf-stack);
         border-left: 1px solid var(--mjf-rule);
@@ -114,7 +117,7 @@ import { FormsProportionBarComponent } from './proportion-bar.component';
       .ss-fact dt { font-size: var(--mjf-label); color: var(--mj-text-muted); }
       .ss-fact dd { margin: 0; font-size: var(--mjf-body); font-weight: 600; color: var(--mj-text-primary); white-space: nowrap; }
 
-      .ss-last { display: flex; align-items: center; gap: 7px; }
+      .ss-last { display: flex; align-items: center; gap: 8px; }
       .ss-live {
         flex: none;
         width: 7px;
@@ -156,6 +159,15 @@ export class FormsSummaryStatsComponent {
 
   public get inProgressLabel(): string {
     return `${plural(this.stats.partialResponses, 'other')} started but unfinished`;
+  }
+
+  /**
+   * Respondents a knockout question ended early. Stated apart from the unfinished ones: being
+   * screened out is the form doing its job, and folding it into "unfinished" made a well-targeted
+   * screener read as an abandonment problem.
+   */
+  public get screenedOutLabel(): string {
+    return `${plural(this.stats.disqualifiedResponses, 'other')} screened out`;
   }
 
   public get durationLabel(): string {

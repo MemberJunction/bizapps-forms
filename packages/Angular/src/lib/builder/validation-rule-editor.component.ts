@@ -6,10 +6,10 @@ import { FORMS_UI_CSS } from '../shared';
 import { rangeConflict } from './validation-bounds';
 
 const VALIDATION_EDITOR_CSS = /* css */ `
-.vre { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.vre { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .vre-full { grid-column: 1 / -1; }
-.vre-label { display: block; font-size: 0.75rem; font-weight: 600; color: var(--mj-text-secondary); margin-bottom: 3px; }
-.vre-empty { grid-column: 1 / -1; font-size: 0.8125rem; color: var(--mj-text-muted); margin: 0; }
+.vre-label { display: block; font-size: var(--mjf-label); font-weight: 600; color: var(--mj-text-secondary); margin-bottom: 4px; }
+.vre-empty { grid-column: 1 / -1; font-size: var(--mjf-meta); color: var(--mj-text-muted); margin: 0; }
 .vre-conflict { grid-column: 1 / -1; }
 .vre-conflict p { margin: 0; }
 `;

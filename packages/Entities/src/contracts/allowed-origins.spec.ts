@@ -7,6 +7,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  allowedOriginsRefusal,
+  ALLOWED_ORIGIN_GRAMMAR,
   authorAllowedOrigins,
   frameAncestorsDirective,
   isOriginAdmitted,
@@ -220,5 +222,47 @@ describe('authoring round-trip', () => {
       kind: 'allowlist',
       origins: ['https://a.example', 'https://b.example'],
     });
+  });
+});
+
+describe('allowedOriginsRefusal — what a WRITE of the column is held to', () => {
+  // The read path (parseAllowedOrigins) drops a bad entry and keeps the rest, because by then the
+  // value is already stored and dropping can only narrow the list. A write is the moment to refuse
+  // instead: the author is still there to fix it. FormDistributionEntityServer calls this for every
+  // writer, so the builder's own check is no longer the only thing standing between a typo and a
+  // silently narrower allowlist.
+
+  it('accepts NULL, blank and [] — the unrestricted spellings', () => {
+    for (const v of [null, undefined, '', '   ', '[]']) {
+      expect(allowedOriginsRefusal(v)).toBeNull();
+    }
+  });
+
+  it('accepts a list whose every entry is an origin, in any casing a browser would canonicalise', () => {
+    expect(allowedOriginsRefusal('["https://a.example", "HTTPS://B.example:443"]')).toBeNull();
+  });
+
+  it('refuses the whole value when ANY entry is unusable, naming each bad entry and the grammar', () => {
+    const refusal = allowedOriginsRefusal('["https://ok.example", "*.acme.com", "https://acme.com/careers"]');
+    expect(refusal).toContain('*.acme.com');
+    expect(refusal).toContain('https://acme.com/careers');
+    expect(refusal).not.toContain('https://ok.example,');
+    expect(refusal).toContain(ALLOWED_ORIGIN_GRAMMAR);
+  });
+
+  it('refuses a non-string entry, naming it', () => {
+    expect(allowedOriginsRefusal('["https://ok.example", 42]')).toContain('42');
+  });
+
+  it('refuses text that is not a JSON array of strings, with the read path\'s own reason', () => {
+    expect(allowedOriginsRefusal('https://acme.com')).toMatch(/not valid JSON/);
+    expect(allowedOriginsRefusal('{"origin":"https://acme.com"}')).toMatch(/must be a JSON array/);
+  });
+
+  it('agrees with the read path: a value it accepts never reads as closed', () => {
+    for (const v of ['["https://a.example"]', '["http://localhost:4200"]', null]) {
+      expect(allowedOriginsRefusal(v)).toBeNull();
+      expect(parseAllowedOrigins(v).kind).not.toBe('closed');
+    }
   });
 });

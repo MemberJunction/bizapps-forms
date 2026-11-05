@@ -1,0 +1,13 @@
+{
+  "entity": "MJ: User Notification Types",
+  "filePattern": "**/.*.json",
+  "pull": {
+    "createNewFileIfNotFound": true,
+    "newFileName": ".form-automation-failed-type.json",
+    "appendRecordsToExistingFile": true,
+    "updateExistingRecords": true,
+    "ignoreNullFields": true,
+    "ignoreVirtualFields": true,
+    "filter": "Name = 'Form Automation Failed'"
+  }
+}

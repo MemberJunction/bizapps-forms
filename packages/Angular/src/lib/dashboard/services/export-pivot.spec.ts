@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { buildExportColumns, buildExportMatrix } from './export-pivot';
-import { q, answer } from '../../shared/testing/entity-row-fixtures';
-import type { ResponseListRow } from '../../responses/response-models';
 import type { ExportDataRow } from '@memberjunction/export-engine';
+import type { FormsResponseListRow, FormsStoredAnswer } from '@mj-biz-apps/forms-entities';
+import { buildExportColumns, buildExportMatrix } from './export-pivot';
+import { q } from '../../shared/testing/entity-row-fixtures';
 
 /**
  * A cell of the matrix by column key. `ExportDataRow` is `Record<string, unknown> | unknown[]` —
@@ -15,29 +15,29 @@ function cell(row: ExportDataRow | undefined, key: string): unknown {
   return row && !Array.isArray(row) ? row[key] : undefined;
 }
 
-function row(responseId: string): ResponseListRow {
+function stored(questionId: string, columns: Partial<FormsStoredAnswer>): FormsStoredAnswer {
+  return { ID: `a-${questionId}`, QuestionID: questionId, TextValue: null, NumericValue: null, DateValue: null, BooleanValue: null, JSONValue: null, FileID: null, ...columns };
+}
+
+/** A `Forms.ListResponses` row as the export reads it: with its answers attached. */
+function row(responseId: string, answers: FormsStoredAnswer[]): FormsResponseListRow {
   return {
-    responseId,
-    status: 'Complete',
-    startedAt: new Date('2026-08-18T09:00:00Z'),
-    submittedAt: new Date('2026-08-18T09:02:00Z'),
-    respondent: 'Anonymous',
-    answeredCount: 1,
+    ResponseID: responseId,
+    Status: 'Complete',
+    FormVersionID: 'v1',
+    StartedAt: '2026-08-18T09:00:00.000Z',
+    SubmittedAt: '2026-08-18T09:02:00.000Z',
+    RespondentPersonID: null,
+    Respondent: 'Ada Lovelace',
+    AnsweredCount: answers.length,
+    Answers: answers,
   };
 }
 
 describe('buildExportColumns', () => {
   it('emits the fixed response columns, then one per question in form order', () => {
     const questions = [q('q-text', 'LongText'), q('q-rating', 'Rating')];
-    expect(buildExportColumns(questions).map((c) => c.name)).toEqual([
-      'responseId',
-      'status',
-      'startedAt',
-      'submittedAt',
-      'respondent',
-      'q-text',
-      'q-rating',
-    ]);
+    expect(buildExportColumns(questions).map((c) => c.name)).toEqual(['responseId', 'status', 'startedAt', 'submittedAt', 'respondent', 'q-text', 'q-rating']);
   });
 
   it('labels each question column by its prompt', () => {
@@ -47,50 +47,42 @@ describe('buildExportColumns', () => {
 });
 
 describe('buildExportMatrix', () => {
-  it('pivots one row per response, one cell per question', () => {
-    const matrix = buildExportMatrix(
-      [row('r1')],
-      [q('q-text', 'LongText')],
-      [answer('r1', 'q-text', { TextValue: 'Loved it' })],
-    );
-    expect(matrix[0]).toMatchObject({ responseId: 'r1', 'q-text': 'Loved it' });
+  it('pivots one row per response, one cell per question, with the server-derived respondent and Date instants', () => {
+    const matrix = buildExportMatrix([row('r1', [stored('q-text', { TextValue: 'Loved it' })])], [q('q-text', 'LongText')]);
+    expect(matrix[0]).toMatchObject({
+      responseId: 'r1',
+      respondent: 'Ada Lovelace',
+      submittedAt: new Date('2026-08-18T09:02:00.000Z'),
+      'q-text': 'Loved it',
+    });
+  });
+
+  it('matches answers to columns whatever GUID casing the server read them in', () => {
+    const id = 'aaaaaaaa-0000-4000-8000-000000000001';
+    const matrix = buildExportMatrix([row('r1', [stored(id.toUpperCase(), { TextValue: 'x' })])], [q(id, 'LongText')]);
+    expect(cell(matrix[0], id)).toBe('x');
   });
 
   it('leaves the cell blank for a question a response never answered', () => {
-    const matrix = buildExportMatrix([row('r1')], [q('q-text', 'LongText')], []);
+    const matrix = buildExportMatrix([row('r1', [])], [q('q-text', 'LongText')]);
     expect(cell(matrix[0], 'q-text')).toBe('');
   });
 
   it('exports a file answer as its file id — a joinable key, and the only evidence in the sheet', () => {
-    const matrix = buildExportMatrix(
-      [row('r1')],
-      [q('q-file', 'FileUpload')],
-      [answer('r1', 'q-file', { FileID: 'file-77' })],
-    );
+    const matrix = buildExportMatrix([row('r1', [stored('q-file', { FileID: 'file-77' })])], [q('q-file', 'FileUpload')]);
     // renderAnswer blanks a file answer for the UI (a bare GUID means nothing on screen),
     // but the sheet has no FormUpload join and the id is how an analyst rejoins MJ: Files.
     expect(cell(matrix[0], 'q-file')).toBe('file-77');
   });
 
-  it('carries no AI score or rationale into the sheet, even when the rows hold them', () => {
-    // `Forms: Analyze Written Responses` scores every ShortText answer, so these columns
-    // filled a spreadsheet with numbers like "First name — Score: 100". The data is still
-    // on the entity; the export deliberately does not reach for it.
-    const matrix = buildExportMatrix(
-      [row('r1')],
-      [q('q-text', 'LongText')],
-      [answer('r1', 'q-text', { TextValue: 'x', Score: 3, ScoreRationale: 'a long explanation' })],
-    );
-    const serialized = JSON.stringify(matrix);
-    expect(serialized).not.toContain('a long explanation');
-    expect(serialized).not.toContain('score');
-    expect(Object.keys(matrix[0])).toEqual([
-      'responseId',
-      'status',
-      'startedAt',
-      'submittedAt',
-      'respondent',
-      'q-text',
-    ]);
+  it('label-maps a choice answer, as the detail view does', () => {
+    const choice = q('q-colour', 'SingleChoice', 0, [{ id: 'o1', label: 'Green', value: 'g', displayOrder: 1 }]);
+    const matrix = buildExportMatrix([row('r1', [stored('q-colour', { TextValue: 'g' })])], [choice]);
+    expect(cell(matrix[0], 'q-colour')).toBe('Green');
+  });
+
+  it('writes no column the questions do not name — no AI score, no rationale', () => {
+    const matrix = buildExportMatrix([row('r1', [stored('q-text', { TextValue: 'x' })])], [q('q-text', 'LongText')]);
+    expect(Object.keys(matrix[0])).toEqual(['responseId', 'status', 'startedAt', 'submittedAt', 'respondent', 'q-text']);
   });
 });

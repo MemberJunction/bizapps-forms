@@ -2,7 +2,7 @@
  * OneQuestion (Typeform-style) render mode: one question at a time with Back/Next
  * stepping, a progress bar, and a final submit. The visible-question list is derived
  * live from the runtime, so conditional show/hide changes the path as the respondent
- * answers. Enter advances; focus moves to each new question for keyboard + SR users.
+ * answers. Enter in a text field advances; focus moves to each new question for keyboard + SR users.
  */
 import {
   ChangeDetectionStrategy,
@@ -20,7 +20,13 @@ import {
 import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 
 import { FormRuntime } from '../core/form-runtime';
+import { nothingToSubmit } from '../core/nothing-to-submit';
+import { uploadWaitNote } from '../core/upload-wait-note';
+import { focusIsOutside, focusOnChange } from '../core/focus-on-change';
+import { StepJudge } from '../core/settled-validation';
 import { clampCursor } from '../core/stepper';
+import { advancesOnEnter } from './enter-advances';
+import { FormUploadStore } from '../core/upload-store';
 import { FormProgressComponent } from './form-progress.component';
 import { FormQuestionComponent } from './questions/form-question.component';
 
@@ -81,6 +87,16 @@ export class FormOneQuestionComponent {
   );
   protected readonly isFirst = computed(() => this.index() === 0);
   protected readonly isLast = computed(() => this.index() >= this.total() - 1);
+
+  /** The widget's upload store: shared with the step judge and the ready line (#328). */
+  private readonly uploads = inject(FormUploadStore);
+
+  /** Judges a question only once its upload has landed (#248) — and only once per tap. */
+  private readonly stepJudge = new StepJudge(
+    this.uploads,
+    () => this.current()?.id ?? null,
+  );
+
   /**
    * Progress comes from the runtime, the same as Scroll mode.
    *
@@ -112,9 +128,20 @@ export class FormOneQuestionComponent {
       this.runtime().isFormValid() &&
       // ...and the submit would actually be ACCEPTED. `isFormValid` only asks whether any field is
       // in error, which nothing is on a form of blank optional questions — so without this the bar
-      // said "You can submit now." beside the #124 banner refusing that exact submit.
-      !this.runtime().wouldSubmitNothing(),
+      // said "You can submit now." beside the #124 banner refusing that exact submit. An upload on
+      // its way counts as an answer, matching the submit gate (#328).
+      !nothingToSubmit(this.runtime(), this.uploads),
   );
+
+  /** "Still uploading — you can press Submit/Next" while this question's file is on the wire. */
+  protected readonly uploadWaitNote = computed(() => {
+    const id = this.current()?.id;
+    return uploadWaitNote({
+      uploading: !!id && this.uploads.isUploadingAmong([id]),
+      isLast: this.isLast(),
+      pressed: this.uploads.waiting(),
+    });
+  });
 
   constructor() {
     // When conditional logic resizes the path, re-clamp the stored cursor so it never
@@ -133,14 +160,15 @@ export class FormOneQuestionComponent {
     });
 
     // Move focus to the current question only when the question itself changes — not on
-    // every answer edit — so typing or selecting an answer never yanks focus mid-input.
-    let lastFocusedId: string | null = null;
+    // every answer edit — so typing or selecting an answer never yanks focus mid-input. The first
+    // question does not take focus from a control outside the form that holds it.
+    const shouldFocus = focusOnChange();
     effect(() => {
       const c = this.current();
-      if (c && c.id !== lastFocusedId) {
-        lastFocusedId = c.id;
-        queueMicrotask(() => this.focusCurrent());
-      }
+      if (!c) return;
+      queueMicrotask(() => {
+        if (shouldFocus(c.id, focusIsOutside(this.hostRef.nativeElement))) this.focusCurrent();
+      });
     });
   }
 
@@ -150,7 +178,8 @@ export class FormOneQuestionComponent {
 
   /**
    * Touched means "left the field", not "typed in it" — see the note on the scroll renderer.
-   * `onNext` below still marks touched explicitly, because trying to advance IS a commit.
+   * `onNext` below still touches the question (through the judge), because trying to advance IS
+   * a commit.
    */
   protected onBlur(question: PublishedFormQuestion, event: FocusEvent): void {
     // `focusout` bubbles, which is why one binding covers every control a question renders — but
@@ -167,14 +196,31 @@ export class FormOneQuestionComponent {
     this.runtime().markTouched(question.id);
   }
 
-  protected onNext(): void {
+  /**
+   * Validate the current question, then submit (last step) or advance.
+   *
+   * Waits for the question's upload first (#248): a drawing still on the wire has no answer yet,
+   * and judging it now would call it "required". The visible value is committed BEFORE the wait.
+   * A `stale` verdict (a second tap or Enter, or Back during the wait) does nothing; see
+   * {@link StepJudge}.
+   *
+   * The step is held by EITHER an `invalid` verdict or `errorFor`. `errorFor` because the verdict's
+   * `areValid` ignores a server refusal, and this step has always been held by one until the answer
+   * changes. The verdict because only it knows about a failed upload on an optional question, which
+   * has no `errorFor` but must not be advanced past (and is left untouched by the judge, so its
+   * quiet failure line is not contradicted by "required").
+   */
+  protected async onNext(): Promise<void> {
     const q = this.current();
     if (!q) {
       return;
     }
     this.commitVisibleValues();
-    this.runtime().markTouched(q.id);
-    if (this.runtime().errorFor(q)) {
+    const verdict = await this.stepJudge.judge(this.runtime(), [q]);
+    if (verdict === 'stale') {
+      return;
+    }
+    if (verdict === 'invalid' || this.runtime().errorFor(q)) {
       this.focusCurrent();
       return;
     }
@@ -200,12 +246,17 @@ export class FormOneQuestionComponent {
     this.index.set(clampCursor(next, this.total()));
   }
 
-  /** Enter on the question advances (except in a multiline textarea). */
+  /**
+   * Enter in a single-line text field advances. Enter on a control — Back, a choice, Retry,
+   * "Choose a file" — is left alone so the control does its own job; the old textarea-only guard
+   * made Enter on Back go forward, and on the last question submit. The Enter that confirms an IME
+   * composition (Japanese, Chinese) is the input method's, not "next".
+   */
   protected onKeydown(event: KeyboardEvent): void {
-    const target = event.target as HTMLElement | null;
-    if (event.key === 'Enter' && target?.tagName !== 'TEXTAREA') {
+    if (event.isComposing) return;
+    if (event.key === 'Enter' && advancesOnEnter(event.target as Element | null)) {
       event.preventDefault();
-      this.onNext();
+      void this.onNext();
     }
   }
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { dateAnswerInstant, dateAnswerText } from '@mj-biz-apps/forms-entities/contracts';
-import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
+import { dateAnswerInstant, dateAnswerText, FORM_QUESTION_TYPES, validateAnswers } from '@mj-biz-apps/forms-entities/contracts';
+import type { AnswerValue, FormQuestionType, PublishedFormQuestion } from '@mj-biz-apps/forms-entities/contracts';
 import { toAnswerInputs } from './answer-value';
 
 function q(id: string, type: PublishedFormQuestion['type']): PublishedFormQuestion {
@@ -165,5 +165,115 @@ describe('toAnswerInputs — the types added with element parity', () => {
     expect(toAnswerInputs(questions, new Map<string, AnswerValue>([['multi', 'only']]))).toEqual([
       { questionId: 'multi', jsonValue: ['only'] },
     ]);
+  });
+});
+
+describe('toAnswerInputs — numeric columns', () => {
+  it('sends a blank as the text it is, never as Number(" ") === 0', () => {
+    expect(toAnswerInputs([q('num', 'Number')], new Map([['num', ' ']]))).toEqual([{ questionId: 'num', textValue: ' ' }]);
+  });
+
+  it('still sends a decimal spelling as the number', () => {
+    expect(toAnswerInputs([q('num', 'Number')], new Map([['num', ' 42 ']]))).toEqual([{ questionId: 'num', numericValue: 42 }]);
+  });
+});
+
+/**
+ * The server now refuses an answer that is not in the form its question's TYPE stores, in every mode
+ * (#303 Task 8 fix round 2, `contracts/answer-shape.ts`). This pins the other side of that promise:
+ * every answer THIS widget builds, for every answerable type, passes the same rule — so a respondent
+ * using the real widget is never refused by it. A type added to the contract without a legitimate
+ * value here fails the `Record<FormQuestionType, …>` below at compile time.
+ */
+describe('every answer the widget builds is in the shape the server accepts', () => {
+  const choices = [
+    { id: 'o1', label: 'A', value: 'a', displayOrder: 1 },
+    { id: 'o2', label: 'B', value: 'b', displayOrder: 2 },
+  ];
+  const matrix = [
+    { id: 'r1', label: 'Row', value: 'r1', displayOrder: 1, matrixAxis: 'Row' as const },
+    { id: 'c1', label: 'Col 1', value: 'c1', displayOrder: 2, matrixAxis: 'Column' as const },
+    { id: 'c2', label: 'Col 2', value: 'c2', displayOrder: 3, matrixAxis: 'Column' as const },
+  ];
+  /** One legitimate held value per type — what the widget's controls produce. `undefined`: not answerable. */
+  const legitimate: Record<FormQuestionType, AnswerValue | undefined> = {
+    ShortText: 'Ada Lovelace',
+    LongText: 'A longer answer.',
+    Email: 'ada@example.com',
+    Phone: '+1 555 010 0199',
+    Website: 'https://example.com',
+    Number: 12.5,
+    SingleChoice: 'a',
+    MultiChoice: ['a', 'b'],
+    Dropdown: 'b',
+    PictureChoice: 'a',
+    Rating: 4,
+    NPS: 9,
+    OpinionScale: 3,
+    Ranking: ['b', 'a'],
+    Matrix: { r1: 'c1' },
+    YesNo: true,
+    Checkbox: true,
+    Legal: true,
+    Date: '2026-10-13',
+    Time: '14:30',
+    Address: { line1: '1 Main Street', city: 'Springfield', country: 'US' },
+    ContactInfo: { firstName: 'Ada', email: 'ada@example.com' },
+    FileUpload: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    Doodle: 'aaaaaaaa-bbbb-4ccc-8ddd-ffffffffffff',
+    Statement: undefined,
+  };
+
+  for (const type of FORM_QUESTION_TYPES) {
+    const value = legitimate[type];
+    if (value === undefined) {
+      continue;
+    }
+    it(`${type}: the built answer passes validateAnswers in every mode`, () => {
+      const options = type === 'Matrix' ? matrix : ['SingleChoice', 'MultiChoice', 'Dropdown', 'PictureChoice', 'Ranking'].includes(type) ? choices : [];
+      const question: PublishedFormQuestion = { ...q('q', type), options };
+      const inputs = toAnswerInputs([question], new Map([['q', value]]));
+      expect(inputs).toHaveLength(1);
+      const definition = {
+        pages: [{ id: 'p', displayOrder: 1, questions: [question] }],
+      };
+      for (const mode of ['complete', 'draft', 'screened-out'] as const) {
+        expect(validateAnswers(definition, inputs, mode).errors).toEqual([]);
+      }
+    });
+  }
+
+  it('a held number with more decimal places than the server stores is refused by the same rule, with the respondent-facing message', () => {
+    const question = q('q', 'Number');
+    const inputs = toAnswerInputs([question], new Map([['q', 1.23456]]));
+    expect(validateAnswers({ pages: [{ id: 'p', displayOrder: 1, questions: [question] }] }, inputs, 'draft').errors).toEqual([
+      { questionId: 'q', message: 'Use at most 4 decimal places.' },
+    ]);
+  });
+});
+
+/**
+ * #303 Task 8 fix round 4 (controller ruling): a date-time with no offset is refused in every mode,
+ * because the instant it names depends on the host's time zone. The widget has no date-time question
+ * type: `Date` sends the bare calendar day `<input type="date">` emits and `Time` the bare clock
+ * reading of `<input type="time">`, neither of which carries — or needs — an offset. Pinned so a
+ * future date-time control cannot start sending a zone-less value without this failing.
+ */
+describe('the widget never sends a zone-less date-time (fix round 4)', () => {
+  it.each([
+    ['Date', '2026-10-13'],
+    ['Time', '14:30'],
+  ] as const)('%s goes on the wire exactly as its control emits it, and passes in every mode', (type, held) => {
+    const question = q('q', type);
+    const inputs = toAnswerInputs([question], new Map([['q', held]]));
+    expect(inputs).toEqual([{ questionId: 'q', dateValue: held }]);
+    for (const mode of ['complete', 'draft', 'screened-out'] as const) {
+      expect(validateAnswers({ pages: [{ id: 'p', displayOrder: 1, questions: [question] }] }, inputs, mode).errors).toEqual([]);
+    }
+  });
+
+  it('every date-column question type is one of those two', () => {
+    const dateColumn = FORM_QUESTION_TYPES.filter((type) => toAnswerInputs([q('q', type)], new Map([['q', 'x']]))[0]?.dateValue !== undefined);
+    expect(dateColumn).toEqual(['Date', 'Time']);
   });
 });

@@ -191,7 +191,9 @@ Without `magicLink` forms still publish, but every public link answers **409** �
 session can be minted. Forms checks all of this at startup — `magicLink` and the role, the
 provisioning user, and Turnstile on a host where a form or link requires a captcha — and logs one
 `[Forms] Anonymous respondent path is NOT ready: …` line per problem, naming the exact setting.
-A clean boot prints none of them.
+A clean boot prints none of them. `mj app install` and `mj app upgrade` (MJ 6.2 or later) also
+check `magicLink` at the end of the install and print this block when it is missing; they never
+change your config.
 
 | Host requirement | Why |
 |---|---|

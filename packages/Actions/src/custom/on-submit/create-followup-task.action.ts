@@ -29,10 +29,14 @@ import type {
   mjBizAppsTasksTaskTypeEntity,
 } from '@mj-biz-apps/tasks-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
-import { saveOrExplain } from '../shared/save-entity';
+import {
+  type ActionDataProvider,
+  type FormResponseContext,
+  loadFormResponseContext,
+  resolveActionProvider,
+  saveOrExplain,
+} from '@mj-biz-apps/forms-core-entities-server';
 import { explainMissingEntityClasses } from '../shared/generated-entity';
-import { loadFormResponseContext, type FormResponseContext } from '../shared/form-response-context';
-import { resolveActionProvider, type ActionDataProvider } from '../shared/action-provider';
 
 const ENTITY = {
   Task: 'MJ_BizApps_Tasks: Tasks',

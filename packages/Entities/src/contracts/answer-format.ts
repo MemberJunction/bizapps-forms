@@ -23,11 +23,11 @@
  * bounds, plus the `Date` / `Time` cases here, because those are the one column the row cannot
  * store an unparsed value in. A draft can never reach `Complete` without the full check.
  */
-import { dateAnswerInstant } from './answer-date';
+import { dateAnswerInstant, isZonelessDateTime } from './answer-date';
 import { isAnswerSupplied } from './conditional-rule';
 import type { AnswerValue } from './conditional-rule';
-import { ADDRESS_FIELDS, CONTACT_INFO_FIELDS, questionTypeBehavior } from './question-types';
-import type { FormQuestionType } from './question-types';
+import { ADDRESS_FIELDS, CONTACT_INFO_FIELDS, matrixAxisOf, questionTypeBehavior } from './question-types';
+import type { FormQuestionType, MatrixAxis } from './question-types';
 import type { JSONValue } from './json-value';
 
 /**
@@ -52,7 +52,7 @@ export interface AnswerFormatQuestion {
 /** The parts of an authored option this module reads. */
 export interface AnswerFormatOption {
   value: string;
-  matrixAxis?: 'Row' | 'Column';
+  matrixAxis?: MatrixAxis;
 }
 
 /** Default `OpinionScale` bounds when the author set none. Must match what the widget renders. */
@@ -199,7 +199,7 @@ export function validateAnswerFormat(
     case 'Number':
     case 'Rating':
     case 'NPS':
-      return coerceAnswerToNumber(value) === undefined ? 'Enter a number.' : undefined;
+      return coerceAnswerToNumber(value) === undefined ? NOT_A_NUMBER_MESSAGE : undefined;
     case 'OpinionScale':
       return validateOpinionScale(question, value);
     case 'SingleChoice':
@@ -213,7 +213,7 @@ export function validateAnswerFormat(
     case 'Website':
       return isWebUrl(String(value)) ? undefined : 'Enter a valid web address.';
     case 'Date':
-      return isStorableDate(type, value) ? undefined : 'Enter a valid date.';
+      return isStorableDate(type, value) ? undefined : dateRefusal(value);
     case 'Time':
       return isStorableDate(type, value) ? undefined : 'Enter a valid time.';
     case 'Checkbox':
@@ -315,6 +315,30 @@ export function isRequiredSatisfied(type: FormQuestionType, value: AnswerValue):
 }
 
 /**
+ * The rows of a `Matrix` answer that have no answer yet, as row VALUES in author order.
+ *
+ * Exists because "required" and "answered" mean different things for a Matrix. Logic rules ask
+ * {@link isAnswerSupplied}, which counts a Matrix answered once ANY row has a value — and that has to
+ * stay, or every published "if Q3 is answered" rule would change meaning. A REQUIRED Matrix, though,
+ * accepted one row of five, which no respondent or author reads as "answered the question".
+ *
+ * Empty — "nothing missing" — for any other type, and for a Matrix with no columns or no rows: such
+ * a question cannot be completed at all, and the plain required check already refuses it empty.
+ */
+export function missingMatrixRows(question: AnswerFormatQuestion, value: AnswerValue): string[] {
+  if (question.type !== 'Matrix') {
+    return [];
+  }
+  const options = question.options ?? [];
+  const rows = options.filter((o) => matrixAxisOf(o) === 'Row').map((o) => o.value);
+  if (rows.length === 0 || !options.some((o) => matrixAxisOf(o) === 'Column')) {
+    return [];
+  }
+  const answered = isMatrixAnswer(value) ? (value as Record<string, string | string[]>) : {};
+  return rows.filter((row) => !isAnswerSupplied(answered[row]));
+}
+
+/**
  * How much of one question is filled in, 0..1.
  *
  * All-or-nothing for a scalar question, and PER SUB-FIELD for a composite. That distinction is
@@ -323,17 +347,25 @@ export function isRequiredSatisfied(type: FormQuestionType, value: AnswerValue):
  * and company watched the progress bar move once and then sit still through four more fields —
  * three consecutive actions with no feedback, which teaches them their input is not registering.
  *
+ * A Matrix is credited PER AUTHORED ROW, for the reason {@link missingMatrixRows} exists: a
+ * required Matrix is complete only when every row is answered, and a bar that read 100% after one
+ * row of five would contradict the Next refusal that follows it.
+ *
  * Progress is the only caller. Validation deliberately keeps the coarser test: a partly-filled
  * ContactInfo IS an answer, and the form is submittable on it.
  */
-export function answerCompleteness(type: FormQuestionType, value: AnswerValue): number {
-  const fields = compositeFieldsFor(type);
+export function answerCompleteness(question: AnswerFormatQuestion, value: AnswerValue): number {
+  const fields = compositeFieldsFor(question.type);
   if (fields && isStringRecord(value)) {
     const parts = value as Record<string, string>;
     const filled = fields.filter((f) => isAnswerSupplied(parts[f])).length;
     return filled / fields.length;
   }
-  return isRequiredSatisfied(type, value) ? 1 : 0;
+  if (!isRequiredSatisfied(question.type, value)) {
+    return 0;
+  }
+  const rows = (question.options ?? []).filter((o) => matrixAxisOf(o) === 'Row').length;
+  return question.type === 'Matrix' && rows > 0 ? (rows - missingMatrixRows(question, value).length) / rows : 1;
 }
 
 /** The fixed sub-field list of a composite type, or undefined for everything else. */
@@ -398,11 +430,11 @@ export function validateCompositeParts(
  */
 function offeredValues(
   question: AnswerFormatQuestion,
-  axis?: 'Row' | 'Column',
+  axis?: MatrixAxis,
 ): ReadonlySet<string> | null {
   const options = question.options ?? [];
   const matching = axis
-    ? options.filter((o) => (o.matrixAxis ?? 'Row') === axis)
+    ? options.filter((o) => matrixAxisOf(o) === axis)
     : options;
   return matching.length > 0 ? new Set(matching.map((o) => o.value)) : null;
 }
@@ -477,7 +509,7 @@ function validateMatrix(question: AnswerFormatQuestion, value: AnswerValue): str
 function validateOpinionScale(question: AnswerFormatQuestion, value: AnswerValue): string | undefined {
   const numeric = coerceAnswerToNumber(value);
   if (numeric === undefined) {
-    return 'Enter a number.';
+    return NOT_A_NUMBER_MESSAGE;
   }
   const { min, max } = opinionScaleBounds(question.settings);
   const outOfRange = !Number.isInteger(numeric) || numeric < min || numeric > max;
@@ -575,6 +607,17 @@ function isStorableDate(type: FormQuestionType, value: AnswerValue): boolean {
   return typeof value === 'string' && dateAnswerInstant(type, value) !== undefined;
 }
 
+/** Said of a date-time that names no offset — refused in every mode, see `isZonelessDateTime`. */
+export const ZONELESS_DATE_TIME_MESSAGE = 'Include a time zone with the time, such as Z or +02:00.';
+
+/**
+ * Why a `Date` answer cannot be stored. A zone-less date-time gets its own sentence because it is
+ * otherwise well formed — "Enter a valid date." would send its sender looking for the wrong fault.
+ */
+function dateRefusal(value: AnswerValue): string {
+  return typeof value === 'string' && isZonelessDateTime(value) ? ZONELESS_DATE_TIME_MESSAGE : 'Enter a valid date.';
+}
+
 /**
  * A decimal number as a person would write one: optional sign, digits with an optional
  * fractional part (or a bare `.5`), and optional scientific-notation exponent.
@@ -583,6 +626,9 @@ function isStorableDate(type: FormQuestionType, value: AnswerValue): boolean {
  * reads back — see {@link coerceAnswerToNumber}.
  */
 const DECIMAL_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+/** What a value that is not a number is told — by the type check, and by the draft rule for numeric columns. */
+export const NOT_A_NUMBER_MESSAGE = 'Enter a number.';
 
 /**
  * Coerce to a finite number, or `undefined` when the value is not numeric at all.

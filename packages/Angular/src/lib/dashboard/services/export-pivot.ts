@@ -2,18 +2,12 @@
  * The response × question pivot behind the CSV/Excel export.
  *
  * Pure and Angular-free so the shape of the exported file is unit-testable — the service
- * around it only decides format and filename and hands the result to MJ's `ExportService`.
+ * around it pages the rows in through `Forms.ListResponses` and hands the result to MJ's
+ * `ExportService`.
  */
-import type {
-  mjBizAppsFormsFormResponseAnswerEntityType,
-  PublishedFormQuestion,
-} from '@mj-biz-apps/forms-entities';
+import { answerColumnFor, foldQuestionId, renderAnswer, type FormsResponseListRow, type FormsStoredAnswer, type PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 import type { ExportColumn, ExportData } from '@memberjunction/export-engine';
-import { answerColumnFor } from '@mj-biz-apps/forms-entities';
-import { renderAnswer } from '../../shared/answer-values';
-import type { ResponseListRow } from '../../responses/response-models';
-
-type AnswerRow = mjBizAppsFormsFormResponseAnswerEntityType;
+import { toDate } from '../../shared/runview-dates';
 
 /** The fixed per-response columns that precede the question matrix. */
 const RESPONSE_COLUMNS: ExportColumn[] = [
@@ -42,7 +36,7 @@ export function buildExportColumns(questions: PublishedFormQuestion[]): ExportCo
  * the id is not noise but a JOINABLE KEY into `MJ: Files`, so blanking it would drop the
  * only evidence in the sheet that a file was submitted at all.
  */
-function exportAnswerValue(q: PublishedFormQuestion, a: AnswerRow): string {
+function exportAnswerValue(q: PublishedFormQuestion, a: FormsStoredAnswer): string {
   // Keyed on the answer COLUMN, not the type name, so `Doodle` — a file answer produced by a
   // canvas rather than a picker — exports its joinable id like any other file instead of the
   // empty string `renderAnswer` gives it.
@@ -53,41 +47,29 @@ function exportAnswerValue(q: PublishedFormQuestion, a: AnswerRow): string {
 }
 
 /**
- * One row per response, one cell per column.
+ * One row per response, one cell per column, from the answers each row carries
+ * (`Forms.ListResponses` with `IncludeAnswers`).
+ *
+ * Question ids are compared folded: the server reads hand back the database's GUID casing, which
+ * need not be the definition snapshot's.
  *
  * The `Score` / `ScoreRationale` columns written by `Forms: Analyze Written Responses` are
- * deliberately absent. That automation scores every ShortText answer, so a form asking for
- * a first name got "Soham — Score: 100" in the sheet: a number with no meaning sitting
- * next to one that has some. The columns still exist on the entity, so re-adding them is a
- * display decision, not a data-recovery job.
+ * deliberately absent (the operation does not even send them). That automation scores every
+ * ShortText answer, so a form asking for a first name got "Score: 100" beside it in the sheet: a
+ * number with no meaning sitting next to one that has some.
  */
-export function buildExportMatrix(
-  responses: ResponseListRow[],
-  questions: PublishedFormQuestion[],
-  answers: AnswerRow[],
-): ExportData {
-  const answersByResponse = new Map<string, AnswerRow[]>();
-  for (const a of answers) {
-    const arr = answersByResponse.get(a.ResponseID);
-    if (arr) arr.push(a);
-    else answersByResponse.set(a.ResponseID, [a]);
-  }
-
-  return responses.map((r) => {
-    const answerByQuestion = new Map<string, AnswerRow>();
-    for (const a of answersByResponse.get(r.responseId) ?? []) {
-      answerByQuestion.set(a.QuestionID, a);
-    }
-
+export function buildExportMatrix(rows: readonly FormsResponseListRow[], questions: readonly PublishedFormQuestion[]): ExportData {
+  return rows.map((r) => {
+    const answerByQuestion = new Map((r.Answers ?? []).map((a) => [foldQuestionId(a.QuestionID), a]));
     const row: Record<string, unknown> = {
-      responseId: r.responseId,
-      status: r.status,
-      startedAt: r.startedAt,
-      submittedAt: r.submittedAt,
-      respondent: r.respondent,
+      responseId: r.ResponseID,
+      status: r.Status,
+      startedAt: toDate(r.StartedAt),
+      submittedAt: toDate(r.SubmittedAt),
+      respondent: r.Respondent,
     };
     for (const q of questions) {
-      const a = answerByQuestion.get(q.id);
+      const a = answerByQuestion.get(foldQuestionId(q.id));
       row[q.id] = a ? exportAnswerValue(q, a) : '';
     }
     return row;

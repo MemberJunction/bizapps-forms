@@ -71,10 +71,16 @@ describe('the add-content bar belongs to the selected question', () => {
     expect(article).toMatch(/gap:/);
   });
 
-  it('is hidden while a question is being dragged', () => {
-    // The placeholder and the preview are clones of the article. Left visible, a dragged card
-    // would tow an add bar around with it, and the placeholder would reserve space for one.
-    expect(css()).toMatch(/cdk-drop-list-dragging[^{]*\.fb-q-add[^{]*\{[^}]*display:\s*none/);
+  it('is hidden while a question is being dragged, without moving anything', () => {
+    // Hidden, because the placeholder is a clone of the article and would otherwise show a bar.
+    // NOT removed from layout: CDK measures every connected list when the drag starts, and this
+    // rule applies a moment later. `display: none` pulled everything below the selected question
+    // up by the bar's height (52px measured), so the lists CDK had measured were no longer where
+    // it thought — an empty section, 48px tall, sat entirely outside its own cached rect and
+    // could never be dropped into (click-through observation 10).
+    const rule = /cdk-drop-list-dragging[^{]*\.fb-q-add[^{]*\{([^}]*)\}/.exec(css())?.[1] ?? '';
+    expect(rule).toMatch(/visibility:\s*hidden/);
+    expect(rule).not.toMatch(/display:\s*none/);
   });
 
   it('renders inside the article, so the drop list only ever sees cdkDrag children', () => {
@@ -88,9 +94,13 @@ describe('the add-content bar belongs to the selected question', () => {
   });
 
   it('does not steal the click that selects the question', () => {
+    // Since UI audit F05 the card selects through mjfRowActivate, which ignores a click that starts
+    // in a button, so the bar needs no stopPropagation of its own.
     const source = html();
     const bar = source.indexOf('class="fb-q-add"');
-    expect(source.slice(bar, bar + 600)).toMatch(/\(click\)="\$event\.stopPropagation\(\);/);
+    const cardAt = source.lastIndexOf('<article', bar);
+    expect(source.slice(cardAt, source.indexOf('>', cardAt))).toContain('(mjfRowActivate)="selectQuestion(node)"');
+    expect(source.slice(bar, bar + 600)).toMatch(/<button[\s\S]*\(click\)="openTypePicker\(page, \$index \+ 1\)"/);
   });
 
   it('leaves no trace of the gutter affordance it replaced', () => {
@@ -113,13 +123,43 @@ describe('the add-content bar belongs to the selected question', () => {
   });
 });
 
-describe('the insert reuses the existing write paths', () => {
-  it('renumbers through the same call the drag path uses, rather than writing DisplayOrder itself', () => {
-    const builder = read('form-builder.component.ts');
-    const insert = /protected async insertQuestionAt\([\s\S]*?\n  \}/.exec(builder)?.[0] ?? '';
-    expect(insert).toMatch(/state\.persistQuestionOrder\(page\)/);
-    expect(insert).not.toMatch(/DisplayOrder\s*=/);
+describe('the add-content bar above the first question', () => {
+  // The executing half (which question offers it, and where the insert lands) is in
+  // `form-builder.verbs.spec.ts`; this pins only that the template asks that method and opens seam 0.
+  const aboveBar = (): string => {
+    const source = html();
+    const start = source.indexOf('class="fb-q-add fb-q-add--above"');
+    expect(start).toBeGreaterThan(-1);
+    return source.slice(source.lastIndexOf('@if', start), source.indexOf('</div>', start));
+  };
+
+  it('is gated on offersInsertAbove and opens seam 0', () => {
+    const bar = aboveBar();
+    expect(bar).toMatch(/@if \(offersInsertAbove\(page, node\)\)/);
+    expect(bar).toMatch(/openTypePicker\(page, 0\)/);
+    expect(bar).toMatch(/<button/);
   });
+
+  it('has its own rule, in design tokens, with the footer bar\'s spacing and no hover gate', () => {
+    const rule = /\.fb-q-add--above[^{]*\{([^}]*)\}/.exec(css())?.[1] ?? '';
+    expect(rule).toMatch(/margin-block:\s*0/);
+    expect(rule).toMatch(/gap:\s*var\(--mjf-gap-sm\)/);
+    expect(rule).not.toMatch(/#[0-9a-f]{3,8}\b|rgb|opacity:\s*0/i);
+  });
+
+  it('renders inside the article, so the drop list still sees only cdkDrag children', () => {
+    const source = html();
+    const bar = source.indexOf('class="fb-q-add fb-q-add--above"');
+    const openedAt = source.lastIndexOf('<article', bar);
+    expect(source.slice(openedAt, source.indexOf('>', openedAt))).toMatch(/cdkDrag/);
+    expect(source.indexOf('</article>', bar)).toBeGreaterThan(bar);
+  });
+});
+
+describe('the insert runs the checks a drag runs', () => {
+  // "Renumbers through the same call the drag path uses" is gone with the call: the insert is ONE
+  // save that creates the question at the seam and renumbers below it (#303), executed in
+  // `form-builder.verbs.spec.ts` and `builder-state.structure.spec.ts`.
 
   it('runs the same rule-damage diff a costly drag runs', () => {
     // `reorderQuestion` states it is the only path able to invert a pair of surviving questions,
@@ -280,6 +320,13 @@ describe('an insert leaves focus on the question it created', () => {
     const body = source.slice(method, source.indexOf('\n  }', method));
     expect(body).toMatch(/afterNextRender\(/);
     expect(body).toMatch(/data-question-id="\$\{questionId\}"/);
+  });
+
+  it('focuses the card title button, because the card itself is no longer a tab stop (F05)', () => {
+    const source = componentTs();
+    const method = source.indexOf('private focusQuestionCard');
+    const body = source.slice(method, source.indexOf('\n  }', method));
+    expect(body).toMatch(/data-question-id="\$\{questionId\}"\] button\.fb-q-label/);
   });
 });
 

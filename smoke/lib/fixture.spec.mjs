@@ -123,11 +123,11 @@ check(
 
 /** The raw value the server validates, from the fixture's typed-column answer shape. */
 function rawValueOf(answer) {
-  if ('jsonValue' in answer) return JSON.parse(answer.jsonValue);
-  if ('numericValue' in answer) return answer.numericValue;
-  if ('booleanValue' in answer) return answer.booleanValue;
-  if ('dateValue' in answer) return answer.dateValue;
-  return answer.textValue;
+  if ('JSONValue' in answer) return JSON.parse(answer.JSONValue);
+  if ('NumericValue' in answer) return answer.NumericValue;
+  if ('BooleanValue' in answer) return answer.BooleanValue;
+  if ('DateValue' in answer) return answer.DateValue;
+  return answer.TextValue;
 }
 
 /** A question of `type` with two offered options and default settings — the shape a real form has. */

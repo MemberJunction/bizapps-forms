@@ -1,9 +1,9 @@
 /**
  * When a `ValidationRule`'s two bounds contradict each other (issue #80).
  *
- * A rule carries its constraints as independent fields and both validators — the widget's
- * `validateRule` and the server's `validation.service` — apply them one after another, lower
- * bound first. That is right for every pair an author means: nothing checks that the pair as a
+ * A rule carries its constraints as independent fields and the validator — the contracts'
+ * `validateAnswer`, which the widget and the server both run — applies them one after another,
+ * lower bound first. That is right for every pair an author means: nothing checks that the pair as a
  * whole is satisfiable, because nothing needed to. Set a minimum above the maximum and every
  * possible answer fails one of the two, in sequence: `100` is told "Must be at least 500." and
  * `500` is told "Must be at most 120." The respondent is handed two mutually exclusive

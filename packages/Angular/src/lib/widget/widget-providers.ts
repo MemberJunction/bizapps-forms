@@ -17,7 +17,7 @@ import type { Provider } from '@angular/core';
 import { FORMS_API_CONFIG, type FormsApiConfig } from './api/forms-api.config';
 import { FORMS_API_SERVICE } from './api/forms-api.interface';
 import { FormsGraphQLApiService } from './api/forms-api.graphql.service';
-import { FormsMockApiService } from './api/forms-api.mock.service';
+import { FormsOfflineApiService } from './api/forms-api.offline.service';
 import { FormUploadService } from './api/form-upload.service';
 import { FORMS_UPLOAD_SERVICE } from './api/form-upload.interface';
 import { FormsMockUploadService } from './api/form-upload.mock.service';
@@ -26,10 +26,10 @@ import { FormsMockUploadService } from './api/form-upload.mock.service';
  * Providers for one `<mj-form>` host.
  *
  * Both transports are chosen from the config rather than passed in: a config with no
- * `graphqlUrl` has nowhere to send a submission OR a file, so the mocks are the only
- * correct choice and callers cannot get the pairing wrong. That is what makes this safe
- * for the preview, which passes an empty config precisely so a trial submission writes
- * nothing.
+ * `graphqlUrl` has nowhere to send a submission OR a file, so callers cannot get the pairing
+ * wrong. With no endpoint the form transport is {@link FormsOfflineApiService}, which refuses
+ * every call — the preview passes an empty config and never calls it (a full draft sends
+ * nothing) — and uploads go to the in-memory mock, so a preview Doodle or file still works.
  *
  * Read and upload are deliberately branched on the SAME expression. They were once
  * branched on nothing at all — the uploader was bound unconditionally — and the preview
@@ -42,14 +42,14 @@ export function formsWidgetProviders(config: FormsApiConfig): Provider[] {
     { provide: FORMS_API_CONFIG, useValue: config },
     {
       provide: FORMS_API_SERVICE,
-      useClass: config.graphqlUrl ? FormsGraphQLApiService : FormsMockApiService,
+      useClass: config.graphqlUrl ? FormsGraphQLApiService : FormsOfflineApiService,
     },
     {
       provide: FORMS_UPLOAD_SERVICE,
       useClass: config.graphqlUrl ? FormUploadService : FormsMockUploadService,
     },
     FormsGraphQLApiService,
-    FormsMockApiService,
+    FormsOfflineApiService,
     FormUploadService,
     FormsMockUploadService,
   ];

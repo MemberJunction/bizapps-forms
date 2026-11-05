@@ -3,58 +3,88 @@ import {
   Component,
   EventEmitter,
   Input,
+  OnDestroy,
   OnInit,
   Output,
   computed,
-  inject,
   signal,
 } from '@angular/core';
-import type { PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
-import { FORMS_UI_CSS } from '../shared';
-import { ResponsesDataService } from './responses-data.service';
+import { LogError } from '@memberjunction/core';
+import { FORMS_UI_CSS, failureMessage } from '../shared';
+import { FORMS_ENTITY } from '../shared/entity-names';
+import { onFormsWrite, type FormsWriteSubscription } from '../shared/forms-writes';
 import { resolveResponsesView } from './responses-view-state';
-import { buildResponseRows } from './response-aggregations';
-import type { ResponseDetail, ResponseListRow, ResponseRecordLink } from './response-models';
+import { readResponseDetail, readResponsePage } from './response-reads';
+import type { DetailPosition, ResponseDetail, ResponseListRow, ResponseRecordLink } from './response-models';
 import { FormsResponseListComponent } from './response-list.component';
 import { FormsResponseDetailComponent } from './response-detail.component';
+import { DEFAULT_RESPONSE_QUERY, pageCount, type ResponseQuery } from './responses-query';
+
+/** How long a burst of Form Response writes settles before the list re-reads once. */
+const WRITE_REFRESH_DEBOUNCE_MS = 300;
+
+/** What the tab shows, as its host keeps it in the URL: the list's query and the open response. */
+export interface ResponsesTabState {
+  query: ResponseQuery;
+  responseId: string | null;
+}
 
 /**
  * A form's submissions, list plus drill-down, scoped to one form.
  *
- * Mounted as the builder's fifth tab so an author can read what a form collected without
- * leaving the form they are editing. Data loads when this component is created — i.e. on
- * tab activation, not on builder open, because the builder's hot path is editing and a
- * form with thousands of responses must not tax it.
+ * Mounted twice: as the builder's fifth tab, so an author can read what a form collected without
+ * leaving the form they are editing, and as the Responses view of Responses & Analytics
+ * (`Embedded`, under the dashboard's own header). Data loads when this component is created — on
+ * tab activation, not on builder open, because the builder's hot path is editing.
  *
- * Question labels come from the form's LATEST PUBLISHED version, not from the draft being
- * edited: an unpublished rename or deletion in the draft must not relabel or hide an answer
- * someone already gave. Responses themselves are scoped by FormID and therefore span every
- * published version.
+ * The list shows ONE page of `Forms.ListResponses` at a time, searched, sorted and paged by the
+ * server (`ResponseQuery`). It used to append 200-row pages and search only what it had loaded, so a
+ * search on a larger form said "nothing found" for a respondent the form did have (UI audit F08).
+ * Each page now replaces the last, so there is no appended list for a moved row to corrupt; a page
+ * past the end (the list shrank) lands on the last page instead.
+ *
+ * It re-reads by itself only when a Form Response is written in this browser; a submission from a
+ * respondent reaches the list through Refresh, which both mounts offer.
+ *
+ * Question labels come from the form's PUBLISHED version, not from the draft being edited: an
+ * unpublished rename or deletion in the draft must not relabel or hide an answer someone already
+ * gave. Responses themselves are scoped by form and therefore span every published version.
  */
 @Component({
   selector: 'mjf-responses-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [ResponsesDataService],
   imports: [FormsResponseListComponent, FormsResponseDetailComponent],
   template: `
-    <section class="mjf-page rt">
-      <header class="mjf-page-head">
-        <div class="mjf-page-headings">
-          <h2 class="mjf-page-title rt-title">Responses</h2>
-          @if (View() === 'list' || View() === 'detail' || View() === 'no-responses') {
-            <p class="mjf-page-sub">
-              {{ Rows().length }} {{ Rows().length === 1 ? 'response' : 'responses' }} across every
-              published version of this form.
-            </p>
-          }
-        </div>
-        <div class="mjf-page-actions">
-          <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="Loading()" (click)="Refresh()">
+    <section class="rt" [class.mjf-page]="!Embedded">
+      @if (!Embedded) {
+        <header class="mjf-page-head">
+          <div class="mjf-page-headings">
+            <h2 class="mjf-page-title rt-title">Responses</h2>
+            @if ((View() === 'list' || View() === 'detail' || View() === 'no-responses') && !Query().search.trim()) {
+              <p class="mjf-page-sub">
+                {{ Total() }} {{ Total() === 1 ? 'response' : 'responses' }} across every
+                published version of this form.
+              </p>
+            }
+          </div>
+          <div class="mjf-page-actions">
+            <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="Loading()" (click)="Refresh()">
+              <i class="fa-solid fa-rotate-right" [class.fa-spin]="Loading()" aria-hidden="true"></i> Refresh
+            </button>
+          </div>
+        </header>
+      }
+
+      @if (Embedded) {
+        <!-- Under the dashboard's header, whose own refresh re-reads the summary and this list
+             and keeps the reader on Responses: this one re-reads only the list. -->
+        <div class="rt-bar">
+          <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" [disabled]="Loading() || OpeningResponse()" (click)="Refresh()">
             <i class="fa-solid fa-rotate-right" [class.fa-spin]="Loading()" aria-hidden="true"></i> Refresh
           </button>
         </div>
-      </header>
+      }
 
       @if (Error(); as e) {
         <p class="mjf-alert" role="alert">
@@ -94,11 +124,23 @@ import { FormsResponseDetailComponent } from './response-detail.component';
           <mj-forms-response-detail
             [Detail]="d"
             (Back)="CloseDetail()"
-            (OpenRecord)="OpenRecord.emit($event)"></mj-forms-response-detail>
+            (Reload)="ReloadDetail()"
+            [Position]="DetailPosition()"
+          (Adjacent)="OpenAdjacent($event)"
+          (OpenRecord)="OpenRecord.emit($event)"></mj-forms-response-detail>
         }
       }
       @case ('list') {
-        <mj-forms-response-list [Rows]="Rows()" (Open)="OpenResponse($event)"></mj-forms-response-list>
+        @if (OpeningResponse()) {
+          <p class="mjf-state" role="status"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Opening response…</p>
+        }
+        <mj-forms-response-list
+          [Rows]="Rows()"
+          [Total]="Total()"
+          [Query]="Query()"
+          [Busy]="OpeningResponse() || Paging()"
+          (QueryChange)="SetQuery($event)"
+          (Open)="OpenResponse($event)"></mj-forms-response-list>
       }
       }
     </section>
@@ -107,29 +149,70 @@ import { FormsResponseDetailComponent } from './response-detail.component';
     FORMS_UI_CSS,
     `
       :host { display: block; background: var(--mj-bg-page); }
+      .rt:not(.mjf-page) { display: flex; flex-direction: column; gap: var(--mjf-gap); }
+      .rt-bar { display: flex; justify-content: flex-end; }
 
       /* The tab is embedded under a builder header that already names the form, so the
          page title steps down a size from a standalone page's. */
-      .rt-title { font-size: 1.375rem; }
+      .rt-title { font-size: var(--mjf-heading); }
     `,
   ],
 })
-export class ResponsesTabComponent implements OnInit {
+export class ResponsesTabComponent implements OnInit, OnDestroy {
   /** The form whose responses to show. */
   @Input({ required: true }) FormID!: string;
 
   /**
+   * True when mounted under a host's own header (Responses & Analytics), which already names the
+   * form and offers a refresh: the tab then drops its page header and keeps only the list.
+   */
+  @Input() Embedded = false;
+
+  /**
    * Relayed upward so the host can navigate. The builder maps this to
-   * `BaseFormComponent.Navigate`; a dashboard host would map it to `OpenEntityRecord`.
+   * `BaseFormComponent.Navigate`; the dashboard maps it to `OpenEntityRecord`.
    */
   @Output() OpenRecord = new EventEmitter<ResponseRecordLink>();
 
-  private readonly data = inject(ResponsesDataService);
+  /**
+   * True while a response is opening, false when it has. The dashboard holds its own refresh and
+   * export controls meanwhile, as it did when it opened responses itself.
+   */
+  @Output() BusyChange = new EventEmitter<boolean>();
+
+  /** What the tab shows changed — a new page, sort or search, or a response opened or closed. */
+  @Output() StateChange = new EventEmitter<ResponsesTabState>();
+
+  /** What to show first, from the host's URL. Read once, on init. */
+  @Input() InitialState: ResponsesTabState | null = null;
 
   public readonly Loading = signal(true);
   public readonly Error = signal<string | null>(null);
   public readonly Rows = signal<ResponseListRow[]>([]);
+  /** Complete responses matching the search, across every page. */
+  public readonly Total = signal(0);
+  /** The page, sort and search on screen. */
+  public readonly Query = signal<ResponseQuery>(DEFAULT_RESPONSE_QUERY);
+  public readonly PageCount = computed(() => pageCount(this.Total(), this.Query().pageSize));
+  /** While a page other than the first load is being read; the rows on screen stay, held. */
+  public readonly Paging = signal(false);
   public readonly Detail = signal<ResponseDetail | null>(null);
+  /** While one response's detail loads; the list stays on screen under the reader's cursor. */
+  public readonly OpeningResponse = signal(false);
+
+  /** Where the open response sits in the whole list; null while none is open or it is not on this page. */
+  public readonly DetailPosition = computed<DetailPosition | null>(() => {
+    const open = this.Detail();
+    const at = open ? this.Rows().findIndex((r) => r.responseId === open.responseId) : -1;
+    if (at < 0) {
+      return null;
+    }
+    const q = this.Query();
+    const index = (q.page - 1) * q.pageSize + at + 1;
+    return { index, total: this.Total(), hasPrevious: index > 1, hasNext: index < this.Total() };
+  });
+
+  private writes: FormsWriteSubscription | null = null;
 
   /**
    * Whether the LIST load failed, as opposed to a single response failing to open. Only
@@ -138,81 +221,260 @@ export class ResponsesTabComponent implements OnInit {
   private readonly loadFailed = signal(false);
 
   /**
-   * The published questions used to label answers, or null when the form has never been
-   * published — which is a distinct empty state from "published, no responses yet", and the
-   * only one with an action attached.
+   * The form's Published version — what labels every response's answers — or null when the form
+   * has never been published, which is a distinct empty state from "published, no responses yet",
+   * and the only one with an action attached.
    */
-  public readonly Questions = signal<PublishedFormQuestion[] | null>(null);
+  public readonly LabelVersionID = signal<string | null>(null);
+
+  /**
+   * Bumped by every (re)load. A page or a detail that arrives for an older generation belongs to a
+   * list the reader has since refreshed, and is dropped rather than mixed into the new one.
+   */
+  private generation = 0;
 
   /**
    * Which single view to show. Resolved by a pure function rather than a chain of template
    * conditions, because "no published version" and "the load failed" both look like an
-   * absent question list — and reading the second as the first told authors their live form
+   * absent label version — and reading the second as the first told authors their live form
    * had never been published.
    */
   public readonly View = computed(() =>
     resolveResponsesView({
       loading: this.Loading(),
       failed: this.loadFailed(),
-      isPublished: this.Questions() !== null,
+      isPublished: this.LabelVersionID() !== null,
       rowCount: this.Rows().length,
+      searching: this.Query().search.trim() !== '',
       hasDetail: this.Detail() !== null,
     }),
   );
 
   public async ngOnInit(): Promise<void> {
+    // A Form Response written in this browser (deleted from its record, say) re-reads the list. The
+    // open detail, if any, stays: the reader did not ask to leave it.
+    this.writes = onFormsWrite(FORMS_ENTITY.FormResponse, ['save', 'delete'], () => void this.load(), {
+      debounceMs: WRITE_REFRESH_DEBOUNCE_MS,
+    });
+    const initial = this.InitialState;
+    if (initial) {
+      this.Query.set(initial.query);
+    }
     await this.load();
+    if (initial?.responseId && this.Rows().some((r) => r.responseId === initial.responseId)) {
+      await this.OpenResponse(initial.responseId);
+    }
   }
 
-  /** Re-queries; the author may be watching submissions arrive. */
+  public ngOnDestroy(): void {
+    this.writes?.unsubscribe();
+    this.writes = null;
+  }
+
+  /**
+   * Re-reads the page on screen and closes any open response; the author may be watching
+   * submissions arrive. The close is announced, or the host's URL keeps naming the response.
+   */
   public async Refresh(): Promise<void> {
-    this.Detail.set(null);
+    if (this.Detail() !== null) {
+      this.CloseDetail();
+    }
     await this.load();
   }
 
-  public async OpenResponse(responseId: string): Promise<void> {
-    const questions = this.Questions();
-    if (!questions) {
+  /**
+   * Show another page, sort or search. A new search or sort starts on page 1. The rows on screen
+   * stay, held, until the page lands; a page asked for after this one wins, whatever order they
+   * arrive in.
+   */
+  public async SetQuery(next: ResponseQuery): Promise<void> {
+    const current = this.Query();
+    const restart = next.search.trim() !== current.search.trim() || next.sort !== current.sort || next.pageSize !== current.pageSize;
+    this.Query.set(restart ? { ...next, page: 1 } : next);
+    this.Detail.set(null);
+    this.emitState();
+    await this.load(true);
+  }
+
+  /**
+   * Open the response before (`-1`) or after (`1`) the open one, crossing to the neighbouring page at
+   * an edge.
+   *
+   * A crossing reads the page first and opens only if it is still wanted: the page landed, and the
+   * reader has not gone Back or opened another response meanwhile. The query moves only when the
+   * page lands, so the position line keeps naming the response on screen while it loads; and a
+   * response that then will not open closes the stale one, whose position is on the page just left.
+   */
+  public async OpenAdjacent(direction: -1 | 1): Promise<void> {
+    const position = this.DetailPosition();
+    const open = this.Detail();
+    if (!position || !open || this.OpeningResponse() || this.Paging() || (direction < 0 ? !position.hasPrevious : !position.hasNext)) {
       return;
     }
-    this.Loading.set(true);
+    const rows = this.Rows();
+    const neighbour = rows[rows.findIndex((r) => r.responseId === open.responseId) + direction];
+    if (neighbour) {
+      await this.OpenResponse(neighbour.responseId);
+      return;
+    }
+    const q = this.Query();
+    if (!(await this.load(true, { ...q, page: q.page + direction })) || this.Detail() !== open) {
+      return;
+    }
+    const landed = this.Rows();
+    const target = direction > 0 ? landed[0] : landed[landed.length - 1];
+    if (target) {
+      await this.OpenResponse(target.responseId);
+    }
+    if (this.Detail() === open) {
+      this.CloseDetail();
+    }
+  }
+
+  /**
+   * Open one response, labelled from the form's Published version.
+   *
+   * A click while another response is opening is ignored: two loads in flight settle in network
+   * order, and the reader could land on the response they did not pick.
+   */
+  public async OpenResponse(responseId: string, announce = true): Promise<void> {
+    if (this.OpeningResponse() || this.LabelVersionID() === null) {
+      return;
+    }
+    const generation = this.generation;
+    this.OpeningResponse.set(true);
+    this.BusyChange.emit(true);
     this.Error.set(null);
     try {
-      this.Detail.set(await this.data.loadResponseDetail(responseId, questions));
+      const detail = await readResponseDetail(responseId, this.LabelVersionID());
+      if (generation === this.generation) {
+        this.Detail.set(detail);
+        if (announce) {
+          this.emitState();
+        }
+      }
     } catch (err) {
-      this.fail(err, 'Failed to load that response.');
+      this.failUnlessSuperseded(generation, err, 'Failed to load that response.');
     } finally {
-      this.Loading.set(false);
+      this.OpeningResponse.set(false);
+      this.BusyChange.emit(false);
+    }
+  }
+
+  /**
+   * Re-read the open response after the detail changed it on the server (a replayed dead letter),
+   * labelled the way it was opened. The stale detail stays on screen until the new one lands, and
+   * under the error if the read fails.
+   *
+   * Not an open: it holds no `OpeningResponse`, so the reader can still pick another row, and it
+   * lands only while the detail it re-reads is still the one on screen. `generation` alone cannot
+   * say that — closing a detail is not a list reload — so a reader who pressed Back, or opened
+   * another response, before the read returned would otherwise have this one opened over them.
+   */
+  public async ReloadDetail(): Promise<void> {
+    const open = this.Detail();
+    const labelVersionId = this.LabelVersionID();
+    if (!open || labelVersionId === null) {
+      return;
+    }
+    const generation = this.generation;
+    const stillOpen = (): boolean => generation === this.generation && this.Detail() === open;
+    this.Error.set(null);
+    try {
+      const detail = await readResponseDetail(open.responseId, labelVersionId);
+      if (stillOpen()) {
+        this.Detail.set(detail);
+      }
+    } catch (err) {
+      const message = failureMessage(err, 'Failed to reload this response.');
+      if (stillOpen()) {
+        this.Error.set(message);
+      } else {
+        LogError(`Superseded reload of response ${open.responseId} (form ${this.FormID}): ${message}`);
+      }
     }
   }
 
   public CloseDetail(): void {
     this.Detail.set(null);
+    this.emitState();
   }
 
-  private async load(): Promise<void> {
-    this.Loading.set(true);
-    this.Error.set(null);
-    this.loadFailed.set(false);
-    try {
-      const questions = await this.data.loadLatestPublishedQuestions(this.FormID);
-      this.Questions.set(questions);
-      if (questions === null) {
-        // Unpublished forms cannot have responses; skip the query entirely.
-        this.Rows.set([]);
-        return;
-      }
-      const { responses, answers } = await this.data.loadResponsesForForm(this.FormID);
-      this.Rows.set(buildResponseRows(responses, answers, questions));
-    } catch (err) {
-      this.loadFailed.set(true);
-      this.fail(err, 'Failed to load this form’s responses.');
-    } finally {
-      this.Loading.set(false);
+  /**
+   * Apply a state the host read from its URL (back / forward): the query, then the response.
+   * Nothing is announced back, so the host's URL is not rewritten with what it just supplied.
+   */
+  public async ApplyState(state: ResponsesTabState): Promise<void> {
+    const sameQuery = JSON.stringify(state.query) === JSON.stringify(this.Query());
+    if (!sameQuery) {
+      this.Query.set(state.query);
+      this.Detail.set(null);
+      await this.load(true);
+    }
+    if (!state.responseId) {
+      this.Detail.set(null);
+    } else if (state.responseId !== this.Detail()?.responseId && this.Rows().some((r) => r.responseId === state.responseId)) {
+      await this.OpenResponse(state.responseId, false);
     }
   }
 
-  private fail(err: unknown, fallback: string): void {
-    this.Error.set(err instanceof Error ? err.message : fallback);
+  private emitState(): void {
+    this.StateChange.emit({ query: this.Query(), responseId: this.Detail()?.responseId ?? null });
+  }
+
+  /**
+   * Read the page `query` names (by default the one on screen), and make it the query once it lands.
+   * `paging` keeps the current rows on screen (held) instead of the full-surface loading state, for a
+   * page turn, a sort or a search. True when this read's page is the one now shown.
+   *
+   * A page past the end — the list shrank since the link was made, or since the reader paged — is
+   * read again as the last page, once.
+   */
+  private async load(paging = false, query: ResponseQuery = this.Query()): Promise<boolean> {
+    const generation = ++this.generation;
+    (paging ? this.Paging : this.Loading).set(true);
+    this.Error.set(null);
+    this.loadFailed.set(false);
+    try {
+      let page = await readResponsePage(this.FormID, query);
+      const last = pageCount(page.total, query.pageSize);
+      const pastTheEnd = page.rows.length === 0 && page.total > 0 && query.page > last;
+      if (generation === this.generation && pastTheEnd) {
+        query = { ...query, page: last };
+        page = await readResponsePage(this.FormID, query);
+      }
+      if (generation !== this.generation) {
+        return false;
+      }
+      this.Query.set(query);
+      if (pastTheEnd) {
+        this.emitState();
+      }
+      this.LabelVersionID.set(page.labelVersionId);
+      this.Rows.set(page.rows);
+      this.Total.set(page.total);
+      return true;
+    } catch (err) {
+      if (generation === this.generation) {
+        this.loadFailed.set(true);
+      }
+      this.failUnlessSuperseded(generation, err, 'Failed to load this form’s responses.');
+      return false;
+    } finally {
+      if (generation === this.generation) {
+        this.Loading.set(false);
+        this.Paging.set(false);
+      }
+    }
+  }
+
+  /** Show a failure of the current list; log (never show) one that belongs to a list since replaced. */
+  private failUnlessSuperseded(generation: number, err: unknown, action: string): void {
+    const message = failureMessage(err, action);
+    if (generation !== this.generation) {
+      LogError(`Superseded responses read for form ${this.FormID}: ${message}`);
+      return;
+    }
+    this.Error.set(message);
   }
 }

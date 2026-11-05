@@ -47,7 +47,9 @@ naming the entity, the missing permission and the hook that needs it.
 
 ### Durable entity actions run in-process for the runner
 
-Every hook above runs as a plain synchronous write, inside the submission request. Some of those
+Every hook above runs as a plain synchronous write inside the automation drain — after the submission
+has committed, from the submitting process (or from the outbox sweep, about every 15 s for a retry; see
+[`local-host.md`, Operating the automation outbox](local-host.md#operating-the-automation-outbox)). Some of those
 writes carry their own durable entity action — bizapps-common's `Common.LogActivity`, fired when
 `Upsert Respondent Person` creates a `Person` — and MJ can run a durable entity action two ways: an
 async task-graph submission (queued, dispatched later) or inline (run immediately, in the caller's
@@ -65,7 +67,7 @@ of on MJ's task queue, is therefore the correct, intended behaviour for this pri
 runs depends on the host:
 
 - **A durable submitter is registered** (the normal MJ 6.1 host): core tries to submit the task
-  graph, is refused, and runs the action inline, inside the submission. Each submit whose automations
+  graph, is refused, and runs the action inline, inside the drain. Each submit whose automations
   create a Person then logs a refused read on `MJ: Task Types` (twice), a
   `[TaskGraphService] Submit failed … Could not create task type` line, and "asked for durable
   dispatch but ran inline instead". All of these are expected, not symptoms.
@@ -174,3 +176,42 @@ The **Automate** tab writes the same `FormAutomation` rows. Two behaviours are w
   the four built-ins back.
 
 Changes take effect on the next **publish**.
+
+## Why not MJ `EntityAction` bindings
+
+MJ has its own generic "when a record changes, run an Action" hook: an `EntityAction` binding on an
+entity. Forms does not use it for submissions. **Every submission behaviour a form owner configures
+goes through `FormAutomation`, and Forms ships no `EntityAction` bindings** (there is no
+`metadata/entity-actions/` in this repo). The decision is `DG-7` in
+[`plans/FORMS_BUILD_PLAN.md`](../plans/FORMS_BUILD_PLAN.md) §10.
+
+Both mechanisms run the same MJ Actions and Agents. They differ only in what triggers the run and
+in what context it runs. `FormAutomation` hides four things behind the one setting an owner picks,
+and an `EntityAction` binding on `FormResponse` would hand all four to whoever writes the binding:
+
+| Hidden by `FormAutomation` | Where it lives |
+|---|---|
+| The run uses the form's **published snapshot**, not the live rows | `resolveOnSubmitDispatch` in `@mj-biz-apps/forms-entities` |
+| The run switches to the **automation service principal**, whose grants are the ceiling on what a form's steps may do, instead of running as MJ's system user, which is who saves a respondent's `FormResponse` (`FormSubmissionEngine`) | resolved in `packages/CoreEntitiesServer/src/automation/service-principal.ts`, applied in `packages/CoreEntitiesServer/src/automation/dispatch-automation.ts` |
+| The target gets a **Forms-shaped input**, not the raw `FormResponse` row: an `EntityBinding` target gets the canonical answers; an Action or Agent gets the response, form, version and distribution IDs, never the answers (MJ's action log stores parameters unredacted) | the same dispatcher |
+| The run is **durable**: an event in the `FormAutomationEvent` outbox, with a per-event run ledger and replay | `packages/CoreEntitiesServer/src/automation/outbox/`, the `FormAutomationRun` ledger, and `packages/CoreEntitiesServer/src/operations/ReplayAutomationEventServerOperation.ts` for replay |
+
+An `EntityAction` on MJ 6.1.6 has none of this. It fires inside `Save()`, as the user who saved the
+row, which for a respondent's save is MJ's system user (`OnAfterSaveExecute` in MJ's `GenericDatabaseProvider.ts`, dispatched without an `await`). Its
+`RunMode` defaults to `Inline`, so a failed run is swallowed, not retried. Only its `Validate`
+invocation can refuse a save. To catch a completion that follows autosaves, a binding would also
+need an `AfterCreate` row, an `AfterUpdate` row and a "changed to `Complete`" filter.
+
+The two cases where a binding once looked useful do not apply. `FormVersion.Status` has no review
+state to react to (its CHECK allows only `Draft`, `Published` and `Retired`). And Forms already
+refuses bad saves in code: `packages/CoreEntitiesServer/src/entities/entity-refusal.ts` and the
+entity servers' `ValidateAsync` overrides, with public submissions refused earlier still in
+`FormSubmissionEngine`.
+
+This rule is about what Forms *authors*. Bindings that other apps own still fire on rows Forms
+writes, such as bizapps-common's `Common.LogActivity` on a new `Person` (see
+[Durable entity actions run in-process for the runner](#durable-entity-actions-run-in-process-for-the-runner)).
+
+The grain rule: **submission behaviour goes through `FormAutomation`. A save concern on a
+non-response Forms entity (`Form`, `FormVersion`, `FormDistribution`) would use `EntityAction` like
+the rest of the family, when a feature needs one. There is no third path.**

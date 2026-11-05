@@ -26,6 +26,7 @@ import { LogError, LogStatus, Metadata, RunView, type UserInfo } from '@memberju
 import { FileStorageEngine } from '@memberjunction/storage';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import type { MJFileEntity } from '@memberjunction/core-entities';
+import { ASSET_ROUTE } from '@mj-biz-apps/forms-entities';
 
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
 import { getRequestOrigin } from '../http/request-origin.js';
@@ -34,7 +35,6 @@ import { parseMultipart } from '../upload/multipart.js';
 import { AssetByteCache } from './asset-byte-cache.js';
 import {
   ASSET_RESPONSE_HEADERS,
-  ASSET_ROUTE,
   assetBodyCap,
   assetPublicUrl,
   assetTooLargeMessage,

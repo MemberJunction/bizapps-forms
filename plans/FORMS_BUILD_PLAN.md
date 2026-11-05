@@ -344,7 +344,7 @@ and no FK indexes — CodeGen adds those).
 | Known-respondent identity | **bizapps-common** Person/Organization/ContactMethod | `bizapps-common/migrations/B…__Schema_and_Tables.sql` |
 | AI authoring of forms | Patterns from the **Form Builder agent** + deterministic `Create/Modify Interactive Form` actions | `packages/MJCoreEntities/src/engines/interactive-forms.ts` |
 | Promote responses → first-class entity | **Runtime Schema Update (RSU)** pipeline: `SchemaEngine.generateDDL()` → migration → CodeGen → restart; `SchemaEvolution` adds columns over time | `packages/SchemaEngine/src/RuntimeSchemaManager.ts`, `SchemaEvolution.ts`, `MJServer/src/resolvers/RSUResolver.ts` |
-| On-submit automation | **Actions / Agents / AI Prompts** | core framework |
+| On-submit automation | **Actions / Agents / AI Prompts**, reached through Forms' own `FormAutomation` trigger layer, not MJ `EntityAction` bindings (DG-7) | core framework |
 | Reporting | RunView/RunViews, RunQuery, BaseDashboard + AG Grid | core framework |
 
 > **NOTE — do NOT reuse MJ Interactive Forms as the survey schema.** Interactive Forms
@@ -687,6 +687,37 @@ native entities. This is the reporting differentiator no incumbent has.
   Switching the default later is therefore a change of enforcement mechanism, not just of snippet.
 - **DG-6 — Response store shape.** Confirm typed-columns + JSON-fallback on
   `FormResponseAnswer` (recommended) vs. pure-JSON. Affects query/projection ergonomics.
+- **DG-7 — On-submit mechanism: `FormAutomation` only, no `EntityAction` bindings. ✅ DECIDED
+  (2026-10-21, #313).** Forms uses `FormAutomation` for every submission behaviour a form owner
+  configures, and Forms does not author MJ `EntityAction` bindings. A save concern on a
+  non-response Forms entity (`Form`, `FormVersion`, `FormDistribution`) would use `EntityAction` the
+  way the rest of the family does, but no feature needs one today, and that decision is taken when
+  such a feature exists. Nobody adds a third mechanism.
+  *Why:* both mechanisms execute the same MJ Actions and Agents; they differ only in what triggers
+  the run and in what context. `FormAutomation` hides four things behind one setting that
+  `EntityAction` would expose to every binding author: the run uses the published snapshot
+  (`resolveOnSubmitDispatch` in `@mj-biz-apps/forms-entities`), not live rows; the dispatch switches
+  to the least-privilege automation service principal (`packages/CoreEntitiesServer/src/automation/service-principal.ts`,
+  applied in `dispatch-automation.ts`) instead of running as MJ's system user, which is who saves a
+  respondent's `FormResponse` (`FormSubmissionEngine`), and so who a binding would run as; the target gets a
+  Forms-shaped input rather than the `FormResponse` row (the canonical answers for an
+  `EntityBinding` target; the response, form, version and distribution IDs, never the answers, for
+  an Action or Agent); and the run is durable through the
+  `FormAutomationEvent` outbox with a per-event ledger and replay. On MJ 6.1.6 an `EntityAction`
+  fires inside `Save()` as the saving user (`GenericDatabaseProvider.ts`, `OnAfterSaveExecute`, no
+  await), `RunMode` defaults to `Inline` so a failure is swallowed, and only the `Validate`
+  invocation can refuse a save. The two residual `EntityAction` cases from the earlier analysis do
+  not hold: `FormVersion.Status` has no review state (its CHECK allows `Draft`, `Published`,
+  `Retired`), and Forms already refuses saves in code through
+  `packages/CoreEntitiesServer/src/entities/entity-refusal.ts` and `ValidateAsync` overrides, with
+  public submissions refused earlier still in `FormSubmissionEngine`.
+  The transition-filter question (whether Forms authors "changed to Complete" `ActionFilter` rows)
+  is **moot** under this decision. If Forms ever adopts a binding, note that bizapps-common ships
+  its own two reusable `ActionFilter` rows under its `metadata/action-filters/`: the family pattern
+  is to author the row in the app, not to wait for MJ to seed it. The superseded analysis (PR #22)
+  is archived at `plans/done/mj-entity-action-workflow-adoption.md` for its verified MJ facts;
+  the operator-facing version of this decision is
+  [`docs/on-submit-automations.md`, "Why not MJ `EntityAction` bindings"](../docs/on-submit-automations.md#why-not-mj-entityaction-bindings).
 
 ---
 
@@ -741,6 +772,56 @@ native entities. This is the reporting differentiator no incumbent has.
 ---
 
 ## 12. Progress Log
+
+- **2026-10-21 — #313: on-submit mechanism decided, `FormAutomation` only (DG-7).** Forms authors no
+  MJ `EntityAction` bindings; the rule and its reason are now `DG-7` in §10, with the operator version
+  in `docs/on-submit-automations.md` ("Why not MJ `EntityAction` bindings"). The PR #22 adoption
+  analysis is archived, header-marked superseded, at `plans/done/mj-entity-action-workflow-adoption.md`.
+  Documentation only: no code, schema or metadata changed.
+
+- **2026-10-19 — MJ 6.1.5 → 6.1.6 (lts-6.1).** Host-tracking pins only (16, root + `apps/MJAPI`);
+  the `packages/*` peers and `mjVersionRange` stay at `^6.1.0-edge.6`, which already admits 6.1.6.
+  The lockfile again kept 380 `packages/*` blocks on the old MJ; `drop-stale-mj-lock.py` cleared
+  them, leaving one MJ version and no non-MJ package moved. 6.1.6 ships no new core migration (top
+  stays `V202610061630`), no `@angular/*` or `ng-auth-services` peer change, and a CodeGen change that
+  only re-quotes resolver descriptions, so nothing was regenerated. `check:host-truth --core-tag
+  v6.1.6` converged. The change that matters is the security C1–C10 backport: `RunAction` now
+  authorizes per action and refuses magic-link sessions, and client `RunView` filters are screened.
+  Forms was already compliant (see the `mj-upgrade` skill), and `smoke:respondent` passed 14/14 on
+  6.1.6. The changeset's claim that "6.1.5 ignores" `AuthorizesCaller` was corrected to name 6.1.6.
+
+- **2026-10-17 — PR #306: #303 rebuilt on MJ 6.1.5 LTS, plus @rkihm-bc's review of it.** #304's
+  server-engine move now ships on the LTS line: the MJ 6.2 Work Queue is replaced by a transactional
+  `FormAutomationEvent` outbox (claim/settle/renew in `automation/outbox/`, a post-commit drain and a
+  30 s scheduled sweep). The review's fixes, each with a spec observed red first: a never-attempted
+  event is claimable at once, because on insert its `NextAttemptAt` carries the API host's clock
+  (`BaseEntity.NewRecord()` stamps the column default from the process), so a host clock running
+  ahead hid a final from its post-commit drain, for good with the scheduler off; a drain whose lease
+  another drain took closes no rows and settles nothing, and a renewal in flight across the settle no
+  longer logs a lost lease; a widget load that fails after a newer load succeeded leaves the form
+  alone. Merging `next` brought #310 (`V202610171645`, `SaveReturnMode = datestamps_only`), which
+  sorted after this PR's three migrations and redefined `spCreate`/`spUpdateFormAutomationRun`
+  without `@FormAutomationEventID`; they are now `V202610172100`–`V202610172102`, and the outbox file
+  carries #310's datestamps-only result SELECTs (header edit 4). Validation: 5/5 packages build;
+  5,774 unit tests pass (33 opt-in skipped); typecheck and every local gate pass; the opt-in SQL
+  Server suite passes 31/33 on a migrations-only room (`MJ_306_Rename`), the two failures being the
+  reporting specs, whose `Forms:` queries arrive only with the release seed.
+- **2026-10-14 — PR #304 verified review fixes (superseded by PR #306 above; #304 targeted the MJ 6.2
+  edge).** Addressed the confirmed GUID-casing,
+  builder ordering, knockout resume, delayed notification, automation history/error, permission
+  retirement, safe error reporting, answer aggregation, input validation, template deletion,
+  metadata pull and reporting pagination defects. Behavioral regressions were observed red before
+  their fixes. The smoke-helper inventory now names all five helpers. Validation against the
+  existing MJ 6.2 edge workspace dependencies: all five packages build; 5,754 unit tests pass
+  (26 opt-in integration tests skipped); root typecheck, UI tokens, migration order, CodeGen
+  append, distribution and generated-scope gates pass. Live respondent, device-resume, binding
+  and respondent-error smokes pass on the edge test harness (the error suite skips two conditional
+  failure paths and reports two pre-existing MJ-core development-mode error disclosures).
+  `smoke/review-data-regressions.mjs`
+  executes the reporting query, renamed-entity permission retirement and metadata filters against
+  SQL Server temporary fixtures; it passes without modifying host metadata. Reporting now seeks
+  by answer ID and remains a live scan rather than a point-in-time snapshot. Release metadata
+  seeding remains the existing release step.
 
 - **2026-08-13 — the seed that finally shipped was shipping an exploit, and could not install
   where it was needed most.** Found from the other side: bizapps-caliber#219 was bricked by our

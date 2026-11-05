@@ -2,27 +2,24 @@
  * `FormsReportingService` exercised as a class.
  *
  * `loadReportableForms` (#247): the rail's counts used to be tallied from downloaded response
- * rows, which the 1000-row view cap truncated. They now come from the shared server-side
- * counter, for the forms the rail actually lists. Exercised over a fake RunView.
+ * rows, which the 1000-row view cap truncated. They come from the shared server-side counter, for
+ * the forms the rail actually lists — the same counter the Forms home grid uses
+ * (`form-catalog.spec.ts`), so the two surfaces cannot disagree about what "a response" is. This is
+ * the executing replacement for the reporting half of `home/response-count-scope.spec.ts`, which
+ * only matched the service's source text (DW18 of #303). Exercised over a fake RunView.
  *
- * `loadReport` (#246): the dashboard used to read a form's answers twice per selection: once
- * inside `loadReport` (through `loadResponsesForForm`) and again through a separate answers-only
- * query, only so the export had the raw rows. These specs pin the fix: the report carries the
- * rows it was built from, the answers are read exactly once, and the definition and responses
- * reads run together. `ResponsesDataService` is replaced by a fake whose reads are deferred
- * promises, so a test can hold both open and observe that both STARTED before either resolved.
+ * `loadReport` (#303): ONE operation, `Forms.GetResponseSummary`, run through the REAL generated
+ * class and `runOperation` with only the provider faked. The report is computed on the server; the
+ * browser reads no response or answer row to draw it.
  */
 import '@angular/compiler';
 import { Injector, runInInjectionContext } from '@angular/core';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunViewParams, RunViewResult } from '@memberjunction/core';
-import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../../shared/entity-names';
-import { ResponsesDataService, type FormResponseRows } from '../../responses/responses-data.service';
-import { mockDefinition } from './forms-reporting-mock';
-import { buildExportMatrix } from './export-pivot';
+import { installFakeOperations, refused, succeeded, type FakeOperations } from '../../shared/testing/fake-operations';
+import { summaryOutput } from '../testing/summary-fixture';
 import type { ReportableForm } from '../models/reporting.model';
-import { response, answer as answerRow } from '../../shared/testing/entity-row-fixtures';
 
 const batches: RunViewParams[][] = [];
 let countsSucceed = true;
@@ -68,36 +65,45 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
       batches.push(params);
       return params.map(answer);
     }
+    public async RunView(params: RunViewParams): Promise<RunViewResult> {
+      batches.push([params]);
+      return answer(params);
+    }
   }
-  return { ...actual, RunView };
+  return { ...actual, RunView, LogError: vi.fn() };
 });
 
-const { FormsReportingService } = await import('./forms-reporting.service');
+const { FormsReportingService, SUMMARY_UNAVAILABLE_TO_YOU } = await import('./forms-reporting.service');
 
 function service(): InstanceType<typeof FormsReportingService> {
-  const injector = Injector.create({
-    providers: [{ provide: ResponsesDataService, useValue: {} }],
-  });
-  return runInInjectionContext(injector, () => new FormsReportingService());
+  return runInInjectionContext(Injector.create({ providers: [] }), () => new FormsReportingService());
 }
+
+const FORM: ReportableForm = { formId: 'form-1', formVersionId: 'ver-1', name: 'Feedback', responseCount: 12 };
+
+let operations: FakeOperations | null = null;
 
 beforeEach(() => {
   batches.length = 0;
   countsSucceed = true;
 });
 
+afterEach(() => {
+  operations?.restore();
+  operations = null;
+});
+
 describe('FormsReportingService.loadReportableForms', () => {
   it('lists published forms with their server-computed Complete count', async () => {
     const forms = await service().loadReportableForms();
-    expect(forms).toEqual([
-      { formId: 'f1', formVersionId: 'v2', name: 'Application', responseCount: 712 },
-    ]);
+    expect(forms).toEqual([{ formId: 'f1', formVersionId: 'v2', name: 'Application', responseCount: 712 }]);
   });
 
-  it('counts only the reportable forms, without downloading response rows', async () => {
+  it('counts only the reportable forms, through the shared Complete-only counter, without downloading response rows', async () => {
     await service().loadReportableForms();
     const responseQueries = batches.flat().filter((p) => p.EntityName === FORMS_ENTITY.FormResponse);
-    expect(responseQueries.every((p) => p.ResultType === 'count_only')).toBe(true);
+    expect(responseQueries.length).toBeGreaterThan(0);
+    expect(responseQueries.every((p) => p.ResultType === 'count_only' && p.ExtraFilter === `Status='Complete'`)).toBe(true);
     expect(responseQueries.flatMap((p) => (p.Aggregates ?? []).map((a) => a.alias))).toEqual(['f1']);
   });
 
@@ -107,135 +113,43 @@ describe('FormsReportingService.loadReportableForms', () => {
   });
 });
 
-interface Deferred<T> {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (error: Error) => void;
-}
-
-function deferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void;
-  let reject!: (error: Error) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-/** Records every read it is asked for; the test decides when (and how) each one settles. */
-class FakeResponses {
-  public readonly calls: string[] = [];
-  public readonly def = deferred<PublishedFormDefinition>();
-  public readonly rows = deferred<FormResponseRows>();
-
-  public loadDefinition(formVersionId: string): Promise<PublishedFormDefinition> {
-    this.calls.push(`definition:${formVersionId}`);
-    return this.def.promise;
-  }
-
-  public loadResponsesForForm(formId: string): Promise<FormResponseRows> {
-    this.calls.push(`responses:${formId}`);
-    return this.rows.promise;
-  }
-}
-
-const FORM: ReportableForm = {
-  formId: 'form-1',
-  formVersionId: 'version-1',
-  name: 'Feedback',
-  responseCount: 1,
-};
-
-/** One complete and one partial response, each answering questions from the mock definition. */
-function rowsWithAPartial(): FormResponseRows {
-  const started = new Date('2026-09-01T10:00:00Z');
-  const submitted = new Date('2026-09-01T10:02:00Z');
-  return {
-    responses: [
-      response('r-complete', 'Complete', started, submitted),
-      response('r-partial', 'Partial', started, null),
-    ],
-    answers: [
-      answerRow('r-complete', 'q-channel', { TextValue: 'search' }),
-      answerRow('r-complete', 'q-rating', { NumericValue: 4 }),
-      answerRow('r-partial', 'q-channel', { TextValue: 'social' }),
-    ],
-  };
-}
-
-function make(): { fake: FakeResponses; svc: InstanceType<typeof FormsReportingService> } {
-  const fake = new FakeResponses();
-  const injector = Injector.create({
-    providers: [{ provide: ResponsesDataService, useValue: fake }],
-  });
-  return { fake, svc: runInInjectionContext(injector, () => new FormsReportingService()) };
-}
-
 describe('FormsReportingService.loadReport', () => {
-  it('reads the answers once, through loadResponsesForForm, and hands the raw rows to the report', async () => {
-    const { fake, svc } = make();
-    const rows = rowsWithAPartial();
-    fake.def.resolve(mockDefinition());
-    fake.rows.resolve(rows);
+  it('asks the server for the summary of the form — one operation, no response or answer row read', async () => {
+    operations = installFakeOperations(() => succeeded(summaryOutput()));
 
-    const report = await svc.loadReport(FORM);
+    const load = await service().loadReport(FORM);
 
-    expect(fake.calls).toHaveLength(2);
-    expect(fake.calls).toContain('definition:version-1');
-    expect(fake.calls).toContain('responses:form-1');
-    // The UNFILTERED rows, partials included: `answers` is the record of what the report was
-    // built from (the funnel and the response rows read the same unfiltered set).
-    expect(report.answers).toEqual(rows.answers);
-    expect(report.answers).toHaveLength(3);
-    expect(report.answers.some((a) => a.ResponseID === 'r-partial')).toBe(true);
+    expect(operations.calls).toEqual([{ key: 'Forms.GetResponseSummary', input: { FormID: 'form-1' } }]);
+    expect(batches).toEqual([]);
+    expect(load.status).toBe('ready');
   });
 
-  it('exports no partial response: the sheet has a row per Complete response only', async () => {
-    const { fake, svc } = make();
-    fake.def.resolve(mockDefinition());
-    fake.rows.resolve(rowsWithAPartial());
+  it('reports Partial and Disqualified apart, and carries the capped flag', async () => {
+    operations = installFakeOperations(() => succeeded(summaryOutput({ InsightAnswersCapped: true })));
 
-    const report = await svc.loadReport(FORM);
-    const questions = report.questions.filter((q) => q.type !== 'Statement');
-    const sheet = buildExportMatrix(report.responses, questions, report.answers);
-    const completeOnly = report.answers.filter((a) => a.ResponseID !== 'r-partial');
+    const load = await service().loadReport(FORM);
 
-    // The row set is decided by `report.responses` (Complete only), not by `report.answers`, so
-    // the partial's answer rows the report carries never reach the sheet — on base and head alike.
-    expect(sheet.map((row) => (Array.isArray(row) ? null : row.responseId))).toEqual(['r-complete']);
-    expect(sheet).toEqual(buildExportMatrix(report.responses, questions, completeOnly));
+    expect(load.status === 'ready' && load.report.summary).toMatchObject({ partialResponses: 3, disqualifiedResponses: 2, completeResponses: 12 });
+    expect(load.status === 'ready' && load.report.insightAnswersCapped).toBe(true);
   });
 
-  it('starts the definition and the responses reads together', async () => {
-    const { fake, svc } = make();
+  it('reads FORBIDDEN — the operation refusing this reader, row-restricted or without read access — as "not available to you"', async () => {
+    operations = installFakeOperations(() => refused('Not allowed.', 'FORBIDDEN'));
 
-    const pending = svc.loadReport(FORM);
-    await Promise.resolve();
-
-    // Neither read has settled, yet both have been asked for: they are concurrent, not serial.
-    expect(fake.calls).toHaveLength(2);
-    expect(fake.calls).toContain('definition:version-1');
-    expect(fake.calls).toContain('responses:form-1');
-
-    fake.def.resolve(mockDefinition());
-    fake.rows.resolve(rowsWithAPartial());
-    await pending;
+    await expect(service().loadReport(FORM)).resolves.toEqual({ status: 'unavailable', message: SUMMARY_UNAVAILABLE_TO_YOU });
+    // FORBIDDEN covers a reader with no read access at all, so the sentence promises no list.
+    expect(SUMMARY_UNAVAILABLE_TO_YOU).not.toMatch(/Responses|can read|listed/);
   });
 
-  it('rejects when the responses read fails', async () => {
-    const { fake, svc } = make();
-    fake.def.resolve(mockDefinition());
-    fake.rows.reject(new Error('boom'));
+  it('classifies by result code only: an execution error is a failure whatever its text says', async () => {
+    operations = installFakeOperations(() => refused('The response summary is not available to this user.', 'EXECUTION_ERROR'));
 
-    await expect(svc.loadReport(FORM)).rejects.toThrow('boom');
+    await expect(service().loadReport(FORM)).rejects.toThrow('not available to this user');
   });
 
-  it('rejects when the definition read fails', async () => {
-    const { fake, svc } = make();
-    fake.def.reject(new Error('no snapshot'));
-    fake.rows.resolve(rowsWithAPartial());
+  it("throws any other refusal with the server's message", async () => {
+    operations = installFakeOperations(() => refused('The response summary failed on the server; the server log has the detail.'));
 
-    await expect(svc.loadReport(FORM)).rejects.toThrow('no snapshot');
+    await expect(service().loadReport(FORM)).rejects.toThrow('failed on the server');
   });
 });

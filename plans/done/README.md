@@ -12,6 +12,7 @@ accurately. Where the two have diverged the CODE IS THE TRUTH, and the running d
 | `ENTITY_BINDING_SPEC.md` | PR #33 | [`guides/ENTITY_BINDING_GUIDE.md`](../../guides/ENTITY_BINDING_GUIDE.md) |
 | `ON_SUBMIT_AUTOMATION_SPEC.md` | PR #33 | [`guides/ENTITY_BINDING_GUIDE.md`](../../guides/ENTITY_BINDING_GUIDE.md) §4 |
 | `QUESTION_LEVEL_LOGIC_PLAN.md` | PR #72 | the code — `packages/Entities/src/contracts/{conditional-rule,flow-resolver}.ts` and `packages/Angular/src/lib/builder/logic-*.ts` |
+| `mj-entity-action-workflow-adoption.md` | decision only, #313 (not adopted) | [`docs/on-submit-automations.md`](../../docs/on-submit-automations.md#why-not-mj-entityaction-bindings) "Why not MJ `EntityAction` bindings", and `DG-7` in [`FORMS_BUILD_PLAN.md`](../FORMS_BUILD_PLAN.md) §10 |
 | `ISSUE-74-EDIT-LOGIC-DIALOG-PLAN.md` | `45d586d` + `5b48fe0` on `enhancement/rules-and-branching`; PR to `next` not yet open | its own Phase 4 checklist, until that PR merges |
 
 Anything still being built stays in `plans/`. The `ISSUE-74` row is the one exception worth

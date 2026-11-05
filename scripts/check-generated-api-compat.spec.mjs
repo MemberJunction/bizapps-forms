@@ -110,5 +110,42 @@ check('every rule declares retiredAtPin',
     `active=${JSON.stringify(active.map((r) => r.id))} retired=${JSON.stringify(retired.map((r) => r.id))}`);
 }
 
+// ── pinnedMJVersion extracts the numeric floor across pin formats and fails closed on non-semver ──
+{
+  const dir = mkdtempSync(join(tmpdir(), 'api-compat-pin-'));
+  try {
+    mkdirSync(join(dir, 'apps', 'MJAPI'), { recursive: true });
+    const writePin = (spec) =>
+      writeFileSync(
+        join(dir, 'apps', 'MJAPI', 'package.json'),
+        JSON.stringify({ dependencies: { '@memberjunction/core': spec } }),
+        'utf8',
+      );
+
+    writePin('^6.1.5');
+    check('pinnedMJVersion strips caret prefix: ^6.1.5 -> 6.1.5', pinnedMJVersion(dir) === '6.1.5', pinnedMJVersion(dir));
+
+    writePin('  ^6.1.5-edge.2  ');
+    check('pinnedMJVersion trims surrounding whitespace: "  ^6.1.5-edge.2  " -> 6.1.5-edge.2',
+      pinnedMJVersion(dir) === '6.1.5-edge.2', pinnedMJVersion(dir));
+
+    writePin('>=6.1.5 <7.0.0');
+    check('pinnedMJVersion extracts floor from lower-bound range: ">=6.1.5 <7.0.0" -> 6.1.5',
+      pinnedMJVersion(dir) === '6.1.5', pinnedMJVersion(dir));
+
+    writePin('workspace:*');
+    let threw = false;
+    try {
+      pinnedMJVersion(dir);
+    } catch {
+      threw = true;
+    }
+    check('pinnedMJVersion throws on non-version spec ("workspace:*") instead of returning 0.0.0', threw);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 console.log(failures === 0 ? '\nPASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
+

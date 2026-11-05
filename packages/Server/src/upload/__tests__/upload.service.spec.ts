@@ -6,13 +6,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { EntityInfo, EntityUserPermissionInfo, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
-import { runUpload, UPLOAD_FAILED_MESSAGE, type UploadContext, type UploadRequest, type UploadStorageEngine } from '../upload.service';
+import { runUpload, RESPONSE_ALREADY_SUBMITTED_MESSAGE, UPLOAD_FAILED_MESSAGE, type UploadContext, type UploadRequest, type UploadStorageEngine } from '../upload.service';
 import { resetUploadConfigForTests } from '../config';
-import { FOREIGN_ORIGIN_MESSAGE } from '../../http/embed-origin';
+import { StageTimer } from '../../http/stage-timer';
 import type { ParsedFile } from '../multipart';
-import { makeDefinition, makeDistribution, makeVersion } from '../../public-submit/__tests__/fakes';
+import { makeDefinition, makeDistribution, makeVersion } from '@mj-biz-apps/forms-core-entities-server/testing';
+import { FOREIGN_ORIGIN_MESSAGE, FORM_UNAVAILABLE_MESSAGE, FORMS_ENTITY } from '@mj-biz-apps/forms-core-entities-server';
 
 const USER = { ID: 'anon', Name: 'Anonymous' } as unknown as UserInfo;
+/** MJ's system user, which the middleware always supplies: the form-status read and the writes run as it. */
+const SYSTEM = { ID: 'system', Name: 'System' } as unknown as UserInfo;
 
 const FORM_RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
 const FORM_RESPONSE_ANSWER_ENTITY = 'MJ_BizApps_Forms: Form Response Answers';
@@ -74,13 +77,46 @@ function makeUploadDefinition() {
 }
 
 /** RunView provider that resolves an open published distribution for slug 'public-1'. */
-function runViewProvider(options: { openDistribution?: boolean; allowedOrigins?: string | null } = {}) {
+function runViewProvider(
+  options: {
+    openDistribution?: boolean;
+    allowedOrigins?: string | null;
+    formStatus?: string;
+    formReadFails?: boolean;
+    /** Existing Form Response rows by id: their Status (in 'dist-1'), or a Status and a distribution. */
+    responses?: Record<string, string | { status: string; distributionId: string }>;
+    responseReadFails?: boolean;
+    /** Every Form Response read, with the principal it ran as. */
+    responseReads?: { filter: string | undefined; user: UserInfo | undefined }[];
+  } = {},
+) {
   const open = options.openDistribution ?? true;
   return {
-    RunView: async <T>(params: RunViewParams): Promise<RunViewResult<T>> => {
+    RunView: async <T>(params: RunViewParams, contextUser?: UserInfo): Promise<RunViewResult<T>> => {
+      if (options.formReadFails && params.EntityName === FORMS_ENTITY.Form) {
+        return { Success: false, Results: [], RowCount: 0, TotalRowCount: 0, ExecutionTime: 0, ErrorMessage: 'login timeout' } as RunViewResult<T>;
+      }
+      if (params.EntityName === FORM_RESPONSE_ENTITY) {
+        // The upload service passes a plain SQL string; a PlatformSQL object would be a change of shape.
+        const filter = typeof params.ExtraFilter === 'string' ? params.ExtraFilter : undefined;
+        options.responseReads?.push({ filter, user: contextUser });
+        if (options.responseReadFails) {
+          return { Success: false, Results: [], RowCount: 0, TotalRowCount: 0, ExecutionTime: 0, ErrorMessage: 'deadlock victim' } as RunViewResult<T>;
+        }
+        // Matched the way SQL would: by id AND by the distribution the filter names (a string entry
+        // lives in the fake distribution, 'dist-1').
+        const found = Object.entries(options.responses ?? {})
+          .map(([ID, row]) => (typeof row === 'string' ? { ID, Status: row, dist: 'dist-1' } : { ID, Status: row.status, dist: row.distributionId }))
+          .filter((row) => filter?.toLowerCase().includes(row.ID.toLowerCase()) && filter.includes(`FormDistributionID='${row.dist}'`))
+          .map(({ ID, Status }) => ({ ID, Status }));
+        return { Success: true, Results: found as T[], RowCount: found.length, TotalRowCount: found.length, ExecutionTime: 0, ErrorMessage: '' } as RunViewResult<T>;
+      }
       let rows: unknown[] = [];
       if (params.EntityName === FORM_DISTRIBUTION_ENTITY && open) {
         rows = [makeDistribution({ AllowedOrigins: options.allowedOrigins ?? null })];
+      } else if (params.EntityName === FORMS_ENTITY.Form && open) {
+        // The form's own Status — the respondent path refuses a form that is not Published (#303).
+        rows = [{ ID: 'form-1', Status: options.formStatus ?? 'Published' }];
       } else if (params.EntityName === FORM_VERSION_ENTITY && open) {
         rows = [makeVersion(makeUploadDefinition())];
       }
@@ -119,12 +155,27 @@ function context(opts: {
   provenanceFails?: boolean;
   allowedOrigins?: string | null;
   requestOrigin?: string;
+  formStatus?: string;
+  formReadFails?: boolean;
+  noSystemUser?: boolean;
+  responses?: Record<string, string | { status: string; distributionId: string }>;
+  responseReadFails?: boolean;
+  responseReads?: { filter: string | undefined; user: UserInfo | undefined }[];
 }): UploadContext {
   return {
     contextUser: USER,
+    elevatedUser: opts.noSystemUser ? undefined : SYSTEM,
     requestOrigin: opts.requestOrigin,
     metadataProvider: metadataProvider(opts.perms ?? respondentPerms()),
-    runViewProvider: runViewProvider({ openDistribution: opts.open, allowedOrigins: opts.allowedOrigins }),
+    runViewProvider: runViewProvider({
+      openDistribution: opts.open,
+      allowedOrigins: opts.allowedOrigins,
+      formStatus: opts.formStatus,
+      formReadFails: opts.formReadFails,
+      responses: opts.responses,
+      responseReadFails: opts.responseReadFails,
+      responseReads: opts.responseReads,
+    }),
     storage: opts.storage ?? storageEngine().engine,
     // Stubbed rather than hitting the database. The endpoint fails closed when provenance cannot
     // be recorded, so without a substitute every upload test would fail for the wrong reason.
@@ -319,9 +370,44 @@ describe('runUpload', () => {
     expect(recordedProvenance[0].questionId).toBe('q-file');
   });
 
-  it('rejects (404) when the distribution does not resolve to an open form', async () => {
+  it('rejects (404) when the distribution does not resolve to an open form, naming no reason', async () => {
     const result = await runUpload(context({ open: false }), request());
     expect(result.failure?.status).toBe(404);
+    expect(result.failure?.error).toBe(FORM_UNAVAILABLE_MESSAGE);
+  });
+
+  // Review minor 12 (#303 Task 8 fix round 1). With no system user the form-status read used to fall
+  // back to the respondent, whose role has no grant on Forms — so every upload was refused as if the
+  // form were archived. It is a host configuration error, and is refused (and logged) as one.
+  it('refuses (500) without reading or storing anything when the host has no system user', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ noSystemUser: true, storage: engine }), request());
+    expect(result.failure?.status).toBe(500);
+    expect(result.failure?.error).toBe(UPLOAD_FAILED_MESSAGE);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  // #303 Task 8: the same link resolution `Forms.SaveResponse` runs — an archived form takes no
+  // uploads, before any byte is stored, even while its link row still reads Active.
+  it('rejects (404) an upload to a form that is no longer Published, storing nothing', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ formStatus: 'Closed', storage: engine }), request());
+    expect(result.failure?.status).toBe(404);
+    // One fixed sentence for every reason a link cannot take uploads; the reason goes to the log.
+    expect(result.failure?.error).toBe(FORM_UNAVAILABLE_MESSAGE);
+    expect(result.failure?.error).not.toContain('form-not-published');
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  // Re-review N2: an unreadable form status is a database problem, not a missing form. It is a 503
+  // with the generic failure sentence — never a 404, and never the internal reason's name.
+  it('answers an unreadable form status as a 503 with the generic message, storing nothing', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ formReadFails: true, storage: engine }), request());
+    expect(result.failure?.status).toBe(503);
+    expect(result.failure?.error).toBe(UPLOAD_FAILED_MESSAGE);
+    expect(JSON.stringify(result)).not.toContain('form-unreadable');
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it('returns a clean 5xx (not a crash) when storage is unconfigured', async () => {
@@ -630,5 +716,117 @@ describe('runUpload — provenance', () => {
       expect(result.failure?.status).toBe(403);
       expect(upload).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * An upload for a response that is already sealed stores nothing (409).
+ *
+ * The widget now waits for its uploads before it submits, so this is the server's half of the same
+ * rule: a file that arrives after the response it names was finished can never become one of its
+ * answers. Storing it anyway left an `MJ: Files` row and a ledger row no answer would ever reference
+ * — 21 of them on the dev database before the widget waited — and gave the respondent no hint that
+ * their file did not make it in.
+ */
+describe('runUpload — a response that is already submitted', () => {
+  const RESPONSE_ID = '6d63fa23-00af-44de-a74d-7483feabb1aa';
+
+  it.each(['Complete', 'Disqualified'])('refuses (409) an upload for a %s response and stores nothing', async (status) => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(
+      context({ storage: engine, responses: { [RESPONSE_ID]: status } }),
+      request({ responseId: RESPONSE_ID }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.failure).toEqual({ status: 409, error: RESPONSE_ALREADY_SUBMITTED_MESSAGE });
+    expect(upload).not.toHaveBeenCalled();
+    expect(recordedProvenance).toHaveLength(0);
+  });
+
+  it('stores the file for a response that is still a draft', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(
+      context({ storage: engine, responses: { [RESPONSE_ID]: 'Partial' } }),
+      request({ responseId: RESPONSE_ID }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(upload).toHaveBeenCalledOnce();
+  });
+
+  it('stores the file for a response id with no row yet (an upload before the first autosave)', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ storage: engine, responses: {} }), request({ responseId: RESPONSE_ID }));
+
+    expect(result.ok).toBe(true);
+    expect(upload).toHaveBeenCalledOnce();
+  });
+
+  it('reads the response as the system user, by its id — the respondent role cannot read responses', async () => {
+    const responseReads: { filter: string | undefined; user: UserInfo | undefined }[] = [];
+    await runUpload(context({ responses: {}, responseReads }), request({ responseId: RESPONSE_ID }));
+
+    expect(responseReads).toHaveLength(1);
+    expect(responseReads[0].user).toBe(SYSTEM);
+    expect(responseReads[0].filter).toContain(RESPONSE_ID);
+  });
+
+  it('only looks inside the distribution the upload resolved, so it says nothing about another form', async () => {
+    // Without the scope, any anonymous caller holding a response id from ANY form could learn
+    // whether it was finished: 409 for sealed, 200 for not. Scoped, a response elsewhere reads as
+    // no row and the upload goes ahead — exactly what happened before this guard existed.
+    const responseReads: { filter: string | undefined; user: UserInfo | undefined }[] = [];
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(
+      context({
+        storage: engine,
+        responseReads,
+        responses: { [RESPONSE_ID]: { status: 'Complete', distributionId: 'dist-other' } },
+      }),
+      request({ responseId: RESPONSE_ID }),
+    );
+
+    expect(responseReads[0].filter).toContain("FormDistributionID='dist-1'");
+    expect(result.ok).toBe(true);
+    expect(upload).toHaveBeenCalledOnce();
+  });
+
+  it('does not read anything when the upload names no response', async () => {
+    const responseReads: { filter: string | undefined; user: UserInfo | undefined }[] = [];
+    const result = await runUpload(context({ responseReads }), request({ responseId: undefined }));
+
+    expect(result.ok).toBe(true);
+    expect(responseReads).toHaveLength(0);
+  });
+
+  it('fails closed (503) when the response cannot be read, and stores nothing', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(
+      context({ storage: engine, responseReadFails: true }),
+      request({ responseId: RESPONSE_ID }),
+    );
+
+    expect(result.failure).toEqual({ status: 503, error: UPLOAD_FAILED_MESSAGE });
+    expect(upload).not.toHaveBeenCalled();
+  });
+});
+
+describe('runUpload — stage timing', () => {
+  it('times the stages a slow upload could be spending its time in, when given a timer', async () => {
+    const timer = new StageTimer();
+    const result = await runUpload(
+      { ...context({ responses: {} }), timer },
+      request({ responseId: '6d63fa23-00af-44de-a74d-7483feabb1aa' }),
+    );
+
+    expect(result.ok).toBe(true);
+    const names = timer.header().split(', ').map((entry) => entry.split(';')[0]);
+    expect(names).toEqual(['resolve', 'response', 'store', 'record']);
+  });
+
+  it('runs exactly as before without one', async () => {
+    const result = await runUpload(context({}), request());
+    expect(result.ok).toBe(true);
   });
 });

@@ -19,8 +19,8 @@
  * reads the parsed snapshot and enforces on its own.
  */
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
-import { FORM_DISTRIBUTION_ENTITY, FORM_VERSION_ENTITY } from '../public-submit/entity-names';
 import type { CaptchaDemand } from './host-readiness';
+import { FORMS_ENTITY } from '@mj-biz-apps/forms-core-entities-server';
 
 /**
  * The one method this probe needs from a provider. `new RunView()` satisfies it (the global
@@ -37,14 +37,14 @@ export type CaptchaDemandRead = { ok: true; demand: CaptchaDemand } | { ok: fals
 
 /** Two questions, each needing only a yes/no — so one row is enough and `simple` is the shape. */
 const ACTIVE_LINKS_REQUIRING_CAPTCHA: RunViewParams = {
-  EntityName: FORM_DISTRIBUTION_ENTITY,
+  EntityName: FORMS_ENTITY.FormDistribution,
   ExtraFilter: `Status='Active' AND IsActive=1 AND CaptchaRequired=1`,
   Fields: ['ID'],
   MaxRows: 1,
   ResultType: 'simple',
 };
 const PUBLISHED_FORMS_REQUIRING_CAPTCHA: RunViewParams = {
-  EntityName: FORM_VERSION_ENTITY,
+  EntityName: FORMS_ENTITY.FormVersion,
   ExtraFilter: `Status='Published' AND DefinitionSnapshot LIKE '%"captchaRequired":true%'`,
   Fields: ['ID'],
   MaxRows: 1,

@@ -11,7 +11,7 @@
  * unit-testable; the Design panel passes `style.CSSVariables`.
  */
 import type { FormStyleTokens, mjBizAppsFormsFormStyleEntity } from '@mj-biz-apps/forms-entities';
-import { parseStyleTokens, buildStyleTokens } from './json-fields';
+import { parseStyleTokens, buildStyleTokens } from '@mj-biz-apps/forms-entities/contracts';
 
 /** Semantic token names the theme editor writes into `CSSVariables`. */
 export const BRAND_TOKENS = {

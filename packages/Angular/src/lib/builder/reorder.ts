@@ -6,7 +6,7 @@
  * whether a proposed move is a real, in-bounds reorder before we touch the array or the
  * database — keeping the two entry points behaviourally identical.
  */
-import type { RuleEntry } from './rules-inventory';
+import type { RuleEntry } from '@mj-biz-apps/forms-entities/contracts';
 
 export function isValidReorder(from: number, to: number, length: number): boolean {
   return (

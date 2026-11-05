@@ -1,200 +1,140 @@
 /**
- * The write ORDER of a cross-section move, which is the whole of its integrity story.
+ * A cross-section move (issue #149) is ONE save: the question's new `PageID`, and the renumbering of
+ * both sections, commit together or not at all.
  *
- * There is no transaction here: this is one `PageID` write plus up to N+M `DisplayOrder` writes,
- * one row at a time, any of which the database can refuse. Rolling back is not the answer — the
- * rollback needs writes of its own, which can also fail — so the order is chosen instead, such
- * that every prefix of it leaves a tree that reloads consistently.
+ * It used to be one `PageID` write plus up to N+M `DisplayOrder` writes, ordered so a failure
+ * part-way still left a tree that reloaded — the worst outcome being one section's order wrong.
+ * In one transaction there is no part-way: a refusal leaves the question in its old section with
+ * every order as it was. Staging the question under the DESTINATION page is the move — its
+ * `PageID` becomes that page's on save.
  *
- * MEMBERSHIP GOES FIRST AND ALONE. `PageID` is the only write that cannot be re-derived from
- * what is on screen; `DisplayOrder` is re-asserted by the next reorder or by a reload. And
- * because `PageID` is one column on one row written by one `Save()`, a question belongs to
- * exactly one page at every instant — "orphaned between sections" is unrepresentable, and the
- * worst a partial failure can do is leave an order within one page wrong.
+ * Run against a stand-in graph (`testing/fake-structure-graph.ts`); the server half is proven by
+ * forms-core-entities-server's opt-in `form-structure-graph.integration.spec.ts`.
  */
-import { describe, it, expect } from 'vitest';
-import { BuilderStateService } from './builder-state.service';
-import type { mjBizAppsFormsFormQuestionEntity } from '@mj-biz-apps/forms-entities';
-import type { PageNode, QuestionNode } from './builder-models';
+import { describe, expect, it } from 'vitest';
+import { fakeTree, GraphedBuilderState } from './testing/fake-structure-graph';
+import type { FormTree, PageNode, QuestionNode } from './builder-models';
 
-/** What a row's `Save()` actually persisted, in call order across the whole fixture. */
-interface WriteLog {
-  entries: Array<{ id: string; pageId: string | null; displayOrder: number }>;
-}
-
-class FakeQuestionEntity {
-  public PageID: string | null = null;
-  public DisplayOrder = 0;
-  public LatestResult = { CompleteMessage: 'refused by the fake' };
-
-  public constructor(
-    public readonly ID: string,
-    private readonly log: WriteLog,
-    /** Return false to model a refusal on this row. */
-    private readonly accept: () => boolean = () => true,
-  ) {}
-
-  public async Save(): Promise<boolean> {
-    if (!this.accept()) {
-      return false;
-    }
-    this.log.entries.push({ id: this.ID, pageId: this.PageID, displayOrder: this.DisplayOrder });
-    return true;
-  }
-}
-
-const asEntity = (e: FakeQuestionEntity): mjBizAppsFormsFormQuestionEntity =>
-  e as unknown as mjBizAppsFormsFormQuestionEntity;
-
-function node(entity: FakeQuestionEntity): QuestionNode {
-  return { entity: asEntity(entity), options: [] };
-}
-
-/** A page whose entity only needs an ID for this method. */
-function page(id: string, questions: QuestionNode[]): PageNode {
-  return { entity: { ID: id } as PageNode['entity'], questions };
-}
-
-/**
- * pA holds a1 a2 a3 (DisplayOrder 0 1 2), pB holds b1 b2 (0 1), and `a2` has ALREADY been moved
- * in memory into pB at `index` — which is the precondition the method is documented to require.
- */
-function fixture(index: number, accept: () => boolean = () => true) {
-  const log: WriteLog = { entries: [] };
-  const make = (id: string, pageId: string, order: number): FakeQuestionEntity => {
-    const e = new FakeQuestionEntity(id, log, accept);
-    e.PageID = pageId;
-    e.DisplayOrder = order;
-    return e;
-  };
-  const a1 = node(make('a1', 'pA', 0));
-  const a2 = node(make('a2', 'pA', 1));
-  const a3 = node(make('a3', 'pA', 2));
-  const b1 = node(make('b1', 'pB', 0));
-  const b2 = node(make('b2', 'pB', 1));
-
-  const destinationQuestions = [b1, b2];
-  destinationQuestions.splice(index, 0, a2);
-
-  return {
-    log,
-    moved: a2,
-    source: page('pA', [a1, a3]),
-    destination: page('pB', destinationQuestions),
-    service: new BuilderStateService(),
-  };
+/** Two sections, then `q2` moved in memory to `index` of section B, as the drop handler does. */
+function movedTree(index: number): {
+  tree: FormTree;
+  source: PageNode;
+  destination: PageNode;
+  moved: QuestionNode;
+  state: GraphedBuilderState;
+} {
+  const { tree, store } = fakeTree([
+    { id: 'A', questions: [{ id: 'q1' }, { id: 'q2' }, { id: 'q3' }] },
+    { id: 'B', questions: [{ id: 'q4' }, { id: 'q5' }] },
+  ]);
+  const [source, destination] = tree.pages;
+  const [moved] = source.questions.splice(1, 1);
+  destination.questions.splice(index, 0, moved);
+  return { tree, source, destination, moved, state: new GraphedBuilderState(store) };
 }
 
 describe('persistCrossPageMove', () => {
   describe('happy', () => {
-    it('writes membership FIRST, in one row write, before renumbering anything', async () => {
-      const { service, moved, source, destination, log } = fixture(1);
+    it('writes the move and both renumberings in ONE save', async () => {
+      const { tree, source, destination, moved, state } = movedTree(1);
 
-      expect(await service.persistCrossPageMove(moved, source, destination)).toBe(true);
+      expect(await state.persistCrossPageMove(tree, moved, source, destination)).toBe(true);
 
-      expect(log.entries[0]).toEqual({ id: 'a2', pageId: 'pB', displayOrder: 1 });
+      expect(state.graphs).toHaveLength(1);
+      expect(state.store.saves).toHaveLength(1);
     });
 
-    it('renumbers the destination and then the source, and never the moved row twice', async () => {
-      // `persistQuestionOrder` skips a row whose DisplayOrder already matches its index, and the
-      // membership write set the moved row to its final index — so it is skipped here. That
-      // reads like an omission unless it is asserted.
-      const { service, moved, source, destination, log } = fixture(1);
+    it('moves the question into the destination section', async () => {
+      const { tree, source, destination, moved, state } = movedTree(1);
 
-      await service.persistCrossPageMove(moved, source, destination);
+      await state.persistCrossPageMove(tree, moved, source, destination);
 
-      expect(log.entries.map((e) => e.id)).toEqual(['a2', 'b2', 'a3']);
-      expect(log.entries.filter((e) => e.id === 'a2')).toHaveLength(1);
+      expect(state.store.stored('q2')?.['PageID']).toBe('B');
+      expect(moved.entity.PageID).toBe('B');
     });
 
-    it('leaves both pages numbered 0..n-1 with no collision', async () => {
-      const { service, moved, source, destination } = fixture(1);
+    it("leaves both sections numbered 0..n-1, in the database and on the builder's rows", async () => {
+      const { tree, source, destination, moved, state } = movedTree(1);
 
-      await service.persistCrossPageMove(moved, source, destination);
+      await state.persistCrossPageMove(tree, moved, source, destination);
 
+      expect(['q4', 'q2', 'q5'].map((id) => state.store.stored(id)?.DisplayOrder)).toEqual([0, 1, 2]);
+      expect(['q1', 'q3'].map((id) => state.store.stored(id)?.DisplayOrder)).toEqual([0, 1]);
       expect(destination.questions.map((q) => q.entity.DisplayOrder)).toEqual([0, 1, 2]);
       expect(source.questions.map((q) => q.entity.DisplayOrder)).toEqual([0, 1]);
-      expect(destination.questions.map((q) => q.entity.PageID)).toEqual(['pB', 'pB', 'pB']);
     });
   });
 
   describe('edge', () => {
     it('appends to the end of the destination', async () => {
-      const { service, moved, source, destination, log } = fixture(2);
+      const { tree, source, destination, moved, state } = movedTree(2);
 
-      expect(await service.persistCrossPageMove(moved, source, destination)).toBe(true);
+      await state.persistCrossPageMove(tree, moved, source, destination);
 
-      expect(log.entries[0]).toEqual({ id: 'a2', pageId: 'pB', displayOrder: 2 });
-      expect(destination.questions.map((q) => q.entity.ID)).toEqual(['b1', 'b2', 'a2']);
+      expect(state.store.stored('q2')).toMatchObject({ PageID: 'B', DisplayOrder: 2 });
     });
 
-    it('writes PageID even when DisplayOrder happens not to change', async () => {
-      // THE TRAP. Moving a question from index 1 of one section to index 1 of another leaves
-      // DisplayOrder untouched, so `persistQuestionOrder` would skip it and PageID would never
-      // reach the database — the question snaps back to its old section on the next reload.
-      const { service, moved, source, destination, log } = fixture(1);
+    it("writes the move even when the question's order number happens not to change", async () => {
+      // q2 sat at order 1 in A and lands at index 1 in B: nothing about its order is new, and a
+      // renumber that only staged changed orders would never write the move at all.
+      const { tree, source, destination, moved, state } = movedTree(1);
       expect(moved.entity.DisplayOrder).toBe(1);
 
-      await service.persistCrossPageMove(moved, source, destination);
+      await state.persistCrossPageMove(tree, moved, source, destination);
 
-      expect(log.entries.some((e) => e.id === 'a2' && e.pageId === 'pB')).toBe(true);
+      expect(state.store.stored('q2')?.['PageID']).toBe('B');
     });
   });
 
   describe('worst', () => {
-    it('writes nothing else when the membership write is refused', async () => {
-      // Fail at (1): disk is exactly the pre-move state, so the move simply did not happen.
-      const { service, moved, source, destination, log } = fixture(1, () => false);
+    it("changes nothing stored, and nothing on the builder's rows, when any write is refused", async () => {
+      const { tree, source, destination, moved, state } = movedTree(1);
+      state.store.refuse.set('q3', 'refused by the database');
 
-      expect(await service.persistCrossPageMove(moved, source, destination)).toBe(false);
+      expect(await state.persistCrossPageMove(tree, moved, source, destination)).toBe(false);
 
-      expect(log.entries).toEqual([]);
+      expect(state.store.stored('q2')).toMatchObject({ PageID: 'A', DisplayOrder: 1 });
+      expect(state.store.stored('q5')?.DisplayOrder).toBe(1);
+      expect(moved.entity.PageID).toBe('A');
     });
 
     it('reports a refusal to the author rather than swallowing it', async () => {
-      const { service, moved, source, destination } = fixture(1, () => false);
+      const { tree, source, destination, moved, state } = movedTree(1);
+      state.store.refuse.set('q2', 'refused by the database');
 
-      await service.persistCrossPageMove(moved, source, destination);
+      await state.persistCrossPageMove(tree, moved, source, destination);
 
-      expect(service.lastFailure()).toContain('refused by the fake');
-    });
-
-    it('reports false when a renumber fails after membership stuck', async () => {
-      // Fail during (2)/(3): membership is on disk, so the question belongs to exactly one page.
-      let calls = 0;
-      const { service, moved, source, destination } = fixture(1, () => {
-        calls += 1;
-        return calls === 1;
-      });
-
-      expect(await service.persistCrossPageMove(moved, source, destination)).toBe(false);
+      expect(state.lastFailure()).toBe('Could not move question to another section. refused by the database');
     });
 
     it('refuses a question the caller has not moved in memory yet', async () => {
-      const { service, moved, source, destination } = fixture(1);
-      destination.questions = destination.questions.filter((q) => q !== moved);
+      const { tree, store } = fakeTree([{ id: 'A', questions: [{ id: 'q1' }] }, { id: 'B' }]);
+      const state = new GraphedBuilderState(store);
+      const [source, destination] = tree.pages;
 
-      await expect(service.persistCrossPageMove(moved, source, destination)).rejects.toThrow(
+      await expect(state.persistCrossPageMove(tree, source.questions[0], source, destination)).rejects.toThrow(
         /not in destination page/,
       );
+      expect(state.graphs).toHaveLength(0);
     });
 
     it('refuses a question still sitting in the source page', async () => {
-      const { service, moved, source, destination } = fixture(1);
-      source.questions.push(moved);
+      const { tree, store } = fakeTree([{ id: 'A', questions: [{ id: 'q1' }] }, { id: 'B' }]);
+      const state = new GraphedBuilderState(store);
+      const [source, destination] = tree.pages;
+      destination.questions.push(source.questions[0]);
 
-      await expect(service.persistCrossPageMove(moved, source, destination)).rejects.toThrow(
+      await expect(state.persistCrossPageMove(tree, source.questions[0], source, destination)).rejects.toThrow(
         /still in source page/,
       );
     });
 
     it('refuses a same-page "move", which is persistQuestionOrder\'s job', async () => {
-      const { service, moved, source, destination } = fixture(1);
+      const { tree, store } = fakeTree([{ id: 'A', questions: [{ id: 'q1' }] }]);
+      const state = new GraphedBuilderState(store);
+      const [page] = tree.pages;
 
-      await expect(service.persistCrossPageMove(moved, source, source)).rejects.toThrow(
-        /same page/,
-      );
-      expect(destination.questions).toContain(moved);
+      await expect(state.persistCrossPageMove(tree, page.questions[0], page, page)).rejects.toThrow(/same page/);
     });
   });
 });

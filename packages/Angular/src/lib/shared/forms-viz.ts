@@ -108,8 +108,8 @@ export const FORMS_VIZ_PRIMITIVES = /* css */ `
 .mjf-type-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
+  gap: 4px;
+  padding: 4px 8px;
   font-size: var(--mjf-label);
   font-weight: 600;
   line-height: 1.5;

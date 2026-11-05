@@ -1,20 +1,26 @@
 /**
- * Standalone mock S1 transport. Lets the widget build, render, and demo end-to-end
- * before WP-B's resolvers land — same {@link IFormsApiService} interface, so swapping
- * to {@link FormsGraphQLApiService} is a one-line provider change.
+ * Development mock S1 transport. Same {@link IFormsApiService} interface, so swapping to
+ * {@link FormsGraphQLApiService} is a one-line provider change for a host that wants a demo.
+ *
+ * NOT in the `<mj-form>` bundle: `formsWidgetProviders` binds {@link FormsOfflineApiService} when
+ * there is no `api-url`, because serving a projection built here put the projection builder on every
+ * respondent's phone (#303 Task 10c fix round 1). `scripts/widget-bundle-guard.mjs` fails
+ * `build:widget` if this module or `mock-form.data.ts` is bundled again.
  *
  * The seeded form exercises every Phase-1 question type (§5.3), both choice + scale
  * styles, conditional show/hide (S2), and validation rules — so the demo doubles as a
- * visual smoke test.
+ * visual smoke test. It is served the way the real server serves a form: as the respondent
+ * PROJECTION (`toRespondentDefinition`), so the demo renders exactly what a respondent's browser
+ * would receive, and every save answers as the server would for a form with no knockouts.
+ *
+ * The builder's Preview does NOT go through this service: it renders the author's full draft and
+ * never sends anything anywhere (see `MjFormComponent`).
  */
 import { Injectable } from '@angular/core';
-import type {
-  PublishedFormDefinition,
-  FormSubmissionInput,
-  FormSubmissionResult,
-} from '@mj-biz-apps/forms-entities/contracts';
+import type { FormsSaveResponseInput, FormsSaveResponseOutput } from '@mj-biz-apps/forms-entities';
+import { toRespondentDefinition } from '@mj-biz-apps/forms-entities/contracts';
 
-import type { IFormsApiService, PublishedFormLoad } from './forms-api.interface';
+import type { IFormsApiService, RespondentFormLoad } from './forms-api.interface';
 import { generateClientResponseId } from '../core/client-id';
 import { buildMockForm } from './mock-form.data';
 
@@ -27,28 +33,26 @@ export class FormsMockApiService implements IFormsApiService {
     return this.sessionId;
   }
 
-  public async loadPublishedForm(distributionSlug: string): Promise<PublishedFormLoad | null> {
+  public async loadRespondentForm(distributionSlug: string): Promise<RespondentFormLoad> {
     await this.simulateLatency();
-    // Never a resume: the mock stands in for a standalone embed/preview with no server, and
-    // resuming requires a magic-link session scoped to a stored response — which is exactly what
-    // a mock cannot have. A demo that "resumed" would be fiction.
-    return { definition: buildMockForm(distributionSlug) };
+    // Never a resume: the mock stands in for a standalone embed with no server, and resuming
+    // requires a magic-link session scoped to a stored response — which is exactly what a mock
+    // cannot have. A demo that "resumed" would be fiction.
+    const definition = toRespondentDefinition(buildMockForm(distributionSlug));
+    return { formVersionId: definition.formVersionId, definition };
   }
 
-  public async submitResponse(
-    input: FormSubmissionInput,
-    existingResponseId?: string,
-  ): Promise<FormSubmissionResult> {
+  public async saveResponse(input: FormsSaveResponseInput): Promise<FormsSaveResponseOutput> {
     await this.simulateLatency();
+    const final = input.Mode === 'final';
     return {
-      success: true,
-      // Echo the client-supplied id back (it is the widget's stable idempotency key), falling
-      // back to a minted id only if none was sent.
-      responseId: existingResponseId ?? `mock-${Date.now().toString(36)}`,
-      status: input.partial ? 'Partial' : 'Complete',
-      confirmationMessage: input.partial
-        ? 'Your progress has been saved.'
-        : 'Thank you! Your response has been recorded.',
+      Success: true,
+      // Echo the client-supplied id back: the server adopts it as the row's primary key.
+      ResponseID: input.ClientResponseID,
+      Status: final ? 'Complete' : 'Partial',
+      Outcome: final ? 'ended' : 'continue',
+      ...(final ? { ConfirmationMessage: 'Thank you! Your response has been recorded.' } : {}),
+      Errors: [],
     };
   }
 

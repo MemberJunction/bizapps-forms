@@ -42,10 +42,10 @@ const source = (file: string): string =>
 /** The body of `name(...) {` up to the next method at the same indent — enough for ordering checks. */
 const methodBody = (file: string, name: string): string => {
   const src = source(file);
-  const start = src.search(new RegExp(`\\n  (protected |private |public )?${name}\\(`));
+  const start = src.search(new RegExp(`\\n  (protected |private |public )?(async )?${name}\\(`));
   expect(start, `${file} declares ${name}`).toBeGreaterThan(-1);
   const rest = src.slice(start + 1);
-  const end = rest.search(/\n  (protected |private |public )?[A-Za-z]+\(/);
+  const end = rest.search(/\n  (protected |private |public )?(async )?[A-Za-z]+\(/);
   return end === -1 ? rest : rest.slice(0, end);
 };
 
@@ -54,10 +54,11 @@ describe('Next and Submit judge what the respondent can see (#268)', () => {
     expect(source('form-question.component.ts')).toMatch(/\n  syncFromDom\(\): void \{/);
   });
 
+  // Validation is the step judge, which touches and validates only after the uploads land (#248).
   it.each([
-    ['../form-scroll.component.ts', 'onNext', /touchAll|areValid/],
-    ['../form-scroll.component.ts', 'onSubmit', /touchAll|areValid/],
-    ['../form-one-question.component.ts', 'onNext', /markTouched|errorFor/],
+    ['../form-scroll.component.ts', 'onNext', /stepJudge\.judge\(/],
+    ['../form-scroll.component.ts', 'onSubmit', /stepJudge\.judge\(/],
+    ['../form-one-question.component.ts', 'onNext', /stepJudge\.judge\(/],
   ])('%s %s commits visible values before validating', (file, method, validation) => {
     const body = methodBody(file, method);
     const commit = body.indexOf('this.commitVisibleValues()');

@@ -6,10 +6,11 @@
  * started actually finished?". The service layer builds the numbers; this decides what
  * they mean and how they read.
  *
- * The dashboard component holds selection state and calls these; nothing here touches
- * RunView, `Date.now()` (the clock is always passed in) or the DOM.
+ * The dashboard component holds selection state and calls these; nothing here reads data,
+ * calls `Date.now()` (the clock is always passed in) or touches the DOM.
  */
-import type { DistributionBucket, FormSummaryStats, ReportableForm } from './models/reporting.model';
+import { OFF_LIST_LABEL } from '@mj-biz-apps/forms-entities';
+import type { DistributionBucket, FormSummaryStats, MatrixCellCount, ReportableForm } from './models/reporting.model';
 
 /** A segment of a proportional bar: a share of a whole, with the role that colours it. */
 export interface ProportionSegment {
@@ -108,15 +109,18 @@ export function percent(fraction: number): string {
 }
 
 /**
- * The completion bar's segments: how many of the people who started this form finished it.
+ * The completion bar's segments: what became of everyone who started this form.
  *
  * A percentage tells you the ratio; the bar tells you the size of the group it is a ratio
  * OF, which is the part that decides whether 60% is a problem or a rounding error on five
- * responses. Zero-count segments are dropped so a form nobody abandoned renders as one
+ * responses. Three outcomes, kept apart because they mean different things: finished, still
+ * unfinished (an abandoned or in-progress autosave), and screened out by a knockout question —
+ * which is the form working as designed, not a leak, so it takes the neutral hue rather than
+ * the caution one. Zero-count segments are dropped so a form nobody abandoned renders as one
  * unbroken bar rather than a bar with an invisible sliver claiming a category.
  */
 export function completionSegments(stats: FormSummaryStats): ProportionSegment[] {
-  const started = stats.completeResponses + stats.partialResponses;
+  const started = stats.completeResponses + stats.partialResponses + stats.disqualifiedResponses;
   if (started === 0) return [];
   const segments: ProportionSegment[] = [
     {
@@ -131,8 +135,53 @@ export function completionSegments(stats: FormSummaryStats): ProportionSegment[]
       fraction: stats.partialResponses / started,
       vizClass: 'mjf-viz-caution',
     },
+    {
+      label: 'Screened out',
+      count: stats.disqualifiedResponses,
+      fraction: stats.disqualifiedResponses / started,
+      vizClass: 'mjf-viz-neutral',
+    },
   ];
   return segments.filter((s) => s.count > 0);
+}
+
+/** Whether a bucket is the server's fold of answers outside the question's options. */
+export function isOffListLabel(label: string): boolean {
+  return label === OFF_LIST_LABEL;
+}
+
+/** A Matrix question's counts as a grid: one row per row option, one column per column option. */
+export interface MatrixGrid {
+  columns: string[];
+  rows: { label: string; counts: number[]; total: number }[];
+}
+
+/**
+ * Lays a Matrix question's cell counts out as rows × columns, in the order the server sent them
+ * (option order, with any "Other (not an option)" row or column last).
+ *
+ * A row or column whose every count is zero is dropped when it is the off-list fold — that label
+ * exists to catch values a client sent outside the options, and an empty one says nothing — but an
+ * AUTHORED row or column with no answers stays: "nobody chose Poor for Food" is a finding.
+ */
+export function matrixGrid(cells: readonly MatrixCellCount[]): MatrixGrid {
+  const columns: string[] = [];
+  const rowLabels: string[] = [];
+  const counts = new Map<string, number>();
+  for (const cell of cells) {
+    if (!columns.includes(cell.columnLabel)) columns.push(cell.columnLabel);
+    if (!rowLabels.includes(cell.rowLabel)) rowLabels.push(cell.rowLabel);
+    counts.set(`${cell.rowLabel}\u0000${cell.columnLabel}`, cell.count);
+  }
+  const countOf = (row: string, column: string): number => counts.get(`${row}\u0000${column}`) ?? 0;
+  const keptColumns = columns.filter((c) => !isOffListLabel(c) || rowLabels.some((r) => countOf(r, c) > 0));
+  const rows = rowLabels
+    .map((label) => {
+      const rowCounts = keptColumns.map((c) => countOf(label, c));
+      return { label, counts: rowCounts, total: rowCounts.reduce((sum, n) => sum + n, 0) };
+    })
+    .filter((row) => !isOffListLabel(row.label) || row.total > 0);
+  return { columns: keptColumns, rows };
 }
 
 /**
@@ -277,6 +326,31 @@ export function railState(loading: boolean, loadError: string | null, formCount:
   if (loading) return 'loading';
   if (formCount > 0) return 'ready';
   return loadError !== null ? 'failed' : 'empty';
+}
+
+/** What the report pane shows for the selected form. `none`: no form selected or nothing read yet. */
+export type ReportState = 'loading' | 'failed' | 'unavailable' | 'empty' | 'ready' | 'none';
+
+export interface ReportStateInput {
+  loading: boolean;
+  failed: boolean;
+  /** Why the summary is refused to this reader, or null. */
+  unavailable: string | null;
+  hasReport: boolean;
+  hasResponses: boolean;
+}
+
+/**
+ * `failed` is its own state so the pane keeps a way out: without it a failed read left the pane
+ * blank once the banner was dismissed. It outranks a refusal because a refusal left over from an
+ * earlier form says nothing about the form whose read just failed.
+ */
+export function reportState(s: ReportStateInput): ReportState {
+  if (s.loading) return 'loading';
+  if (s.failed) return 'failed';
+  if (s.unavailable !== null) return 'unavailable';
+  if (!s.hasReport) return 'none';
+  return s.hasResponses ? 'ready' : 'empty';
 }
 
 /** "12 forms · 1,204 responses" — or, with no list after a failed load, no totals rather than zeros. */

@@ -22,7 +22,7 @@ import { AIEngine } from '@memberjunction/aiengine';
 import { AIPromptParams } from '@memberjunction/ai-core-plus';
 import { AIPromptRunner } from '@memberjunction/ai-prompts';
 import type { UserInfo } from '@memberjunction/core';
-import type { ActionDataProvider } from '../shared/action-provider';
+import type { ActionDataProvider } from '@mj-biz-apps/forms-core-entities-server';
 
 /** Name of the MJ AI Prompt that scores free-text answers (resolved from metadata). */
 export const RESPONSE_ANALYZER_PROMPT_NAME = 'Forms: Response Analyzer';

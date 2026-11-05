@@ -20,7 +20,10 @@ import type { ConditionalRule } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
 import { RuleEditorDialogComponent } from './rule-editor-dialog.component';
 import { LogicEditorComponent } from './logic-editor.component';
-import type { ConditionalSourceQuestion } from './condition-sources';
+import {
+  describeCondition,
+  type ConditionalSourceQuestion,
+} from '@mj-biz-apps/forms-entities/contracts';
 import {
   emptyLogicDraft,
   isLogicDraftDirty,
@@ -29,7 +32,6 @@ import {
   type LogicDraft,
 } from './logic-draft';
 import type { JumpTargetOption } from './jump-target-options';
-import { describeCondition } from './rules-panel-model';
 import { storedTargetLabel } from './jump-target-options';
 import type { FormSection } from './section-groups';
 
@@ -48,8 +50,8 @@ const RULES_PANEL_CSS = /* css */ `
   height: 28px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 10px;
+  gap: 4px;
+  padding: 0 8px;
   font: inherit;
   font-size: var(--mjf-label);
   font-weight: 600;
@@ -67,10 +69,10 @@ const RULES_PANEL_CSS = /* css */ `
 .rp-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   min-height: var(--mjf-tap);
-  padding: 8px 10px;
+  padding: 8px 8px;
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -91,7 +93,7 @@ const RULES_PANEL_CSS = /* css */ `
   border-radius: var(--mjf-radius-sm);
   background: var(--mj-bg-surface-hover);
   color: var(--mj-brand-primary);
-  font-size: 0.75rem;
+  font-size: var(--mjf-icon-sm);
 }
 .rp-text { flex: 1 1 auto; min-width: 0; font-size: var(--mjf-label); line-height: 1.45; }
 `;

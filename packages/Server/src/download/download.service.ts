@@ -47,10 +47,10 @@ import { LogError, LogErrorEx } from '@memberjunction/core';
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import { escapeSqlString } from '@mj-biz-apps/forms-entities';
 
-import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names.js';
 import { describeReadFallback, readStoredObject, redactStorageKey, type StorageReadEngine } from '../storage/read-object.js';
 import { getUploadConfig } from '../upload/config.js';
 import { getDownloadConfig } from './config.js';
+import { FORMS_ENTITY } from '@mj-biz-apps/forms-core-entities-server';
 
 /** MJ core's file registry, read only after the provenance row has authorized the caller. */
 const FILE_ENTITY = 'MJ: Files';
@@ -189,7 +189,7 @@ export async function loadResponseFile(ctx: DownloadContext, fileId: string): Pr
 async function readProvenance(ctx: DownloadContext, fileId: string): Promise<UploadProvenanceRow | undefined> {
   const result = await ctx.runViewProvider.RunView<UploadProvenanceRow>(
     {
-      EntityName: FORM_UPLOAD_ENTITY,
+      EntityName: FORMS_ENTITY.FormUpload,
       ExtraFilter: `FileID='${escapeSqlString(fileId)}'`,
       Fields: ['FileID', 'FileName', 'ContentType', 'Status'],
       MaxRows: 1,

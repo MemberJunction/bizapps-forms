@@ -26,8 +26,8 @@
  *
  * ── How the magic-link redeem reaches this page (the "link → login" fix) ────────────────
  * A distribution's shared URL is `${publicUrl}/f/<slug>`. The respondent must reach `<mj-form>`
- * holding the *redeemed* anonymous SESSION JWT — never the raw token — because the S1 resolvers
- * (`PublicFormResolver`) call `GetUserFromPayload` and throw with no session.
+ * holding the *redeemed* anonymous SESSION JWT — never the raw token — because the respondent
+ * operations (`Forms.GetRespondentForm` / `Forms.SaveResponse`) authorize from that session's scope.
  *
  * Rather than wait for the core change that would re-point `MagicLinkRouter.sendRedeemResult` at
  * `/f/:slug`, this route does the redeem ITSELF, server-side (see {@link redeemSlugToToken}):
@@ -51,34 +51,41 @@ import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware, configInfo } from '@memberjunction/server';
 import { LogStatus, LogError, LogErrorEx, Metadata, RunView, type UserInfo } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/generic-database-provider';
-import { getMagicLinkProvisioningConfig } from '@mj-biz-apps/forms-core-entities-server';
+import {
+  getMagicLinkProvisioningConfig,
+  isPostgres,
+  requireDatabaseProvider,
+  resolveAutomationPrincipal,
+  withIsolatedProvider,
+  withLazyIsolatedProvider,
+  type AcquireIsolatedProvider,
+} from '@mj-biz-apps/forms-core-entities-server';
 import { frameAncestorsDirective, parseAllowedOrigins } from '@mj-biz-apps/forms-entities';
 
 import { matchesExactRoute, matchSingleSegmentRoute } from '../http/route-match.js';
 import { getRequestOrigin } from '../http/request-origin.js';
 import { getGraphqlUrlForRequest, getRespondentHostConfig, graphqlRootPathWarning } from './config.js';
-import { getPublicSubmitConfig } from '../public-submit/config.js';
 import { renderRespondentHostPage } from './host-page.js';
 import { redeemSlugToToken } from './redeem.service.js';
 import { loadFormIdentity } from './form-identity.js';
-import { assessRespondentReadiness } from './host-readiness.js';
+import {
+  assessDatabaseReadiness,
+  assessRespondentReadiness,
+  isDatabaseReadinessRequired,
+  refuseBootOnDatabaseReadiness,
+  REQUIRE_READ_COMMITTED_SNAPSHOT_ENV,
+} from './host-readiness.js';
 import { assessAutomationReadiness, describeDurableDispatch, type PermissionLookup } from '../automation/automation-readiness.js';
-import { resolveAutomationPrincipal } from '../automation/service-principal.js';
 import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.js';
 import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
 import { runForget, runRemember, runResume, type ResumeRouteOutcome } from './device-resume.service.js';
 import { makeDeviceResumeDeps } from './resume-deps.js';
-import {
-  withIsolatedProvider,
-  withLazyIsolatedProvider,
-  type AcquireIsolatedProvider,
-} from '../automation/isolated-provider.js';
 import { readResumeCookie } from './resume-cookie.js';
 import { matchResumeRoute } from './resume-routes.js';
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
 import { checkRedeemRateLimit, redeemInFlightLimiter } from './redeem-rate-limit.js';
-import { currentRequestIdentity } from '../http/request-identity.js';
 import { requestIdentityHandler } from '../http/RequestIdentityMiddleware.js';
+import { getPublicSubmitConfig, currentRequestIdentity } from '@mj-biz-apps/forms-core-entities-server';
 
 /** Route the respondent host page is served from (matches the Forms `publicUrl()` shape). */
 export const RESPONDENT_HOST_ROUTE = '/f/:slug';
@@ -201,6 +208,10 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     // only as a per-submit log line on a best-effort hook, which is how #239 and four before it
     // went unnoticed.
     this.reportAutomationReadiness();
+    // And for the database: a host without READ_COMMITTED_SNAPSHOT works until two authors publish
+    // or clone at once. The one boot check allowed to stop the process — it logs and exits, and
+    // only when the operator opted in.
+    await this.reportDatabaseReadiness();
   }
 
   /**
@@ -321,6 +332,62 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
   }
 
   /**
+   * Probe `READ_COMMITTED_SNAPSHOT` once (SQL Server only), log each reason, and — only when
+   * `FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT=true` — refuse to boot.
+   *
+   * The probe itself never throws: a failed read is logged with what was being read and reported to
+   * the assessment as an unknown state, so it is neither swallowed nor allowed to take down an
+   * MJAPI that also serves other apps.
+   *
+   * The opt-in refusal ends the PROCESS (exit code 1) rather than throwing. A throw from this hook
+   * only rejects `createMJServer`'s promise, which the host prints and moves on from; the port never
+   * opens, but the open database pool keeps node alive — a live PID that serves nothing and that a
+   * supervisor cannot tell from a healthy start. `FORMS_REQUIRE_SESSION_HASH_SALT` does not need
+   * this because it runs at module load, where a throw fails the import; this check needs a live
+   * provider, so it cannot move there.
+   */
+  private async reportDatabaseReadiness(): Promise<void> {
+    const probe = await this.probeReadCommittedSnapshot();
+    if (probe === undefined) return;
+    const reasons = assessDatabaseReadiness({ dialect: 'sqlserver', ...probe });
+    for (const reason of reasons) {
+      // The opt-in advice belongs here, not in the reason: the refusal embeds the reasons, and it
+      // only exists when the operator has already set the flag.
+      const advice = isDatabaseReadinessRequired()
+        ? ''
+        : ` Set ${REQUIRE_READ_COMMITTED_SNAPSHOT_ENV}=true to refuse to boot without it.`;
+      LogError(`[Forms] Database is NOT ready for concurrent authoring: ${reason}${advice}`);
+    }
+    try {
+      refuseBootOnDatabaseReadiness(reasons);
+    } catch (e) {
+      LogError(e instanceof Error ? e.message : String(e));
+      process.exit(1);
+    }
+  }
+
+  /** The probe's reading, or `undefined` on PostgreSQL where there is nothing to ask. */
+  private async probeReadCommittedSnapshot(): Promise<{ readCommittedSnapshotOn: boolean | null; databaseName?: string } | undefined> {
+    try {
+      const provider = requireDatabaseProvider(Metadata.Provider, 'The READ_COMMITTED_SNAPSHOT boot probe');
+      if (isPostgres(provider)) return undefined;
+      const rows = await provider.ExecuteSQL<{ IsOn: boolean | number; DatabaseName: string }>(
+        'SELECT is_read_committed_snapshot_on AS IsOn, DB_NAME() AS DatabaseName FROM sys.databases WHERE name = DB_NAME()',
+        undefined,
+        undefined,
+        this.systemUser(),
+      );
+      if (rows.length !== 1) {
+        throw new Error(`expected one sys.databases row for the current database, got ${rows.length}`);
+      }
+      return { readCommittedSnapshotOn: Boolean(rows[0].IsOn), databaseName: rows[0].DatabaseName };
+    } catch (e) {
+      LogError(`[Forms] Could not read READ_COMMITTED_SNAPSHOT at boot: ${e instanceof Error ? e.message : String(e)}`);
+      return { readCommittedSnapshotOn: null };
+    }
+  }
+
+  /**
    * Log every entity grant the automation principal lacks, under one grep-able prefix, then say
    * once how durable entity actions behave for it (#269).
    *
@@ -383,7 +450,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       return;
     }
     try {
-      const limit = checkRedeemRateLimit(currentRequestIdentity()?.ipHash);
+      const limit = await checkRedeemRateLimit(currentRequestIdentity()?.ipHash);
       if (!limit.allowed) {
         // This door's own per-IP meter and core's redeem meter are different budgets, but they are
         // the SAME fact to the respondent — "this network, too many times" — so they get the same

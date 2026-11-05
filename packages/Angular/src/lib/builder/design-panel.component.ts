@@ -72,7 +72,12 @@ const SAVE_DEBOUNCE_MS = 600;
   ],
   // The widget's own providers (and the empty graphqlUrl that selects the mock transports, so a
   // trial answer writes nothing) belong to the stage, not to this panel.
-  providers: [DesignStateService],
+  //
+  // NO `DesignStateService` provider here: the panel uses the BUILDER's instance, which the
+  // builder routes through its one save queue (`DesignStateService.UseSaveQueue`). A panel-level
+  // instance saved the builder's form record outside that queue — not flushed before publish, and
+  // free to run over a structural save. A host mounting this panel on its own provides one.
+  providers: [],
   templateUrl: './design-panel.component.html',
   styles: [FORMS_UI_CSS, DESIGN_PANEL_STYLES],
 })

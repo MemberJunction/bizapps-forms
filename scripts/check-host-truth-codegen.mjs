@@ -80,17 +80,66 @@ import { fileURLToPath } from 'node:url';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/** The `mj migrate -t` tag a host sitting at our declared floor would be on. */
-export function coreMigrationTag(mjVersionRange) {
-  const lowerBound = /(?:^|\s)>=\s*(\d+)\.(\d+)\.(\d+)/.exec(mjVersionRange ?? '');
-  if (!lowerBound) {
+/**
+ * The `mj migrate -t` tag the oldest host that can run every app in the room would be on — ours,
+ * common's and tasks' `mjVersionRange` floors, the HIGHEST of them, prerelease included: a host at
+ * `>=6.2.0-edge.3` runs 6.2.0-edge.3, and before 6.2.0 ships `v6.2.0` names no tag at all. Our floor
+ * alone is not enough: the room installs the siblings' heads, and when common 5.54 raised its floor
+ * to 6.1.5 a room at our 6.1.0-edge.6 failed on common's first migration (#306 CI).
+ */
+export function coreMigrationTag(...mjVersionRanges) {
+  const floors = mjVersionRanges.map((range) => {
+    const lowerBound = /(?:^|\s)>=\s*(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(range ?? '');
+    if (!lowerBound) {
+      throw new Error(
+        `The mjVersionRange ${JSON.stringify(range)} has no '>=X.Y.Z' lower bound, ` +
+          'so the core migration tag cannot be derived. Pass --core-tag vX.Y.Z to say it explicitly.',
+      );
+    }
+    return lowerBound[1];
+  });
+  if (floors.length === 0) {
+    throw new Error('No mjVersionRange was given, so the core migration tag has no lower bound to read.');
+  }
+  return `v${floors.reduce((highest, floor) => (compareVersions(floor, highest) > 0 ? floor : highest))}`;
+}
+
+/** Semver precedence for `X.Y.Z[-pre]`: a prerelease sorts below its release, numeric identifiers numerically. */
+function compareVersions(a, b) {
+  const [coreA, preA] = splitVersion(a);
+  const [coreB, preB] = splitVersion(b);
+  for (let i = 0; i < 3; i++) {
+    if (coreA[i] !== coreB[i]) return coreA[i] - coreB[i];
+  }
+  if (!preA || !preB) return preA ? -1 : preB ? 1 : 0;
+  const partsA = preA.split('.');
+  const partsB = preB.split('.');
+  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+    if (partsA[i] === undefined) return -1;
+    if (partsB[i] === undefined) return 1;
+    const numeric = /^\d+$/.test(partsA[i]) && /^\d+$/.test(partsB[i]);
+    const order = numeric ? Number(partsA[i]) - Number(partsB[i]) : partsA[i].localeCompare(partsB[i]);
+    if (order !== 0) return order;
+  }
+  return 0;
+}
+
+function splitVersion(version) {
+  const dash = version.indexOf('-');
+  const core = (dash === -1 ? version : version.slice(0, dash)).split('.').map(Number);
+  return [core, dash === -1 ? '' : version.slice(dash + 1)];
+}
+
+/** The `mjVersionRange` of the app whose `migrations/` directory is `migrationsDir`, read from the `mj-app.json` beside it. */
+function siblingVersionRange(migrationsDir) {
+  const manifest = path.join(path.resolve(REPO_ROOT, migrationsDir), '..', 'mj-app.json');
+  if (!existsSync(manifest)) {
     throw new Error(
-      `mj-app.json's mjVersionRange ${JSON.stringify(mjVersionRange)} has no '>=X.Y.Z' lower bound, ` +
-        'so the core migration tag cannot be derived. Pass --core-tag vX.Y.Z to say it explicitly.',
+      `${manifest} does not exist, so that app's MJ floor is unknown and the room's core tag cannot be derived. ` +
+        'Check out the whole sibling repository, or pass --core-tag vX.Y.Z.',
     );
   }
-  const [, major, minor, patch] = lowerBound;
-  return `v${major}.${minor}.${patch}`;
+  return JSON.parse(readFileSync(manifest, 'utf8')).mjVersionRange;
 }
 
 /**
@@ -125,6 +174,38 @@ export function readCliResult(stdout) {
     }
   }
   return null;
+}
+
+/**
+ * Whether CodeGen pass 1 (the "settle" pass) did its job.
+ *
+ * From MJ 6.2 an `includeSchemas` entry that matches no schema makes CodeGen fail (6.1 only warned).
+ * Pass 1 runs before this repo's migrations, so our own schema cannot exist yet, and every 6.2 run
+ * failed there. That one failure is expected, so it is accepted: the result names only
+ * MANAGE_METADATA, the unmatched entries are all ours, and stderr carries no other error line (`✖ …` or MJ's plain `Error …`). Pass 2
+ * (the verdict) still requires a clean success.
+ */
+export function settlingPassAccepts({ result, stderr, ownSchemas }) {
+  if (!result || result.command !== 'codegen' || result.data?.skippedDb !== false) return false;
+  if (result.success === true) return true;
+  const errors = result.errors ?? [];
+  if (errors.length !== 1 || errors[0].context !== 'MANAGE_METADATA') return false;
+  // eslint-disable-next-line no-control-regex
+  const lines = (stderr ?? '').replace(/\u001b\[[0-9;]*m/g, '').split('\n');
+  const own = new Set(ownSchemas.map((s) => s.toLowerCase()));
+  const unmatched = lines
+    .map((line) => /includeSchemas entr(?:y|ies) \[([^\]]*)\] match no schema/.exec(line))
+    .filter(Boolean)
+    .flatMap((match) => match[1].split(',').map((s) => s.trim().toLowerCase()));
+  if (unmatched.length === 0 || !unmatched.every((s) => own.has(s))) return false;
+  // Two shapes of error line: the phase summaries (`✖ …`) and MJ's own logError lines inside metadata
+  // management, which carry no ✖ (e.g. '   Error creating new entities'). Both fold into the one
+  // MANAGE_METADATA error, so any of them other than the two summaries below means a second fault.
+  const expectedErrorLines = [/^✖ ERROR managing metadata/, /^✖ MJ CodeGen finished with 1 failure/];
+  const otherErrors = lines
+    .map((line) => line.trim())
+    .filter((line) => (line.startsWith('✖') || /^Error\b/i.test(line)) && !expectedErrorLines.some((re) => re.test(line)));
+  return otherErrors.length === 0;
 }
 
 /** Capture files that appeared during the run — never the ones that were already there. */
@@ -163,6 +244,9 @@ export function workingDatabaseName({ envFileText, processEnv }) {
 
 const require = createRequire(import.meta.url);
 
+/** This repo's own CodeGen scope, read from its config so the two cannot drift apart. */
+const OWN_INCLUDE_SCHEMAS = require(path.join(REPO_ROOT, 'mj.config.cjs')).includeSchemas ?? [];
+
 /**
  * Per-step ceilings. The core chain is 85 migrations and took 4m11s on a developer laptop; a cold CI
  * runner is slower. Capped rather than open-ended so a hung child is reported as a hung child.
@@ -198,6 +282,16 @@ function mjCommand() {
  * captured because that is where the CLI puts its findings.
  */
 function runMj({ label, args, database, timeout }) {
+  const { command, stdout, status } = spawnMj({ label, args, database, timeout, captureStderr: false });
+  if (status !== 0) throw mjExitError({ label, status, stdout, command });
+  return stdout;
+}
+
+/**
+ * Spawn one `mj` step. With `captureStderr`, stderr is collected (and echoed once the step ends)
+ * instead of streamed live — CodeGen reports its findings there, and pass 1 must read them.
+ */
+function spawnMj({ label, args, database, timeout, captureStderr }) {
   const { command, prefix } = mjCommand();
   process.stderr.write(`\n── ${label}\n`);
   const child = spawnSync(command, [...prefix, ...args], {
@@ -207,23 +301,26 @@ function runMj({ label, args, database, timeout }) {
     // dotenv does not overwrite a variable already in the environment, so this — not an edit to
     // .env — is what points the CLI at the clean room.
     env: { ...process.env, DB_DATABASE: database },
-    stdio: ['ignore', 'pipe', 'inherit'],
+    stdio: ['ignore', 'pipe', captureStderr ? 'pipe' : 'inherit'],
   });
   if (child.error?.code === 'ETIMEDOUT') {
     throw new Error(`${label}: no answer within ${Math.round(timeout / 60_000)} minutes — giving up rather than waiting forever.`);
   }
   if (child.error) throw new Error(`${label}: could not run ${command} — ${child.error.message}`);
   const stdout = child.stdout ?? '';
+  const stderr = child.stderr ?? '';
+  if (captureStderr) process.stderr.write(stderr);
   process.stdout.write(stdout);
-  if (child.status !== 0) {
-    throw new Error(
-      `${label}: mj exited ${child.status}.\n` +
-        (stdout.trim() ? `Its last words on stdout:\n${stdout.trim().split('\n').slice(-15).join('\n')}\n` : '') +
-        'If the failure mentions "The login already has an account under a different user name", the ' +
-        'database was not created owned by [sa] — see docs/database-operations.md §4.',
-    );
-  }
-  return stdout;
+  return { command, stdout, stderr, status: child.status };
+}
+
+function mjExitError({ label, status, stdout }) {
+  return new Error(
+    `${label}: mj exited ${status}.\n` +
+      (stdout.trim() ? `Its last words on stdout:\n${stdout.trim().split('\n').slice(-15).join('\n')}\n` : '') +
+      'If the failure mentions "The login already has an account under a different user name", the ' +
+      'database was not created owned by [sa] — see docs/database-operations.md §4.',
+  );
 }
 
 function parseArgs(argv) {
@@ -284,8 +381,8 @@ function checkPreconditions(options) {
  * convergence. So the CLI's own machine-readable result document is the gate, and anything we cannot
  * read there fails closed.
  */
-function runCodegenPass({ label, database }) {
-  const stdout = runMj({
+function runCodegenPass({ label, database, settling }) {
+  const { stdout, stderr, status } = spawnMj({
     label,
     // No --skip-commands / --no-ai: neither flag exists in the pinned CLI (6.1.0-edge.5), only in
     // MJ source. Passing them fails the run outright with "Nonexistent flags" — which is how CI
@@ -294,8 +391,17 @@ function runCodegenPass({ label, database }) {
     args: ['codegen', '--skipfiles', '--no-banner', '--format', 'json'],
     database,
     timeout: STEP_TIMEOUT_MS.codegen,
+    captureStderr: true,
   });
   const result = readCliResult(stdout);
+  if (settling) {
+    if (settlingPassAccepts({ result, stderr, ownSchemas: OWN_INCLUDE_SCHEMAS })) return;
+    throw new Error(
+      `${label}: CodeGen failed for a reason other than our own schema not existing yet (exit ${status}). ` +
+        `Its result document was ${result ? JSON.stringify(result) : 'absent from stdout'}.`,
+    );
+  }
+  if (status !== 0) throw mjExitError({ label, status, stdout });
   if (!result || result.command !== 'codegen' || result.success !== true || result.data?.skippedDb !== false) {
     throw new Error(
       `${label}: could not confirm CodeGen ran its database pass, so its silence proves nothing. Its ` +
@@ -308,7 +414,13 @@ function main() {
   const options = parseArgs(process.argv.slice(2));
   checkPreconditions(options);
 
-  const coreTag = options.coreTag ?? coreMigrationTag(require(path.join(REPO_ROOT, 'mj-app.json')).mjVersionRange);
+  const coreTag =
+    options.coreTag ??
+    coreMigrationTag(
+      require(path.join(REPO_ROOT, 'mj-app.json')).mjVersionRange,
+      siblingVersionRange(options.commonMigrations),
+      siblingVersionRange(options.tasksMigrations),
+    );
   const capture = captureDirectory();
   const before = listCaptures(capture);
 
@@ -329,7 +441,7 @@ function main() {
   runMj({ label: 'bizapps-common migrations', args: ['migrate', '--schema', '__mj_BizAppsCommon', '--dir', options.commonMigrations], database: options.database, timeout: STEP_TIMEOUT_MS.migrateApp });
   runMj({ label: 'bizapps-tasks migrations', args: ['migrate', '--schema', '__mj_BizAppsTasks', '--dir', options.tasksMigrations], database: options.database, timeout: STEP_TIMEOUT_MS.migrateApp });
 
-  runCodegenPass({ label: 'CodeGen pass 1 — settling the schemas we do not own', database: options.database });
+  runCodegenPass({ label: 'CodeGen pass 1 — settling the schemas we do not own', database: options.database, settling: true });
   const settled = newCaptureFiles({ before, after: listCaptures(capture) });
   for (const name of settled) {
     const statements = summarizeCapture(readFileSync(path.join(capture, name), 'utf8'));

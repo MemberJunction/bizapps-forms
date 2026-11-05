@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
@@ -15,6 +15,19 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(HERE, '..');
+
+/**
+ * A documented exception for the allowance rules to act on. The repo's own list is empty since
+ * forms-server stopped declaring type-graphql (#303 final review), so the rules are exercised on
+ * this fixture — the entry the list used to hold — passed in explicitly.
+ */
+const FIXTURE_ALLOWANCE = Object.freeze({
+    package: '@mj-biz-apps/forms-server',
+    peer: 'type-graphql',
+    version: '2.0.0-beta.3',
+    reason: 'Fixture: the exception the repo carried until forms-server stopped declaring type-graphql.',
+});
+const ALLOW = Object.freeze([FIXTURE_ALLOWANCE]);
 
 // ── What counts as an exact version ─────────────────────────────────────────────────────────────
 
@@ -129,10 +142,11 @@ test('exact dependencies and devDependencies are none of the gate\'s business', 
 });
 
 test('an allowlisted exact peer is not reported', () => {
-    const allowed = ALLOWED_EXACT_PEERS[0];
+    const allowed = FIXTURE_ALLOWANCE;
     const found = findExactPeers(
         { name: allowed.package, peerDependencies: { [allowed.peer]: allowed.version } },
         'packages/Server/package.json',
+        ALLOW,
     );
     assert.deepEqual(found, []);
 });
@@ -140,10 +154,11 @@ test('an allowlisted exact peer is not reported', () => {
 // The allowance is keyed to the VALUE, not just the name. If MJ moves its own exact dependency and
 // we follow it, the reasoning that justified the exception has to be re-stated rather than inherited.
 test('an allowlisted peer at a different version is still reported', () => {
-    const allowed = ALLOWED_EXACT_PEERS[0];
+    const allowed = FIXTURE_ALLOWANCE;
     const found = findExactPeers(
         { name: allowed.package, peerDependencies: { [allowed.peer]: '2.0.0-rc.4' } },
         'packages/Server/package.json',
+        ALLOW,
     );
     assert.equal(found.length, 1);
     assert.equal(found[0].version, '2.0.0-rc.4');
@@ -158,6 +173,7 @@ test('an allowance is scoped to its package — another package may not claim th
     const found = findExactPeers(
         { name: '@mj-biz-apps/forms-impostor', peerDependencies: { 'type-graphql': '2.0.0-beta.3' } },
         'packages/Impostor/package.json',
+        ALLOW,
     );
     assert.equal(found.length, 1);
     assert.equal(found[0].package, '@mj-biz-apps/forms-impostor');
@@ -165,7 +181,7 @@ test('an allowance is scoped to its package — another package may not claim th
 });
 
 test('every allowlist entry carries a reason', () => {
-    for (const entry of ALLOWED_EXACT_PEERS) {
+    for (const entry of [...ALLOWED_EXACT_PEERS, FIXTURE_ALLOWANCE]) {
         assert.equal(typeof entry.reason, 'string');
         assert.ok(entry.reason.length > 40, `allowance for ${entry.package} -> ${entry.peer} needs a real reason`);
     }
@@ -219,8 +235,8 @@ test('runCheck reports an allowance that no longer matches anything', () => {
             peerDependencies: { '@angular/cdk': '^21.1.3' },
         },
     });
-    const { stale } = runCheck(root);
-    assert.equal(stale.length, ALLOWED_EXACT_PEERS.length);
+    const { stale } = runCheck(root, ALLOW);
+    assert.equal(stale.length, 1);
     assert.match(stale[0], /no longer/i);
 });
 
@@ -229,14 +245,14 @@ test('runCheck reports an allowance that no longer matches anything', () => {
 // lie for type-graphql's prerelease line). It must instead say the exception has expired and name
 // the version it still expects.
 test('runCheck tells an expired allowance to be re-argued, not to write a range', () => {
-    const allowed = ALLOWED_EXACT_PEERS[0];
+    const allowed = FIXTURE_ALLOWANCE;
     const root = writeTree({
         'packages/Server/package.json': {
             name: allowed.package,
             peerDependencies: { [allowed.peer]: '2.0.0-rc.4' },
         },
     });
-    const { violations } = runCheck(root);
+    const { violations } = runCheck(root, ALLOW);
     assert.equal(violations.length, 1);
     assert.match(violations[0], /expired/i);
     assert.match(violations[0], new RegExp(allowed.version.replace(/\./g, '\\.')));
@@ -248,9 +264,10 @@ test('runCheck tells an expired allowance to be re-argued, not to write a range'
 // not about the allowlist being satisfied, so both outcomes are asserted rather than just one.
 test('runCheck tolerates a missing scanned directory (and correctly reports the allowlist as stale on it)', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'peer-ranges-empty-'));
-    const { violations, stale } = runCheck(root);
+    const { violations, stale } = runCheck(root, ALLOW);
     assert.deepEqual(violations, []);
-    assert.equal(stale.length, ALLOWED_EXACT_PEERS.length);
+    assert.equal(stale.length, 1);
+    assert.deepEqual(runCheck(root), { violations: [], stale: [] }); // the repo's own (empty) list
 });
 
 test('the scanned directories are the ones this repo publishes from', () => {
@@ -300,11 +317,23 @@ test('runCheck throws a SyntaxError naming the file for invalid JSON', () => {
 // Pattern: scripts/check-codegen-append.spec.mjs, which asserts both directions — a clean `exits 0`
 // plus `FIRES:` cases wrapping execFileSync in assert.throws and checking err.status.
 
-/** A minimal repo the gate can scan, with the gate itself copied in so REPO_ROOT resolves to it. */
-function syntheticRepo(label, manifests) {
+/**
+ * A minimal repo the gate can scan, with the gate itself copied in so REPO_ROOT resolves to it.
+ * `allowances`, when given, replaces the COPY's allowlist — the one way to drive the CLI's
+ * allowance paths now that the repo's own list is empty. The replacement is asserted to have
+ * happened, so a reworded declaration fails here rather than silently testing the empty list.
+ */
+function syntheticRepo(label, manifests, allowances) {
     const root = mkdtempSync(path.join(tmpdir(), `peer-ranges-${label}-`));
     mkdirSync(path.join(root, 'scripts'), { recursive: true });
-    copyFileSync(path.join(HERE, 'check-peer-ranges.mjs'), path.join(root, 'scripts/check-peer-ranges.mjs'));
+    const gate = path.join(root, 'scripts/check-peer-ranges.mjs');
+    copyFileSync(path.join(HERE, 'check-peer-ranges.mjs'), gate);
+    if (allowances) {
+        const declaration = 'export const ALLOWED_EXACT_PEERS = Object.freeze([]);';
+        const source = readFileSync(gate, 'utf8');
+        assert.ok(source.includes(declaration), 'the gate no longer declares its allowlist as the spec expects');
+        writeFileSync(gate, source.replace(declaration, `export const ALLOWED_EXACT_PEERS = Object.freeze(${JSON.stringify(allowances)});`));
+    }
     for (const [rel, manifest] of Object.entries(manifests)) {
         mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
         writeFileSync(path.join(root, rel), JSON.stringify(manifest, null, 2));
@@ -330,7 +359,7 @@ test('FIRES: the CLI exits 1 and names the offender when a peer is exact', () =>
     const root = syntheticRepo('violation', {
         'packages/Angular/package.json': { name: '@mj-biz-apps/forms-ng', peerDependencies: { '@angular/cdk': '21.1.3' } },
         'packages/Server/package.json': { name: '@mj-biz-apps/forms-server', peerDependencies: { 'type-graphql': '2.0.0-beta.3' } },
-    });
+    }, ALLOW);
     const { status, stderr } = runCli(root);
     assert.equal(status, 1, `expected a failing exit code, got ${status}`);
     assert.match(stderr, /Peer-range gate FAILED/);
@@ -345,7 +374,7 @@ test('FIRES: the CLI exits 1 when the only problem is a stale allowance', () => 
     // thing ALLOWED_EXACT_PEERS' own docstring says must not be allowed to sit around.
     const root = syntheticRepo('stale', {
         'packages/Server/package.json': { name: '@mj-biz-apps/forms-server', peerDependencies: { 'type-graphql': '^2.0.0-beta.3' } },
-    });
+    }, ALLOW);
     const { status, stderr } = runCli(root);
     assert.equal(status, 1, `a stale allowance alone must fail the gate, got exit ${status}`);
     assert.match(stderr, /no longer appears in any manifest/);
@@ -357,7 +386,7 @@ test('FIRES: the CLI exits 1 when a documented allowance has expired', () => {
     // cases above because it reports BOTH a violation and a stale allowance for the same entry.
     const root = syntheticRepo('expired', {
         'packages/Server/package.json': { name: '@mj-biz-apps/forms-server', peerDependencies: { 'type-graphql': '2.0.0-beta.4' } },
-    });
+    }, ALLOW);
     const { status, stderr } = runCli(root);
     assert.equal(status, 1);
     assert.match(stderr, /has simply expired, and must be re-argued/);

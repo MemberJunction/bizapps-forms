@@ -184,3 +184,50 @@ describe('flushPendingSaves cannot hang the caller forever', () => {
     }
   });
 });
+
+describe('one failed step never poisons a row\'s save chain (final review I3)', () => {
+  it('a re-read that throws rejects to ITS caller only; a save queued behind it still runs', async () => {
+    const { service, entity } = serviceWith();
+    entity.Settings = 'kept';
+    const adopting = service.adoptStored(asEntity(entity), async () => {
+      throw new Error('row read failed');
+    });
+    const saving = service.save(asEntity(entity));
+
+    await expect(adopting).rejects.toThrow('row read failed');
+    expect(await saving).toBe(true);
+    expect(entity.persisted).toEqual(['kept']);
+  });
+
+  it('a debounced save that throws is shown to the author, and a flush still resolves', async () => {
+    const { service, entity } = serviceWith();
+    entity.Save = async () => {
+      throw new Error('socket hang up');
+    };
+    service.saveDebounced(asEntity(entity));
+
+    await expect(service.flushPendingSaves()).resolves.toBeUndefined();
+    expect(service.lastFailure()).toMatch(/socket hang up/);
+  });
+
+  it('after a thrown save, the next save of the same row runs and lands', async () => {
+    const { service, entity } = serviceWith();
+    const realSave = entity.Save.bind(entity);
+    let calls = 0;
+    entity.Save = async () => {
+      calls++;
+      if (calls === 1) {
+        throw new Error('first save threw');
+      }
+      return realSave();
+    };
+    entity.Settings = 'first';
+    service.saveDebounced(asEntity(entity));
+    await service.flushPendingSaves();
+    entity.Settings = 'second';
+    service.saveDebounced(asEntity(entity));
+    await service.flushPendingSaves();
+
+    expect(entity.persisted).toEqual(['second']);
+  });
+});

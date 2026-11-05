@@ -6,7 +6,6 @@ import {
   type RelativeInstant,
 } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
-import { publishedVersionFilter } from '../../public-submit/definition-loader.service';
 import { FORMS_SELF_CALL_HEADER } from '../../http/request-identity';
 
 /**
@@ -31,6 +30,7 @@ import {
   type RedeemDeps,
   type RedeemRunViewProvider,
 } from '../redeem.service';
+import { publishedVersionFilter } from '@mj-biz-apps/forms-core-entities-server';
 
 /** A minimal anonymous/system context user — only `.ID` is touched by the flow. */
 const SYSTEM_USER = { ID: 'system-user-id' } as unknown as UserInfo;
@@ -61,6 +61,7 @@ function fakeDistribution(
 
 const FORM_DISTRIBUTION_ENTITY = 'MJ_BizApps_Forms: Form Distributions';
 const FORM_VERSION_ENTITY = 'MJ_BizApps_Forms: Form Versions';
+const FORM_ENTITY = 'MJ_BizApps_Forms: Forms';
 
 /**
  * A RunView provider fake that answers per entity: the distribution row(s) for the slug read and
@@ -74,16 +75,32 @@ function fakeProvider(opts: {
   versions?: Array<{ ID: string }>;
   /** Make the version read fail (`Success: false`) while the distribution read succeeds. */
   versionReadFails?: boolean;
-}): { provider: RedeemRunViewProvider; calls: RunViewParams[] } {
+  /** The form's own `Status` (#303 Task 8 fix round 1); defaults to Published. */
+  formStatus?: string;
+  /** Make the form-status read fail. */
+  formReadFails?: boolean;
+}): { provider: RedeemRunViewProvider; calls: RunViewParams[]; readers: (UserInfo | undefined)[] } {
   const calls: RunViewParams[] = [];
+  const readers: (UserInfo | undefined)[] = [];
   const provider: RedeemRunViewProvider = {
     async RunView<T = mjBizAppsFormsFormDistributionEntityType>(
       params: RunViewParams,
+      user?: UserInfo,
     ): Promise<RunViewResult<T>> {
       calls.push(params);
+      readers.push(user);
       const isVersionRead = params.EntityName === FORM_VERSION_ENTITY;
-      const success = isVersionRead ? !(opts.versionReadFails ?? false) : (opts.success ?? true);
-      const rows: unknown[] = isVersionRead ? (opts.versions ?? [{ ID: 'version-1' }]) : (opts.rows ?? []);
+      const isFormRead = params.EntityName === FORM_ENTITY;
+      const success = isVersionRead
+        ? !(opts.versionReadFails ?? false)
+        : isFormRead
+          ? !(opts.formReadFails ?? false)
+          : (opts.success ?? true);
+      const rows: unknown[] = isVersionRead
+        ? (opts.versions ?? [{ ID: 'version-1' }])
+        : isFormRead
+          ? [{ ID: 'form-1', Status: opts.formStatus ?? 'Published' }]
+          : (opts.rows ?? []);
       return {
         Success: success,
         Results: rows as T[],
@@ -94,7 +111,7 @@ function fakeProvider(opts: {
       } as RunViewResult<T>;
     },
   };
-  return { provider, calls };
+  return { provider, calls, readers };
 }
 
 /**
@@ -308,6 +325,33 @@ describe('redeemSlugToToken', () => {
     expect(out.ok).toBe(false);
     expect(out.reason).toBe('form-unpublished');
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  // #303 Task 8 fix round 1 (controller ruling 4). The door checked the link and the version but not
+  // the FORM: archiving keeps the Published version (a restore brings it back), so a link whose status
+  // escaped the archive rule still minted a session for a form the submit path then refused. Refused
+  // exactly as a closed link is — same reason, so the same page and the same words.
+  it('refuses a form that is not Published exactly as it refuses a closed link, minting no token', async () => {
+    for (const formStatus of ['Closed', 'Draft']) {
+      const provider = fakeProvider({ rows: [fakeDistribution()], formStatus }).provider;
+      const fetchImpl = fakeFetch({ success: true, token: 'redeemed-jwt' });
+      const out = await redeemSlugToToken(deps({ provider, fetchImpl }), 'customer-survey');
+      expect(out.ok).toBe(false);
+      expect(out.reason).toBe('distribution-closed');
+      expect(fetchImpl).not.toHaveBeenCalled();
+    }
+  });
+
+  it("reads the form's Status as the door's own (system) user, and answers a failed read as a failure, not a closure", async () => {
+    const seen = fakeProvider({ rows: [fakeDistribution()] });
+    await redeemSlugToToken(deps({ provider: seen.provider }), 'customer-survey');
+    const formRead = seen.calls.findIndex((c) => c.EntityName === FORM_ENTITY);
+    expect(formRead).toBeGreaterThanOrEqual(0);
+    expect(seen.readers[formRead]).toBe(SYSTEM_USER);
+
+    const failing = fakeProvider({ rows: [fakeDistribution()], formReadFails: true }).provider;
+    const out = await redeemSlugToToken(deps({ provider: failing }), 'customer-survey');
+    expect(out.reason).toBe('redeem-failed');
   });
 
   // The door needs a yes/no, not the snapshot: the read asks for the ID only and stops at one row.

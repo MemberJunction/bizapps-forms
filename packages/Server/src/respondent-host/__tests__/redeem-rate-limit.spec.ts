@@ -46,11 +46,23 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
 vi.mock('@memberjunction/generic-database-provider', () => ({
   UserCache: { Instance: { GetSystemUser: () => undefined, UserByName: () => undefined } },
 }));
-vi.mock('@mj-biz-apps/forms-core-entities-server', () => ({
+vi.mock('@mj-biz-apps/forms-core-entities-server', async (importOriginal) => ({
+  // The rate limiter, the request-identity store and the in-flight limiter live here now (#303
+  // Task 8) and are the real ones — they are what this file is about.
+  ...(await importOriginal<typeof import('@mj-biz-apps/forms-core-entities-server')>()),
   getMagicLinkProvisioningConfig: () => ({ roleName: 'Form Respondent' }),
+  // The middleware's isolated-provider helpers and the automation principal moved into this package
+  // (#303); pass-throughs, because provider isolation is not what this file is about.
+  withLazyIsolatedProvider: async <T>(_purpose: string, work: (acquire: () => Promise<Record<string, never>>) => Promise<T>): Promise<T> =>
+    work(async () => ({})),
+  withIsolatedProvider: async <T>(_purpose: string, work: (provider: Record<string, never>) => Promise<T>): Promise<T> => work({}),
+  resolveAutomationPrincipal: () => null,
 }));
 vi.mock('../captcha-demand', () => ({ readCaptchaDemand: async () => ({ ok: true, demand: undefined }) }));
-vi.mock('../host-readiness', () => ({ assessRespondentReadiness: () => [] }));
+vi.mock('../host-readiness', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../host-readiness')>()),
+  assessRespondentReadiness: () => [],
+}));
 
 /** The caller key the resume route built for its rate limiter — the fact under test. */
 let capturedCallerKey: string | undefined;
@@ -69,7 +81,7 @@ vi.mock('../resume-deps', () => ({
       inviteFor: async () => ({ ok: false }),
       revokeInvite: async () => undefined,
       scopeOf: () => undefined,
-      allowRequest: () => true,
+      allowRequest: async () => true,
       cookieFor: () => '',
       clearCookie: () => '',
       callerKey: ctx.callerKey,
@@ -82,18 +94,17 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 
 import { RequestIdentityMiddleware, requestIdentityHandler } from '../../http/RequestIdentityMiddleware';
-import { currentRequestIdentity } from '../../http/request-identity';
 import {
   checkRedeemRateLimit,
   redeemInFlightLimiter,
   redeemRateLimitMax,
   resetRedeemInFlightForTests,
 } from '../redeem-rate-limit';
-import { FormsRateLimiter } from '../../public-submit/rate-limit.service';
 // Type only: the class itself is imported dynamically inside the tests that need it, so that
 // `vi.mock` is in place before the module is evaluated. `import type` is erased at compile time
 // and does not load the module, so it cannot defeat that.
 import type { RespondentHostMiddleware } from '../RespondentHostMiddleware';
+import { FormsRateLimiter, currentRequestIdentity } from '@mj-biz-apps/forms-core-entities-server';
 
 afterEach(() => {
   delete process.env.FORMS_REDEEM_IP_MAX;
@@ -191,35 +202,39 @@ describe('checkRedeemRateLimit', () => {
     FormsRateLimiter.Instance.resetForTests();
   });
 
-  it('admits up to the ceiling and refuses the next request from the same caller', () => {
+  it('admits up to the ceiling and refuses the next request from the same caller', async () => {
     process.env.FORMS_REDEEM_IP_MAX = '3';
     const caller = 'a'.repeat(64);
-    const verdicts = [1, 2, 3, 4].map(() => checkRedeemRateLimit(caller).allowed);
+    // Sequential on purpose: each charge must land before the next is consulted.
+    const verdicts: boolean[] = [];
+    for (let i = 0; i < 4; i++) {
+      verdicts.push((await checkRedeemRateLimit(caller)).allowed);
+    }
     expect(verdicts).toEqual([true, true, true, false]);
   });
 
-  it('tells a refused caller how long to wait', () => {
+  it('tells a refused caller how long to wait', async () => {
     process.env.FORMS_REDEEM_IP_MAX = '1';
     const caller = 'b'.repeat(64);
-    checkRedeemRateLimit(caller);
-    const refused = checkRedeemRateLimit(caller);
+    await checkRedeemRateLimit(caller);
+    const refused = await checkRedeemRateLimit(caller);
     expect(refused.allowed).toBe(false);
     expect(refused.retryAfterMs).toBeGreaterThan(0);
   });
 
-  it('gives each caller their own budget', () => {
+  it('gives each caller their own budget', async () => {
     process.env.FORMS_REDEEM_IP_MAX = '1';
-    checkRedeemRateLimit('c'.repeat(64));
+    await checkRedeemRateLimit('c'.repeat(64));
     // A different caller must not inherit the first one's spent budget: a shared bucket would let
     // one caller refuse the form for everyone, which is the failure the IP keying exists to avoid.
-    expect(checkRedeemRateLimit('d'.repeat(64)).allowed).toBe(true);
+    expect((await checkRedeemRateLimit('d'.repeat(64))).allowed).toBe(true);
   });
 
-  it('admits everything when the caller cannot be identified', () => {
+  it('admits everything when the caller cannot be identified', async () => {
     process.env.FORMS_REDEEM_IP_MAX = '1';
     // Deliberate no-op rather than a shared bucket — see the module note. Two calls, both admitted.
-    expect(checkRedeemRateLimit(undefined).allowed).toBe(true);
-    expect(checkRedeemRateLimit(undefined).allowed).toBe(true);
+    expect((await checkRedeemRateLimit(undefined)).allowed).toBe(true);
+    expect((await checkRedeemRateLimit(undefined)).allowed).toBe(true);
   });
 });
 

@@ -1,9 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { BuilderStateService } from './builder-state.service';
-import type {
-  mjBizAppsFormsFormQuestionEntity,
-  mjBizAppsFormsFormQuestionOptionEntity,
-} from '@mj-biz-apps/forms-entities';
+import type { mjBizAppsFormsFormQuestionEntity } from '@mj-biz-apps/forms-entities';
+import { fakeTree, GraphedBuilderState } from './testing/fake-structure-graph';
 
 /**
  * A save/delete that REFUSES, the way `BaseEntity` actually refuses: by returning false with the
@@ -13,9 +11,6 @@ import type {
 class RefusingEntity {
   public LatestResult = { CompleteMessage: 'The DELETE statement conflicted with a FK constraint.' };
   public async Save(): Promise<boolean> {
-    return false;
-  }
-  public async Delete(): Promise<boolean> {
     return false;
   }
 }
@@ -30,10 +25,6 @@ class AcceptingEntity {
 
 function asQuestion(e: RefusingEntity | AcceptingEntity): mjBizAppsFormsFormQuestionEntity {
   return e as unknown as mjBizAppsFormsFormQuestionEntity;
-}
-
-function asOption(e: RefusingEntity): mjBizAppsFormsFormQuestionOptionEntity {
-  return e as unknown as mjBizAppsFormsFormQuestionOptionEntity;
 }
 
 describe('a mutation the database refuses', () => {
@@ -57,9 +48,12 @@ describe('a mutation the database refuses', () => {
   });
 
   it('reports a refused DELETE too — the case an author sees as a dead button', async () => {
-    const service = new BuilderStateService();
-    await service.deleteOption(asOption(new RefusingEntity()));
-    expect(service.lastFailure()).toContain('Could not delete option');
+    const { tree, store } = fakeTree([{ id: 'p1', questions: [{ id: 'q1', options: [{ id: 'o1' }] }] }]);
+    store.refuse.set('o1', 'The DELETE statement conflicted with a FK constraint.');
+    const service = new GraphedBuilderState(store);
+    const node = tree.pages[0].questions[0];
+    await service.deleteOption(tree, node, node.options[0]);
+    expect(service.lastFailure()).toBe('Could not delete option. The DELETE statement conflicted with a FK constraint.');
   });
 
   it('reports a refused AUTOSAVE, which is the one that loses work', async () => {

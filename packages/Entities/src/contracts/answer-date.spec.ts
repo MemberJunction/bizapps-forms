@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { calendarDateOf, clockTimeOf, dateAnswerInstant, dateAnswerText, parseClockTime } from './answer-date';
+import { validateAnswer, validateAnswers } from './answer-validation';
 
 describe('parseClockTime', () => {
   it('reads what <input type="time"> emits', () => {
@@ -180,4 +181,183 @@ describe('dateAnswerText — what it normalises, and what it must not silently d
     const stored = dateAnswerInstant('Date', '2026-09-01T15:00:30Z') as Date;
     expect(dateAnswerText('Date', stored)).toBe('2026-09-01 15:00:30');
   });
+});
+
+/**
+ * #303 Task 8 fix round 2 (controller ruling). `new Date('2026-02-30')` is not invalid in V8 — it is
+ * MARCH 2, and "February 30, 2026" rolls over the same way — so an impossible calendar date used to
+ * pass validation and be stored as a different day the respondent never gave. A date answer must be
+ * a real calendar day (and, when it carries a time, a real clock time), or it is refused.
+ */
+describe('dateAnswerInstant — impossible dates and times are refused, never rolled over', () => {
+  it.each(['2026-02-30', '2026-13-01', '2025-02-29', '2026-04-31', '2026-00-10', '2026-10-00'])('refuses the date %s', (text) => {
+    expect(dateAnswerInstant('Date', text)).toBeUndefined();
+  });
+
+  it('accepts a leap day in a leap year', () => {
+    expect(dateAnswerInstant('Date', '2024-02-29')?.toISOString()).toBe('2024-02-29T00:00:00.000Z');
+  });
+
+  it.each(['2026-10-13T25:00:00Z', '2026-10-13T10:60:00Z', '2026-10-13T10:00:60Z', '2026-02-30T10:00:00Z', '2026-10-13T10:00:00+24:00'])(
+    'refuses a date carrying an impossible time or offset: %s',
+    (text) => {
+      expect(dateAnswerInstant('Date', text)).toBeUndefined();
+    },
+  );
+
+  it('still reads a real date-time a non-widget client sends', () => {
+    expect(dateAnswerInstant('Date', '2026-10-13T10:30:00Z')?.toISOString()).toBe('2026-10-13T10:30:00.000Z');
+    expect(dateAnswerInstant('Date', '2026-10-13T10:30:15.250+02:00')?.toISOString()).toBe('2026-10-13T08:30:15.250Z');
+  });
+
+  it('refuses a free-form date the legacy parser would roll over', () => {
+    expect(dateAnswerInstant('Date', 'February 30, 2026')).toBeUndefined();
+  });
+
+  it.each(['24:00', '23:60', '12:30:60', '7:05'])('refuses the time %s', (text) => {
+    expect(dateAnswerInstant('Time', text)).toBeUndefined();
+  });
+});
+
+describe('validateAnswers refuses an impossible date in every mode, naming the question', () => {
+  const definition = {
+    pages: [
+      {
+        id: 'p',
+        displayOrder: 1,
+        questions: [
+          { id: 'q-date', type: 'Date' as const, prompt: 'When', isRequired: false, displayOrder: 1, options: [] },
+          { id: 'q-time', type: 'Time' as const, prompt: 'At', isRequired: false, displayOrder: 2, options: [] },
+        ],
+      },
+    ],
+  };
+  for (const mode of ['complete', 'draft', 'screened-out'] as const) {
+    it(`${mode}: 2026-02-30 and 24:00`, () => {
+      const outcome = validateAnswers(
+        definition,
+        [
+          { questionId: 'q-date', dateValue: '2026-02-30' },
+          { questionId: 'q-time', dateValue: '24:00' },
+        ],
+        mode,
+      );
+      expect(outcome.errors).toEqual([
+        { questionId: 'q-date', message: 'Enter a valid date.' },
+        { questionId: 'q-time', message: 'Enter a valid time.' },
+      ]);
+      expect(outcome.answers).toEqual([]);
+    });
+  }
+});
+
+/**
+ * Fix round 3. N4: `FormResponseAnswer.DateValue` is DATETIMEOFFSET — 0001-01-01 to 9999-12-31 — so a
+ * date it cannot store (year 0000, or an offset that carries the instant past either end) is refused,
+ * never left to fail at commit as a generic error. N5 (controller ruling): the ISO-8601 forms
+ * non-widget clients send are accepted — up to 7 fractional digits (DATETIMEOFFSET's precision),
+ * `±hhmm` and `±hh:mm` offsets, `Z`, a lowercase `t`.
+ */
+describe('dateAnswerInstant — what DATETIMEOFFSET can store (fix round 3)', () => {
+  it.each(['0000-01-01', '0000-12-31T10:00:00Z', '9999-12-31T23:00:00-05:00', '0001-01-01T03:00:00+05:00'])(
+    'refuses %s, outside 0001-01-01..9999-12-31 once its offset is applied',
+    (text) => {
+      expect(dateAnswerInstant('Date', text)).toBeUndefined();
+    },
+  );
+
+  it('admits the edges of the range', () => {
+    expect(dateAnswerInstant('Date', '0001-01-01')?.toISOString()).toBe('0001-01-01T00:00:00.000Z');
+    expect(dateAnswerInstant('Date', '9999-12-31T23:00:00+05:00')?.toISOString()).toBe('9999-12-31T18:00:00.000Z');
+  });
+
+  it('reads a leap day by the Gregorian rule in every year, the first century included', () => {
+    expect(dateAnswerInstant('Date', '0004-02-29')).toBeDefined();
+    expect(dateAnswerInstant('Date', '0100-02-29')).toBeUndefined();
+    expect(dateAnswerInstant('Date', '2000-02-29')).toBeDefined();
+  });
+});
+
+describe('dateAnswerInstant — ISO-8601 as non-widget clients write it (fix round 3)', () => {
+  it.each([
+    // Python `datetime.isoformat()`: 6 fractional digits, `+00:00`.
+    ['2026-10-13T14:30:00.123456+00:00', '2026-10-13T14:30:00.123Z'],
+    // .NET round-trip `"o"`: 7 fractional digits.
+    ['2026-10-13T14:30:00.1234567Z', '2026-10-13T14:30:00.123Z'],
+    ['2026-10-13T14:30:00.1234567+02:00', '2026-10-13T12:30:00.123Z'],
+    // The basic offset, and a lowercase separator.
+    ['2026-10-13T14:30:00+0200', '2026-10-13T12:30:00.000Z'],
+    ['2026-10-13t14:30:00Z', '2026-10-13T14:30:00.000Z'],
+  ])('accepts %s', (text, iso) => {
+    expect(dateAnswerInstant('Date', text)?.toISOString()).toBe(iso);
+  });
+
+
+  it('refuses more fractional digits than DATETIMEOFFSET keeps, and an impossible basic offset', () => {
+    expect(dateAnswerInstant('Date', '2026-10-13T14:30:00.12345678Z')).toBeUndefined();
+    expect(dateAnswerInstant('Date', '2026-10-13T14:30:00+2400')).toBeUndefined();
+  });
+});
+
+
+/**
+ * Fix round 4.
+ *
+ * R3-3: the stored instant is built from the components the grammar matched, never by handing the
+ * text to `new Date`. V8's ISO parser rejects the space separator, and its legacy fallback reads a
+ * 2-digit year as 19xx/20xx — so `0050-06-15 10:20Z` was stored as 1950, a different day than the
+ * respondent gave, with the range check none the wiser because 1950 is in range.
+ *
+ * Controller ruling: a date-time with no offset is REFUSED in every mode. Read as server-local time,
+ * the stored instant depended on which time zone the host happened to run in.
+ */
+describe('dateAnswerInstant — the instant is the one its components name (fix round 4)', () => {
+  it.each([
+    ['0050-06-15 10:20Z', '0050-06-15T10:20:00.000Z'],
+    ['0050-06-15 10:00:00+0530', '0050-06-15T04:30:00.000Z'],
+    ['0001-06-15 10:20Z', '0001-06-15T10:20:00.000Z'],
+    ['0001-06-15T10:20Z', '0001-06-15T10:20:00.000Z'],
+    ['0099-12-31t23:59:59.9999999Z', '0099-12-31T23:59:59.999Z'],
+    ['2026-10-13 14:30:00.5-07:00', '2026-10-13T21:30:00.500Z'],
+  ])('stores %s as the year it was typed', (text, iso) => {
+    expect(dateAnswerInstant('Date', text)?.toISOString()).toBe(iso);
+  });
+
+  it('admits the real ±14:00 offset limit and refuses anything past it', () => {
+    expect(dateAnswerInstant('Date', '2026-10-13T10:00:00+14:00')?.toISOString()).toBe('2026-10-12T20:00:00.000Z');
+    expect(dateAnswerInstant('Date', '2026-10-13T10:00:00-14:00')?.toISOString()).toBe('2026-10-14T00:00:00.000Z');
+    for (const offset of ['+14:59', '+14:01', '-1401', '-14:30']) {
+      expect(dateAnswerInstant('Date', `2026-10-13T10:00:00${offset}`), offset).toBeUndefined();
+    }
+  });
+
+  it.each(['2026-10-13T14:30:00', '2026-10-13 14:30', '2026-10-13T14:30:00.123456', '0050-06-15 10:20'])(
+    'refuses the zone-less date-time %s, whose instant would depend on the host time zone',
+    (text) => {
+      expect(dateAnswerInstant('Date', text)).toBeUndefined();
+    },
+  );
+
+  it('still reads a bare calendar date as UTC midnight', () => {
+    expect(dateAnswerInstant('Date', '2026-10-13')?.toISOString()).toBe('2026-10-13T00:00:00.000Z');
+  });
+});
+
+describe('a zone-less date-time is refused with its own message, by both verdicts, in every mode (fix round 4)', () => {
+  const question = { id: 'q-date', type: 'Date' as const, prompt: 'When', isRequired: false, displayOrder: 1, options: [] };
+  const definition = { pages: [{ id: 'p', displayOrder: 1, questions: [question] }] };
+  const message = 'Include a time zone with the time, such as Z or +02:00.';
+
+  for (const mode of ['complete', 'draft', 'screened-out'] as const) {
+    it(`${mode}: the payload verdict and the per-field verdict agree`, () => {
+      const outcome = validateAnswers(definition, [{ questionId: 'q-date', dateValue: '2026-10-13T14:30' }], mode);
+      expect(outcome.errors).toEqual([{ questionId: 'q-date', message }]);
+      expect(validateAnswer(question, '2026-10-13T14:30', mode)).toEqual({ message });
+    });
+
+    it(`${mode}: an impossible date-time keeps the plain message`, () => {
+      const outcome = validateAnswers(definition, [{ questionId: 'q-date', dateValue: '2026-02-30T14:30' }], mode);
+      expect(outcome.errors).toEqual([{ questionId: 'q-date', message: 'Enter a valid date.' }]);
+    });
+  }
 });

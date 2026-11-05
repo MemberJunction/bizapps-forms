@@ -29,10 +29,15 @@ import type { FormQuestionType } from '@mj-biz-apps/forms-entities';
 // does not generate it (rationale: `excludeSchemas` in mj.config.cjs).
 import type { mjBizAppsCommonPersonEntity } from '@mj-biz-apps/common-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
-import { saveOrExplain } from '../shared/save-entity';
+import {
+  type ActionDataProvider,
+  type AnswerWithType,
+  type FormResponseContext,
+  loadFormResponseContext,
+  resolveActionProvider,
+  saveOrExplain,
+} from '@mj-biz-apps/forms-core-entities-server';
 import { explainMissingEntityClasses } from '../shared/generated-entity';
-import { loadFormResponseContext, type AnswerWithType, type FormResponseContext } from '../shared/form-response-context';
-import { resolveActionProvider, type ActionDataProvider } from '../shared/action-provider';
 
 const PERSON_ENTITY = 'MJ_BizApps_Common: People';
 
@@ -207,10 +212,13 @@ async function createPerson(
 ): Promise<{ person: mjBizAppsCommonPersonEntity } | { error: string }> {
   const person = await provider.GetEntityObject<mjBizAppsCommonPersonEntity>(PERSON_ENTITY, contextUser);
   person.NewRecord();
-  // FirstName / LastName are required on People; derive sensible fallbacks from email.
+  // People requires both columns to hold a value, not a name. FirstName falls back to the email
+  // local part (real data the respondent gave us). LastName falls back to '' — never a
+  // placeholder: a literal like "(unknown)" is written into a shared table and leaks into every
+  // other app's search, mail-merge and header (F13).
   const fallback = email.split('@')[0];
   person.FirstName = identity.firstName ?? fallback;
-  person.LastName = identity.lastName ?? '(unknown)';
+  person.LastName = identity.lastName ?? '';
   person.Email = email;
   if (identity.phone) {
     person.Phone = identity.phone;

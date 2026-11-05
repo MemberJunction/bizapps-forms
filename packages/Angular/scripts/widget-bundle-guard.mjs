@@ -56,6 +56,47 @@ export function findServerOnlyInputs(inputPaths, packageNameOf) {
 }
 
 /**
+ * Code that is not server-only but must still never SHIP in `<mj-form>` (#303 Task 10c fix round 1).
+ * The projection BUILDER is the server's job (`Forms.GetRespondentForm` serves its output); the widget
+ * parses the result with the schema in `respondent-definition`, never builds one. The development
+ * mock built one in the browser, which is how the builder got onto every respondent's phone.
+ *
+ * Unlike {@link SERVER_ONLY_INPUTS} these live in packages the widget DOES import — the contracts
+ * barrel re-exports the builder — so esbuild reads them on every build and tree-shakes them away. The
+ * rule is therefore judged on the output: an input counts only when some of its bytes were bundled.
+ */
+const DEV_ONLY_CODE = [
+  {
+    label: 'respondent projection builder',
+    matches: (name, inputPath) => name === '@mj-biz-apps/forms-entities' && /\/contracts\/respondent-projection\.[jt]s$/.test(inputPath),
+  },
+  {
+    label: 'development mock transport',
+    matches: (name, inputPath) =>
+      name === '@mj-biz-apps/forms-ng' && /\/widget\/api\/(forms-api\.mock\.service|mock-form\.data)\.[jt]s$/.test(inputPath),
+  },
+];
+
+/**
+ * The bundled inputs that carry development-only code, grouped like {@link findServerOnlyInputs}.
+ * @param {Record<string, { bytesInOutput: number }>} outputInputs `metafile.outputs[<bundle>].inputs`
+ * @param {(inputPath: string) => string | undefined} packageNameOf see `createPackageNameResolver`
+ * @returns {Map<string, string[]>}
+ */
+export function findDevOnlyCode(outputInputs, packageNameOf) {
+  const offenders = new Map();
+  for (const [inputPath, { bytesInOutput }] of Object.entries(outputInputs)) {
+    if (!(bytesInOutput > 0)) continue;
+    const name = packageNameOf(inputPath);
+    const hit = DEV_ONLY_CODE.find((entry) => entry.matches(name, inputPath));
+    if (!hit) continue;
+    const key = `${name} [${hit.label}]`;
+    offenders.set(key, [...(offenders.get(key) ?? []), inputPath]);
+  }
+  return offenders;
+}
+
+/**
  * Returns a function naming the npm package that owns an esbuild input path: the `name` of the
  * nearest `package.json` above it, skipping the nameless `{ "type": "module" }` stubs many
  * packages keep inside `dist/`. Identity comes from the package itself, not from the path's

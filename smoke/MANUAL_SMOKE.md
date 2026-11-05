@@ -77,14 +77,17 @@ await pool.close();
 ```
 
 **Public API** — `/graphql` returns `{"error":"Authentication required"}` without a JWT, *even for
-the public queries*. Get one by reading it off the respondent host page:
+the respondent operations*. Get one by reading it off the respondent host page. Since #303 the
+respondent surface is two Remote Operations, `Forms.GetRespondentForm` and `Forms.SaveResponse`, sent
+through MJ's one `ExecuteRemoteOperation` mutation (the `PublishedForm` query and
+`SubmitFormResponse` mutation are gone); `smoke/lib/operations.mjs` is the scripted equivalent:
 
 ```bash
 curl -s http://localhost:4000/f/<slug> -o host.html
 TOKEN=$(grep -o 'data-token="[^"]*"' host.html | sed 's/data-token="//;s/"$//')
 curl -s -X POST http://localhost:4000/graphql \
-  -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
-  -d '{"query":"query($s:String!){PublishedForm(distributionSlug:$s){formVersionId definitionJSON}}","variables":{"s":"<slug>"}}'
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -H 'x-session-id: manual-1' \
+  -d '{"query":"mutation($k:String!,$i:String!,$m:String!){ExecuteRemoteOperation(input:{operationKey:$k,inputJSON:$i,invokeMode:$m}){success resultCode outputJSON errorMessage}}","variables":{"k":"Forms.GetRespondentForm","i":"{\"Slug\":\"<slug>\"}","m":"attached"}}'
 ```
 
 ---
@@ -176,19 +179,20 @@ operations as them, with a System control beside each one.
 - [ ] The switch reads OFF for a row at `Status='Active', IsActive=0`, and clicking it REOPENS
 - [ ] Delete a link with no responses → its invite is `Revoked`, not left `Active`
 
-### F. Public GraphQL — read
-- [ ] `PublishedForm` with the right slug → correct ids, `renderMode`, `settingsJSON`
-- [ ] `PublishedForm` with **another form's** slug → `null`
-- [ ] `PublishedForm` with a **bogus** slug → `null`, byte-identical to the previous case (no existence leak)
+### F. Public operations — read (`Forms.GetRespondentForm`)
+- [ ] The right slug → `FormVersionID`, and a `DefinitionJSON` with `renderMode`, pages and questions — and NO `scoring`, `endScreens` or `automations` key anywhere in it (#302)
+- [ ] **Another form's** slug → `resultCode: "FORBIDDEN"`
+- [ ] A **bogus** slug → `FORBIDDEN`, byte-identical to the previous case (no existence leak)
 
-### G. Public GraphQL — submit
-- [ ] Happy path → `success:true`, `status:"Complete"`, confirmation message
-- [ ] Omit a required answer → refused, error carries the offending `questionId`
+### G. Public operations — submit (`Forms.SaveResponse`)
+- [ ] Happy path (`Mode: "final"`) → `Success:true`, `Status:"Complete"`, `Outcome:"ended"`, the server-chosen ending or confirmation message
+- [ ] Omit a required answer → `Success:false`, *"This question is required."*, carrying the offending `QuestionID`
 - [ ] Malformed email → *"Enter a valid email address."*
-- [ ] Answer for a `questionId` **not in this form** → the foreign answer is dropped (verify by joining `FormResponseAnswer` → `FormQuestion.FormID`)
+- [ ] Answer for a `QuestionID` **not in this form** → the whole save is REFUSED: *"That answer does not belong to any question on this form."* (before #303 the foreign answer was silently dropped)
 - [ ] Answer for a question belonging to **another form** → same
-- [ ] Wrong `formVersionId` → *"version-mismatch"*
-- [ ] Submit to **another distribution's** slug with this token → *"distribution-not-found"*
+- [ ] One answer carrying two columns (e.g. `TextValue` and `NumericValue`) → *"That answer carries more than one value."*
+- [ ] Wrong `FormVersionID` → *"This form is not available."* — one sentence for a closed, archived, stale or unreadable link; the reason is in the server log only
+- [ ] Submit to **another distribution's** slug with this token → `resultCode: "FORBIDDEN"` (the operation's Authorize, before any engine code)
 - [ ] Exceed 10 final submits/min in one session → clear rate-limit message naming the wait (autosaves never count toward it)
 - [ ] Answer typing lands in the right columns: text → `TextValue`, multi-select → `JSONValue`, NPS/number → `NumericValue`
 
@@ -225,7 +229,7 @@ operations as them, with a System control beside each one.
 - [ ] Change font / colours → a per-form `FormStyle` row is created, `CSSVariables` are all semantic `--mjf-*` tokens with **no hardcoded values**
 - [ ] Live preview updates, and desktop / tablet / mobile widths all render (mobile-first is a shipping requirement)
 - [ ] The change does **not** reach the live form until republish, and the UI says so
-- [ ] After republish → `PublishedForm.styleTokensJSON` carries the new tokens
+- [ ] After republish → `Forms.GetRespondentForm`'s `DefinitionJSON.styleTokens` carries the new tokens
 
 ### M. Analytics, responses, cross-app
 - [ ] Responses tab lists responses with status, respondent and answered count

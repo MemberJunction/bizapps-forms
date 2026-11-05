@@ -20,8 +20,8 @@ import type {
   mjBizAppsFormsFormEntityType,
 } from '@mj-biz-apps/forms-entities';
 
-import { FORM_ENTITY } from '../public-submit/entity-names.js';
 import type { RedeemRunViewProvider } from './redeem.service.js';
+import { FORMS_ENTITY } from '@mj-biz-apps/forms-core-entities-server';
 
 /** What the host page bakes into its head. */
 export interface FormIdentity {
@@ -56,7 +56,7 @@ async function loadDescription(
 ): Promise<string | undefined> {
   const result = await provider.RunView<mjBizAppsFormsFormEntityType>(
     {
-      EntityName: FORM_ENTITY,
+      EntityName: FORMS_ENTITY.Form,
       ExtraFilter: `ID=${quoteSqlString(source.FormID)}`,
       Fields: ['Description'],
       ResultType: 'simple',

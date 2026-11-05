@@ -13,6 +13,7 @@
  * consumed by the server (dispatch) and the builder (explaining to an author what will happen).
  */
 import type { FormSettings, PublishedFormAutomation } from './form-definition';
+import { readStoredFormSettings } from './stored-columns';
 
 /** The dispatch decision. `automations` is carried so the caller never re-reads the definition. */
 export type OnSubmitDispatch =
@@ -46,15 +47,25 @@ export interface OnSubmitDispatchInput {
  * a hand-written snapshot, or by a caller going directly to `buildFormFromBlueprint`.
  */
 export function resolveOnSubmitDispatch(definition: OnSubmitDispatchInput): OnSubmitDispatch {
-  switch (definition.settings.onSubmitMode) {
+  return dispatchesLegacy(definition.settings, definition.automations.length)
+    ? { kind: 'legacy' }
+    : { kind: 'configured', automations: definition.automations };
+}
+
+/**
+ * Whether a form with these settings and this many automations runs the four legacy hooks rather
+ * than its own steps — the decision {@link resolveOnSubmitDispatch} makes, asked of the LIVE form by
+ * the server's automation editor, which must seed the built-ins at exactly the moment an edit turns
+ * this from true to false.
+ */
+export function dispatchesLegacy(settings: Pick<FormSettings, 'onSubmitMode'>, automationCount: number): boolean {
+  switch (settings.onSubmitMode) {
     case 'Configured':
-      return { kind: 'configured', automations: definition.automations };
+      return false;
     case 'Legacy':
-      return { kind: 'legacy' };
+      return true;
     default:
-      return definition.automations.length > 0
-        ? { kind: 'configured', automations: definition.automations }
-        : { kind: 'legacy' };
+      return automationCount === 0;
   }
 }
 
@@ -66,4 +77,33 @@ export function resolveOnSubmitDispatch(definition: OnSubmitDispatchInput): OnSu
  */
 export function hasUnreachableAutomations(definition: OnSubmitDispatchInput): boolean {
   return definition.settings.onSubmitMode === 'Legacy' && definition.automations.length > 0;
+}
+
+/**
+ * The `Form.Settings` JSON that marks a form's automations authoritative — its own steps are what run
+ * on submit, INCLUDING when it has none — or `null` when it already is. Throws when the stored
+ * settings cannot be read.
+ *
+ * Dispatch used to be inferred from whether the automation list was empty, which made "this form
+ * has never configured anything" and "this form deliberately runs nothing" the same state: an author
+ * who removed their last step got all four legacy hooks back, silently (bizapps-forms#47).
+ *
+ * `null` means "no write needed", not "failed". There is deliberately NO inverse: once a form runs
+ * its own steps, removing all of them means "run nothing", not "run the four I never asked for".
+ *
+ * Throws rather than overwriting: this replaces the whole blob, so carrying on would mean writing
+ * back either the unreadable value or the defaults in its place — both lose the author's settings.
+ * The PARSED settings are spread, not the raw JSON, so an author's quota or close date survives.
+ *
+ * One implementation for the server's `FormAutomationEngine` and the builder's Automate tab.
+ */
+export function settingsUpdateToMarkAuthoritative(raw: string | null | undefined): string | null {
+  const read = readStoredFormSettings(raw);
+  if (!read.ok) {
+    throw new Error(`This form's settings cannot be read (${read.reason}), so they were not changed.`);
+  }
+  if (read.value.onSubmitMode === 'Configured') {
+    return null;
+  }
+  return JSON.stringify({ ...read.value, onSubmitMode: 'Configured' });
 }

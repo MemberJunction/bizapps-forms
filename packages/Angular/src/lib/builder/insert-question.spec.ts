@@ -27,9 +27,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { ConditionalRule } from '@mj-biz-apps/forms-entities';
-import { collectRuleEntries, type RuleInventoryForm } from './rules-inventory';
+import {
+  collectRuleEntries,
+  type ConditionalSourceQuestion,
+  type RuleInventoryForm,
+} from '@mj-biz-apps/forms-entities/contracts';
 import { newlyBrokenRules } from './reorder';
-import type { ConditionalSourceQuestion } from './condition-sources';
 
 const showsWhenVip: ConditionalRule = {
   show: { all: [{ questionId: 'q1', op: 'equals', value: 'vip' }] },

@@ -10,12 +10,19 @@ import {
   ViewChild,
   inject,
 } from '@angular/core';
+import { FormsReplayAutomationEventOperation } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
-import { MJ_CORE_ENTITY } from '../shared/entity-names';
+import { FORMS_ENTITY, MJ_CORE_ENTITY } from '../shared/entity-names';
+import { runOperation } from '../shared/remote-operation';
+// Deep import on purpose: the widget barrel would pull the whole respondent widget into Explorer;
+// this file and its glyph table import nothing but @angular/core.
+import { IconComponent } from '../widget/components/icon.component';
 import type {
+  DetailPosition,
   ResponseAnswerView,
   ResponseFileView,
-  ResponseAutomationRunView,
+  ResponseAutomationAttempt,
+  ResponseAutomationEventView,
   ResponseBindingRecordView,
   ResponseDetail,
   ResponseRecordLink,
@@ -25,6 +32,9 @@ import { ResponseFileDownloadService } from './response-file-download.service';
 /** Byte-size units, largest step first, for the human-readable file size. */
 const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
 
+/** What a replay writes: the event it re-queues, and the run rows its drain reopens. */
+const REPLAY_WRITES = [FORMS_ENTITY.FormAutomationEvent, FORMS_ENTITY.FormAutomationRun];
+
 /**
  * Run status / binding outcome -> badge tone.
  *
@@ -33,7 +43,7 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
  * one of them. Both maps are total over their CodeGen union, so a new value in the
  * CHECK constraint fails the build here instead of silently rendering as neutral.
  */
-const RUN_TONE: Record<ResponseAutomationRunView['status'], string> = {
+const RUN_TONE: Record<ResponseAutomationAttempt['status'], string> = {
   Succeeded: 'mjf-badge--success',
   Failed: 'mjf-badge--danger',
   Running: 'mjf-badge--info',
@@ -60,6 +70,7 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
 @Component({
   selector: 'mj-forms-response-detail',
   standalone: true,
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [ResponseFileDownloadService],
   template: `
@@ -70,6 +81,19 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
             <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to responses
           </button>
         }
+        @if (Position; as p) {
+          <!-- Reading responses one after another without going back to the list each time
+               (UI audit F08); the host crosses page boundaries. -->
+          <div class="rd-nav" role="group" aria-label="Move between responses">
+            <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" [disabled]="!p.hasPrevious" (click)="Adjacent.emit(-1)">
+              <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Previous
+            </button>
+            <span class="rd-pos">Response {{ p.index }} of {{ p.total }}</span>
+            <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" [disabled]="!p.hasNext" (click)="Adjacent.emit(1)">
+              Next <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+            </button>
+          </div>
+        }
         <div class="meta">
           <span class="mjf-badge" [class.mjf-badge--success]="Detail.status === 'Complete'">{{ Detail.status }}</span>
           <span class="respondent">{{ Detail.respondent }}</span>
@@ -79,7 +103,13 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
         </div>
       </header>
 
-      @if (Detail.unlabelledAnswerCount > 0) {
+      @if (Detail.labelsMissing) {
+        <p class="rd-note" role="status">
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+          The form version used for labels has no readable published definition, so this
+          response’s answers cannot be labelled and are not shown. They are still stored.
+        </p>
+      } @else if (Detail.unlabelledAnswerCount > 0) {
         <p class="rd-note" role="status">
           <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
           {{ Detail.unlabelledAnswerCount }}
@@ -91,7 +121,7 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
 
       @if (Detail.answers.length === 0) {
         <p class="rd-empty">
-          {{ Detail.unlabelledAnswerCount > 0
+          {{ Detail.labelsMissing || Detail.unlabelledAnswerCount > 0
              ? 'None of this response’s answers could be labelled.'
              : 'This response has no answers.' }}
         </p>
@@ -163,25 +193,59 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
         </p>
       }
 
-      @if (Detail.automationRuns.length > 0 || Detail.bindingRecords.length > 0) {
+      @if (Detail.automationRuns.length > 0 || Detail.bindingRecords.length > 0 || DeadLetters.length > 0) {
         <section class="rd-did">
           <h3 class="mjf-section-title rd-did-title">What this submission did</h3>
+
+          <!-- A dead letter first: it is the one thing here the author can act on. Every Retry
+               button holds while any replay runs, because the reload that follows re-renders
+               this whole list. -->
+          @for (e of DeadLetters; track e.eventId) {
+            <div class="run run--dead">
+              <span class="mjf-badge mjf-badge--danger" [title]="GaveUpTitle(e)">
+                <mjf-icon name="triangle-exclamation" /> Automations failed
+              </span>
+              <button
+                type="button"
+                class="mjf-btn mjf-btn--ghost mjf-btn--sm"
+                [disabled]="RetryingEventId !== ''"
+                [attr.aria-busy]="RetryingEventId === e.eventId"
+                (click)="RetryAutomations(e)"
+              >
+                <mjf-icon name="rotate-right" [spin]="RetryingEventId === e.eventId" />
+                Retry automations
+              </button>
+              @if (RetryError && RetryErrorEventId === e.eventId) {
+                <span class="retry-error" role="alert">{{ RetryError }}</span>
+              }
+              <span class="run-msg" title="The automation event that gave up">Event {{ e.eventId }}</span>
+              @if (e.lastError) {
+                <p class="run-error">{{ e.lastError }}</p>
+              }
+            </div>
+          }
 
           @for (r of Detail.automationRuns; track r.runId) {
             <div class="run">
               <span class="mjf-badge" [class]="RunTone(r)">{{ r.status }}</span>
               <span class="run-name">{{ r.automationName }}</span>
+              <!-- "Delivery attempt", not "N attempts": AttemptCount is which delivery of the submit
+                   message last ran this step (a replay starts again at 1), not how many times it ran. -->
               <span class="run-meta">
                 @if (r.durationSeconds !== null) {
                   {{ r.durationSeconds }}s ·
                 }
-                {{ r.attemptCount }} {{ r.attemptCount === 1 ? 'attempt' : 'attempts' }}
+                <span title="Which attempt at the submission's automation event last ran this step. A retry raises it; a replay starts again at 1.">attempt {{ r.deliveryAttempt }}</span>
               </span>
               @if (r.actionExecutionLogId) {
                 <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="OpenActionLog(r)">Action log</button>
               }
               @if (r.aiAgentRunId) {
                 <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="OpenAgentRun(r)">Agent run</button>
+              }
+              @if (r.automationEventId) {
+                <!-- For an operator: the id to look the attempt up by in the automation outbox. -->
+                <span class="run-msg" title="The automation event whose run ran this step">Event {{ r.automationEventId }}</span>
               }
               @if (r.errorMessage) {
                 <p class="run-error">{{ r.errorMessage }}</p>
@@ -219,11 +283,13 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
       /* --- header --- */
 
       .rd-head { display: flex; flex-direction: column; align-items: flex-start; gap: var(--mjf-gap-sm); }
+      .rd-nav { display: flex; flex-wrap: wrap; align-items: center; gap: var(--mjf-gap-sm); }
+      .rd-pos { font-size: var(--mjf-meta); color: var(--mj-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
       /* The sole escape from the detail view, so it is drawn as a real button rather than
          a bare link: a border, a radius and a hover it visibly responds to. The arrow
          slides on hover to say which way it goes. */
       .rd-back {
-        padding: 0 14px;
+        padding: 0 12px;
         color: var(--mj-text-secondary);
         background: var(--mj-bg-surface);
         border: 1px solid var(--mj-border-default);
@@ -274,7 +340,7 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
       .answer { padding: var(--mjf-card-pad); }
       .answer + .answer { border-top: 1px solid var(--mjf-rule); }
       .answer dt {
-        margin: 0 0 6px;
+        margin: 0 0 4px;
         font-size: var(--mjf-meta);
         font-weight: 600;
         color: var(--mj-text-secondary);
@@ -340,10 +406,22 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
         border-radius: var(--mjf-radius-sm);
         background: var(--mj-bg-surface);
       }
+      /* The error border marks the row as needing the author, not just as one more step. */
+      .run--dead { border-color: var(--mj-status-error-border); }
       .run-name,
       .bind-entity { font-weight: 600; }
       .run-meta,
       .bind-fields { color: var(--mj-text-muted); }
+      /* An id to copy, not to read: set apart, and allowed to wrap on a phone. */
+      .run-msg {
+        font-family: var(--mj-font-family-mono, monospace);
+        font-size: var(--mjf-label);
+        color: var(--mj-text-muted);
+        overflow-wrap: anywhere;
+        user-select: all;
+      }
+      /* Beside the button that failed, like a download error beside its file. */
+      .retry-error { font-size: var(--mjf-meta); color: var(--mj-status-error-text); }
       .run-error,
       .run-output { flex-basis: 100%; margin: 0; font-size: var(--mjf-label); line-height: 1.5; white-space: pre-wrap; }
       .run-error { color: var(--mj-status-error-text); }
@@ -377,11 +455,29 @@ export class FormsResponseDetailComponent implements AfterViewInit {
 
   @Output() Back = new EventEmitter<void>();
 
+  /** Where this response sits in the list, when the host can move between responses; else null. */
+  @Input() Position: DetailPosition | null = null;
+
+  /** The reader asked for the response before (`-1`) or after (`1`) this one. */
+  @Output() Adjacent = new EventEmitter<-1 | 1>();
+
   /**
    * A record the user asked to open. The host maps it to its own navigation:
    * `OpenEntityRecord` on a dashboard, `Navigate` on a form component.
    */
   @Output() OpenRecord = new EventEmitter<ResponseRecordLink>();
+
+  /**
+   * A replay re-queued an event and drained it, so what the panel shows is stale. The host
+   * re-reads the detail the way it read it first: it owns the read, and the label version.
+   */
+  @Output() Reload = new EventEmitter<void>();
+
+  /** The dead-lettered event a replay is running for; empty when none is. */
+  public RetryingEventId = '';
+  /** The last replay refusal, and which event it belongs to. */
+  public RetryError = '';
+  public RetryErrorEventId = '';
 
   @ViewChild('backButton') private backButton?: ElementRef<HTMLButtonElement>;
 
@@ -394,8 +490,53 @@ export class FormsResponseDetailComponent implements AfterViewInit {
     this.backButton?.nativeElement.focus();
   }
 
+  /**
+   * The events whose automations gave up — the only ones offered a retry. The server refuses a
+   * replay of any other status, so offering one would be a button that can only fail.
+   */
+  public get DeadLetters(): ResponseAutomationEventView[] {
+    return this.Detail.automationEvents.filter((e) => e.status === 'DeadLetter');
+  }
+
+  /** The dead-letter badge's tooltip. One attempt is possible: a refusal no retry can fix gives up on the first. */
+  public GaveUpTitle(e: ResponseAutomationEventView): string {
+    return `These automations gave up after ${e.attemptCount} ${e.attemptCount === 1 ? 'attempt' : 'attempts'}`;
+  }
+
+  /**
+   * Replay one dead-lettered event (`Forms.ReplayAutomationEvent`): re-queue it and run it once,
+   * now. On success the host reloads the detail, which shows how the run ended; a refusal stays
+   * beside the event it belongs to and nothing reloads.
+   */
+  public async RetryAutomations(event: ResponseAutomationEventView): Promise<void> {
+    if (event.status !== 'DeadLetter' || this.RetryingEventId) {
+      return;
+    }
+    this.RetryingEventId = event.eventId;
+    this.RetryError = '';
+    this.RetryErrorEventId = '';
+    try {
+      const outcome = await runOperation(
+        new FormsReplayAutomationEventOperation(),
+        { FormAutomationEventID: event.eventId },
+        `replaying automation event ${event.eventId} of response ${this.Detail.responseId}`,
+        REPLAY_WRITES,
+      );
+      if (outcome.ok) {
+        this.Reload.emit();
+      } else {
+        this.RetryError = outcome.error;
+        this.RetryErrorEventId = event.eventId;
+      }
+    } finally {
+      this.RetryingEventId = '';
+      // OnPush with an awaited handler, as in DownloadFile.
+      this.cdr.markForCheck();
+    }
+  }
+
   /** Badge tone for an automation run's status. See RUN_TONE. */
-  public RunTone(r: ResponseAutomationRunView): string {
+  public RunTone(r: ResponseAutomationAttempt): string {
     return RUN_TONE[r.status] ?? '';
   }
 
@@ -437,7 +578,7 @@ export class FormsResponseDetailComponent implements AfterViewInit {
     this.OpenRecord.emit({ entityName: MJ_CORE_ENTITY.File, recordId: fileId });
   }
 
-  public OpenActionLog(r: ResponseAutomationRunView): void {
+  public OpenActionLog(r: ResponseAutomationAttempt): void {
     if (r.actionExecutionLogId) {
       this.OpenRecord.emit({
         entityName: MJ_CORE_ENTITY.ActionExecutionLog,
@@ -446,7 +587,7 @@ export class FormsResponseDetailComponent implements AfterViewInit {
     }
   }
 
-  public OpenAgentRun(r: ResponseAutomationRunView): void {
+  public OpenAgentRun(r: ResponseAutomationAttempt): void {
     if (r.aiAgentRunId) {
       this.OpenRecord.emit({ entityName: MJ_CORE_ENTITY.AIAgentRun, recordId: r.aiAgentRunId });
     }
