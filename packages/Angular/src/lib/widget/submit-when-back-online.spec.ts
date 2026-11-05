@@ -148,6 +148,91 @@ describe('a submit that failed offline is sent when the network returns', () => 
     expect(api.savesOf('final')).toHaveLength(2);
   });
 
+  /**
+   * PR #354 review, finding 1. A real offline session fails the AUTOSAVE too, not only the submit, so
+   * the controller is in 'error' when the network returns. The `online` listener used to resume the
+   * autosave first — it had just been reopened by the failed submit — which put a partial on the wire
+   * ahead of the submit the respondent asked for. On a knockout answer that partial comes back
+   * `ended`, `endEarly` seals with a final save, and the waiting submit (already past its
+   * `endingEarly` check) sends a second final with the same client response id.
+   */
+  async function offlineEverywhere(): Promise<{ form: MjFormHarness; api: FakeFormsApi; reach: () => void }> {
+    let reachable = false;
+    const api = new FakeFormsApi(servedAs(screeningForm()), (input) => {
+      if (!reachable) {
+        throw new FormsApiUnreachableError('Failed to fetch');
+      }
+      return screeningServer(input);
+    });
+    const { form } = await mountForm({ api });
+    return { form, api, reach: () => (reachable = true) };
+  }
+
+  it('sends the waiting submit, and no partial ahead of it, when an autosave also failed offline', async () => {
+    const { form, api, reach } = await offlineEverywhere();
+    online = false;
+    form.rt.setValue('name', 'Sam');
+    form.commit();
+    await vi.advanceTimersByTimeAsync(0);
+    await form.submit();
+    expect(form.bannerText).toBe(SUBMIT_WHEN_ONLINE_MESSAGE);
+    const before = api.saves.length;
+
+    reach();
+    await backOnline();
+
+    expect(api.saves.slice(before).map((save) => save.Mode)).toEqual(['final']);
+    expect(form.phaseNow).toBe('done');
+  });
+
+  it('sends exactly one final when the offline answer was a knockout', async () => {
+    const { form, api, reach } = await offlineEverywhere();
+    online = false;
+    form.rt.setValue('age', 16);
+    form.rt.setValue('name', 'Sam');
+    form.commit();
+    await vi.advanceTimersByTimeAsync(0);
+    await form.submit();
+    const before = api.saves.length;
+
+    reach();
+    await backOnline();
+    await vi.advanceTimersByTimeAsync(0);
+
+    const after = api.saves.slice(before).map((save) => save.Mode);
+    expect(after.filter((mode) => mode === 'final')).toHaveLength(1);
+    expect(after).not.toContain('partial');
+    expect(form.phaseNow).toBe('done');
+  });
+
+  it('a knockout verdict that lands while a submit waits for the autosave does not send a second final', async () => {
+    // The same double final with no network involved: the committed knockout's partial is still on
+    // the wire when Submit is pressed, the submit waits for it in `settle()`, and the verdict it
+    // brings back used to start `endEarly`'s own final beside the submit's.
+    let release: (() => void) | null = null;
+    const api = new FakeFormsApi(servedAs(screeningForm()), (input) => {
+      if (input.Mode === 'partial' && !release) {
+        return new Promise((resolve) => (release = () => resolve(screeningServer(input))));
+      }
+      return screeningServer(input);
+    });
+    const { form } = await mountForm({ api });
+    form.rt.setValue('age', 16);
+    form.rt.setValue('name', 'Sam');
+    form.commit();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(release).not.toBeNull();
+
+    const submitting = form.submit();
+    await vi.advanceTimersByTimeAsync(0);
+    release!();
+    await submitting;
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(api.savesOf('final')).toHaveLength(1);
+    expect(form.phaseNow).toBe('done');
+  });
+
   it('does nothing on an online event when no submit is waiting', async () => {
     const { form, api } = await formWithFlakyNetwork();
 

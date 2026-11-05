@@ -418,9 +418,15 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (typeof window === 'undefined' || this.onlineListener) {
       return;
     }
+    // One or the other, never both. A submit waiting for the network carries every answer itself,
+    // and its `settle()` is what quiesces the autosave; resuming the autosave first (it was reopened
+    // by the failed submit) put a partial on the wire ahead of it, and a knockout partial then sealed
+    // the response with a second final beside the submit's (PR #354 review). If the submit fails
+    // again it re-arms, and its `returnToEditing` reopens the autosave for the next `online`.
     this.onlineListener = () => {
-      this.autosave?.resume();
-      this.sendSubmitWaitingForNetwork();
+      if (!this.sendSubmitWaitingForNetwork()) {
+        this.autosave?.resume();
+      }
     };
     window.addEventListener('online', this.onlineListener);
   }
@@ -847,9 +853,18 @@ export class MjFormComponent implements OnInit, OnDestroy {
    *
    * Scheduled, never awaited, from inside a save: {@link endEarly} first quiesces the autosave, and
    * the save that delivered this verdict is still the controller's in-flight save until it returns.
+   *
+   * Not while a submit is in flight. A partial already on the wire when Submit was pressed delivers
+   * its verdict while the submit waits for it in `settle()`, and that submit has passed its own
+   * `endingEarly` check — so `endEarly` here put a second final on the wire beside the submit's, with
+   * the same client response id (PR #354 review). The submit carries the same committed answers, and
+   * the server judges a final the same way: it seals the knockout and returns its ending.
    */
   private actOnVerdict(result: FormsSaveResponseOutput, sentKey: string): void {
     if (result.Outcome !== 'ended' || !this.ledger.IsCommitted(sentKey) || this.endingEarly) {
+      return;
+    }
+    if (this.phase() === 'submitting') {
       return;
     }
     void this.endEarly({
@@ -1159,14 +1174,16 @@ export class MjFormComponent implements OnInit, OnDestroy {
 
   /**
    * The network is back: send the submit the respondent already asked for, once. Re-checks the phase
-   * because the form may have moved on — a reload, a lapsed session — since it was armed.
+   * because the form may have moved on — a reload, a lapsed session — since it was armed. Returns
+   * whether it sent, so the caller does not also resume the autosave.
    */
-  private sendSubmitWaitingForNetwork(): void {
+  private sendSubmitWaitingForNetwork(): boolean {
     if (!this.submitWhenOnline || this.phase() !== 'ready') {
-      return;
+      return false;
     }
     this.submitWhenOnline = false;
     void this.onSubmit();
+    return true;
   }
 
   /**
