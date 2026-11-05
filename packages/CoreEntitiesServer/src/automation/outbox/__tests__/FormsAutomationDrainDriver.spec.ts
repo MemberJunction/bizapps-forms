@@ -4,7 +4,7 @@
  * what the scheduling engine sees of it.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { UserInfo } from '@memberjunction/core';
+import type { IMetadataProvider, UserInfo } from '@memberjunction/core';
 import type { MJScheduledJobEntity, MJScheduledJobRunEntity } from '@memberjunction/core-entities';
 import { MJGlobal } from '@memberjunction/global';
 import { BaseScheduledJob, type ScheduledJobExecutionContext } from '@memberjunction/scheduling-engine';
@@ -30,6 +30,8 @@ function context(heartbeat = vi.fn(async () => undefined)): ScheduledJobExecutio
     Schedule: { Configuration: '{}' } as unknown as MJScheduledJobEntity,
     Run: {} as unknown as MJScheduledJobRunEntity,
     ContextUser: SYSTEM,
+    // Required from MJ 6.2. The driver does not read it yet (the drain uses the global provider).
+    Provider: {} as unknown as IMetadataProvider,
     heartbeat,
   };
 }

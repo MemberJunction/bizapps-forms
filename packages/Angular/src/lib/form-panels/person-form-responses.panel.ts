@@ -13,8 +13,9 @@ import { PersonFormResponsesListComponent } from './person-form-responses-list.c
 
 /**
  * "Forms" section on Common's Person record form (#285): every form response linked to the
- * person. The registration claims the Form Responses → People relationship, so it replaces MJ's
- * generic related-entity grid there (see the model file for why `relatedJoinField` is omitted).
+ * person. The registration claims the Form Responses → People relationship through
+ * `RespondentPersonID`, so it replaces MJ's generic related-entity grid there (see the model file
+ * for why this needs MJ 6.2).
  *
  * Typed over `BaseEntity`, not Common's Person entity class: only the primary key is read, and
  * that keeps forms-ng free of a dependency on `@mj-biz-apps/common-entities`.
