@@ -1,5 +1,0 @@
----
-"@mj-biz-apps/forms-server": minor
----
-
-Adds the v0.16.0 consolidated metadata seed, `V202611050328__v0.16.x__Metadata_Sync.sql`, which delivers to hosts the records `metadata/` gained since v0.15.1 and that had so far reached no installed host: the 20 Forms Remote Operations and their category, the three Forms reporting queries (with their fields, parameters and permissions) and their query category, the authoring actions' params and result codes, the Forms API scopes, the Forms scheduled job and its type, and the automation-failed notification type. It also applies this release's metadata edits to existing records: the Form Respondent role description, the AI form-designer template, the Search-API and name-field curation of the automation outbox entity and six response-side fields, and the related-record collections of the Form → Pages → Questions → Options and Form → Screens relationships. Applied after the chain on a database that never saw the push, a dry-run push finds nothing left to create or update.
