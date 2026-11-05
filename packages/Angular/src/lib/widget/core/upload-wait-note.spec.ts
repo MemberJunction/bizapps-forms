@@ -22,6 +22,11 @@ describe('uploadWaitNote', () => {
     );
   });
 
+  it('goes away once the respondent has pressed — "you can press" is stale under "Saving your file…"', () => {
+    expect(uploadWaitNote({ uploading: true, isLast: true, pressed: true })).toBeNull();
+    expect(uploadWaitNote({ uploading: true, isLast: false, pressed: true })).toBeNull();
+  });
+
   it('on an earlier step, says the same about Next', () => {
     expect(uploadWaitNote({ uploading: true, isLast: false })).toBe(
       'Your file is still uploading. You can press Next — you move on once the file is saved.',

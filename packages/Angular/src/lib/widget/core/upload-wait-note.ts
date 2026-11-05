@@ -5,9 +5,12 @@
  * moves on (#248) — but nothing said so before the press, so a respondent looking at a spinner had
  * to guess whether the press would lose their file. This says it where they are looking. Both
  * renderers use it, so the two cannot word it differently.
+ *
+ * `pressed`: a Submit or Next is already waiting on the upload. The overlay then says "Saving your
+ * file…", and "you can press Submit" under it would tell the respondent to do what they just did.
  */
-export function uploadWaitNote(state: { uploading: boolean; isLast: boolean }): string | null {
-  if (!state.uploading) {
+export function uploadWaitNote(state: { uploading: boolean; isLast: boolean; pressed?: boolean }): string | null {
+  if (!state.uploading || state.pressed) {
     return null;
   }
   return state.isLast

@@ -163,7 +163,11 @@ export class FormScrollComponent {
   protected readonly uploadWaitNote = computed(() => {
     const page = this.current();
     const ids = page ? this.questionsFor(page).map((q) => q.id) : [];
-    return uploadWaitNote({ uploading: this.uploads.isUploadingAmong(ids), isLast: this.isLast() });
+    return uploadWaitNote({
+      uploading: this.uploads.isUploadingAmong(ids),
+      isLast: this.isLast(),
+      pressed: this.uploads.waiting(),
+    });
   });
 
   constructor() {

@@ -136,7 +136,11 @@ export class FormOneQuestionComponent {
   /** "Still uploading — you can press Submit/Next" while this question's file is on the wire. */
   protected readonly uploadWaitNote = computed(() => {
     const id = this.current()?.id;
-    return uploadWaitNote({ uploading: !!id && this.uploads.isUploadingAmong([id]), isLast: this.isLast() });
+    return uploadWaitNote({
+      uploading: !!id && this.uploads.isUploadingAmong([id]),
+      isLast: this.isLast(),
+      pressed: this.uploads.waiting(),
+    });
   });
 
   constructor() {

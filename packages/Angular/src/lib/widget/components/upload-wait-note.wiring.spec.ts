@@ -98,6 +98,21 @@ describe.each([
     expect(note()).toBeNull();
   });
 
+  it('goes away while a press waits on the upload, and does not come back when it lands', async () => {
+    const { form, note, goToLastStep } = await rendererFor(Renderer, applicationForm(mode, true));
+    goToLastStep();
+    const token = form.uploadStore.begin('resume', resumeFile());
+    expect(note()).not.toBeNull();
+
+    // A Submit or Next waiting on the upload is what `whenSettled` is.
+    const waiting = form.uploadStore.whenSettled(['resume']);
+    expect(note()).toBeNull();
+
+    form.uploadStore.succeed(token, 'file-resume');
+    await waiting;
+    expect(note()).toBeNull();
+  });
+
   it('names Next on an earlier step', async () => {
     const { form, note } = await rendererFor(Renderer, applicationForm(mode, false));
     form.uploadStore.begin('resume', resumeFile());
