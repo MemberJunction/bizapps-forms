@@ -15,6 +15,7 @@ import { resetPublicSubmitConfigForTests } from '../config.js';
 
 afterEach(() => {
   delete process.env.FORMS_TURNSTILE_SECRET;
+  delete process.env.FORMS_TURNSTILE_ENFORCE_HOSTNAME;
   resetPublicSubmitConfigForTests();
   logError.mockClear();
 });
@@ -106,9 +107,24 @@ describe('verifyTurnstile', () => {
     expect(result.errorCode).toBe('turnstile-unreachable');
   });
 
-  describe('hostname check (warn-only by design — see the module header)', () => {
-    it('logs, but does NOT refuse, a token solved on an unexpected hostname', async () => {
+  describe('hostname check (enforced by default — see the module header)', () => {
+    it('REFUSES a token solved on an unexpected hostname by default (the token-farming hole)', async () => {
       process.env.FORMS_TURNSTILE_SECRET = 's';
+      resetPublicSubmitConfigForTests();
+      const { fetchImpl } = fetchAnswering({ success: true, hostname: 'evil.example' });
+      const result = await verifyTurnstile(true, 'tok', {
+        fetchImpl,
+        expectedHostnames: ['forms.acme.com'],
+      });
+      expect(result.success).toBe(false);
+      expect(result.errorCode).toBe('hostname-mismatch');
+      const lines = logError.mock.calls.map((c) => String(c[0]));
+      expect(lines.some((l) => l.includes('evil.example'))).toBe(true);
+    });
+
+    it('logs, but does NOT refuse, when the deployment opted out with FORMS_TURNSTILE_ENFORCE_HOSTNAME=false', async () => {
+      process.env.FORMS_TURNSTILE_SECRET = 's';
+      process.env.FORMS_TURNSTILE_ENFORCE_HOSTNAME = 'false';
       resetPublicSubmitConfigForTests();
       const { fetchImpl } = fetchAnswering({ success: true, hostname: 'evil.example' });
       const result = await verifyTurnstile(true, 'tok', {

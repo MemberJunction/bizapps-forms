@@ -68,6 +68,14 @@ export interface ResumeResponseRow {
    * rather than a pass — see `resume-columns.ts` for why it is undefined today.
    */
   formDistributionId?: string;
+  /**
+   * Whether an UNOWNED row (blank `anonymousSessionId`) carries the widget's client-id capability:
+   * its stored `SourceMetadata` records the row's own primary key, verified by the adapter through
+   * `findResumableResponseById` — the same proof the submit pipeline demands before adopting a
+   * bare id. `ownsDraft` consults it only for unowned rows; the adapter reports false for owned
+   * ones without checking, because ownership is their proof.
+   */
+  clientIdProven: boolean;
 }
 
 /** Everything the three bodies need from the world. */
@@ -297,7 +305,9 @@ export async function runRemember(deps: DeviceResumeDeps, args: RememberArgs): P
  * Whether the caller may be given a pointer to this row.
  *
  * TWO QUESTIONS, and the first one is not answered here. `responseIsOurs` is THE ownership rule, so
- * this route CALLS it rather than restating it. It used to restate it — minus the scope clause —
+ * this route CALLS it rather than restating it — adding only the unowned-row proof below, which the
+ * write path gets from its lookups and this read-by-bare-id path must demand itself (see the inline
+ * comment). It used to restate it — minus the scope clause —
  * while its comment claimed the two were the same rule, and #193 is what that cost: after a
  * `/resume` the caller's JWT names the RESPONSE, and the row's owner column still names the first
  * sitting's session, so an ordinary resumed fill matched neither half and was refused as a stranger
@@ -336,6 +346,15 @@ function ownsDraft(
   const row = { ID: response.id, AnonymousSessionID: response.anonymousSessionId };
   const caller = { sessionId: args.sessionId, scopedResponseId: args.scopeId };
   if (!responseIsOurs(row, caller)) {
+    return false;
+  }
+  // An UNOWNED row is "ours" to ANY caller under `responseIsOurs` — right at the WRITE, where the
+  // lookups only ever hand it a row found via the SourceMetadata client-id proof or the caller's
+  // verified scope, and wrong here, where `args.responseId` arrived in a request body. So before a
+  // bearer credential is minted for an unowned row, demand that same proof — unless the caller's
+  // verified scope names the row, which is strictly stronger evidence (and what keeps resumed
+  // sittings on pre-client-id drafts working).
+  if (foldId(response.anonymousSessionId) === '' && !response.clientIdProven && !scopeNamesResponse(row, caller)) {
     return false;
   }
   const rowLink = foldId(response.formDistributionId);
