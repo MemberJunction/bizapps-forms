@@ -24,16 +24,19 @@ const FORM_VERSION_ENTITY = 'MJ_BizApps_Forms: Form Versions';
 
 /** Scope-metadata provider granting the given per-entity CanCreate map. */
 function metadataProvider(perms: Record<string, boolean>) {
+  const entityInfo = (name: string): EntityInfo => {
+    const permissions = {
+      CanCreate: perms[name] ?? false,
+      CanRead: true,
+      CanUpdate: false,
+      CanDelete: false,
+    } as EntityUserPermissionInfo;
+    return { Name: name, GetUserPermisions: () => permissions } as unknown as EntityInfo;
+  };
   return {
-    EntityByName: (name: string): EntityInfo => {
-      const permissions = {
-        CanCreate: perms[name] ?? false,
-        CanRead: true,
-        CanUpdate: false,
-        CanDelete: false,
-      } as EntityUserPermissionInfo;
-      return { Name: name, GetUserPermisions: () => permissions } as unknown as EntityInfo;
-    },
+    EntityByName: entityInfo,
+    // The whole entity set the allow-list sweep walks — here, every entity the perms map names.
+    Entities: Object.keys(perms).map(entityInfo),
   };
 }
 

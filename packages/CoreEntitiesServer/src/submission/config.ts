@@ -13,8 +13,10 @@
  *  - `FORMS_TURNSTILE_VERIFY_URL`     Override the Turnstile siteverify endpoint
  *                                     (default Cloudflare production URL).
  *  - `FORMS_TURNSTILE_ENFORCE_HOSTNAME` Refuse (not just log) a verified token solved on a
- *                                     hostname outside the expected set. Off by default; turn on
- *                                     when the deployment's hostnames are fully known.
+ *                                     hostname outside the expected set. ON by default — this is
+ *                                     what closes the token-farming hole. Set to 'false'/'0' to
+ *                                     fall back to warn-only on a deployment whose expected set
+ *                                     cannot name every host it answers on.
  *  - `FORMS_RATELIMIT_MAX`            Max FINAL submits (completions and knockouts) per window
  *                                     per (session, distribution) key. Default 10. An autosave
  *                                     never charges this bucket — see `FORMS_AUTOSAVE_RATELIMIT_MAX`.
@@ -86,12 +88,14 @@ export interface PublicSubmitConfig {
   turnstileSecret: string | undefined;
   turnstileVerifyUrl: string;
   /**
-   * When true, a verified Turnstile token whose reported solve hostname is OUTSIDE the expected
-   * set (this API's public host + the distribution's allowed embed origins) is REFUSED instead of
-   * only logged. Off by default because the expected set is derived from `MJAPI_PUBLIC_URL` and
-   * `AllowedOrigins` and may not name every host a legitimate deployment answers on; a deployment
-   * that knows its topology should turn this on so tokens farmed on an attacker's page fail.
-   * Env: `FORMS_TURNSTILE_ENFORCE_HOSTNAME` ('true'/'1').
+   * When true (the DEFAULT), a verified Turnstile token whose reported solve hostname is OUTSIDE
+   * the expected set (this API's public host + the distribution's allowed embed origins) is
+   * REFUSED instead of only logged — a challenge solved on an attacker's own page embedding this
+   * deployment's public sitekey must not verify here (the token-farming hole). The expected set is
+   * derived from `MJAPI_PUBLIC_URL` and `AllowedOrigins`, so a deployment whose set cannot name
+   * every host it legitimately answers on (multi-host proxies, internal names) opts out to
+   * warn-only by setting the env var to 'false'/'0'.
+   * Env: `FORMS_TURNSTILE_ENFORCE_HOSTNAME` (default on; 'false'/'0' = warn-only).
    */
   turnstileEnforceHostname: boolean;
   /**
@@ -191,7 +195,7 @@ export function getPublicSubmitConfig(): PublicSubmitConfig {
   cached = Object.freeze({
     turnstileSecret: process.env.FORMS_TURNSTILE_SECRET?.trim() || undefined,
     turnstileVerifyUrl: process.env.FORMS_TURNSTILE_VERIFY_URL?.trim() || DEFAULT_TURNSTILE_VERIFY_URL,
-    turnstileEnforceHostname: ['true', '1'].includes((process.env.FORMS_TURNSTILE_ENFORCE_HOSTNAME ?? '').trim().toLowerCase()),
+    turnstileEnforceHostname: !['false', '0'].includes((process.env.FORMS_TURNSTILE_ENFORCE_HOSTNAME ?? '').trim().toLowerCase()),
     rateLimitMax: numberFromEnv('FORMS_RATELIMIT_MAX', 10),
     autosaveRateLimitMax: numberFromEnv('FORMS_AUTOSAVE_RATELIMIT_MAX', 60),
     ipRateLimitMax: numberFromEnv('FORMS_RATELIMIT_IP_MAX', 120),

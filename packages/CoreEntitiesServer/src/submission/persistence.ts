@@ -316,6 +316,12 @@ export interface ResponseCaller {
  * It takes the ROW rather than its owner column so the two arguments cannot be transposed, and it
  * now needs the row's `ID` as well for the same reason: reading it off a second argument would let
  * a caller's own id stand in for the row's.
+ *
+ * THE BLANK-OWNER CLAUSE IS ONLY SAFE BESIDE THE LOOKUPS. At the write, an unowned row this admits
+ * was FOUND by `findResumableResponseById`, whose `SourceMetadata` client-id proof is the
+ * capability — so "no owner" never actually means "any caller who can name the id". A path that
+ * loads a row by a BARE id (`/remember`'s `ownsDraft` in forms-server) must demand that same proof
+ * itself before treating an unowned row as the caller's; this rule alone does not.
  */
 export function responseIsOurs(
   response: Pick<mjBizAppsFormsFormResponseEntityType, 'ID' | 'AnonymousSessionID'>,
