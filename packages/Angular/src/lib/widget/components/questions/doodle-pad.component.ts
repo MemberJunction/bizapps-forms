@@ -46,6 +46,7 @@ import {
 
 import { PadCaptures, type CaptureClaim } from './pad-captures';
 import { addStroke, drawStroke, type DoodlePoint, type DoodleStroke } from './doodle-strokes';
+import { canUndoPad, clearPad, undoPad, type ClearedDrawing, type PadHistory } from './doodle-history';
 import { IconComponent } from '../icon.component';
 
 /**
@@ -106,7 +107,7 @@ const DOODLE_PAD_CSS = /* css */ `
   background: var(--mjf-doodle-paper);
   color: var(--mjf-doodle-ink);
 }
-.mjf-doodle__pad:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+.mjf-doodle__pad:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-shadow); }
 
 /* THE PEN PALETTE, and why every hue is mixed toward the page ink.
 
@@ -177,12 +178,12 @@ const DOODLE_PAD_CSS = /* css */ `
    two (WCAG 1.4.1). The width buttons get the same treatment for consistency. */
 .mjf-doodle__pen[aria-pressed='true'], .mjf-doodle__width[aria-pressed='true'] {
   border-color: var(--mjf-accent);
-  box-shadow: var(--mjf-focus-ring);
+  box-shadow: var(--mjf-focus-shadow);
 }
 .mjf-doodle__pen:focus-visible, .mjf-doodle__width:focus-visible {
   outline: none;
   border-color: var(--mjf-accent);
-  box-shadow: var(--mjf-focus-ring);
+  box-shadow: var(--mjf-focus-shadow);
 }
 /* The swatch itself — a dot of the pen's own colour, ringed so a pen that nearly matches the
    button background still has an edge. */
@@ -213,7 +214,7 @@ const DOODLE_PAD_CSS = /* css */ `
   color: var(--mjf-page-ink-soft);
 }
 .mjf-doodle__action:hover:not(:disabled) { background: var(--mjf-page-sunken); }
-.mjf-doodle__action:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+.mjf-doodle__action:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-shadow); }
 .mjf-doodle__action:disabled, .mjf-doodle__pen:disabled, .mjf-doodle__width:disabled { opacity: 0.5; cursor: default; }
 `;
 
@@ -372,8 +373,21 @@ export class DoodlePadComponent {
    */
   protected readonly hasInk = computed(() => this.base() !== null || this.strokes().length > 0);
 
-  /** Whether undo has anything left to take back — this session's strokes, and nothing else. */
-  protected readonly canUndo = computed(() => this.strokes().length > 0);
+  /** What the last Clear wiped, while one Undo can still put it back (see `doodle-history.ts`). */
+  private readonly clearedDrawing = signal<ClearedDrawing<HTMLCanvasElement, DoodleStroke> | null>(null);
+
+  /** Whether undo has anything left to take back: this session's strokes, or a Clear. */
+  protected readonly canUndo = computed(() => canUndoPad(this.history()));
+
+  private history(): PadHistory<HTMLCanvasElement, DoodleStroke> {
+    return { base: this.base(), strokes: this.strokes(), cleared: this.clearedDrawing() };
+  }
+
+  private applyHistory(pad: PadHistory<HTMLCanvasElement, DoodleStroke>): void {
+    this.base.set(pad.base);
+    this.strokes.set(pad.strokes);
+    this.clearedDrawing.set(pad.cleared);
+  }
 
   /**
    * The pen in the respondent's hand: their pick, or the author's default until they pick.
@@ -526,16 +540,21 @@ export class DoodlePadComponent {
    * showing the stroke just removed would put the artifact and the screen quietly out of step —
    * and the respondent would have no way to tell. Undoing back to a genuinely empty pad drops the
    * answer instead, exactly as Clear does, so no orphan file is left behind.
+   *
+   * UNDO AFTER CLEAR puts the whole drawing back — base image included — and re-exports it, so the
+   * answer Clear withdrew is stored again. Clear was otherwise the one control on the form that
+   * destroyed work with no way back (UI audit F07).
    */
   public undo(): void {
-    if (this.strokes().length === 0) {
+    const next = undoPad(this.history());
+    if (!next) {
       return;
     }
     // An undo changes what the pad MEANS, so it retires the in-flight work for the same reasons a
     // new stroke and Clear do: a repaint would bury the result under the stored image, and the
     // previous stroke's export describes a drawing that no longer exists.
     this.captures.supersede();
-    this.strokes.update((strokes) => strokes.slice(0, -1));
+    this.applyHistory(next);
     this.paint();
     if (this.hasInk()) {
       void this.emitPng();
@@ -588,6 +607,8 @@ export class DoodlePadComponent {
       }
     }
     this.strokes.set(unbaked.length > 0 ? [...unbaked, ...strokes] : strokes);
+    // A new stroke starts a new history: Undo must not bring back a drawing Clear wiped before it.
+    this.clearedDrawing.set(null);
   }
 
   /**
@@ -701,7 +722,9 @@ export class DoodlePadComponent {
    */
   public clear(): void {
     this.captures.supersede();
-    this.resetDrawing();
+    // Keeps what it wiped, so the next Undo can restore it — see `doodle-history.ts`.
+    this.applyHistory(clearPad(this.history()));
+    this.current = null;
     const canvas = this.pad()?.nativeElement;
     const ctx = canvas?.getContext('2d');
     if (canvas && ctx) {
@@ -721,6 +744,7 @@ export class DoodlePadComponent {
   private resetDrawing(): void {
     this.base.set(null);
     this.strokes.set([]);
+    this.clearedDrawing.set(null);
     this.current = null;
   }
 

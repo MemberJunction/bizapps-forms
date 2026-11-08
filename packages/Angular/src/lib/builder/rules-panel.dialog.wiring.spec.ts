@@ -277,6 +277,15 @@ describe('closing asks only when there is something to lose', () => {
     expect(dialog()).toMatch(/Keep editing/);
   });
 
+  it('the confirm button reads "Save", because confirming writes the rule (template text)', () => {
+    // It read "Done", which says "close". The host writes the committed rule onto the item and
+    // the builder autosaves it, so the word for what happens is Save — the word this panel's own
+    // comments already used.
+    const foot = /class="red-foot"[\s\S]*?\n {6}<\/div>/.exec(dialog())?.[0] ?? '';
+    expect(foot).toMatch(/>Save<\/button>/);
+    expect(foot).not.toMatch(/>Done</);
+  });
+
   it('confirm sits LEFT of cancel, per the repo dialog convention', () => {
     const css = dialog();
     const discard = css.indexOf('discarded.emit()');

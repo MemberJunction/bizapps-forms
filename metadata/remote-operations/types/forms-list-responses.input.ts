@@ -23,4 +23,9 @@ export interface FormsListResponsesInput {
     OrderBy?: 'SubmittedAt DESC' | 'SubmittedAt ASC' | 'StartedAt DESC' | 'StartedAt ASC';
     /** Attach each row's stored answers, and the labelling definition, for the export. */
     IncludeAnswers: boolean;
+    /**
+     * Only responses whose linked person's name, or any text answer the caller may read, contains
+     * this, matched literally. Blank or omitted: no narrowing. At most 100 characters.
+     */
+    Search?: string | null;
 }

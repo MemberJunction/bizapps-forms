@@ -8,6 +8,7 @@ import type { ExportFormat } from '@memberjunction/export-engine';
 
 import { FORMS_UI_CSS, FORMS_VIZ_CSS, failureMessage } from '../shared';
 import { FORMS_REPORTING_CSS } from './forms-reporting-dashboard.styles';
+import { reportingViewFromParams, reportingViewToParams, type ReportingMode, type ReportingView } from '../shared/view-urls';
 import { FormsReportingService } from './services/forms-reporting.service';
 import { FormsReportingExportService } from './services/forms-reporting-export.service';
 import type { FormReportData, ReportableForm } from './models/reporting.model';
@@ -19,7 +20,9 @@ import {
   portfolioLine,
   railState,
   relativeTime,
+  reportState,
   type RailState,
+  type ReportState,
   sortFormsForRail,
 } from './reporting-view-model';
 import { CoalescedLoad } from '../shared/coalesced-load';
@@ -41,7 +44,7 @@ import { ResponsesTabComponent } from '../responses/responses-tab.component';
  * responses stay separate because reading one person's submission is a genuinely different
  * task from reading the aggregate.
  */
-type DashboardMode = 'insights' | 'responses';
+type DashboardMode = ReportingMode;
 
 /**
  * Responses & Analytics — the Forms app's cross-form home for everything that has been
@@ -111,6 +114,11 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   public responsesMounted = false;
   public errorMessage: string | null = null;
   /**
+   * The selected form's report could not be read. Kept apart from `errorMessage`, which the
+   * reader can dismiss: the pane keeps its failed state and its Retry until the next read.
+   */
+  public reportFailed = false;
+  /**
    * Why the form list itself failed to load, kept apart from `errorMessage` (which any later
    * action overwrites or dismisses). With no list on screen it means the list is unknown, not
    * empty; with one (a failed reload) the list stays usable. `railState` decides which.
@@ -133,6 +141,12 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   public exportNotice: string | null = null;
 
   public mode: DashboardMode = 'insights';
+
+  /**
+   * The form and view a link (or back / forward) asked for, kept until the form list can satisfy
+   * it — a deep link arrives before the list does (UI audit F09).
+   */
+  private urlView: ReportingView | null = null;
   public readonly modes: { key: DashboardMode; label: string; icon: string }[] = [
     { key: 'insights', label: 'Insights', icon: 'fa-solid fa-chart-simple' },
     { key: 'responses', label: 'Responses', icon: 'fa-solid fa-table-list' },
@@ -247,6 +261,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     } else if (ownReportStamp === this.selectionStamp) {
       this.selectionStamp++;
       this.loadingReport = false;
+      this.reportFailed = true;
       this.fail(reason, 'Failed to load the report.');
     }
     this.cdr.markForCheck();
@@ -258,13 +273,53 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
    * Refresh used to jump back to the first form's Insights.
    */
   private async showSelectionAfterLoad(): Promise<void> {
-    const selectedId = this.selectedForm?.formId;
-    const kept = selectedId ? this.forms.find((f) => f.formId === selectedId) : undefined;
-    if (kept) {
+    const wanted = this.urlView;
+    this.urlView = null;
+    const selectedId = this.selectedForm?.formId ?? wanted?.formId;
+    const kept = selectedId ? this.forms.find((f) => f.formId.toLowerCase() === selectedId.toLowerCase()) : undefined;
+    if (kept && kept.formId === this.selectedForm?.formId) {
       await this.loadReportFor(kept);
-    } else {
-      await this.selectForm(this.forms[0]);
+      return;
     }
+    // The view is set as the load starts, not after it: the reader should land on Responses at once.
+    const showing = this.selectForm(kept ?? this.forms[0]);
+    if (kept && wanted?.view === 'responses') {
+      this.setMode('responses', false);
+    }
+    await showing;
+  }
+
+  /**
+   * A link, a reload or back / forward named a form and view. Before the list is in, it waits for
+   * {@link showSelectionAfterLoad}; after, it is applied at once. MJ delivers these with its own
+   * write-back suppressed, and this applies them without writing, so the URL is never rewritten
+   * with what it just supplied.
+   */
+  protected override OnQueryParamsChanged(params: Record<string, string>, _source: 'popstate' | 'deeplink'): void {
+    const view = reportingViewFromParams(params);
+    if (this.forms.length === 0) {
+      this.urlView = view;
+      return;
+    }
+    const form = view.formId ? this.forms.find((f) => f.formId.toLowerCase() === view.formId?.toLowerCase()) : undefined;
+    void this.followUrl(form ?? this.forms[0], view.view);
+  }
+
+  private async followUrl(form: ReportableForm, view: DashboardMode): Promise<void> {
+    const showing = form.formId !== this.selectedForm?.formId ? this.selectForm(form) : null;
+    this.setMode(view, false);
+    await showing;
+  }
+
+  /** The rail: the reader picked a form — shown, and kept in the URL. */
+  public async pickForm(form: ReportableForm): Promise<void> {
+    const showing = this.selectForm(form);
+    this.writeUrl();
+    await showing;
+  }
+
+  private writeUrl(): void {
+    this.UpdateQueryParams(reportingViewToParams({ formId: this.selectedForm?.formId ?? null, view: this.mode }));
   }
 
   // --- The rail --------------------------------------------------------------
@@ -277,6 +332,17 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   /** "12 forms · 1,204 responses" — what this dashboard covers, before you pick one. */
   public get portfolioLine(): string {
     return portfolioLine(this.forms, this.formsLoadError);
+  }
+
+  /** Which state the selected form's pane shows; `failed` carries the Retry. */
+  public get reportState(): ReportState {
+    return reportState({
+      loading: this.loadingReport,
+      failed: this.reportFailed,
+      unavailable: this.summaryUnavailable,
+      hasReport: this.report !== null,
+      hasResponses: this.hasResponses,
+    });
   }
 
   /** Which of loading / failed / empty / ready the report pane shows. */
@@ -325,6 +391,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     const stamp = ++this.selectionStamp;
     this.selectedForm = form;
     this.loadingReport = true;
+    this.reportFailed = false;
     this.errorMessage = null;
     this.exportNotice = null;
     // The previous form's report must not sit under the new form's name while this one
@@ -352,6 +419,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
       // A failed report must not leave the previous form's numbers on screen under the new
       // form's name — every figure would be a lie about the form the header claims.
       this.report = null;
+      this.reportFailed = true;
       this.fail(err, 'Failed to load the report.');
     } finally {
       // The latest request owns the flag; a superseded one clearing it would end the
@@ -365,10 +433,14 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
 
   // --- The report ------------------------------------------------------------
 
-  public setMode(mode: DashboardMode): void {
+  /** Switch Insights / Responses; `remember` keeps it in the URL (a reader's switch, not a link's). */
+  public setMode(mode: DashboardMode, remember = true): void {
     this.mode = mode;
     if (mode === 'responses') {
       this.responsesMounted = true;
+    }
+    if (remember) {
+      this.writeUrl();
     }
     this.cdr.markForCheck();
   }
@@ -483,10 +555,16 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     this.cdr.markForCheck();
   }
 
+  /**
+   * Show and log a failure. It is never emitted as `BaseDashboard.Error`: MJ's host answers that,
+   * during the first load, by replacing the whole dashboard with "Unable to Load Dashboard" (UI
+   * audit F01) — and every failure here already has a state on the page with a way out (the
+   * rail's Retry, the pane's Retry, the dismissible banner). A throw from `initDashboard` or
+   * `loadData` itself still reaches the host through `BaseDashboard.runGuardedLoad`.
+   */
   private fail(err: unknown, action: string): void {
     const message = failureMessage(err, action);
     this.errorMessage = message;
-    LogError(message);
-    this.Error.emit(err instanceof Error ? err : new Error(message));
+    LogError(message, undefined, err);
   }
 }

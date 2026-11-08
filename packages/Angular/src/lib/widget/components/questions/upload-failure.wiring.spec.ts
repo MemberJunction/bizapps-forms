@@ -159,6 +159,6 @@ describe('the quiet line is styled as text', () => {
     expect(css()).toMatch(/\.mjf-file__failed-link \{[^}]*background: none;[^}]*border: 0;/);
     expect(css()).toMatch(/\.mjf-file__failed-link \{[^}]*color: var\(--mjf-accent\);/);
     expect(css()).toMatch(/\.mjf-file__failed-link \{[^}]*text-decoration: underline;/);
-    expect(css()).toMatch(/\.mjf-file__failed-link:focus-visible \{[^}]*box-shadow: var\(--mjf-focus-ring\);/);
+    expect(css()).toMatch(/\.mjf-file__failed-link:focus-visible \{[^}]*box-shadow: var\(--mjf-focus-shadow\);/);
   });
 });

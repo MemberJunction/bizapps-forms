@@ -68,7 +68,7 @@ import type { FunnelStep } from '../models/reporting.model';
 
       .fn { margin: 0; padding: 0; list-style: none; }
 
-      .fn-step { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
+      .fn-step { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
 
       .fn-index {
         display: flex;
@@ -86,7 +86,7 @@ import type { FunnelStep } from '../models/reporting.model';
         font-variant-numeric: tabular-nums;
       }
 
-      .fn-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 7px; padding-bottom: 2px; }
+      .fn-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding-bottom: 2px; }
 
       .fn-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
       .fn-title { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-primary); overflow-wrap: anywhere; }
@@ -119,7 +119,7 @@ import type { FunnelStep } from '../models/reporting.model';
       .fn-gap-note {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 4px;
         font-size: var(--mjf-label);
         color: var(--mj-text-muted);
         font-variant-numeric: tabular-nums;

@@ -25,6 +25,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { buildAnswers, resolveSlug } from './lib/fixture.mjs';
+import { redeemHostPage } from './lib/host-page.mjs';
 import { definitionQuestions, firstSaveError, getRespondentForm, postGraphQL, saveResponse } from './lib/operations.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
@@ -39,18 +40,20 @@ const check = (cond, m, detail) => (cond ? pass(m) : fail(m, detail));
 async function main() {
   console.log(`Respondent-path smoke test\n  target : ${BASE}\n  slug   : ${SLUG}\n`);
 
-  // 1. The public host page must render for an anonymous visitor with no session.
-  const pageRes = await fetch(`${BASE}/f/${SLUG}`);
-  check(pageRes.status === 200, `GET /f/${SLUG} serves 200`,
-    `got ${pageRes.status} — 409 means either no PublicLinkToken (host magicLink not enabled?) or, ` +
-      'since bizapps-forms#118, that the form has no Published version; 503 means the link has an ' +
-      'OpenAt in the future. The page body says which.');
-  const html = await pageRes.text();
-
-  // 2. The page must carry a redeemed anonymous session token.
-  const token = (html.match(/data-token="([^"]+)"/) || [])[1];
-  check(Boolean(token), 'host page carries an anonymous session token');
-  if (!token) { console.error('\ncannot continue without a session token'); process.exit(1); }
+  // 1 + 2. The public host page must render for an anonymous visitor with no session, and carry a
+  //    redeemed anonymous session token. The helper names the cause when it cannot: a rate limit, a
+  //    status with the page's own explanation (409 = no PublicLinkToken or, since bizapps-forms#118,
+  //    no Published version; 503 = the link's OpenAt is in the future), or a page with no token.
+  let token;
+  try {
+    ({ token } = await redeemHostPage(BASE, SLUG));
+  } catch (err) {
+    fail(`GET /f/${SLUG} serves a page with an anonymous session token`, err.message);
+    console.error('\ncannot continue without a session token');
+    process.exit(1);
+  }
+  pass(`GET /f/${SLUG} serves 200`);
+  pass('host page carries an anonymous session token');
 
   // 3. The widget bundle must actually be served, not 404. Without it the page renders
   //    an empty shell — which looks like a styling problem, not a missing build step.

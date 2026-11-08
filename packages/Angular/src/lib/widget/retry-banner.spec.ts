@@ -7,7 +7,7 @@
  */
 import '@angular/compiler';
 import { describe, expect, it } from 'vitest';
-import type { RespondentFormLoad } from './api/forms-api.interface';
+import { API_UNREACHABLE_LOAD_MESSAGE, FormsApiUnreachableError, type RespondentFormLoad } from './api/forms-api.interface';
 
 import { FakeFormsApi, screeningForm, screeningServer, servedAs, startMount } from './testing/mj-form-harness';
 
@@ -29,5 +29,16 @@ describe('"Try again" after a failed load', () => {
     expect(form.phaseNow).not.toBe('error');
     expect(form.rt.visiblePages().length).toBeGreaterThan(0);
     expect(form.bannerText).toBe('');
+  });
+});
+
+describe('an unreachable network on the first load', () => {
+  it('shows the load sentence, never the save sentence that promises kept answers', async () => {
+    const api = new FakeFormsApi(() => Promise.reject(new FormsApiUnreachableError('TypeError: Failed to fetch')), screeningServer);
+    const { form, loaded } = startMount({ api });
+    await loaded;
+    expect(form.phaseNow).toBe('error');
+    expect(form.bannerText).toBe(API_UNREACHABLE_LOAD_MESSAGE);
+    expect(form.bannerText).not.toContain('Your answers are still here');
   });
 });

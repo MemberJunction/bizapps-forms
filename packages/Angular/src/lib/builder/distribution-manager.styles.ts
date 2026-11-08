@@ -59,7 +59,7 @@ export const DISTRIBUTION_STYLES = /* css */ `
   gap: var(--mjf-gap-sm);
   width: 100%;
   min-height: var(--mjf-tap);
-  padding: var(--mjf-gap-sm) 10px;
+  padding: var(--mjf-gap-sm) 8px;
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -104,8 +104,8 @@ export const DISTRIBUTION_STYLES = /* css */ `
   align-items: center;
   gap: var(--mjf-gap-sm);
   max-width: 100%;
-  padding: 2px 6px;
-  margin-left: -6px;
+  padding: 2px 4px;
+  margin-left: -4px;
   font: inherit;
   font-size: var(--mjf-section);
   font-weight: 700;
@@ -155,7 +155,7 @@ export const DISTRIBUTION_STYLES = /* css */ `
   align-items: flex-start;
   gap: var(--mjf-gap-sm);
   margin: 0;
-  padding: var(--mjf-gap-sm) 10px;
+  padding: var(--mjf-gap-sm) 8px;
   max-width: 62ch;
   border-radius: var(--mjf-radius-sm);
   background: color-mix(in srgb, var(--mj-status-warning) 14%, transparent);

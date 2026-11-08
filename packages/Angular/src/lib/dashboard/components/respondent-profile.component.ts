@@ -85,11 +85,11 @@ import type { ProfileDistribution, RespondentProfile } from '../models/reporting
         gap: var(--mjf-stack);
         margin: 0;
       }
-      .rpf-metric { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+      .rpf-metric { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
       .rpf-metric dt { font-size: var(--mjf-label); color: var(--mj-text-muted); }
       .rpf-metric dd {
         margin: 0;
-        font-size: 1.75rem;
+        font-size: var(--mjf-title);
         font-weight: 650;
         line-height: 1.1;
         letter-spacing: var(--mj-tracking-tight, -0.02em);
@@ -98,7 +98,7 @@ import type { ProfileDistribution, RespondentProfile } from '../models/reporting
       }
       /* A thin meter under the figure. Two numbers on this panel are counts and two are
          rates; the meter is what tells them apart at a glance. */
-      .rpf-meter { height: 4px; margin-top: 3px; border-radius: var(--mjf-radius-pill); }
+      .rpf-meter { height: 4px; margin-top: 4px; border-radius: var(--mjf-radius-pill); }
       .rpf-meter > .mjf-viz-bar { border-radius: var(--mjf-radius-pill); }
       .rpf-detail { font-size: var(--mjf-label); color: var(--mj-text-muted); }
 
@@ -109,12 +109,12 @@ import type { ProfileDistribution, RespondentProfile } from '../models/reporting
         align-items: start;
       }
       .rpf-dist { display: flex; flex-direction: column; gap: var(--mjf-gap); }
-      .rpf-dist-head { display: flex; flex-direction: column; gap: 3px; }
+      .rpf-dist-head { display: flex; flex-direction: column; gap: 4px; }
       .rpf-dist-title { margin: 0; font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-primary); }
       .rpf-dist-caption { margin: 0; font-size: var(--mjf-label); color: var(--mj-text-muted); line-height: 1.45; }
 
       .rpf-bars { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
-      .rpf-bar { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+      .rpf-bar { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
       .rpf-bar-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
       .rpf-bar-head > .mjf-viz-dot { align-self: center; }
       .rpf-bar-label {

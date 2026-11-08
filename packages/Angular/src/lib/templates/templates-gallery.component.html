@@ -13,33 +13,30 @@
     @if (saved.length === 0) {
       <p class="tg-section-note">
         Nothing saved yet. Open any form, then use <strong>Save as template</strong> in its
-        <i class="fa-solid fa-ellipsis" aria-hidden="true"></i> menu to reuse it here.
+        header to reuse it here.
       </p>
     } @else {
       <div class="tg-grid">
         @for (row of saved; track row.id) {
-          <div
-            class="tg-card"
-            [class.is-busy]="Busy"
-            role="button"
-            tabindex="0"
-            [attr.aria-label]="'Create a form from ' + row.name"
-            (click)="chooseSaved(row)"
-            (keydown.enter)="chooseSaved(row)"
-            (keydown.space)="chooseSaved(row); $event.preventDefault()"
-          >
+          <!-- A click anywhere but Delete creates the form; the name is the keyboard path. The card
+               is never a button itself, so Delete is not nested in one (UI audit F05). -->
+          <div class="tg-card" [class.is-busy]="Busy" (mjfRowActivate)="chooseSaved(row)">
             <div class="tg-card-top">
               <i [class]="'tg-card-icon ' + markFor(row).colorClass + ' ' + markFor(row).icon" aria-hidden="true"></i>
-              <span class="tg-card-name">{{ row.name }}</span>
+              <button
+                type="button"
+                class="tg-card-name mjf-row-primary"
+                [disabled]="Busy"
+                [attr.aria-label]="'Create a form from ' + row.name"
+                (click)="chooseSaved(row)"
+              >{{ row.name }}</button>
               <button
                 type="button"
                 class="mjf-btn mjf-btn--quiet mjf-btn--icon mjf-btn--sm tg-delete"
                 [disabled]="Busy"
                 [attr.aria-label]="'Delete the template ' + row.name"
                 title="Delete this template"
-                (click)="askDelete(row); $event.stopPropagation()"
-                (keydown.enter)="$event.stopPropagation()"
-                (keydown.space)="$event.stopPropagation()"
+                (click)="askDelete(row)"
               >
                 <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
               </button>
@@ -61,19 +58,17 @@
     </div>
     <div class="tg-grid">
       @for (starter of starters; track starter.key; let i = $index) {
-        <div
-          class="tg-card"
-          [class.is-busy]="Busy"
-          role="button"
-          tabindex="0"
-          [attr.aria-label]="'Create a form from ' + starter.name"
-          (click)="chooseStarter(starter)"
-          (keydown.enter)="chooseStarter(starter)"
-          (keydown.space)="chooseStarter(starter); $event.preventDefault()"
-        >
+        <!-- Same shape as a saved template's card, so both read and tab the same way. -->
+        <div class="tg-card" [class.is-busy]="Busy" (mjfRowActivate)="chooseStarter(starter)">
           <div class="tg-card-top">
             <i [class]="'tg-card-icon ' + colorFor(i) + ' ' + starter.icon" aria-hidden="true"></i>
-            <span class="tg-card-name">{{ starter.name }}</span>
+            <button
+              type="button"
+              class="tg-card-name mjf-row-primary"
+              [disabled]="Busy"
+              [attr.aria-label]="'Create a form from ' + starter.name"
+              (click)="chooseStarter(starter)"
+            >{{ starter.name }}</button>
             <span class="tg-lock">Built-in</span>
           </div>
           <span class="tg-card-desc">{{ starter.description }}</span>

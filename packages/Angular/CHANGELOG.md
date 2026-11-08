@@ -1,5 +1,381 @@
 # @mj-biz-apps/forms-ng
 
+## 0.16.0
+
+### Minor Changes
+
+- f5efc17: A dead-lettered automation event is now visible and can be replayed (#311). Before, a final
+  submit whose automations gave up was only a `DeadLetter` row in `FormAutomationEvent`.
+
+  - **Logged.** Once the dead letter is written, the drain logs one error line naming the response,
+    the trigger, the reason and the steps it closed. A drain that lost its lease before it settled
+    logs no dead letter: the event is the new holder's.
+  - **The form's owner is notified in-app**, through the new `Form Automation Failed` user
+    notification type (in-app on by default, email off, the user may change it). The notice names the
+    form, the reason and the steps closed, and carries the response's and the event's ids. A form with no owner sends
+    nothing; a notice that fails is logged and changes nothing about the event.
+  - **"Retry automations"** in the response detail. A dead-lettered event shows under an
+    "Automations failed" badge with its last error, beside a button that re-queues it with a fresh
+    attempt budget, runs it once, now, and reloads the detail to show how it ended. The replay reruns
+    only the steps the dead letter closed; a step that already succeeded is never run twice.
+  - **`Forms.ReplayAutomationEvent`** (`forms:write`, authoring permission) is the operation behind
+    the button. It refuses an event that is not dead-lettered, or that a concurrent replay already
+    re-queued, naming the event. `Forms.GetResponseDetail` gains `AutomationEvents`, the response's
+    outbox events oldest first.
+  - **A refused record write is no longer retried.** A binding step whose `Save()` the entity layer
+    refuses (validation, permission) now fails without a retry, since every attempt would be refused
+    the same way; it used to spend all five attempts first.
+
+  The `Form Automation Failed` notification type and the `Forms.ReplayAutomationEvent` remote
+  operation ship in this release's metadata seed (`Metadata_Sync`); until a host has it, dead letters
+  are logged but nobody is notified, and the button is refused. `forms-core-entities-server` gains the
+  MJ peer `@memberjunction/notifications`. Runbook, including the hand-run replay update for a host
+  without the UI: `docs/local-host.md`, "Operating the automation outbox".
+
+- 377b002: Forms now works on a host whose MJAPI database login holds only MJ's three roles, `cdp_Developer`,
+  `cdp_Integration` and `cdp_UI` (#338). Before, every respondent final submit, and every partial save
+  after a response's first, failed with "Something went wrong while submitting your response", and the automation outbox could not
+  claim, settle, renew or replay an event: those paths ran raw SQL against Forms base tables, and MJ's
+  roles get `SELECT` on views and `EXECUTE` on procedures, never table rights. A `db_owner` login, as on
+  most dev boxes, never showed it.
+
+  The migration `V202610222300__v0.16.x__Roles_Only_Guarded_Write_Sprocs.sql` adds nine procedures in
+  `__mj_BizAppsForms`, each the statement it replaces, granted `EXECUTE` to `cdp_Developer` and
+  `cdp_Integration`; on SQL Server the server now calls them. No table, column or entity changes, and no
+  table grants. PostgreSQL keeps the raw statements. `docs/install.md` §5 states the login requirement.
+
+- e3b0f0a: Forms' domain logic moves out of the browser into server engines, exposed as 19 typed Remote
+  Operations (`Forms.*`), and on-submit automations run from a transactional outbox the save writes in
+  its own transaction (#303). Runs on the MJ 6.1 LTS line (6.1.6). Ships three migrations and new
+  metadata, so this is a `minor`. Closes #302, #75 and #103.
+
+  ### What a host must do
+
+  - **MJ's scheduler on**, with a `systemUserEmail` that names an existing user (`scheduledJobs` in the
+    host's `mj.config.cjs`; MJ enables it by default). It runs the seeded _Forms — Automation Outbox
+    Sweep_ on a 30-second cron (about every 15 s in practice: MJ's scheduler runs a job up to 1 s
+    early and again at the same mark), which retries failed automation attempts and recovers events a stopped
+    process left behind. First attempts run in the submitting process right after commit, scheduler or
+    not.
+  - **`ALTER DATABASE … SET READ_COMMITTED_SNAPSHOT ON`.** No migration sets it. It removes a possible
+    deadlock between saving a share link and archiving its form (they lock in opposite orders; with it
+    off, one of the two is rolled back and must be retried).
+  - **API keys need the new scopes**: `forms:read` for the response list, detail, summary and link
+    claims; `forms:write` for everything that changes a form. A key without them is refused.
+  - The `Form Respondent` role **loses its Read on Form Versions** (and that grant's row filter,
+    `MJ Forms: Respondent Own Form Versions`), removed by `V202610172102` (#302). With it, any holder of
+    a public link could read the raw snapshot — answer key, ending redirects, knockout conditions —
+    through the generated `mjBizAppsFormsFormVersion` query. The server now reads the published version
+    as the system user. Its other grants are unchanged, and its Description now says so.
+  - Until a host has this release's consolidated `Metadata_Sync`, it has no sweep job: first attempts
+    still run, retries wait. Responses are accepted either way.
+  - **Authoring from a starter template and "Author with AI" keep working for non-Owners on MJ 6.1.6
+    and 6.2.** From 6.1.6 (and on 6.2), MJ's `RunAction` refuses a non-Owner any action that has no
+    `MJ: Action Authorizations` link and does not authorize its caller itself; 6.1.5 and earlier ignore
+    the marker below, so nothing changes there. `Forms: Create Form From Template` and `Forms: Generate Form
+From Brief` now declare `AuthorizesCaller` (MJ core's convention for client-called actions): each
+    already refuses a caller who may not author forms, and that check stays the one authoring
+    decision. Nothing to grant. Do not add an Action Authorization for either: any such row replaces
+    the marker. The on-submit actions do not declare it; only the automation runner runs them.
+  - Runbook for dead-lettered and abandoned automation events, and how to re-queue one:
+    `docs/local-host.md`, "Operating the automation outbox".
+
+  ### What changes for respondents
+
+  - The form a respondent loads no longer carries scoring, ending screens, score or knockout
+    conditions, automations, the quota or the redirect URL (#302). The server decides knockouts and
+    which ending to show; a partial save that trips a knockout ends the form with the server's screen.
+    Author Preview resolves endings through the same code (#75).
+  - Answers are checked more strictly, and a bad answer refuses the whole save instead of being
+    dropped: an answer for a question not on the form ("That answer does not belong to any question on
+    this form."), an answer carrying more than one value column, a value outside a scale, and a
+    date-time with no offset ("Include a time zone with the time, such as Z or +02:00.").
+  - A closed, archived, stale-version or unreadable link answers one sentence, "This form is not
+    available."; the reason is in the server log only. `/f/:slug` and uploads refuse a form that is not
+    Published, and uploads are refused on a host with no system user. Upload failures use fixed
+    messages (503 / 404). The per-session rate bucket and the quota pre-check judge the answers as
+    sent; what is stored is only what passed provenance.
+  - The widget saves when a field is committed (focus leaves it) as well as on its usual debounce, and
+    holds the autosave while an answer a rule depends on cannot be stored yet. Measured on a
+    three-question form: two partial saves and one final submit. `<mj-form>` with no `api-url` shows
+    "This form is not available." instead of a demo form.
+
+  ### What changes for authors and operators
+
+  - **Publish** builds the snapshot on the server, in one transaction, with the strict rule parsers: a
+    rule that does not parse, a binding automation whose binding row is gone, or unreadable binding
+    settings now **refuse** publish, naming the column. Inactive automations publish without their
+    unreadable rule or binding. Templates cannot be published. Two publishes at once: one wins, the
+    other gets "Another publish of this form is in progress; reload and try again." Each automation's
+    binding settings are frozen into the snapshot, so a form with binding steps published before this
+    release shows "Update" in the builder until it is republished.
+  - **Archive** closes every active share link in the same transaction; **Restore** returns the form to
+    Published (or Draft when it never published) and leaves the links closed for a deliberate reopen.
+  - **Clone, save as template, create from template** each run in one transaction and leave nothing
+    behind on failure; template names are checked for uniqueness on the server. The builder's
+    structural edits (add, delete, reorder, move) save as one `MJ.SaveEntityGraph` transaction, and each
+    structural save also stamps the Form row (UpdatedAt and a Record Change).
+  - `Forms: Generate Form From Brief` and `Forms: Create Form From Template` gain an optional
+    `PublishImmediately` parameter, and no longer create a Draft version first, so their first
+    published version is v1. A starter form the Action creates is owned by the caller. An unknown
+    template key reads "Unknown template key '…'. Known templates: …". A Designer model that keeps
+    emitting side effects costs up to 3 LLM calls before it is refused.
+  - **Automations** run from the automation outbox, at least once and idempotently per event: a re-run
+    never repeats a configured step that already succeeded for that event. The exception is a form that
+    runs the four **legacy** on-submit hooks: they write no run rows, so a drain that dies mid-chain and
+    is reclaimed fires them again. A failed attempt is retried with exponential backoff (2, 4, 8, 16 s,
+    each waiting for the next sweep, so the fifth attempt lands 55 to 85 s after the submit) for at most
+    5 attempts; a final submit then dead-letters, a partial save is abandoned.
+    `FORMS_HOOKS_BLOCKING`, the in-process hook path and the recovery sweep are gone. An anonymous
+    respondent is never treated as
+    verified: a binding whose identity rule MATCHES an existing record records the match on the
+    binding ledger (`Skipped`, with the matched id) and writes nothing to it — no fields, no files; a
+    create policy still creates.
+  - **Responses**: the dashboard, list, detail and export read through `Forms.GetResponseSummary`,
+    `ListResponses` and `GetResponseDetail`. The summary is computed on the server and returns
+    aggregates only; a caller with a row-level filter on responses is refused it (FORBIDDEN). The
+    dashboard's "Sample data" mock mode is removed. An export reads at most 50,000 responses and says
+    so when it stops short, and stops with "Responses changed while exporting — try again." if the form
+    is republished or answered mid-export; the list says "The list changed — refresh to see it." in the
+    same case. List search covers the pages already loaded.
+  - Share-link slugs no longer end in a hyphen, and a taken slug gets a 5-character suffix.
+  - `FormDistribution.ResponseCount` is **server-owned**: only a submission's atomic slot `UPDATE`
+    advances it. Every save of a link carries the stored count (read under the save's row lock), a
+    client change to it is ignored and logged, and a new link starts at 0 — so a builder tab opened
+    before responses arrived can no longer roll the count back and reopen slots `MaxResponses` closed.
+  - A builder edit whose save throws (rather than being refused) is shown in the builder's error banner
+    and no longer blocks later saves of the same row.
+  - **A new form is created when the author asks for it.** A never-saved Form record (New form, or a
+    "New Forms Record" tab Explorer restores on its own) opens on a start step with a name box and
+    **Create form**; nothing is written until then. The builder used to save an "Untitled form" row as
+    soon as it loaded one, so a restored tab left a stray Draft behind.
+  - The builder offers **Add content above** on the selected first question of a section, the one
+    insert position no "after this question" bar reached. A question can be dragged into an empty
+    section: the hidden add bar no longer shifts the layout CDK measured when the drag started.
+  - The dashboard's Refresh keeps the Responses view open, and opening the dashboard reads the summary
+    once (MJ's host refreshes the instance while its own init is still loading).
+  - "What this submission did" and the Automate tab's recent activity show a step's summary as text,
+    without the stored JSON envelope or record ids.
+  - `MJ_BizApps_Forms: Form Responses` now has a record name, the form's name (metadata, shipped in
+    this release's `Metadata_Sync`). Explorer's record-name lookup failed for every response before. The
+    three foreign keys to it keep `IncludeRelatedEntityNameFieldInBaseView` off, so no view changes.
+  - `FormAutomationRun.AttemptCount`'s description still mentions the removed recovery sweep; it is
+    corrected by a later migration.
+  - A repeat final submit on an already-sealed response is answered from the stored row — its stored
+    answers, or the knockout screen it was sealed on — never from the repeat's own answers, so a
+    session cannot probe which ending (or gated redirect) an answer set earns (#302).
+  - Publishing a form with a question whose `PageID` is empty places it on the first page instead of
+    failing with "Cannot read properties of null".
+
+  ### Migrations
+
+  - `V202610172100` creates `FormAutomationEvent`, the automation outbox (one row per run a save owes,
+    with its claim state, lease and attempt count), and adds nullable `FormAutomationRun.FormAutomationEventID`
+    (FK), the event whose run ran the step. Rows written before it are `NULL` and belong to no event.
+  - `V202610172101` files five fields (two on FormDistribution, two on FormResponse, one on
+    FormAutomationRun) in their category panels on hosts built from migrations (metadata only).
+  - `V202610172102` deletes the `Form Respondent` role's Form Versions grant (matched by role and
+    entity name, every duplicate) and its row filter, unless another permission row still names the
+    filter (#302). Idempotent; it throws if the grant survives.
+
+  ### Breaking API changes, by package
+
+  - **`forms-entities`**: removed the retired mutation's `FormSubmissionInput` / `FormSubmissionResult`
+    (use the generated `FormsSaveResponseInput` / `FormsSaveResponseOutput`). Gains `generated/remote_operations.ts` (one `Forms*Operation` class and its
+    I/O types per operation) and, in `contracts/`, `toRespondentDefinition` and the respondent
+    projection, `validateAnswers`, `settleVisibility`, the answer-shape helpers, `rulesMayRead`,
+    `RuleBearingDefinition` (`endScreens` now required), `isZonelessDateTime` /
+    `ZONELESS_DATE_TIME_MESSAGE`, the Designer blueprint schema and side-effect-key helpers, and the
+    builder modules that moved out of `forms-ng` (snapshot builder, rules inventory, condition sources,
+    jump reach, option labels, asset refs, `isOpenToResponses`, `slugify`, `remapConditionalRule`,
+    `remapFieldMappings`, `RemapResult`, `unreadableDraftMessage`). The tolerant
+    `parseConditionalRule` / `parseValidationRule` / `parseFormSettings` are removed in favour of the
+    zod parsers. `FormStructureGraph`'s default commit refuses on a server-side provider; server
+    callers pass an explicit commit.
+  - **`forms-core-entities-server`**: now holds every engine (`FormPublishingEngine`,
+    `FormAuthoringEngine`, `FormDistributionEngine`, `FormAutomationEngine`, `FormSubmissionEngine`,
+    `FormReportingEngine`), the entity server subclasses, the operation server classes, the
+    automation outbox (`OUTBOX_RESPONSE_SUBMITTED`, `drainAutomationOutbox`, `FormsAutomationDrainDriver`),
+    and the helpers that moved from `forms-actions` and
+    `forms-server` (`loadFormResponseContext`, the binding executor and ledger, `STARTER_TEMPLATES` /
+    `getStarterTemplate` / `StarterTemplate`, `resolvePublishedDefinition`). New exports include
+    `refuseFormAuthoring`, `withActionDatabaseProvider`, `FORMS_ENTITY`, `readFormPublication` /
+    `FormPublication`, `SUMMARY_NOT_AVAILABLE_MESSAGE` / `ROW_RESTRICTED_SUMMARY_MESSAGE`. Signatures changed:
+    `resolvePublishedDefinition` takes a fourth
+    argument, the system reader, which now reads the form's `Status` **and** its published version.
+    `DefinitionLoadFailure` gains `form-not-published` and `form-unreadable`.
+    `FormAuthoringError` gains `fault`. New MJ peers: `actions`, `actions-base`, `ai-agents`,
+    `ai-core-plus`, `generic-database-provider`, `scheduling-engine` and `scheduling-base-types`. Listed under
+    `server` in `mj-app.json`.
+  - **`forms-actions`**: thin wrappers over the engines. Removed: `buildFormFromBlueprint`,
+    `FormPersistError`, the blueprint types, `STARTER_TEMPLATES` / `getStarterTemplate` /
+    `StarterTemplate` (now in `forms-core-entities-server`), `parseFormBlueprint` (now
+    `parseDesignerBlueprint`, with `DesignerSideEffectError`), the shared action helpers, and the
+    `FormVersionID` output. `runAuthoring` has a new signature. New: `readOnSubmitConfig`,
+    `withOnSubmitConfig`.
+  - **`forms-server`**: transport only. Removed: the `PublishedForm` query and `SubmitFormResponse`
+    mutation (use `Forms.GetRespondentForm` / `Forms.SaveResponse`), the `FormDistributionClaims` query
+    (use `Forms.GetDistributionClaims`), `PublicFormResolver`, `DistributionClaimsResolver`, the
+    isolated provider and dispatcher, and the recovery sweep. The `/f/:slug`, redeem, resume, upload,
+    asset, download and widget-bundle routes keep their URLs and wire shapes. No longer declares
+    `type-graphql` as a peer: no hand-written resolver is left, and the generated ones take their
+    decorators through `@memberjunction/server`.
+  - **`forms-ng`**: removed `PublishService` / `PublishResult`, `FormCloneService`,
+    `FormTemplatesService` / `SavedTemplateRow` (the row type now lives in an unexported module),
+    `ResponsesDataService`, and these exports:
+    - dashboard: the browser aggregation modules `reporting-aggregations`, `question-insight-roles`,
+      `respondent-profile`, `open-text-insights`, `temporal-buckets` and `statistics` (the summary is
+      `Forms.GetResponseSummary`; the view types are `report-view`);
+    - widget: `validateQuestion`, `hasValue`, `FieldValidationResult` (use `validateAnswers` from
+      `forms-entities`);
+    - shared: `renderAnswer`, `respondentLabel`, `extractChoiceValues`, `CHOICE_TYPES`,
+      `NUMERIC_TYPES`, `TEXT_TYPES` (now in `forms-entities`);
+    - builder: `jumpReach` / `reachNote` and `JumpReach`, `ReachItem`, `ReachPage`, `ReachSource`;
+      `collectRuleEntries`, `ruleBadgesFor`, `endingReachFor` and `EndingReach`, `RuleBadge`,
+      `RuleEntry`, `RuleInventoryForm`, `RuleInventoryItem`, `RuleInventoryPage`, `RuleItemKind`;
+      `buildPublishedDefinition`, `isOpenToResponses`, `slugify`; the template `clone-remap` module
+      (all now in `forms-entities`). `DistributionService.create` returns a result object. Widget: `FormRuntime` takes a
+      `WidgetForm`; `IFormsApiService` is reshaped around the two respondent operations;
+      `FormsOfflineApiService` replaces the mock in the shipped entry; `AutosaveFn` may return
+      `NOTHING_TO_SAVE`; `AutosaveController` takes a fifth hooks parameter; `buildDraftInputs` returns
+      `DraftInputs`. Responses and dashboard: `FormsReportingService.loadReport` returns a `ReportLoad`;
+      `FormsReportingExportService.exportResponses` takes `(form, format)` and returns an `ExportOutcome`;
+      `ResponseAutomationRunView` is renamed `ResponseAutomationAttempt`, whose `automationEventId`
+      names the outbox event that ran the step.
+
+- a688060: Fixes from the 2026-10-26 pre-release smoke test. Ships one migration
+  (`V202610262300__v0.16.x__Person_Unknown_Surname_Repair`) and new action metadata, so this is a
+  `minor`.
+
+  ### For host operators
+
+  - **MJAPI now says at boot when `READ_COMMITTED_SNAPSHOT` is off.** It logs an ERROR line: without
+    it, two authors who publish, clone or save different forms at the same moment can deadlock, and
+    one of them sees the operation fail. Set `FORMS_REQUIRE_READ_COMMITTED_SNAPSHOT=true` to make MJAPI
+    stop at boot instead of only logging. Off by default.
+  - **Respondent People no longer get "(unknown)" as a surname.** When a form has no name question,
+    _Upsert Respondent Person_ now stores an empty surname. The migration repairs the People rows that
+    already carry `LastName = '(unknown)'`; a real surname is never changed.
+  - **On-submit action logs record result codes.** The four Forms on-submit actions now declare their
+    result codes, so `ActionExecutionLog.ResultCode` tells a success from a failure. The declarations
+    reach a host with this release's metadata.
+
+  ### For form authors
+
+  - **Publish no longer refuses valid rules at random.** A rule that reads an earlier question was
+    sometimes refused as "answered later than this rule runs", depending on the questions' ids. The
+    publish check now reads pages, questions and options in display order.
+  - **Matrix labels are correct.** The response detail and the CSV/Excel export now map a Matrix's
+    rows through its row options and its cells through its column options. Before, a row and a column
+    with the same value showed the column's label for both. Exported Matrix text changes to the
+    correct labels.
+  - **Archive asks first.** Archiving a form from the Forms home asks for confirmation, because it
+    closes every share link of the form.
+  - **The Archive and Restore icons work from the keyboard.** Enter or Space on the icon opened the
+    form's builder instead, and before the confirmation was added it also archived the form without
+    asking. It now opens the confirmation, as a click does.
+  - **The Forms home refreshes when you return to it**, so response counts are current without a
+    page reload.
+  - **Archive and Restore update the list at once.** Archiving or restoring a form within a few
+    seconds of opening the Forms home left the list showing it as before until the next reload.
+
+  ### For respondents
+
+  - **Uploads and drawings now autosave.** A finished file upload or doodle saves the draft at once,
+    so a reload or a later visit on the same device keeps it.
+  - **Offline saving shows its state and retries on reconnect.** When an autosave fails, the footer
+    says "Couldn't save yet — will retry" instead of going blank, and the save is sent again as soon
+    as the browser is back online, also after a Submit that failed offline.
+  - **Offline errors are sentences, not browser text.** A submit with no network says "You appear to
+    be offline. Your answers are still here — try again when you're connected." instead of "Failed to
+    fetch"; a form that cannot load offline says "You appear to be offline. Check your connection and
+    try again."
+
+- d13e996: The High findings from the October UI audit. `minor` because `Forms.ListResponses` gains an input, declared in `metadata/remote-operations/types/` and seeded at release.
+
+  - **Builder deletes can be undone.** Deleting a question, a screen, a section or an option takes it off the canvas at once and shows "Deleted “Email” · Undo" for 10 seconds; the delete is saved when the window passes, or before any other change, a publish, or leaving the builder. The browser's OK/Cancel box on section delete is gone, and every remove button names its option. On a public form, Undo after Doodle "Clear" brings the drawing back.
+  - **The Responses table works past one page.** `Forms.ListResponses` takes a `Search`, matched on the server against the linked person's name and any text answer the caller may read. The table searches every response, sorts by Submitted (announced to screen readers), keeps its header in view, and pages 25, 50 or 100 at a time instead of "Load more". The status chips, which could never apply, are gone. An open response has Previous and Next.
+  - **The URL keeps your place.** The Forms home search and archived toggle, the Analytics form and view, and the builder's tab with its Responses page, sort, search and open response are kept in the URL, so a reload or a shared link opens where the reader was.
+  - **A required Matrix needs every row.** A partly answered required Matrix is refused with "2 rows still need an answer." and the rows are marked, in the form and on the server alike. Logic rules still count a Matrix as answered once any row is. A widget bundle cached from before this release still lets a respondent continue past a partly answered required Matrix; the server then refuses that submission with the same message.
+  - **Button hover never lowers contrast.** The public form's primary button now moves away from its text colour on hover, where it used to drop MJ's blue below AA.
+
+- e3b0f0a: Preserve cloned rules, mapped time values and saved answer identities when question IDs differ only in casing. Keep page and ending order consistent after deletion, clear device resume after a knockout, retain template-copy warnings and show each automation step's recent activity without hiding write failures.
+
+  Correct reporting totals across question-type changes and prevent duplicate rows while reading reports during submissions. Reject malformed identifiers and invalid response limits before persistence, keep internal database errors out of operation responses, and delete every child of large templates. Retire respondent snapshot access independently of the entity display name and scope metadata pulls to Forms records.
+
+### Patch Changes
+
+- 7721e39: A drawing that was still being saved when the respondent tapped Next or Submit was lost, even though the pad said "Drawn." Next and Submit now wait for it, and the status line reads "Saving drawing…" from the moment the pen lifts.
+- cc7dd1c: **Requires MemberJunction 6.2 or later.** Upgrade the host to MJ 6.2.0 (including its core
+  migrations, `mj migrate -t v6.2.0`) before you install or upgrade to this release. The MJ peer
+  range of every package and `mj-app.json`'s `mjVersionRange` now start at `6.2.0-edge.8`, so a 6.1
+  host is refused. bizapps-common and bizapps-tasks still declare `^6.1.6`, which admits 6.2.0 but
+  not a `6.2.0-edge.N` preview host, so use the 6.2.0 release.
+
+  - The Forms section on a Person record now claims only the `RespondentPersonID` relationship, and
+    MJ's duplicate "Form Responses" grid no longer appears beside it (#349; needs MJ#4990's fix,
+    which only 6.2 has).
+  - `mj app install` and `mj app upgrade` now print the exact `magicLink` config block at the end of
+    the install when the host has not enabled it. Without it every public link answers 409. The check
+    only prints; it never changes host config or fails the install.
+  - The form-quota and partial-response counts refuse (fail closed) if a count comes back without a
+    total, which MJ 6.2's types now allow.
+
+- d2f000a: A respondent whose only answer was a drawing or a file still uploading (or whose upload had given up) was refused with "Please answer at least one question before submitting." Submit now waits for the upload, or restarts it, and then sends. The "You can submit now" line counts an upload on its way too. An upload the server rejected still shows its own message.
+- 4e6a53c: The respondent widget no longer sends a response without a file that is still uploading. A Submit or Next tapped while a Doodle drawing or a FileUpload is on the wire now waits under "Saving your file…" and sends the answer once the file is stored; before, a signature drawn just before Submit was lost with no message. Uploads that fail on a bad moment (a dropped connection, a 5xx, a stalled request, or the upload rate limit's 429) retry by themselves after 5 s, 15 s and 60 s. A file the server refuses (too large, a type the question does not take) is not retried. The red upload error and its Retry button are replaced by one quiet line: "Choose again" for a refused file, and "Try again" once every retry has failed. Submit and Next refuse while a visible question's upload has failed, including on an optional question.
+- 3e5432e: Accessibility and resilience fixes from the October UI audit:
+
+  - **Responses & Analytics and the Forms home no longer go blank when one read fails.** A failed report shows "Couldn’t load this form’s responses." with Retry in place, and the rail stays usable. A failed form list says "Couldn’t load your forms." with Retry, instead of "No forms yet". When every form is archived, the page says so and offers "Show archived".
+  - **Rows and cards are no longer buttons that contain buttons.** This covers Forms home rows, template cards, and builder question and screen cards. The name is the keyboard path, and a click anywhere else on the row still opens it. Move and Delete buttons now name the question they act on.
+  - **Contrast and size in dark mode.** Primary buttons, template card text, the question number and the drag handle now pass WCAG AA. The drag handle is 24 × 40 px.
+  - **One-question forms:** Enter on Back, a choice or Retry now does that control's job. It used to go forward, and on the last question it submitted.
+  - **Matrix, address and required questions are announced correctly.** Each matrix row is its own radio group with arrow keys. Address and contact fields sit under their question. Required choice groups say so.
+
+- e93d443: Builder polish from the October UI audit (F12, F14, F22, F23, F24).
+
+  - The builder's tab strip is one Tab stop: the arrow keys, Home and End move along it, and each tab names the panel it controls.
+  - Below 900px the Properties pane opens as a bottom sheet when something is selected, with Done and Escape to close it. The tab strip fades at its edges and scrolls the selected tab into view, and a section's title keeps its own row on a phone.
+  - Explorer surfaces take spacing from a 4px scale and font sizes from type tokens. New tokens: `--mjf-gap-md`, `--mjf-heading`, `--mjf-figure`, `--mjf-figure-lg`, `--mjf-icon-sm`, `--mjf-icon` and `--mjf-icon-lg`. `--mjf-card-pad-sm` is now 12px.
+  - Builder dialogs dim the page with `--mj-bg-overlay`, which follows the theme.
+  - In the respondent widget, `--mjf-focus-ring` is now a colour, as it is in Explorer, and the focus shadow is `--mjf-focus-shadow`. A form style that set the ring to a colour, as the shipped Contrast style does, used to remove the focus indicator.
+  - The respondent widget no longer takes focus on its first render from a control outside the form that already holds it, such as a host page's own field or the builder's tab strip. After the welcome screen's Start button, the first question still gets focus.
+  - The rule dialog's confirm button says Save, and the person panel's states name responses instead of forms.
+  - `lint:ui` gains five rules: undefined MJ tokens, `--mj-color-*` palette steps, the focus ring used as a shadow, raw font sizes, and off-scale spacing.
+
+- 3a74fdc: Fixes from the review of the UI audit work.
+
+  - Builder: a second delete inside the undo window waits for the first to be written before it leaves the canvas. Undoing it no longer puts the item back at an order the database does not have, and deleting the default ending and then the last other ending no longer leaves the form with no default ending after Undo.
+  - Builder: a delete or an Undo updates the Publish state and the stale-notice banners at once, not when the undo window closes. Preview writes a held delete first.
+  - Builder: while the default ending's delete is held, the ending that will replace it reads "Default ending", not "Never shown — add a condition". `endingReachFor` now treats a form with no default as the runtime does.
+  - Responses: Next or Previous across a page edge opens nothing when the page fails to load or the reader went Back, keeps the position line correct while the page loads, and closes the old response if the new one fails to open. Refresh tells the host that it closed the open response, so the URL stops naming it.
+  - Forms home: a failed reload under a list already on screen is shown in the banner.
+  - Widget: a Matrix question moves the progress bar per answered row, as a composite question does per part.
+  - `Forms.ListResponses` refuses a caller who may not read answers, with a reason, before any read. Before, the list read the answers anyway and failed.
+
+- cceec70: A file question no longer reads "Uploading … 100%" while the server is still storing the file. It now shows "Uploading resume.pdf — 63%…" while the bytes go up and "Saving resume.pdf…" until the file is stored, so a full bar no longer looks like a finished upload.
+
+  While a file on the current step is uploading, a note beside Submit (or Next) says the respondent can press it and the response is sent once the file is saved. Pressing it was already safe; nothing said so before the press.
+
+  A final submit that fails because the device is offline is now sent again by itself when the browser reports it is back online, and the banner says so. It is not sent if the respondent changes an answer first, and it is not promised when the browser reports it is online (a blocked or unreachable server), where the banner still asks the respondent to try again.
+
+  The upload route refuses (409) a file for a response that is already Complete or Disqualified, instead of storing a file that can never become an answer. Every upload answer now carries a `Server-Timing` header (`body`, `resolve`, `response`, `store`, `record`, `total`), so a slow upload on a host shows in the browser's DevTools where the time went.
+
+  A custom upload transport (`IFormsUploadService`) may report the storing phase by calling its progress callback as `onProgress(null, 'storing')`; one that does not keeps working as before.
+
+- Updated dependencies [f5efc17]
+- Updated dependencies [bfd0e70]
+- Updated dependencies [0f03d55]
+- Updated dependencies [cc7dd1c]
+- Updated dependencies [005ee3c]
+- Updated dependencies [377b002]
+- Updated dependencies [4b6d6d6]
+- Updated dependencies [e3b0f0a]
+- Updated dependencies [a688060]
+- Updated dependencies [d13e996]
+- Updated dependencies [3a74fdc]
+- Updated dependencies [e3b0f0a]
+  - @mj-biz-apps/forms-entities@0.16.0
+
 ## 0.15.1
 
 ### Patch Changes

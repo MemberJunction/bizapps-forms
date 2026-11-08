@@ -13,6 +13,14 @@
  */
 import type { DatabaseProviderBase, IMetadataProvider } from '@memberjunction/core';
 
+/**
+ * Whether `provider` is PostgreSQL rather than SQL Server. The dialect fact lives here, once, so the
+ * outbox's lease SQL and the host's boot probes cannot disagree about it.
+ */
+export function isPostgres(provider: DatabaseProviderBase): boolean {
+  return provider.PlatformKey === 'postgresql';
+}
+
 /** `provider` as a database provider, or a throw naming `caller` and what was wrong. */
 export function requireDatabaseProvider(provider: IMetadataProvider | null | undefined, caller: string): DatabaseProviderBase {
   if (!provider) {

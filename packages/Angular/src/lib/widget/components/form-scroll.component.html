@@ -76,6 +76,16 @@
       <p class="mjf-scroll__empty">This form has no questions to display.</p>
     }
 
+    <!-- Just ABOVE the button the respondent is about to press, because that is where the question
+         "will this lose my file?" gets asked — and above, not below: on a phone the button is
+         often the last thing on screen, and a line under it was off the bottom edge (seen in WebKit
+         at iPhone width). Always rendered; only its content is conditional, because a live region
+         inserted together with its text is not reliably announced. -->
+    <p class="mjf-wait-note" aria-live="polite">
+      @if (uploadWaitNote(); as note) {
+        {{ note }}
+      }
+    </p>
     <div class="mjf-scroll__actions" [class.mjf-scroll__actions--stepped]="!isFirst()">
       @if (!isFirst()) {
         <button type="button" class="mjf-back" [disabled]="submitting()" (click)="onBack()">

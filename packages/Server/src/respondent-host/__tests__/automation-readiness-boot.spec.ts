@@ -42,7 +42,10 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 });
 
 vi.mock('../captcha-demand', () => ({ readCaptchaDemand: async () => ({ ok: true, demand: undefined }) }));
-vi.mock('../host-readiness', () => ({ assessRespondentReadiness: () => [] }));
+vi.mock('../host-readiness', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../host-readiness')>()),
+  assessRespondentReadiness: () => [],
+}));
 
 import express from 'express';
 import { RespondentHostMiddleware } from '../RespondentHostMiddleware';

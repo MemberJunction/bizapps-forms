@@ -32,8 +32,17 @@ export const FORMS_HOME_CSS = /* css */ `
   color: var(--mj-status-success-text);
 }
 
+/* The inline Archive confirm, in place of the icon button. The sentence wraps rather than
+   widening the row; the confirm button carries the same error tint the icon shows on hover. */
+.home-confirm { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--mjf-gap-sm); max-width: 30rem; }
+.home-confirm-text { flex: 1 1 100%; font-size: var(--mjf-meta); color: var(--mj-text-secondary); text-align: right; }
+.home-confirm-archive { color: var(--mj-status-error-text); }
+.home-confirm-archive:hover:not(:disabled) { background: var(--mj-status-error-bg); }
+.home-confirm-archive:focus-visible { outline-color: var(--mj-status-error); }
+
 /* The row's trailing affordance. Muted until hover so a long list doesn't read as a
    column of arrows. */
+/* ui-gate: allow-disabled-token — decorative chevron; the row's own name says where it goes */
 .home-chevron { flex: none; color: var(--mj-text-disabled); font-size: var(--mjf-meta); transition: color var(--mjf-ease), transform var(--mjf-ease); }
 .mjf-row:hover .home-chevron { color: var(--mj-text-secondary); transform: translateX(2px); }
 

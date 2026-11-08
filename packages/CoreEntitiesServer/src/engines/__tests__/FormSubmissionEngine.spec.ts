@@ -188,18 +188,17 @@ describe('SaveResponse — the form must be Published', () => {
 });
 
 describe('SaveResponse — the quota is decided by the conditional UPDATE, inside the transaction', () => {
-  it('takes the slot with one conditional UPDATE, counted with the dialect, in the save transaction', async () => {
+  it('takes the slot through the conditional-UPDATE procedure, in the save transaction (SQL Server)', async () => {
+    // The UPDATE and its @@ROWCOUNT live in spFormDistributionConsumeResponseSlot (#338); its shape
+    // is pinned by guarded-write-sprocs.migration.spec.ts.
     const fake = fakeFor({ distribution: makeDistribution({ MaxResponses: 5, ResponseCount: 2 }) });
 
     const result = await saveThroughEngine(ctxFor(fake), ADULT);
 
     expect(result.success).toBe(true);
-    const update = fake.statements.find((s) => /UPDATE/.test(s.sql));
-    expect(update?.inTransaction).toBe(true);
-    expect(update?.sql).toContain('SET [ResponseCount] = [ResponseCount] + 1');
-    expect(update?.sql).toContain("WHERE [ID] = 'dist-1'");
-    expect(update?.sql).toContain('([MaxResponses] IS NULL OR [ResponseCount] < [MaxResponses])');
-    expect(update?.sql).toContain('@@ROWCOUNT'); // provider.Dialect.AffectedRowCountSQL
+    const slot = fake.statements.find((s) => /spFormDistributionConsumeResponseSlot/.test(s.sql));
+    expect(slot?.inTransaction).toBe(true);
+    expect(slot?.sql).toBe("EXEC [__mj_BizAppsForms].[spFormDistributionConsumeResponseSlot] @ID = 'dist-1'");
     expect(fake.distribution?.ResponseCount).toBe(3);
   });
 
@@ -208,7 +207,7 @@ describe('SaveResponse — the quota is decided by the conditional UPDATE, insid
     // UPDATE is the decision: zero rows is the quota refusal, and nothing of this save survives.
     const fake = fakeFor({
       distribution: makeDistribution({ MaxResponses: 1, ResponseCount: 0 }),
-      sql: [{ match: /UPDATE/, rows: [{ AffectedRows: 0 }] }],
+      sql: [{ match: /spFormDistributionConsumeResponseSlot/, rows: [{ AffectedRows: 0 }] }],
     });
     const ctx = ctxFor(fake);
 
@@ -227,7 +226,7 @@ describe('SaveResponse — the quota is decided by the conditional UPDATE, insid
     await saveThroughEngine(ctx, { ...ADULT, partial: true });
     await saveThroughEngine(ctx, { ...ADULT, clientResponseId: '33333333-2222-4333-8444-555555555555', answers: [{ questionId: 'q-age', textValue: 'under' }] });
 
-    expect(fake.statements.filter((s) => /UPDATE/.test(s.sql))).toHaveLength(0);
+    expect(fake.statements.filter((s) => /spFormDistributionConsumeResponseSlot|UPDATE/.test(s.sql))).toHaveLength(0);
     expect(fake.distribution?.ResponseCount).toBe(0);
   });
 
@@ -240,8 +239,8 @@ describe('SaveResponse — the quota is decided by the conditional UPDATE, insid
 
     expect(result.success).toBe(false);
     expect(result.errors[0].message).toBe(QUOTA_REACHED_MESSAGE);
-    const lock = fake.statements.find((s) => /UPDLOCK/.test(s.sql));
-    expect(lock?.sql).toContain("FROM [__mj_BizAppsForms].[Form] WITH (UPDLOCK, HOLDLOCK) WHERE [ID] = 'form-1'");
+    const lock = fake.statements.find((s) => /spFormLockRowForQuota/.test(s.sql));
+    expect(lock?.sql).toBe("EXEC [__mj_BizAppsForms].[spFormLockRowForQuota] @ID = 'form-1'");
     expect(lock?.inTransaction).toBe(true);
     expect(fake.saved).toHaveLength(0);
   });
@@ -287,7 +286,88 @@ describe('SaveResponse — the quota is decided by the conditional UPDATE, insid
   it('takes no lock at all for a form without a form-level quota', async () => {
     const fake = fakeFor();
     await saveThroughEngine(ctxFor(fake), ADULT);
-    expect(fake.statements.some((s) => /UPDLOCK/.test(s.sql))).toBe(false);
+    expect(fake.statements.some((s) => /spFormLockRowForQuota|UPDLOCK/.test(s.sql))).toBe(false);
+  });
+});
+
+describe('SaveResponse — the beforeCommit seam (#339)', () => {
+  it('adds no SQL: a save with a no-op seam issues exactly the statements a save without one does', async () => {
+    const plain = fakeFor({ distribution: makeDistribution({ MaxResponses: 5, ResponseCount: 0 }) });
+    const seamed = fakeFor({ distribution: makeDistribution({ MaxResponses: 5, ResponseCount: 0 }) });
+
+    await saveThroughEngine(ctxFor(plain), ADULT);
+    await saveThroughEngine({ ...ctxFor(seamed), beforeCommit: async () => undefined }, ADULT);
+
+    expect(seamed.statements.map((s) => s.sql)).toEqual(plain.statements.map((s) => s.sql));
+    expect(seamed.transactions).toEqual(plain.transactions);
+  });
+
+  it('is awaited: no transaction begins until the seam settles', async () => {
+    const fake = fakeFor({ distribution: makeDistribution({ MaxResponses: 5, ResponseCount: 0 }) });
+    let open!: () => void;
+    const opened = new Promise<void>((r) => (open = r));
+    let arrived!: () => void;
+    const atSeam = new Promise<void>((r) => (arrived = r));
+    let settled = false;
+
+    const saving = saveThroughEngine(
+      {
+        ...ctxFor(fake),
+        beforeCommit: async () => {
+          arrived();
+          await opened;
+        },
+      },
+      ADULT,
+    ).finally(() => (settled = true));
+    await atSeam;
+    // Give an un-awaited seam every chance to let the save run on into its transaction.
+    for (let turn = 0; turn < 5; turn++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+
+    expect(fake.transactions).toEqual([]);
+    expect(settled).toBe(false);
+    open();
+    expect((await saving).success).toBe(true);
+    expect(fake.transactions).toEqual(['begin', 'commit']);
+  });
+
+  it('runs after every read-time check: no read happens between the seam and the transaction', async () => {
+    // A new draft (no row yet, not a completion) runs every read-time gate, the draft ceiling included.
+    const fake = fakeFor({ distribution: makeDistribution({ MaxResponses: 5, ResponseCount: 0 }) });
+    const reads = (): number => fake.viewCalls.length + fake.queryCalls.length + fake.statements.length;
+    let readsAtSeam = -1;
+    let readsAtBegin = -1;
+    const begin = fake.provider.BeginEntityTransaction!.bind(fake.provider);
+    fake.provider.BeginEntityTransaction = async () => {
+      readsAtBegin = reads();
+      return begin();
+    };
+
+    const result = await saveThroughEngine(
+      {
+        ...ctxFor(fake),
+        beforeCommit: async () => {
+          readsAtSeam = reads();
+        },
+      },
+      { ...ADULT, partial: true },
+    );
+
+    expect(result.success).toBe(true);
+    expect(readsAtSeam).toBeGreaterThan(0);
+    expect(readsAtSeam).toBe(readsAtBegin);
+  });
+
+  it('is never reached by a save the quota pre-check refuses', async () => {
+    const fake = fakeFor({ distribution: makeDistribution({ MaxResponses: 1, ResponseCount: 1 }) });
+    const seam = vi.fn(async () => undefined);
+
+    const result = await saveThroughEngine({ ...ctxFor(fake), beforeCommit: seam }, ADULT);
+
+    expect(result.errors[0]?.message).toBe(QUOTA_REACHED_MESSAGE);
+    expect(seam).not.toHaveBeenCalled();
   });
 });
 

@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { RunInEntityTransaction, RunView, type BaseEntity, type IRunViewProvider, type UserInfo } from '@memberjunction/core';
-import { makeFakeProvider } from '../index.js';
+import { makeDistribution, makeFakeProvider } from '../index.js';
 
 const DISTRIBUTIONS = 'MJ_BizApps_Forms: Form Distributions';
 
@@ -114,6 +114,16 @@ describe('ExecuteSQL — recorded, scripted, and aware of the transaction it ran
       ['SELECT x', true],
       ['UPDATE t', false],
     ]);
+  });
+
+  it.each([
+    ['the SQL Server procedure', "EXEC [__mj_BizAppsForms].[spFormDistributionConsumeResponseSlot] @ID = 'dist-1'"],
+    ['the raw UPDATE (PostgreSQL)', 'UPDATE "s"."FormDistribution" SET "ResponseCount" = "ResponseCount" + 1 WHERE "ID" = \'dist-1\''],
+  ])('emulates the distribution slot for %s: one row while the cap has room, none once full', async (_label, sql) => {
+    const fake = makeFakeProvider({ distribution: makeDistribution({ MaxResponses: 1, ResponseCount: 0 }) });
+    expect(await fake.provider.ExecuteSQL(sql)).toEqual([{ AffectedRows: 1 }]);
+    expect(await fake.provider.ExecuteSQL(sql)).toEqual([{ AffectedRows: 0 }]);
+    expect(fake.distribution?.ResponseCount).toBe(1);
   });
 
   it('carries the dialect surface engines build statements with', () => {

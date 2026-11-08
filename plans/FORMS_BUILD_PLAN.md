@@ -773,6 +773,16 @@ native entities. This is the reporting differentiator no incumbent has.
 
 ## 12. Progress Log
 
+- **2026-11-06 — MJ 6.2.0 → 6.2.1 (lts-6.2).** Host-tracking pins only (18, root + `apps/MJAPI`); the
+  `packages/*` peers and `mjVersionRange` stay at the `6.2.0-edge.8` floor, which already admits 6.2.1.
+  `drop-stale-mj-lock.py` cleared 532 stale blocks, leaving one MJ version; the only non-MJ change is
+  `ws@8.21.3` collapsing onto the `ws@8.22.1` already in the lockfile. 6.2.1 ships no new core migration
+  (top stays `V202611032346`), no `@angular/*` line change, and no security or authorization change. Its one
+  runtime change makes `ActionEngine`'s fire-and-forget log writes leave the caller's transaction, which
+  needs nothing from Forms: Forms never awaits `LogEntryPersisted`. `check:host-truth --core-tag v6.2.1`
+  converged on the published 6.2.1 CLI, so the upgrade owes no migration, and `smoke:respondent` passed
+  14/14 on a harness running published 6.2.1.
+
 - **2026-10-21 — #313: on-submit mechanism decided, `FormAutomation` only (DG-7).** Forms authors no
   MJ `EntityAction` bindings; the rule and its reason are now `DG-7` in §10, with the operator version
   in `docs/on-submit-automations.md` ("Why not MJ `EntityAction` bindings"). The PR #22 adoption

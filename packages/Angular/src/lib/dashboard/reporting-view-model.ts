@@ -328,6 +328,31 @@ export function railState(loading: boolean, loadError: string | null, formCount:
   return loadError !== null ? 'failed' : 'empty';
 }
 
+/** What the report pane shows for the selected form. `none`: no form selected or nothing read yet. */
+export type ReportState = 'loading' | 'failed' | 'unavailable' | 'empty' | 'ready' | 'none';
+
+export interface ReportStateInput {
+  loading: boolean;
+  failed: boolean;
+  /** Why the summary is refused to this reader, or null. */
+  unavailable: string | null;
+  hasReport: boolean;
+  hasResponses: boolean;
+}
+
+/**
+ * `failed` is its own state so the pane keeps a way out: without it a failed read left the pane
+ * blank once the banner was dismissed. It outranks a refusal because a refusal left over from an
+ * earlier form says nothing about the form whose read just failed.
+ */
+export function reportState(s: ReportStateInput): ReportState {
+  if (s.loading) return 'loading';
+  if (s.failed) return 'failed';
+  if (s.unavailable !== null) return 'unavailable';
+  if (!s.hasReport) return 'none';
+  return s.hasResponses ? 'ready' : 'empty';
+}
+
 /** "12 forms · 1,204 responses" — or, with no list after a failed load, no totals rather than zeros. */
 export function portfolioLine(forms: readonly ReportableForm[], loadError: string | null): string {
   if (forms.length === 0 && loadError !== null) return 'Forms could not be loaded';

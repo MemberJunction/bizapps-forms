@@ -22,6 +22,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   return { ...actual, LogError: vi.fn() };
 });
 
+const { DEFAULT_RESPONSE_QUERY } = await import('./responses-query');
 const { MAX_EXPORT_PAGES, RESPONSES_CHANGED_MESSAGE, readResponseDetail, readResponsePage, readResponsesForExport } = await import('./response-reads');
 
 let operations: FakeOperations | null = null;
@@ -50,34 +51,33 @@ function page(rows: FormsResponseListRow[], total: number, extra: Partial<FormsL
 const rows = (from: number, count: number): FormsResponseListRow[] => Array.from({ length: count }, (_, i) => listRow(from + i));
 
 describe('readResponsePage', () => {
-  it('asks for one page of Complete responses of the form, without answers, at the shared page size', async () => {
+  it('asks the server for the page, sort and search the table is showing (F08)', async () => {
     operations = installFakeOperations(() => succeeded(page([listRow(1)], 41)));
 
-    const result = await readResponsePage('form-1', 200);
+    const result = await readResponsePage('form-1', { search: 'ann', sort: 'oldest', page: 2, pageSize: 25 });
 
     expect(operations.calls).toEqual([
       {
         key: 'Forms.ListResponses',
-        input: { FormID: 'form-1', Status: 'Complete', StartRow: 200, MaxRows: MAX_RESPONSE_PAGE_SIZE, IncludeAnswers: false },
+        input: { FormID: 'form-1', Status: 'Complete', StartRow: 25, MaxRows: 25, OrderBy: 'SubmittedAt ASC', IncludeAnswers: false, Search: 'ann' },
       },
     ]);
     expect(result).toMatchObject({ total: 41, labelVersionId: 'v1', rows: [{ responseId: 'r-1', respondent: 'Person 1' }] });
   });
 
-  it('never asks for every row of a form at once (DW16): a bounded page, and nothing but the declared input', async () => {
+  it('never asks for every row of a form at once (DW16): a bounded page', async () => {
     operations = installFakeOperations(() => succeeded(page([], 0)));
 
-    await readResponsePage('form-1', 0);
+    await readResponsePage('form-1', DEFAULT_RESPONSE_QUERY);
 
     const input = operations.calls[0].input as FormsListResponsesInput;
     expect(input.MaxRows).toBeLessThanOrEqual(MAX_RESPONSE_PAGE_SIZE);
-    expect(Object.keys(input).sort()).toEqual(['FormID', 'IncludeAnswers', 'MaxRows', 'StartRow', 'Status']);
   });
 
   it("throws the server's refusal so the host can show it", async () => {
     operations = installFakeOperations(() => refused('A form id is required.'));
 
-    await expect(readResponsePage('form-1', 0)).rejects.toThrow('A form id is required.');
+    await expect(readResponsePage('form-1', DEFAULT_RESPONSE_QUERY)).rejects.toThrow('A form id is required.');
   });
 });
 

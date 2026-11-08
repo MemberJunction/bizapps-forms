@@ -79,6 +79,32 @@ describe('renderAnswer', () => {
   });
 });
 
+describe('renderAnswer, Matrix axes', () => {
+  const overlapping = q('m', 'Matrix', 'Rate', [
+    { value: 'opt1', label: 'Row 1', matrixAxis: 'Row' },
+    { value: 'opt2', label: 'Row 2', matrixAxis: 'Row' },
+    { value: 'opt1', label: 'Col 1', matrixAxis: 'Column' },
+    { value: 'opt2', label: 'Col 2', matrixAxis: 'Column' },
+    { value: 'opt3', label: 'Col 3', matrixAxis: 'Column' },
+  ]);
+
+  it('labels a row key by the row axis and a cell by the column axis when their values overlap', () => {
+    expect(renderAnswer(overlapping, { ...blank, JSONValue: '{"opt1":"opt2","opt2":"opt3"}' })).toBe('Row 1: Col 2; Row 2: Col 3');
+  });
+
+  it('joins a multi-select cell with " / " through column labels', () => {
+    expect(renderAnswer(overlapping, { ...blank, JSONValue: '{"opt1":["opt1","opt3"]}' })).toBe('Row 1: Col 1 / Col 3');
+  });
+
+  it('reads an option with no axis as a row, and shows a value nobody offered as itself', () => {
+    const noAxis = q('b', 'Matrix', 'Rate', [
+      { value: 'venue', label: 'Venue' },
+      { value: 'great', label: 'Great', matrixAxis: 'Column' },
+    ]);
+    expect(renderAnswer(noAxis, { ...blank, JSONValue: '{"venue":"great","food":"ok"}' })).toBe('Venue: Great; food: ok');
+  });
+});
+
 describe('answerHoldsValue', () => {
   it('counts 0, false and a file as values, and a blank row or whitespace as none', () => {
     expect(answerHoldsValue({ ...blank, NumericValue: 0 })).toBe(true);

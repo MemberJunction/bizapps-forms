@@ -1,15 +1,14 @@
 /**
  * Pure model for the "Forms" section on Common's Person record form (#285).
  *
- * `relatedJoinField` is deliberately NOT set on the registration. Reproduced against MJ
- * 6.1.4's real `ResolveFormContributions` and filed upstream as MemberJunction/MJ#4990: with
- * both `contributionKey` and `relatedJoinField` set, the stock grid key
- * `related:<entity>:RespondentPersonID` is never claimed, so MJ's stock related-entity grid
- * still mounts beside this panel. Omitting it claims EVERY FK from Form Responses to People,
- * which is correct only while there is exactly one: `FK_FormResponse_RespondentPerson`
- * (FormResponse.RespondentPersonID -> Common Person). A second FK to Person would be silently
- * claimed by this panel too — revisit this registration if one is ever added. The spec pins the
- * counter-example, so if MJ fixes the resolver that test flips and the field may be added.
+ * `relatedJoinField` names `RespondentPersonID`, so this panel claims exactly the one FK it
+ * renders (`FK_FormResponse_RespondentPerson`) and MJ's stock related-entity grid for that FK does
+ * not mount beside it. A second FK from Form Responses to People would stay MJ's to render.
+ *
+ * This needs MJ 6.2 or later. On 6.1, a claim with both `contributionKey` and `relatedJoinField`
+ * never claimed the stock grid key (MemberJunction/MJ#4990, fixed by MJ PR #4311, first shipped in
+ * 6.2.0-edge.3), so the stock grid mounted next to this panel. That is one reason the packages'
+ * MJ peer floor is `6.2.0-edge.8`.
  */
 import type { FormPanelRegistrationMetadata } from '@memberjunction/ng-base-forms';
 import { FORMS_ENTITY } from '../shared/entity-names';
@@ -23,6 +22,7 @@ export const PERSON_FORMS_REGISTRATION: FormPanelRegistrationMetadata = {
   slot: 'after-related',
   sortKey: 60,
   relatedEntity: FORMS_ENTITY.FormResponse,
+  relatedJoinField: 'RespondentPersonID',
   contributionKey: PERSON_FORMS_SECTION_KEY,
 };
 

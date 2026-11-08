@@ -31,6 +31,8 @@ import { FormRuntime } from '../core/form-runtime';
 import { entryKey, sectionEntries, skippedMessage, type SectionEntry } from '../core/section-content';
 import { steppableSections } from '../core/section-stepper';
 import { nothingToSubmit } from '../core/nothing-to-submit';
+import { uploadWaitNote } from '../core/upload-wait-note';
+import { focusIsOutside, focusOnChange } from '../core/focus-on-change';
 import { StepJudge } from '../core/settled-validation';
 import { clampCursor } from '../core/stepper';
 import { FormUploadStore } from '../core/upload-store';
@@ -157,6 +159,17 @@ export class FormScrollComponent {
       !nothingToSubmit(this.runtime(), this.uploads),
   );
 
+  /** "Still uploading — you can press Submit/Next" while a file in this section is on the wire. */
+  protected readonly uploadWaitNote = computed(() => {
+    const page = this.current();
+    const ids = page ? this.questionsFor(page).map((q) => q.id) : [];
+    return uploadWaitNote({
+      uploading: this.uploads.isUploadingAmong(ids),
+      isLast: this.isLast(),
+      pressed: this.uploads.waiting(),
+    });
+  });
+
   constructor() {
     // A jump firing on the last section shortens the list under the cursor, so re-clamp whenever
     // the path resizes. Tracked on `total()` with the cursor read and written untracked, so the
@@ -173,14 +186,15 @@ export class FormScrollComponent {
 
     // Move focus to the section itself when it changes, so keyboard and screen-reader users land
     // on the new heading rather than wherever the old Next button used to be — and so the
-    // browser scrolls the top of the section into view on a phone.
-    let lastFocusedId: string | null = null;
+    // browser scrolls the top of the section into view on a phone. The first section does not
+    // take focus from a control outside the form that holds it (the builder's tab strip).
+    const shouldFocus = focusOnChange();
     effect(() => {
       const page = this.current();
-      if (page && page.id !== lastFocusedId) {
-        lastFocusedId = page.id;
-        queueMicrotask(() => this.focusCurrentSection());
-      }
+      if (!page) return;
+      queueMicrotask(() => {
+        if (shouldFocus(page.id, focusIsOutside(this.hostRef.nativeElement))) this.focusCurrentSection();
+      });
     });
   }
 

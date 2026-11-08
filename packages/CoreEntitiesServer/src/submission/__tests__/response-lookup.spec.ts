@@ -17,6 +17,8 @@ function makeProvider(options: {
   success?: boolean;
   rows?: Array<{ ID: string }>;
   capture?: (params: RunViewParams) => void;
+  /** Drop TotalRowCount from the result, as MJ 6.2's optional type allows. */
+  omitTotal?: boolean;
 }) {
   return {
     RunView: async <T>(params: RunViewParams): Promise<RunViewResult<T>> => {
@@ -25,7 +27,7 @@ function makeProvider(options: {
         Success: options.success ?? true,
         Results: (options.rows ?? []) as unknown as T[],
         RowCount: options.rows?.length ?? 0,
-        TotalRowCount: options.rows?.length ?? 0,
+        TotalRowCount: options.omitTotal ? undefined : (options.rows?.length ?? 0),
         ExecutionTime: 0,
         ErrorMessage: '',
       } as RunViewResult<T>;
@@ -160,6 +162,11 @@ describe('countPartialResponses (the durable row ceiling)', () => {
 
   it('fails CLOSED on a query error, so a database blip cannot become an unbounded hole', async () => {
     const provider = makeProvider({ success: false });
+    expect((await countPartialResponses(provider, { formVersionId: 'v' }, USER)).ok).toBe(false);
+  });
+
+  it('fails CLOSED when a successful count carries no TotalRowCount (MJ 6.2 types it optional)', async () => {
+    const provider = makeProvider({ omitTotal: true });
     expect((await countPartialResponses(provider, { formVersionId: 'v' }, USER)).ok).toBe(false);
   });
 });

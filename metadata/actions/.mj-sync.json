@@ -22,7 +22,8 @@
       "CategoryID": { "entity": "MJ: Action Categories", "field": "Name" }
     },
     "relatedEntities": {
-      "MJ: Action Params": { "entity": "MJ: Action Params", "foreignKey": "ActionID" }
+      "MJ: Action Params": { "entity": "MJ: Action Params", "foreignKey": "ActionID" },
+      "MJ: Action Result Codes": { "entity": "MJ: Action Result Codes", "foreignKey": "ActionID" }
     }
   }
 }

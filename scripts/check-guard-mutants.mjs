@@ -362,11 +362,13 @@ export const MUTANTS = [
   {
     name: 'hook/row-lock-dropped',
     behaviour: 'the credential re-read takes an update lock, so a second writer of the row waits its turn',
-    file: 'packages/CoreEntitiesServer/src/magic-link/FormDistributionEntityServer.ts',
-    find: '          : `SELECT ${columns} FROM ${table} WITH (UPDLOCK, HOLDLOCK) WHERE ${where}`;',
-    replace: '          : `SELECT ${columns} FROM ${table} WHERE ${where}`;',
+    // On SQL Server the locked re-read is spFormDistributionReadServerColumnsLocked (#338), so the
+    // lock hint lives in the migration, not in FormDistributionEntityServer.ts.
+    file: 'migrations/V202610222300__v0.16.x__Roles_Only_Guarded_Write_Sprocs.sql',
+    find: '    SELECT [MagicLinkInviteID], [PublicLinkToken], [ResponseCount] FROM [${flyway:defaultSchema}].[FormDistribution] WITH (UPDLOCK, HOLDLOCK) WHERE [ID] = @ID;',
+    replace: '    SELECT [MagicLinkInviteID], [PublicLinkToken], [ResponseCount] FROM [${flyway:defaultSchema}].[FormDistribution] WHERE [ID] = @ID;',
     suite: 'packages/CoreEntitiesServer',
-    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
+    killedBy: ['src/shared/__tests__/guarded-write-sprocs.migration.spec.ts'],
   },
   {
     name: 'hook/origins-grammar-neutralised',
@@ -539,11 +541,12 @@ export const MUTANTS = [
   {
     name: 'claim/first-attempt-waits-on-host-clock',
     behaviour: "a never-attempted event is due at once, so an API host whose clock runs ahead of the database cannot hide a final from its post-commit drain",
-    file: 'packages/CoreEntitiesServer/src/automation/outbox/claim.ts',
-    find: "(e.${q('AttemptCount')} = 0 OR e.${q('NextAttemptAt')} <= ${now})",
-    replace: "(1 = 0 OR e.${q('NextAttemptAt')} <= ${now})",
+    // On SQL Server the claim is spFormAutomationEventClaim (#338): the due rule lives in the migration.
+    file: 'migrations/V202610222300__v0.16.x__Roles_Only_Guarded_Write_Sprocs.sql',
+    find: '(e.[AttemptCount] = 0 OR e.[NextAttemptAt] <= SYSDATETIMEOFFSET())',
+    replace: '(1 = 0 OR e.[NextAttemptAt] <= SYSDATETIMEOFFSET())',
     suite: 'packages/CoreEntitiesServer',
-    killedBy: ['src/automation/outbox/__tests__/claim.spec.ts'],
+    killedBy: ['src/shared/__tests__/guarded-write-sprocs.migration.spec.ts'],
   },
   {
     name: 'drain/partial-save-dead-letters',
@@ -1836,11 +1839,36 @@ export const MUTANTS = [
     killedBy: ['src/lib/responses/response-reads.spec.ts', 'src/lib/dashboard/services/forms-reporting-export.service.spec.ts'],
   },
   {
-    name: 'responses/list-pages-past-a-change',
-    behaviour: 'Load more stops and says the list changed when a page disagrees with it, instead of appending a shifted page',
+    // Was the Load-more check that refused to append a page the list had shifted under. The table
+    // now reads numbered pages (UI audit F08), so nothing is appended; what can go wrong is a page
+    // past the end after the list shrank, which must land on the last page, not an empty table.
+    name: 'responses/page-past-the-end-lands-on-last',
+    behaviour: 'a page past the end (the list shrank since the link or the last page turn) is read again as the last page, not shown empty',
     file: 'packages/Angular/src/lib/responses/responses-tab.component.ts',
-    find: '      if (page.total !== this.Total() || page.rows.some((r) => held.has(r.responseId))) {',
+    find: '      if (generation === this.generation && pastTheEnd) {',
     replace: '      if (false) {',
+    suite: 'packages/Angular',
+    killedBy: ['src/lib/responses/responses-tab.component.spec.ts'],
+  },
+  {
+    // A second delete used to leave the tree before the first one's held write ran; that write
+    // renumbers what it finds, so Undo restored the second at a position the rows no longer had.
+    name: 'builder/second-delete-waits-for-the-held-one',
+    behaviour: 'a new delete takes its item out of the tree only after the delete already held is written',
+    file: 'packages/Angular/src/lib/builder/builder-state.service.ts',
+    find: '      await this.pendingDelete.release();',
+    replace: '      void 0;',
+    suite: 'packages/Angular',
+    killedBy: ['src/lib/builder/builder-state.held-delete.spec.ts'],
+  },
+  {
+    // Next at a page edge reads the page, then opens its first response. A reader who went Back
+    // while the page loaded was pulled back into a detail they had just closed.
+    name: 'responses/next-across-a-page-respects-back',
+    behaviour: 'Next across a page boundary opens nothing when the page failed or the reader left the response meanwhile',
+    file: 'packages/Angular/src/lib/responses/responses-tab.component.ts',
+    find: '    if (!(await this.load(true, { ...q, page: q.page + direction })) || this.Detail() !== open) {',
+    replace: '    if (!(await this.load(true, { ...q, page: q.page + direction })) && false) {',
     suite: 'packages/Angular',
     killedBy: ['src/lib/responses/responses-tab.component.spec.ts'],
   },

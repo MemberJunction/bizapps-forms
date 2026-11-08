@@ -33,6 +33,7 @@ import {
   CONTACT_INFO_FIELDS,
   doodlePen,
   isAnswerableQuestionType,
+  missingMatrixRows,
   numericScalePoints,
   opinionScaleBounds,
   ratingScaleMax,
@@ -45,6 +46,7 @@ import { NgTemplateOutlet } from '@angular/common';
 
 import { FORMS_UPLOAD_SERVICE } from '../../api/form-upload.interface';
 import { FormUploadStore, type UploadStatus, type UploadToken } from '../../core/upload-store';
+import { uploadingLine } from '../../core/upload-status-line';
 import {
   autocompleteFor,
   compositeAutocompleteFor,
@@ -58,6 +60,8 @@ import { DoodlePadComponent, type DoodleExportSink } from './doodle-pad.componen
 import { doodleExportSink } from './doodle-export-sink';
 import { IconComponent } from '../icon.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
+import { questionShape } from './question-shape';
+import { compositeFieldDescribedBy } from './composite-described-by';
 
 /** How long a reordered row takes to travel to its new place. */
 const RANK_TRAVEL_MS = 220;
@@ -166,11 +170,19 @@ export class FormQuestionComponent {
     const value = this.value();
     return typeof value === 'string' && value.trim() !== '';
   });
-  /** Whole-number progress percent for the aria-valuenow / label. */
-  protected readonly uploadPercent = computed(() => {
+  /** True once every byte is sent and the server is storing the file. */
+  protected readonly uploadStoring = computed(() => this.upload().phase === 'storing');
+  /**
+   * Whole-number percent of bytes sent, for the bar and its aria-valuenow — or null while the
+   * transport cannot tell AND while the server is storing, so the bar never sits full ("done") over
+   * a file that is not saved yet.
+   */
+  protected readonly sendingPercent = computed(() => {
     const p = this.uploadProgress();
-    return p === null ? null : Math.round(p * 100);
+    return p === null || this.uploadStoring() ? null : Math.round(p * 100);
   });
+  /** "Uploading resume.pdf — 63%…", then "Saving resume.pdf…" — see {@link uploadingLine}. */
+  protected readonly uploadingText = computed(() => uploadingLine(this.upload()));
 
   protected readonly inputId = computed(() => `mjf-q-${this.question().id}`);
   /**
@@ -183,6 +195,8 @@ export class FormQuestionComponent {
    * `inputId()` instead left every grouped question unnamed to a screen reader (#117).
    */
   protected readonly labelId = computed(() => `${this.inputId()}-label`);
+  /** How the header labels this question: `<label for>`, a named group, or a fieldset legend. */
+  protected readonly shape = computed(() => questionShape(this.question().type));
 
   /**
    * The id of the question's outer container — where focus lands when the control cannot take it.
@@ -234,6 +248,16 @@ export class FormQuestionComponent {
 
   protected partErrorId(field: string): string {
     return `${this.inputId()}-${field}-error`;
+  }
+
+  /** One address field's description: the question's help, then why the field is invalid. */
+  protected compositeDescribedBy(field: string): string | null {
+    return compositeFieldDescribedBy({
+      helpId: this.question().helpText ? this.helpId() : null,
+      fieldErrorId: this.partError(field) ? this.partErrorId(field) : null,
+      groupErrorId: this.errorMessage() ? this.errorId() : null,
+      hasPartErrors: this.hasPartErrors(),
+    });
   }
 
   /**
@@ -603,6 +627,15 @@ export class FormQuestionComponent {
   protected readonly matrixColumns = computed(() =>
     this.question().options.filter((o) => o.matrixAxis === 'Column'),
   );
+  /**
+   * The rows a required Matrix still needs, by row value — asked of the shared contract, the same
+   * one the submit check uses, so the rows marked here are the rows the server would refuse over.
+   * Empty until the question's error is showing: a respondent who has not tried to continue yet is
+   * not shown red rows.
+   */
+  protected readonly matrixMissing = computed(() =>
+    this.errorMessage() ? new Set(missingMatrixRows(this.question(), this.value())) : new Set<string>(),
+  );
 
   private readonly matrixValue = computed<Record<string, string>>(() => {
     const v = this.value();
@@ -622,19 +655,21 @@ export class FormQuestionComponent {
     return out;
   });
 
+  /** The native radio group name for one matrix row: rows must not share a group. */
+  protected matrixName(row: string): string {
+    return `${this.inputId()}-row-${row}`;
+  }
+
   protected isMatrixSelected(row: string, column: string): boolean {
     return this.matrixValue()[row] === column;
   }
 
-  /** Select (or clear) one row's column. */
+  /**
+   * Select one row's column. Rows are native radios, which fire `change` only when they become
+   * checked, so a row cannot be cleared once answered — the same as every other radio question.
+   */
   protected onMatrix(row: string, column: string): void {
-    const next: Record<string, string> = { ...this.matrixValue() };
-    if (next[row] === column) {
-      delete next[row];
-    } else {
-      next[row] = column;
-    }
-    this.valueChange.emit(Object.keys(next).length > 0 ? next : null);
+    this.valueChange.emit({ ...this.matrixValue(), [row]: column });
   }
 
   // --- Doodle --------------------------------------------------------------
