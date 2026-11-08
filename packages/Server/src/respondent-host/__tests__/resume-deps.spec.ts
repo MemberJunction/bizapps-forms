@@ -97,6 +97,18 @@ describe('makeDeviceResumeDeps — each DB-touching dependency runs on the reque
     expect(recordedProviders).toEqual([isolated]);
   });
 
+  it('loadResponse runs the UNOWNED-row client-id proof lookup, and through it too', async () => {
+    // A blank-owner row triggers the second read — `findResumableResponseById`'s SourceMetadata
+    // proof, the capability `/remember` demands before minting for an unowned draft.
+    scripted.rows = [{ ID: 'r1', Status: 'Partial', AnonymousSessionID: '', FormVersionID: 'v1', FormDistributionID: null }];
+    const deps = makeDeviceResumeDeps(buildCtx(acquireIsolated));
+
+    const row = await deps.loadResponse('r1');
+
+    expect(row?.clientIdProven).toBe(true);
+    expect(recordedProviders).toEqual([isolated, isolated]);
+  });
+
   it('mint mints through it', async () => {
     const deps = makeDeviceResumeDeps(buildCtx(acquireIsolated));
 

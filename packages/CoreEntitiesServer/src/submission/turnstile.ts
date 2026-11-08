@@ -20,14 +20,14 @@
  *    behaviour, not a new failure mode.
  *  - `hostname` — the host of the page the challenge was solved on, echoed back by Cloudflare.
  *    Checked against the hostnames a legitimate solve can report (this API's own public host plus
- *    the distribution's authored embed origins) and LOGGED on a mismatch by default. Warn-only
- *    is the default deliberately: the expected set is derived from `MJAPI_PUBLIC_URL` and
- *    `AllowedOrigins`, and neither is guaranteed to name every hostname a legitimate deployment
- *    answers on (multi-host proxies, internal names), so failing on it would brick working
- *    captcha-enabled forms. A deployment that knows its topology sets
- *    `FORMS_TURNSTILE_ENFORCE_HOSTNAME` to refuse mismatched tokens outright — closing the
- *    token-farming hole where a challenge solved on an attacker's own page (embedding this
- *    deployment's public sitekey) verifies here; `remoteip` above is the other enforcement half.
+ *    the distribution's authored embed origins) and REFUSED on a mismatch by default — this is
+ *    what closes the token-farming hole where a challenge solved on an attacker's own page
+ *    (embedding this deployment's public sitekey) verifies here; `remoteip` above is the other
+ *    enforcement half. The expected set is derived from `MJAPI_PUBLIC_URL` and `AllowedOrigins`,
+ *    and neither is guaranteed to name every hostname a legitimate deployment answers on
+ *    (multi-host proxies, internal names) — a deployment in that position sets
+ *    `FORMS_TURNSTILE_ENFORCE_HOSTNAME=false` to log the mismatch for the operator instead of
+ *    refusing, until it can enumerate its hosts.
  */
 import { LogError } from '@memberjunction/core';
 import { getPublicSubmitConfig } from './config.js';
@@ -60,7 +60,8 @@ export interface TurnstileVerifyOptions {
   remoteIp?: string;
   /**
    * Hostnames a legitimate solve can report (lowercase). A reported `hostname` outside this set
-   * is logged for the operator and NOT refused — see the module header for why warn-only.
+   * is REFUSED by default, or only logged when the deployment opted out with
+   * `FORMS_TURNSTILE_ENFORCE_HOSTNAME=false` — see the module header.
    * Empty/absent means "nothing to compare against": no check runs.
    */
   expectedHostnames?: readonly string[];
@@ -75,8 +76,10 @@ export function captchaRequired(formCaptcha: boolean, distributionCaptcha: boole
 
 /**
  * The lowercase hostnames of the given origin/URL strings, for {@link TurnstileVerifyOptions}'
- * `expectedHostnames`. Unparseable and absent entries are skipped rather than refused — this
- * feeds a warn-only comparison, so a malformed source must cost coverage, never availability.
+ * `expectedHostnames`. Unparseable and absent entries are skipped rather than refused: a malformed
+ * source narrows the expected set rather than erroring. Under the enforcing default a narrowed set
+ * can refuse solves from the host it failed to name — the operator remedy is to fix the source
+ * origin, or opt out to warn-only (`FORMS_TURNSTILE_ENFORCE_HOSTNAME=false`) meanwhile.
  */
 export function expectedTurnstileHostnames(origins: ReadonlyArray<string | undefined>): string[] {
   const hostnames = new Set<string>();
@@ -137,7 +140,8 @@ async function callSiteVerify(
       if (mismatch && getPublicSubmitConfig().turnstileEnforceHostname) {
         LogError(
           `[Forms] Turnstile token REFUSED: it was solved on hostname "${parsed.hostname}", outside ` +
-            `the expected set, and FORMS_TURNSTILE_ENFORCE_HOSTNAME is on.`,
+            `the expected set. Hostname enforcement is on by default; set ` +
+            `FORMS_TURNSTILE_ENFORCE_HOSTNAME=false to log mismatches without refusing.`,
         );
         return { success: false, errorCode: 'hostname-mismatch' };
       }
@@ -168,9 +172,9 @@ function hostnameOutsideExpectedSet(
 
 /**
  * Say so — to the operator, not the respondent — when a verified token was solved on a hostname
- * outside the expected set. Warn-only by default (the module header carries the reasoning);
- * deployments that know their topology turn on `FORMS_TURNSTILE_ENFORCE_HOSTNAME` to refuse
- * instead.
+ * outside the expected set. This path runs only when the deployment opted OUT of the enforcing
+ * default (`FORMS_TURNSTILE_ENFORCE_HOSTNAME=false` — the module header carries the reasoning),
+ * so the log line is what stands between the operator and the token-farming hole.
  */
 function warnOnUnexpectedHostname(
   reported: string | undefined,
@@ -185,8 +189,8 @@ function warnOnUnexpectedHostname(
   LogError(
     `[Forms] Turnstile token verified, but it was solved on hostname "${reported}", which is not ` +
       `this API's public host or one of the distribution's allowed embed origins (${expected.join(', ')}). ` +
-      `The submission was NOT refused — this set is derived from MJAPI_PUBLIC_URL and AllowedOrigins ` +
-      `and may not name every host this deployment answers on — but if this hostname is not yours, ` +
-      `the token was minted on someone else's page.`,
+      `The submission was NOT refused because FORMS_TURNSTILE_ENFORCE_HOSTNAME is set to false — ` +
+      `if this hostname is not yours, the token was minted on someone else's page; add your hosts ` +
+      `to the expected set and remove the opt-out to refuse these.`,
   );
 }
