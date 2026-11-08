@@ -47,7 +47,7 @@ const SCREEN_EDITOR_CSS = /* css */ `
 }
 /* The glyph takes its screen's hue; the title stays on a token. Same split as the type
    pills — the palette is measured for graphics, not for text. */
-.se-head > i { color: var(--mjf-viz-fill); font-size: 1rem; }
+.se-head > i { color: var(--mjf-viz-fill); font-size: var(--mjf-icon); }
 .se-head-title { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
 
 .se-section { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); padding-top: var(--mjf-gap-sm); }

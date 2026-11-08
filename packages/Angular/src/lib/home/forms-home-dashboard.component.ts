@@ -2,9 +2,12 @@ import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
+  ElementRef,
   inject,
+  ViewChild,
+  ViewChildren,
 } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { DatePipe, Location } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { BaseDashboard } from '@memberjunction/ng-shared';
 import type { ResourceData } from '@memberjunction/core-entities';
@@ -13,11 +16,15 @@ import { RegisterClass } from '@memberjunction/global';
 import type { ActionParam } from '@memberjunction/actions-base';
 
 import { FORMS_UI_CSS, failureMessage } from '../shared';
+import { homeViewFromParams, homeViewToParams } from '../shared/view-urls';
 import { onFormsWrite, type FormsWriteSubscription } from '../shared/forms-writes';
 import { CoalescedLoad } from '../shared/coalesced-load';
+import { RowActivateDirective } from '../shared/row-activate.directive';
 import { FormsHomeService } from './forms-home.service';
+import { homeListState, type HomeListState } from './home-list-state';
 import { FORMS_HOME_CSS } from './forms-home-dashboard.styles';
 import { totalResponses } from './home-aggregations';
+import { isFormsHomeUrl } from './home-route';
 import {
   HOME_ACTION,
   HOME_ENTITY,
@@ -63,8 +70,28 @@ function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/**
+ * The narrow slices of the template's elements that focus restoration uses. Structural, so the real
+ * `ElementRef` / `QueryList` satisfy them and a test can supply a plain double without a DOM.
+ */
+interface FocusTarget {
+  nativeElement: Pick<HTMLElement, 'focus'>;
+}
+interface TriggerRef {
+  nativeElement: Pick<HTMLButtonElement, 'focus' | 'dataset'>;
+}
+interface TriggerLookup {
+  find(predicate: (trigger: TriggerRef) => boolean): TriggerRef | undefined;
+}
+
+/** What the archive handlers need of a DOM event; a test double need only offer this. */
+type StoppableEvent = Pick<Event, 'stopPropagation'>;
+
 /** Which authoring panel (if any) is open. */
 type AuthoringPanel = 'none' | 'ai' | 'template';
+
+/** How long typing in the search pauses before the URL follows it, so Back does not step letter by letter. */
+export const HOME_URL_DEBOUNCE_MS = 400;
 
 /**
  * Forms home / studio — the first-class MJExplorer "Forms" surface
@@ -92,17 +119,24 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [FormsHomeService],
-  imports: [FormsModule, DatePipe, TemplatesGalleryComponent],
+  imports: [FormsModule, DatePipe, TemplatesGalleryComponent, RowActivateDirective],
   templateUrl: './forms-home-dashboard.component.html',
   styles: [FORMS_UI_CSS, FORMS_HOME_CSS],
 })
 export class FormsHomeDashboardComponent extends BaseDashboard {
   private readonly data = inject(FormsHomeService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly location = inject(Location);
 
   public loading = false;
   public busy = false;
   public errorMessage: string | null = null;
+  /**
+   * Why the last read of the list failed, or null. Kept apart from `errorMessage`, which any later
+   * action overwrites: the failed card shows THIS, so an unrelated message (an authoring
+   * refusal, a copy warning) never appears under "Couldn’t load your forms."
+   */
+  public listLoadError: string | null = null;
 
   public forms: FormSummaryRow[] = [];
   /** `forms` narrowed by `query`. Maintained by `applyFilter`, not recomputed in the template. */
@@ -115,6 +149,35 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
 
   /** MJGlobal subscription behind {@link watchForFormChanges}; released on destroy. */
   private formChanges?: FormsWriteSubscription;
+  /**
+   * The row whose Archive is waiting for its second click, or null. At most one row asks at a time:
+   * asking about another row, opening a row, Cancel and Escape all clear it.
+   */
+  public confirmingArchive: string | null = null;
+
+  /**
+   * The confirm button exists only while a row is asking, so the setter running with an element is
+   * the moment to move focus onto it: a keyboard user who pressed the icon button lands on the
+   * answer instead of on a button that has just disappeared.
+   */
+  @ViewChild('archiveConfirmButton')
+  private set archiveConfirmButton(ref: ElementRef<HTMLButtonElement> | undefined) {
+    ref?.nativeElement.focus();
+  }
+
+  /** Every row's Archive/Restore icon, found by `data-row-id` when focus has to return to one. */
+  @ViewChildren('archiveTrigger')
+  protected archiveTriggers?: TriggerLookup;
+
+  /** Stable focus target (`tabindex="-1"`) for when the row that held focus is gone. */
+  @ViewChild('pageTitle')
+  protected pageTitle?: FocusTarget;
+
+  /** Unregisters the {@link watchForReturn} listener; released on destroy. */
+  private stopWatchingUrl?: () => void;
+  /** Whether the last URL this page saw was its own route; a re-read fires on ARRIVAL only. */
+  private onHomeRoute = true;
+  private urlWriteTimer: ReturnType<typeof setTimeout> | null = null;
 
   public async GetResourceDisplayName(_data: ResourceData): Promise<string> {
     return 'Forms';
@@ -125,7 +188,38 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   }
 
   protected initDashboard(): void {
-    // Nothing to set up beyond the injected service.
+    this.watchForReturn();
+  }
+
+  /**
+   * Re-read when the user navigates back to this page.
+   *
+   * The Explorer wrapper calls `Refresh()` once, at mount, and a respondent's `FormResponse` is
+   * written server-side, so nothing in this browser hears it: the response counts shown after a
+   * trip to another tab were the ones read at mount (F10). `Location.onUrlChange` fires on every
+   * pushState the Explorer router makes; when the new URL is this dashboard's own route
+   * ({@link isFormsHomeUrl}: `/app/forms`, `/app/forms/Forms`) the list is read again.
+   * `@angular/router` is not a dependency of this package, hence `Location`. `loadForms` is
+   * coalesced, so a navigation during a read queues one follow-up, never a second read.
+   *
+   * Deliberately not done: polling or a push channel. A count that changes while this page is on
+   * screen still waits for the next visit or a host Refresh.
+   */
+  private watchForReturn(): void {
+    if (this.stopWatchingUrl) {
+      return;
+    }
+    this.stopWatchingUrl = this.location.onUrlChange((url) => {
+      // On ARRIVAL only: this page writes its own search into the URL (F09), and a URL change that
+      // never left the page is not a return to it.
+      const arrived = isFormsHomeUrl(url) && !this.onHomeRoute;
+      this.onHomeRoute = isFormsHomeUrl(url);
+      if (!arrived) {
+        return;
+      }
+      // Not floating: the coalescer never rejects, and `readForms` shows its own failure.
+      void this.loadForms();
+    });
   }
 
   /**
@@ -160,9 +254,19 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     return super.Refresh();
   }
 
-  public ngOnDestroy(): void {
+  /** Set on destroy so a write that settles afterwards does not render or focus a dead view. */
+  private destroyed = false;
+
+  public override ngOnDestroy(): void {
+    this.destroyed = true;
     this.formChanges?.unsubscribe();
     this.formChanges = undefined;
+    this.stopWatchingUrl?.();
+    this.stopWatchingUrl = undefined;
+    this.clearUrlTimer();
+    // BaseResourceComponent's teardown ends MJ's query-param subscriptions, which this page now
+    // relies on (F09); shadowing it without the call left them running after the page was gone.
+    super.ngOnDestroy();
   }
 
   /**
@@ -211,6 +315,7 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
       'abort',
       () => {
         this.fail(signal.reason, 'Failed to load forms.');
+        this.listLoadError = this.errorMessage;
         this.endLoad();
       },
       { once: true },
@@ -220,11 +325,13 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
       const rows = await this.data.loadForms();
       if (signal.aborted) return;
       this.forms = rows;
+      this.listLoadError = null;
       this.applyFilter();
     } catch (err) {
       // Abandoned: the coalescer logs this late failure; the page already says the read failed.
       if (signal.aborted) throw err;
       this.fail(err, 'Failed to load forms.');
+      this.listLoadError = this.errorMessage;
     } finally {
       if (!signal.aborted) this.endLoad();
     }
@@ -266,6 +373,31 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.cdr.markForCheck();
   }
 
+  /** Which of loading / failed / first run / all archived / no match / list the page shows. */
+  public get listState(): HomeListState {
+    return homeListState({
+      loading: this.loading,
+      failed: this.listLoadError !== null,
+      total: this.forms.length,
+      archived: this.archivedCount,
+      visible: this.visibleForms.length,
+      query: this.query,
+      showArchived: this.showArchived,
+    });
+  }
+
+  /**
+   * What the top banner says, or null. Every message shows there except a list failure the failed
+   * card is already telling. Asked of `listState`, not of the message alone: a reload that fails
+   * under a list already on screen renders no failed card, so the banner is its only place.
+   */
+  public get bannerMessage(): string | null {
+    if (this.errorMessage === null) {
+      return null;
+    }
+    return this.errorMessage === this.listLoadError && this.listState === 'failed' ? null : this.errorMessage;
+  }
+
   public get archivedCount(): number {
     return this.forms.filter((f) => f.status === ARCHIVED_STATUS).length;
   }
@@ -273,10 +405,111 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   public toggleArchived(): void {
     this.showArchived = !this.showArchived;
     this.applyFilter();
+    this.writeUrl();
+  }
+
+  /** The search box: narrows at once; the URL follows once typing pauses. */
+  public setQuery(text: string): void {
+    this.query = text;
+    this.applyFilter();
+    this.clearUrlTimer();
+    this.urlWriteTimer = setTimeout(() => {
+      this.urlWriteTimer = null;
+      this.writeUrl();
+    }, HOME_URL_DEBOUNCE_MS);
+  }
+
+  /**
+   * A link, a reload or back / forward named a search and toggle (UI audit F09). MJ delivers these
+   * with its own write-back suppressed, so applying them here does not rewrite the URL.
+   */
+  protected override OnQueryParamsChanged(params: Record<string, string>, _source: 'popstate' | 'deeplink'): void {
+    const view = homeViewFromParams(params);
+    this.clearUrlTimer();
+    this.query = view.query;
+    this.showArchived = view.showArchived;
+    this.applyFilter();
+  }
+
+  private writeUrl(): void {
+    this.clearUrlTimer();
+    this.UpdateQueryParams(homeViewToParams({ query: this.query, showArchived: this.showArchived }));
+  }
+
+  private clearUrlTimer(): void {
+    if (this.urlWriteTimer !== null) {
+      clearTimeout(this.urlWriteTimer);
+      this.urlWriteTimer = null;
+    }
   }
 
   public isArchived(row: FormSummaryRow): boolean {
     return row.status === ARCHIVED_STATUS;
+  }
+
+  /**
+   * The Archive icon's click. Restoring opens nothing and is one click; archiving asks first
+   * (F11) — one stray click used to close the form's share links with no question.
+   *
+   * There is deliberately no Undo toast: a true undo would reopen the links, which is a server-side
+   * decision (`Forms.RestoreForm` keeps them closed on purpose).
+   */
+  public async requestArchive(row: FormSummaryRow): Promise<void> {
+    if (this.isArchived(row)) {
+      await this.toggleArchive(row);
+      return;
+    }
+    this.confirmingArchive = row.id;
+    this.cdr.markForCheck();
+  }
+
+  /** The question the inline confirm asks; the form's name is in it so the row cannot be mistaken. */
+  public archiveQuestion(row: FormSummaryRow): string {
+    return `Archive "${row.name}"? Its open share links close and respondents see "no longer accepting responses". Restore brings it back, but the links stay closed.`;
+  }
+
+  /**
+   * `event` is the button's own click, stopped here as a second guard. The first is the row itself:
+   * `mjfRowActivate` ignores any click that starts in a button. The stop still matters if this
+   * button is ever moved out of the row's control check, because the confirm re-renders as soon as
+   * the state clears and removes the wrapper's own `(click)` stop mid-dispatch.
+   */
+  public async confirmArchive(row: FormSummaryRow, event?: StoppableEvent): Promise<void> {
+    event?.stopPropagation();
+    this.confirmingArchive = null;
+    await this.toggleArchive(row);
+    // The user may have navigated away during the archive; a destroyed view cannot be rendered.
+    if (this.destroyed) {
+      return;
+    }
+    // The row usually leaves the list (archived forms are hidden); focus must not fall to <body>.
+    if (this.visibleForms.some((r) => r.id === row.id)) {
+      this.focusArchiveTrigger(row.id);
+    } else {
+      this.pageTitle?.nativeElement.focus();
+    }
+  }
+
+  /** Stops its own click as a second guard, for the reason given on {@link confirmArchive}. */
+  public cancelArchive(event?: StoppableEvent): void {
+    event?.stopPropagation();
+    const rowId = this.confirmingArchive;
+    this.confirmingArchive = null;
+    this.cdr.markForCheck();
+    if (rowId) {
+      this.focusArchiveTrigger(rowId);
+    }
+  }
+
+  /**
+   * Gives focus back to a row's Archive/Restore icon once the confirm that replaced it is gone
+   * (WCAG 2.4.3: a keyboard user otherwise restarts Tab from the top of the page). The icon is
+   * re-created by the view update, so render synchronously first; `detectChanges` is the one way
+   * to know the element exists before asking for it.
+   */
+  private focusArchiveTrigger(rowId: string): void {
+    this.cdr.detectChanges();
+    this.archiveTriggers?.find((t) => t.nativeElement.dataset['rowId'] === rowId)?.nativeElement.focus();
   }
 
   /**
@@ -315,6 +548,7 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
 
   /** Opens an existing form record (renders the WP-D builder). */
   public openForm(row: FormSummaryRow): void {
+    this.confirmingArchive = null;
     this.OpenEntityRecord.emit({
       EntityName: HOME_ENTITY.forms,
       RecordPKey: CompositeKey.FromID(row.id),
@@ -458,11 +692,15 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.cdr.markForCheck();
   }
 
-  /** Alert, log and emitted Error all say what failed; the original failure rides along as `cause`. */
+  /**
+   * Alert and log say what failed; the original failure is logged with it. Never emitted as
+   * `BaseDashboard.Error`: MJ's host answers that, during the first load, by replacing the whole
+   * page with "Unable to Load Dashboard" (UI audit F01), and every failure here has a state on
+   * the page with a way out. Same rule as the reporting dashboard's `fail`.
+   */
   private fail(err: unknown, action: string): void {
     const message = failureMessage(err, action);
     this.errorMessage = message;
-    LogError(message);
-    this.Error.emit(new Error(message, { cause: err }));
+    LogError(message, undefined, err);
   }
 }

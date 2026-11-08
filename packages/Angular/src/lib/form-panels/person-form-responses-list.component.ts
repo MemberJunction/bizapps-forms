@@ -44,7 +44,7 @@ const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded.";
         <div class="pfr-state">
           <p class="pfr-loading" role="status">
             <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
-            Loading forms…
+            Loading responses…
           </p>
         </div>
       }
@@ -52,7 +52,7 @@ const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded.";
         <div class="pfr-state">
           <div class="mjf-empty" role="alert">
             <span class="mjf-empty-icon"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i></span>
-            <span class="mjf-empty-title">Forms could not be loaded</span>
+            <span class="mjf-empty-title">Responses could not be loaded</span>
             <p class="mjf-empty-body">{{ ErrorMessage() }}</p>
             <button type="button" class="mjf-btn mjf-btn--sm" (click)="Retry()">
               <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
@@ -66,7 +66,7 @@ const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded.";
           <div class="pfr-state">
             <div class="mjf-empty">
               <span class="mjf-empty-icon"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i></span>
-              <span class="mjf-empty-title">No forms yet</span>
+              <span class="mjf-empty-title">No responses from this person yet</span>
               <p class="mjf-empty-body">Responses this person submits will appear here.</p>
             </div>
           </div>
@@ -161,7 +161,7 @@ const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded.";
       .pfr-progress {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 4px;
         color: var(--mj-status-warning-text);
       }
     `,

@@ -45,7 +45,7 @@ export const FORMS_REPORTING_CSS = /* css */ `
   background: var(--mj-bg-surface);
 }
 
-.rp-rail-head { display: flex; flex-direction: column; gap: 3px; padding: 0 6px; }
+.rp-rail-head { display: flex; flex-direction: column; gap: 4px; padding: 0 4px; }
 .rp-rail-title {
   margin: 0;
   font-size: var(--mjf-section);
@@ -77,7 +77,7 @@ export const FORMS_REPORTING_CSS = /* css */ `
   gap: var(--mjf-gap-sm);
   width: 100%;
   min-height: var(--mjf-tap);
-  padding: var(--mjf-gap-sm) 10px;
+  padding: var(--mjf-gap-sm) 8px;
   font: inherit;
   font-size: var(--mjf-meta);
   text-align: left;
@@ -105,10 +105,10 @@ export const FORMS_REPORTING_CSS = /* css */ `
   color: var(--mj-text-secondary);
   font-variant-numeric: tabular-nums;
 }
-.rp-form-count.is-none { color: var(--mj-text-disabled); font-weight: 400; }
+.rp-form-count.is-none { color: var(--mj-text-muted); font-weight: 400; }
 
-.rp-rail-none { margin: 0; padding: 0 6px; font-size: var(--mjf-meta); color: var(--mj-text-muted); }
-.rp-rail-count { margin: 0; padding: 0 6px; font-size: var(--mjf-label); color: var(--mj-text-muted); }
+.rp-rail-none { margin: 0; padding: 0 4px; font-size: var(--mjf-meta); color: var(--mj-text-muted); }
+.rp-rail-count { margin: 0; padding: 0 4px; font-size: var(--mjf-label); color: var(--mj-text-muted); }
 
 /* ----------------------------------------------------------------- the report */
 
@@ -132,7 +132,7 @@ export const FORMS_REPORTING_CSS = /* css */ `
 .rp-head-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .rp-head-name {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: var(--mjf-heading);
   font-weight: 650;
   letter-spacing: var(--mj-tracking-tight, -0.01em);
   color: var(--mj-text-primary);
@@ -176,6 +176,11 @@ export const FORMS_REPORTING_CSS = /* css */ `
 }
 .rp-alert-close {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px; /* measured 18x24 before: under WCAG 2.5.8's 24px */
+  min-height: 32px;
   padding: 4px;
   font: inherit;
   color: inherit;

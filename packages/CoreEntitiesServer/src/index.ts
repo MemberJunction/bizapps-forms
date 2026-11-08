@@ -181,7 +181,7 @@ export { EngineTransactionFailure } from './engines/engine-guards.js';
 export { FormAuthoringError } from './engines/authoring-errors.js';
 export type { ClonedForm } from './engines/form-clone.js';
 export { STARTER_TEMPLATES, getStarterTemplate, type StarterTemplate } from './engines/starter-templates.js';
-export { requireDatabaseProvider } from './shared/database-provider.js';
+export { isPostgres, requireDatabaseProvider } from './shared/database-provider.js';
 export { isGuid } from './shared/guid.js';
 export { FORMS_ENTITY } from './shared/entity-names.js';
 
@@ -276,7 +276,9 @@ export {
   type ResolvedDefinition,
 } from './submission/published-link.js';
 export { checkRespondentScope, type ScopeCheckResult, type ScopeMetadataProvider } from './submission/respondent-scope.js';
+export { findResumableResponseById, type ResponseLookupResult } from './submission/response-lookup.js';
 export { foldId, responseIsOurs, scopeNamesResponse, withoutQueryEcho, type ResponseCaller } from './submission/persistence.js';
+export { isTerminalResponseStatus, type FormResponseStatus } from './submission/response-status.js';
 export { deviceResumeAllowed, distributionOfResponse } from './submission/resume-columns.js';
 export { revokeResponseInvites, type RevokeSummary } from './magic-link/response-invite-revocation.js';
 export { checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE, apiOwnOrigin, resetEmbedOriginConfigForTests, type EmbedOriginVerdict } from './shared/embed-origin.js';

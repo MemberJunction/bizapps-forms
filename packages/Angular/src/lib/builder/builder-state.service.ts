@@ -16,6 +16,8 @@ import {
 import { FORMS_ENTITY } from '../shared/entity-names';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
 import { defaultEndingChanges, defaultEndingId, vacantDefaultEnding } from './default-ending';
+import { PendingDelete, type HeldDelete } from './pending-delete';
+import { describeSaveError } from './delete-refusal';
 
 /**
  * How long an edit waits for a follow-up before it is written.
@@ -314,11 +316,13 @@ export class BuilderStateService {
    * matters, and a refusal leaves both the rows and the builder's flags as they were.
    */
   public async setDefaultEnding(tree: FormTree, screenId: string): Promise<boolean> {
-    const changes = defaultEndingChanges(tree.screens, screenId);
-    if (changes.set === null && changes.clear.length === 0) {
-      return true;
-    }
     return this.runStructural(tree, 'change the default ending', false, async (graph) => {
+      // Read when the save RUNS: a held delete of the current default (F07) lands first and
+      // promotes a survivor, and a change worked out before it would set a second default.
+      const changes = defaultEndingChanges(tree.screens, screenId);
+      if (changes.set === null && changes.clear.length === 0) {
+        return true;
+      }
       for (const screen of changes.clear) {
         (await graph.StageScreen(screen)).IsDefault = false;
       }
@@ -344,11 +348,13 @@ export class BuilderStateService {
    */
   public async deleteQuestion(tree: FormTree, page: PageNode, node: QuestionNode): Promise<boolean> {
     return this.runStructural(tree, 'delete question', false, async (graph) => {
-      // Read when the save RUNS, not when it was asked for: a delete queued behind another one
-      // must renumber, and leave on screen, what the first left — not a list from before it.
-      if (!page.questions.includes(node)) {
+      // Once only: a second delete of the same row would be a save the server refuses.
+      if (this.deleted.has(node.entity)) {
         return true;
       }
+      // Read when the save RUNS, not when it was asked for: a delete queued behind another one
+      // must renumber, and leave on screen, what the first left — not a list from before it. The
+      // node may already be out of the page: a held delete takes it off screen first (F07).
       const survivors = page.questions.filter((q) => q !== node);
       const stagedPage = await graph.StagePage(page.entity);
       graph.RemoveQuestion(stagedPage, await graph.StageQuestion(stagedPage, node.entity));
@@ -356,6 +362,7 @@ export class BuilderStateService {
       if (!(await this.commit(graph, 'delete question'))) {
         return false;
       }
+      this.deleted.add(node.entity);
       page.questions = page.questions.filter((q) => q !== node);
       return true;
     });
@@ -368,8 +375,8 @@ export class BuilderStateService {
     option: mjBizAppsFormsFormQuestionOptionEntity,
   ): Promise<boolean> {
     return this.runStructural(tree, 'delete option', false, async (graph) => {
-      // Read when the save runs — see deleteQuestion.
-      if (!node.options.includes(option)) {
+      // Once only, and read when the save runs — see deleteQuestion.
+      if (this.deleted.has(option)) {
         return true;
       }
       const survivors = node.options.filter((o) => o !== option);
@@ -379,6 +386,7 @@ export class BuilderStateService {
       if (!(await this.commit(graph, 'delete option'))) {
         return false;
       }
+      this.deleted.add(option);
       node.options = node.options.filter((o) => o !== option);
       return true;
     });
@@ -498,6 +506,60 @@ export class BuilderStateService {
 
   /** The one structural save in flight, or null. Field autosaves wait for it (see the class note). */
   private structuralInFlight: Promise<void> | null = null;
+  /** Rows this service has deleted, so a delete asked for twice is saved once. */
+  private readonly deleted = new WeakSet<object>();
+
+  /**
+   * The delete the author can still undo (UI audit F07) — see `pending-delete.ts` for why the write
+   * is held rather than undone. Owned HERE because this is where every write is ordered: the held
+   * delete is released before any other structural edit is queued and before a flush, so no save
+   * can overtake it and no publish can snapshot a deleted item.
+   */
+  private readonly pendingDelete = new PendingDelete();
+  /** What the undo toast shows, or null. */
+  public readonly heldDelete = this.pendingDelete.current;
+
+  /**
+   * Take an item out of the tree and hold its delete. `take` removes it and says how to put it back
+   * and how to write the delete, or returns null when the item is already gone. Resolves true once
+   * the delete is held.
+   *
+   * WHY `take` IS CALLED HERE, LATE. A delete's write renumbers whatever it finds in the tree WHEN
+   * IT RUNS, and holding this one writes the one held before it. An item taken out first would be
+   * missing from that renumber — so Undo put it back at a position the rows no longer had, and a
+   * default ending deleted next left the first delete no survivor to promote. So the held delete is
+   * written first, and only then is the next item taken. Calls are queued, so a third delete waits
+   * for the second to be held.
+   */
+  public holdDelete(label: string, take: () => Omit<HeldDelete, 'label'> | null): Promise<boolean> {
+    const run = async (): Promise<boolean> => {
+      await this.pendingDelete.release();
+      const taken = take();
+      if (!taken) {
+        return false;
+      }
+      this.pendingDelete.hold({ label, ...taken });
+      return true;
+    };
+    const held = this.holdQueue.then(run);
+    this.holdQueue = held.then(
+      () => undefined,
+      () => undefined,
+    );
+    return held;
+  }
+  /** `holdDelete` calls, one at a time. Never rejects; each caller sees its own outcome. */
+  private holdQueue: Promise<void> = Promise.resolve();
+
+  /** Take back the held delete; false when there is none. */
+  public undoDelete(): boolean {
+    return this.pendingDelete.undo();
+  }
+
+  /** Write the held delete now (leaving the builder, re-reading the tree). Resolves once it has settled. */
+  public async releaseHeldDelete(): Promise<void> {
+    await this.pendingDelete.release();
+  }
   /** Structural edits run one at a time, in the order they were asked for. */
   private structuralQueue: Promise<unknown> = Promise.resolve();
 
@@ -521,10 +583,13 @@ export class BuilderStateService {
     failed: T,
     work: (graph: StructureGraph) => Promise<T>,
   ): Promise<T> {
+    // Queue the held delete FIRST: `release` reaches its commit synchronously, and the commit is
+    // itself a structural edit, so it lands on the queue ahead of this one.
+    void this.pendingDelete.release();
     const run = this.structuralQueue.then(async () => {
       let release = (): void => undefined;
       try {
-        await this.flushPendingSaves();
+        await this.flushFieldSaves();
         this.structuralInFlight = new Promise<void>((resolve) => {
           release = resolve;
         });
@@ -553,8 +618,9 @@ export class BuilderStateService {
     if (result.ok) {
       return true;
     }
+    // The log keeps MJ's full report (the SQL batch it ran); the author reads a sentence.
     LogError(`Forms builder failed to ${action}: ${result.error}`);
-    this._lastFailure.set(`Could not ${action}. ${result.error}`);
+    this._lastFailure.set(`Could not ${action}. ${describeSaveError(result.error)}`);
     return false;
   }
 
@@ -614,6 +680,17 @@ export class BuilderStateService {
    * published version.
    */
   public async flushPendingSaves(): Promise<void> {
+    // A held delete is a pending save too, and publish must not snapshot what the author deleted.
+    await this.pendingDelete.release();
+    await this.flushFieldSaves();
+  }
+
+  /**
+   * Land every debounced field save. The structural queue calls THIS, never
+   * {@link flushPendingSaves}: releasing a held delete from inside a queued edit would queue its
+   * commit behind the very edit waiting on it — a deadlock (held-delete spec, "no deadlock").
+   */
+  private async flushFieldSaves(): Promise<void> {
     for (const [entity, timer] of [...this.saveTimers]) {
       clearTimeout(timer);
       this.saveTimers.delete(entity);
@@ -713,6 +790,47 @@ export class BuilderStateService {
     this._lastFailure.set(null);
   }
 
+  /** Show a refusal the builder decided itself (a delete it will not attempt), in the same band. */
+  public showRefusal(message: string): void {
+    this._lastFailure.set(message);
+  }
+
+  /**
+   * How many stored answers the questions hold, or null when that could not be read.
+   *
+   * Asked before a delete is held: an answered question cannot be deleted (every answer points at
+   * its question), and the author should hear that at the click, not ten seconds later. A failed
+   * read is logged and answers null, and the caller then holds the delete as before; a refusal
+   * still comes back from the save, reworded.
+   */
+  public async answerCount(questionIds: readonly string[]): Promise<number | null> {
+    if (questionIds.length === 0) {
+      return 0;
+    }
+    try {
+      return await this.countAnswers(questionIds);
+    } catch (err) {
+      LogError(`Forms builder could not count the answers of questions ${questionIds.join(', ')}: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+  }
+
+  /** The count itself; a spec overrides this. Throws when the read fails. */
+  protected async countAnswers(questionIds: readonly string[]): Promise<number> {
+    const result = await new RunView().RunView(
+      {
+        EntityName: FORMS_ENTITY.FormResponseAnswer,
+        ExtraFilter: `QuestionID IN (${questionIds.map(quoteSqlString).join(',')})`,
+        ResultType: 'count_only',
+      },
+      this.md.CurrentUser,
+    );
+    if (!result.Success) {
+      throw new Error(result.ErrorMessage || 'the read was refused');
+    }
+    return result.TotalRowCount ?? 0;
+  }
+
   /**
    * Persist a field edit to one entity now (not debounced) — through the same queue as every other
    * builder write, so it is flushed before a publish, never runs twice at once for one row, and
@@ -760,7 +878,7 @@ export class BuilderStateService {
   private reportFailure(action: string, entity: SaveableEntity): void {
     const reason = entity.LatestResult?.CompleteMessage ?? 'unknown error';
     LogError(`Forms builder failed to ${action}: ${reason}`);
-    this._lastFailure.set(`Could not ${action}. ${reason}`);
+    this._lastFailure.set(`Could not ${action}. ${describeSaveError(reason)}`);
   }
 }
 

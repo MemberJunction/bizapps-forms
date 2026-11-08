@@ -186,7 +186,7 @@
           title="Your edits are not published yet. Publishing pushes them live."
           (click)="publish()"
         >
-          <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Publish changes
+          <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Publish<span class="fb-publish-more"> changes</span>
         </button>
       }
       @case ('publish') {
@@ -241,57 +241,38 @@
     </div>
   }
 
-  <!-- Tabs -->
-  <nav class="fb-tabs" role="tablist" aria-label="Builder workspace">
-    <button
-      type="button"
-      class="fb-tab"
-      role="tab"
-      [class.is-on]="activeTab === 'build'"
-      [attr.aria-selected]="activeTab === 'build'"
-      (click)="setTab('build')"
-    ><i class="fa-solid fa-list-check" aria-hidden="true"></i> Build</button>
-    <button
-      type="button"
-      class="fb-tab"
-      role="tab"
-      [class.is-on]="activeTab === 'design'"
-      [attr.aria-selected]="activeTab === 'design'"
-      (click)="setTab('design')"
-    ><i class="fa-solid fa-palette" aria-hidden="true"></i> Design</button>
-    <button
-      type="button"
-      class="fb-tab"
-      role="tab"
-      [class.is-on]="activeTab === 'distribute'"
-      [attr.aria-selected]="activeTab === 'distribute'"
-      (click)="setTab('distribute')"
-    ><i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Distribute</button>
-    <button
-      type="button"
-      class="fb-tab"
-      role="tab"
-      [class.is-on]="activeTab === 'automate'"
-      [attr.aria-selected]="activeTab === 'automate'"
-      (click)="setTab('automate')"
-    ><i class="fa-solid fa-bolt" aria-hidden="true"></i> Automate</button>
-    <button
-      type="button"
-      class="fb-tab"
-      role="tab"
-      [class.is-on]="activeTab === 'responses'"
-      [attr.aria-selected]="activeTab === 'responses'"
-      (click)="setTab('responses')"
-    ><i class="fa-solid fa-inbox" aria-hidden="true"></i> Responses</button>
+  <!-- Tabs. One Tab stop: the selected tab is tabindex 0, the rest -1, and the arrow keys move
+       along the strip (builder-tabs.ts). -->
+  <nav class="fb-tabs" role="tablist" aria-label="Builder workspace" (keydown)="onTabKey($event)">
+    @for (item of tabItems; track item.tab) {
+      <button
+        #tabButton
+        type="button"
+        class="fb-tab"
+        role="tab"
+        [id]="tabId(item.tab)"
+        [attr.aria-controls]="panelId(item.tab)"
+        [class.is-on]="activeTab === item.tab"
+        [attr.aria-selected]="activeTab === item.tab"
+        [attr.tabindex]="activeTab === item.tab ? 0 : -1"
+        (click)="setTab(item.tab)"
+      ><i [class]="item.icon" aria-hidden="true"></i> {{ item.label }}</button>
+    }
   </nav>
 
   @if (activeTab === 'automate' && tree) {
-    <mjf-automation-tab class="fb-pane-host" [FormID]="tree.form.ID" [Questions]="mappableQuestions" />
+    <mjf-automation-tab class="fb-pane-host" role="tabpanel" [id]="panelId('automate')" [attr.aria-labelledby]="tabId('automate')" [FormID]="tree.form.ID" [Questions]="mappableQuestions" />
   }
 
   <!-- Created on activation, so the responses query never runs on builder open. -->
   @if (activeTab === 'responses' && tree) {
-    <mjf-responses-tab class="fb-pane-host" [FormID]="tree.form.ID" (OpenRecord)="openLinkedRecord($event)" />
+    <mjf-responses-tab
+      class="fb-pane-host"
+      role="tabpanel" [id]="panelId('responses')" [attr.aria-labelledby]="tabId('responses')"
+      [FormID]="tree.form.ID"
+      [InitialState]="responsesState"
+      (StateChange)="onResponsesState($event)"
+      (OpenRecord)="openLinkedRecord($event)" />
   }
 
   <!-- `&& tree` matters: everything below reads the loaded tree, and the tree is assigned after
@@ -300,7 +281,7 @@
        screens in. The Automate and Responses tabs above already gate on `tree` for the same
        reason; this one did not. -->
   @if (activeTab === 'build' && builderReady) {
-    <div class="fb-body">
+    <div class="fb-body" [class.has-selection]="selection.kind !== 'none'" role="tabpanel" [id]="panelId('build')" [attr.aria-labelledby]="tabId('build')">
       <!-- LEFT: palette -->
       <nav class="fb-pane fb-pane--left" aria-label="Add question palette">
         <div class="fb-palette-search">
@@ -362,25 +343,30 @@
                author deletes the screen. -->
           <div class="fb-opening">
           @if (welcomeScreen; as ws) {
+            <!-- Not a tab stop itself: the title button is the keyboard path, and a click anywhere
+                 but a control selects it (UI audit F05: a focusable card held Delete). -->
             <article
               class="fb-screen"
               [class.is-selected]="ws.ID === selectedScreenId"
-              tabindex="0"
-              (click)="selectScreen(ws)"
-              (keydown.enter)="selectScreen(ws)"
-              [attr.aria-label]="'Edit welcome screen ' + ws.Title"
+              (mjfRowActivate)="selectScreen(ws)"
             >
               <span class="fb-screen-icon mjf-viz-4"><i class="fa-solid fa-flag" aria-hidden="true"></i></span>
               <div class="fb-screen-main">
                 <div class="fb-screen-kind">Welcome screen</div>
-                <div class="fb-screen-title">{{ ws.Title }}</div>
+                <button
+                  type="button"
+                  class="fb-screen-title"
+                  [attr.aria-label]="'Edit welcome screen ' + ws.Title"
+                  [attr.aria-current]="ws.ID === selectedScreenId ? 'true' : null"
+                  (click)="selectScreen(ws)"
+                >{{ ws.Title }}</button>
               </div>
               <button
                 type="button"
                 class="fb-q-btn fb-q-btn--danger fb-reveal"
                 [disabled]="busy"
                 aria-label="Delete welcome screen"
-                (click)="deleteScreen(ws); $event.stopPropagation()"
+                (click)="deleteScreen(ws)"
               ><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
             </article>
           } @else {
@@ -406,11 +392,14 @@
                  setting. Shown only when there IS more than one page, so a simple one-page form
                  gains no chrome it has no use for. -->
             @if (pages.length > 1) {
+              <!-- A click on the head's own surface selects the section; its controls do their own
+                   job. A click in the title selects it too, as the head-wide click used to; focus
+                   does not, so tabbing past it keeps the selected question. -->
               <div
                 class="fb-page-head"
                 [class.is-selected]="selectedPageId === page.entity.ID"
                 [class.is-add-target]="addTarget?.notice && addTarget?.page?.entity?.ID === page.entity.ID"
-                (click)="selectPage(page)"
+                (mjfRowActivate)="selectPage(page)"
               >
                 <span class="fb-page-num">{{ $index + 1 }}</span>
                 <input
@@ -420,6 +409,7 @@
                   [value]="page.entity.Title ?? ''"
                   [attr.placeholder]="'Page ' + ($index + 1)"
                   [attr.aria-label]="'Title for page ' + ($index + 1)"
+                  (click)="selectPage(page)"
                   (change)="setPageTitle(page, pageTitle.value)"
                 />
                 <!-- Where the next palette click lands. The destination used to be invisible
@@ -459,7 +449,7 @@
                   class="fb-q-btn fb-q-btn--danger fb-reveal"
                   [disabled]="busy"
                   [attr.aria-label]="'Delete section ' + ($index + 1)"
-                  (click)="$event.stopPropagation(); deletePage(page)"
+                  (click)="deletePage(page)"
                 ><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
               </div>
               <!-- The widget has always rendered this under the section heading; nothing in the
@@ -481,8 +471,7 @@
                  author to the palette to do the one thing the canvas is for.
 
                  Seam 0 is exact, not merely clamped: it is the only seam an empty page has, and
-                 the per-question bar always opens $index + 1, so the two openers cannot collide.
-                 No stopPropagation, unlike that bar: this does not sit inside a clickable card. -->
+                 the per-question bar always opens $index + 1, so the two openers cannot collide. -->
             @if (page.questions.length === 0) {
               <div class="fb-canvas-empty">
                 <i class="fa-solid fa-list-check" aria-hidden="true"></i>
@@ -513,16 +502,16 @@
               (cdkDropListDropped)="dropQuestion(page, $event)"
             >
             @for (node of page.questions; track node.entity.ID) {
+              <!-- Not a tab stop itself: the question's label is a button and the keyboard path. A
+                   click anywhere but a control selects it; the click a drag leaves behind does not
+                   (UI audit F05: a focusable card held four buttons). -->
               <article
                 class="fb-q"
                 cdkDrag
                 [cdkDragData]="node"
                 [class.is-selected]="node.entity.ID === selectedQuestionId"
                 [attr.data-question-id]="node.entity.ID"
-                tabindex="0"
-                (click)="selectQuestion(node)"
-                (keydown.enter)="selectQuestion(node)"
-                [attr.aria-label]="'Edit question ' + node.entity.Prompt"
+                (mjfRowActivate)="selectQuestion(node)"
               >
                 <div class="fb-q-drag-preview" *cdkDragPreview>
                   <span class="fb-q-num">{{ displayIndex(page, node) }}</span>
@@ -540,7 +529,7 @@
                       [disabled]="busy"
                       [attr.aria-label]="'Add content before ' + node.entity.Prompt"
                       [attr.aria-expanded]="isPickerOpen(page, 0)"
-                      (click)="$event.stopPropagation(); openTypePicker(page, 0)"
+                      (click)="openTypePicker(page, 0)"
                     >
                       <i class="fa-solid fa-plus" aria-hidden="true"></i> Add content above
                     </button>
@@ -561,11 +550,16 @@
                   cdkDragHandle
                   [disabled]="busy"
                   [attr.aria-label]="'Drag to reorder question ' + node.entity.Prompt"
-                  (click)="$event.stopPropagation()"
                 ><i class="fa-solid fa-grip-vertical" aria-hidden="true"></i></button>
                 <span class="fb-q-num">{{ displayIndex(page, node) }}</span>
                 <div class="fb-q-main">
-                  <div class="fb-q-label">{{ node.entity.Prompt }}</div>
+                  <button
+                    type="button"
+                    class="fb-q-label"
+                    [attr.aria-label]="'Edit question ' + node.entity.Prompt"
+                    [attr.aria-current]="node.entity.ID === selectedQuestionId ? 'true' : null"
+                    (click)="selectQuestion(node)"
+                  >{{ node.entity.Prompt }}</button>
                   @if (node.entity.HelpText) {
                     <div class="fb-q-help">{{ node.entity.HelpText }}</div>
                   }
@@ -593,22 +587,22 @@
                     type="button"
                     class="fb-q-btn"
                     [disabled]="busy || !canMoveQuestion(page, node, -1)"
-                    (click)="moveQuestion(page, node, -1); $event.stopPropagation()"
-                    aria-label="Move up"
+                    (click)="moveQuestion(page, node, -1)"
+                    [attr.aria-label]="'Move ' + node.entity.Prompt + ' up'"
                   ><i class="fa-solid fa-chevron-up" aria-hidden="true"></i></button>
                   <button
                     type="button"
                     class="fb-q-btn"
                     [disabled]="busy || !canMoveQuestion(page, node, 1)"
-                    (click)="moveQuestion(page, node, 1); $event.stopPropagation()"
-                    aria-label="Move down"
+                    (click)="moveQuestion(page, node, 1)"
+                    [attr.aria-label]="'Move ' + node.entity.Prompt + ' down'"
                   ><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
                   <button
                     type="button"
                     class="fb-q-btn fb-q-btn--danger"
                     [disabled]="busy"
-                    (click)="deleteQuestion(page, node); $event.stopPropagation()"
-                    aria-label="Delete question"
+                    (click)="deleteQuestion(page, node)"
+                    [attr.aria-label]="'Delete ' + node.entity.Prompt"
                   ><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
                 </div>
                 </div>
@@ -631,7 +625,7 @@
                       [disabled]="busy"
                       [attr.aria-label]="'Add content after ' + node.entity.Prompt"
                       [attr.aria-expanded]="isPickerOpen(page, $index + 1)"
-                      (click)="$event.stopPropagation(); openTypePicker(page, $index + 1)"
+                      (click)="openTypePicker(page, $index + 1)"
                     >
                       <i class="fa-solid fa-plus" aria-hidden="true"></i> Add content
                     </button>
@@ -662,10 +656,7 @@
               <article
                 class="fb-screen"
                 [class.is-selected]="es.ID === selectedScreenId"
-                tabindex="0"
-                (click)="selectScreen(es)"
-                (keydown.enter)="selectScreen(es)"
-                [attr.aria-label]="'Edit ending ' + es.Title"
+                (mjfRowActivate)="selectScreen(es)"
               >
                 <span class="fb-screen-icon mjf-viz-2"><i class="fa-solid fa-flag-checkered" aria-hidden="true"></i></span>
                 <div class="fb-screen-main">
@@ -693,7 +684,13 @@
                       }
                     }
                   </div>
-                  <div class="fb-screen-title">{{ es.Title }}</div>
+                  <button
+                    type="button"
+                    class="fb-screen-title"
+                    [attr.aria-label]="'Edit ending ' + es.Title"
+                    [attr.aria-current]="es.ID === selectedScreenId ? 'true' : null"
+                    (click)="selectScreen(es)"
+                  >{{ es.Title }}</button>
                 </div>
                 @if (es.RedirectURL) {
                   <span class="mjf-badge" title="Redirects instead of showing this screen">
@@ -704,8 +701,8 @@
                   type="button"
                   class="fb-q-btn fb-q-btn--danger fb-reveal"
                   [disabled]="busy"
-                  aria-label="Delete ending"
-                  (click)="deleteScreen(es); $event.stopPropagation()"
+                  [attr.aria-label]="'Delete ending ' + es.Title"
+                  (click)="deleteScreen(es)"
                 ><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
               </article>
             }
@@ -725,7 +722,13 @@
       </section>
 
       <!-- RIGHT: properties -->
-      <aside class="fb-pane fb-pane--right" aria-label="Properties">
+      <!-- Below 900px this is a bottom sheet, shown while something is selected (F14). The head is
+           the sheet's own and is hidden at desktop width, where the pane is a column. -->
+      <aside class="fb-pane fb-pane--right" aria-label="Properties" (keydown.escape)="onPropertiesEscape()">
+        <div class="fb-sheet-head">
+          <span class="fb-sheet-title">{{ inspectorTitle }}</span>
+          <button type="button" class="mjf-btn mjf-btn--sm fb-sheet-done" (click)="closeSheet()">Done</button>
+        </div>
         @if (selectedScreen; as screen) {
           <mjf-screen-editor
             [sections]="formSections"
@@ -771,7 +774,7 @@
       </aside>
     </div>
   } @else if (activeTab === 'design') {
-    <div class="fb-design">
+    <div class="fb-design" role="tabpanel" [id]="panelId('design')" [attr.aria-labelledby]="tabId('design')">
       <mjf-design-panel
         [form]="record"
         [definition]="designPreviewDefinition"
@@ -779,7 +782,7 @@
       ></mjf-design-panel>
     </div>
   } @else if (activeTab === 'distribute') {
-    <div class="fb-distribute">
+    <div class="fb-distribute" role="tabpanel" [id]="panelId('distribute')" [attr.aria-labelledby]="tabId('distribute')">
       <mjf-distribution-manager [formId]="record.ID"></mjf-distribution-manager>
     </div>
   }
@@ -797,6 +800,12 @@
       (Confirmed)="saveAsTemplate($event)"
       (Cancelled)="closeTemplateDialog()"
     />
+  }
+
+  <!-- The delete the author can still take back (UI audit F07). One item at most; tracked by
+       identity so each delete gets a fresh toast and countdown. -->
+  @for (held of heldToasts(); track held) {
+    <mjf-undo-toast [Label]="held.label" (Undo)="undoDelete()" />
   }
 </div>
 }

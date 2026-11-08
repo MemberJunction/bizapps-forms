@@ -96,7 +96,7 @@ import { FormsResponseDetailComponent } from './response-detail.component';
 
       /* Opened as an entity record rather than as a page of its own, so the form's name
          is a heading, not the app title. */
-      .rf-title { font-size: 1.5rem; }
+      .rf-title { font-size: var(--mjf-heading); }
 
       /* Collapsed by default: the audit fields matter to whoever is debugging a dedupe
          or a session, and to nobody else reading the response. */
@@ -118,7 +118,7 @@ import { FormsResponseDetailComponent } from './response-detail.component';
       .rf-raw-grid {
         display: grid;
         grid-template-columns: minmax(150px, max-content) 1fr;
-        gap: 6px var(--mjf-stack);
+        gap: 4px var(--mjf-stack);
         margin: var(--mjf-gap-sm) 0 0;
       }
       .rf-raw-grid dt { font-weight: 600; color: var(--mj-text-muted); }

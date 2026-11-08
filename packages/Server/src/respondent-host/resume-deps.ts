@@ -23,6 +23,8 @@ import {
   distributionOfResponse,
   distributionQuotaExceeded,
   distributionWindowRefusal,
+  findResumableResponseById,
+  foldId,
   FormsRateLimiter,
   FORMS_ENTITY,
   revokeResponseInvites,
@@ -178,7 +180,32 @@ async function loadResponse(
     status: row.Status,
     anonymousSessionId: row.AnonymousSessionID,
     formDistributionId: distributionOfResponse(row),
+    clientIdProven: await clientIdProven(row, contextUser, provider),
   };
+}
+
+/**
+ * Whether an UNOWNED row (blank `AnonymousSessionID`) carries the widget's client-id capability —
+ * its `SourceMetadata` recording the row's own primary key. Answered by the SAME lookup the submit
+ * pipeline's adopt path trusts, `findResumableResponseById`, rather than a second spelling of its
+ * `LIKE` proof. An owned row reports false WITHOUT querying: ownership is its proof, and
+ * `ownsDraft` never consults this field for one. Fail-CLOSED: a query error reports no proof, so a
+ * database blip cannot mint a bearer credential for a row nothing vouches for.
+ */
+async function clientIdProven(
+  row: mjBizAppsFormsFormResponseEntityType,
+  contextUser: UserInfo,
+  provider: DatabaseProviderBase,
+): Promise<boolean> {
+  if (foldId(row.AnonymousSessionID) !== '') {
+    return false;
+  }
+  const proof = await findResumableResponseById(
+    new RunView(provider),
+    { responseId: row.ID, formVersionId: row.FormVersionID },
+    contextUser,
+  );
+  return proof.ok && proof.response !== undefined;
 }
 
 /**

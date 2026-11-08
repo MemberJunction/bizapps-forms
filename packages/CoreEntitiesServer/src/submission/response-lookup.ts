@@ -187,7 +187,9 @@ export async function countPartialResponses(
     },
     contextUser,
   );
-  if (!result.Success) {
+  // MJ 6.2 types TotalRowCount as optional (absent only under SkipTotalRowCount, which this read
+  // never passes); a count without one is as unusable as a failed one, so both fail closed.
+  if (!result.Success || result.TotalRowCount == null) {
     return { ok: false, count: 0 };
   }
   return { ok: true, count: result.TotalRowCount };

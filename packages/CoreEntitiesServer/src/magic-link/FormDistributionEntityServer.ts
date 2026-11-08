@@ -52,13 +52,15 @@ import {
 } from '@mj-biz-apps/forms-entities';
 import { addViolations, refuse, refuseIfUnvalidated, tracksStoredValues, type RuleViolation } from '../entities/entity-refusal.js';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
+import { procedureCallInSchema } from '../shared/forms-procedure.js';
 import { getMagicLinkProvisioningConfig } from './config.js';
 import { MagicLinkMinterRegistry, type IAnonymousMagicLinkMinter, type InviteWriteHost } from './minter.js';
 import { runProvisioning, DISTRIBUTION_ENTITY_NAME, type MintedLink } from './provision-runner.js';
 
 /**
  * The SERVER-OWNED columns as the store holds them right now: the credential pair, and the
- * completion counter that submit advances with a raw conditional `UPDATE` (`submission/quota.ts`).
+ * completion counter that submit advances with a conditional `UPDATE` outside this entity
+ * (`submission/quota.ts`; a procedure on SQL Server).
  */
 type StoredServerColumns = Pick<
   mjBizAppsFormsFormDistributionEntityType,
@@ -66,9 +68,10 @@ type StoredServerColumns = Pick<
 >;
 
 /**
- * The provider surface a save needs to lock the row it is about to write: raw SQL on the provider's
- * own connection (so the lock is taken inside the transaction it opened), the quoting that names
- * the table, and the dialect that decides how a row lock is spelled.
+ * The provider surface a save needs to lock the row it is about to write: `ExecuteSQL` on the
+ * provider's own connection (so the lock is taken inside the transaction it opened), the quoting
+ * that names the procedure or table, and the dialect that picks the statement — the
+ * `spFormDistributionReadServerColumnsLocked` call on SQL Server, a raw `FOR UPDATE` on PostgreSQL.
  */
 type RowLockHost = IEntityDataProvider &
   Pick<DatabaseProviderBase, 'ExecuteSQL' | 'QuoteIdentifier' | 'QuoteSchemaAndView' | 'PlatformKey'>;
@@ -153,7 +156,7 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    * bizapps-forms#104 exists to remove, produced by the act of rotating. So an update runs as one
    * transaction on the row's own provider whose FIRST statement locks the row
    * ({@link adoptStoredServerColumns}); a second writer's lock waits until the first commits, then
-   * reads what the first one landed. Submit's raw slot `UPDATE` takes the same row lock, so it
+   * reads what the first one landed. Submit's conditional slot `UPDATE` (a procedure on SQL Server) takes the same row lock, so it
    * queues behind this turn too. The hook's own re-entrant save runs inside the transaction
    * already held, so it neither opens another nor locks again.
    *
@@ -431,7 +434,7 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    * Lock this row, and make this save carry the server-owned columns THE STORE holds, not the ones
    * this instance loaded — one statement for all three.
    *
-   * The count: submit advances `ResponseCount` with a raw conditional `UPDATE`, never through this
+   * The count: submit advances `ResponseCount` with a conditional `UPDATE`, never through this
    * entity, so every loaded copy of the row is behind it. Written back from a copy loaded when the
    * builder opened, the counter went DOWN and `MaxResponses` could be exceeded (final review I2). The
    * stored value is carried on every update, whoever saves.
@@ -486,14 +489,12 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
     try {
       // Built inside the try: a provider whose quoting throws takes the same fail-soft path as a
       // failed read, rather than throwing out of the save.
-      const q = (name: string): string => provider.QuoteIdentifier(name);
-      const table = provider.QuoteSchemaAndView(this.EntityInfo.SchemaName, this.EntityInfo.BaseTable);
-      const columns = `${q('MagicLinkInviteID')}, ${q('PublicLinkToken')}, ${q('ResponseCount')}`;
-      const where = `${q('ID')} = ${quoteSqlString(this.ID)}`;
       const sql =
         provider.PlatformKey === 'postgresql'
-          ? `SELECT ${columns} FROM ${table} WHERE ${where} FOR UPDATE`
-          : `SELECT ${columns} FROM ${table} WITH (UPDLOCK, HOLDLOCK) WHERE ${where}`;
+          ? this.postgresLockedReadStatement(provider)
+          : // The procedure (#338) holds the UPDLOCK, HOLDLOCK: MJ's runtime roles may EXECUTE it
+            // but hold no rights on the base table. On this provider, so inside the save's transaction.
+            procedureCallInSchema(provider, this.EntityInfo.SchemaName, 'spFormDistributionReadServerColumnsLocked', { ID: this.ID });
       const rows = await provider.ExecuteSQL<StoredServerColumns>(sql, undefined, undefined, this.ContextCurrentUser);
       const row = rows[0];
       if (!row) {
@@ -508,6 +509,13 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
     } catch (e) {
       return { failure: e instanceof Error ? e.message : String(e) };
     }
+  }
+
+  /** PostgreSQL's locked re-read: the raw `SELECT … FOR UPDATE` on the base table. */
+  private postgresLockedReadStatement(provider: RowLockHost): string {
+    const q = (name: string): string => provider.QuoteIdentifier(name);
+    const table = provider.QuoteSchemaAndView(this.EntityInfo.SchemaName, this.EntityInfo.BaseTable);
+    return `SELECT ${q('MagicLinkInviteID')}, ${q('PublicLinkToken')}, ${q('ResponseCount')} FROM ${table} WHERE ${q('ID')} = ${quoteSqlString(this.ID)} FOR UPDATE`;
   }
 
   /**

@@ -36,6 +36,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from './lib/sqlcmd.mjs';
+import { redeemHostPage } from './lib/host-page.mjs';
 import { buildAnswers, pickEmailQuestion, pickNameQuestion, requireQuestion, resolveFormId, resolveQuestions, resolveSeededSlug } from './lib/fixture.mjs';
 import { definitionQuestions as questionsOf, firstSaveError, getRespondentForm, republishForm, saveResponse } from './lib/operations.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
@@ -85,10 +86,7 @@ async function eventually(read, isDone) {
 }
 
 async function session() {
-  const html = await (await fetch(`${BASE}/f/${SLUG}`)).text();
-  const token = (html.match(/data-token="([^"]+)"/) || [])[1];
-  if (!token) throw new Error('no anonymous session token on /f/' + SLUG);
-  return token;
+  return (await redeemHostPage(BASE, SLUG)).token;
 }
 
 // ---------- 1. seed ----------

@@ -134,7 +134,7 @@ describe('the outbox event a final submit owes', () => {
     expect(result.errors[0].message).toBe(SUBMIT_FAILED_MESSAGE);
     expect(JSON.stringify(result)).not.toContain('TransportUnavailable');
     expect(fake.saved.map((r) => r.entityName)).not.toContain(FORM_RESPONSE_ENTITY);
-    expect(fake.statements.some((s) => /UPDATE/.test(s.sql) && s.inTransaction)).toBe(true); // the slot was taken…
+    expect(fake.statements.some((s) => /spFormDistributionConsumeResponseSlot/.test(s.sql) && s.inTransaction)).toBe(true); // the slot was taken…
     expect(fake.transactions).toEqual(['begin', 'rollback']); // …and rolled back with the rest
   });
 });

@@ -162,8 +162,8 @@ export async function runProvisioning(
  * Keep a credential we are not replacing bounded by the link it belongs to.
  *
  * Runs on every entity save of a live, credentialled distribution. A public submission is no
- * longer one: since #303 it advances `ResponseCount` with a raw conditional `UPDATE`
- * (`submission/quota.ts`), so this pass runs on author and engine saves only. Each run LOADS THE
+ * longer one: since #303 it advances `ResponseCount` with a conditional `UPDATE`
+ * (`submission/quota.ts`; a procedure on SQL Server), so this pass runs on author and engine saves only. Each run LOADS THE
  * INVITE ROW: one core-entity read per save, and it is the price of the expiry staying in step. It cannot be skipped on "nothing to re-bound" without reading the row,
  * because the distribution does not record the credential's expiry: when `CloseAt` was just
  * cleared the stored value is the OLD date, not the sentinel, and when a previous re-bound

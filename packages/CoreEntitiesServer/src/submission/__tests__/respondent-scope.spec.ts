@@ -23,4 +23,15 @@ describe('checkRespondentScope', () => {
     expect(result.allowed).toBe(false);
     expect(result.reason).toMatch(/privilege accretion/i);
   });
+
+  it('denies create access on ANY entity outside the respondent allow-list, not just form definitions', () => {
+    // The old deny-list named only Forms / Form Versions / Form Distributions, so a grant on any
+    // other entity — core tables included — sailed through. The allow-list refuses all of them.
+    const perms = respondentPermissions();
+    perms['MJ: Users'] = true;
+    const { provider } = makeFakeProvider({ createPermissions: perms });
+    const result = checkRespondentScope(provider, makeContextUser());
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('MJ: Users');
+  });
 });

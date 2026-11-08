@@ -23,6 +23,7 @@
 import { randomUUID } from 'node:crypto';
 import { buildAnswers, publishedSnapshotAutomations, resolveFormId, resolveSlug } from './lib/fixture.mjs';
 import { definitionQuestions, firstSaveError, getRespondentForm, saveResponse } from './lib/operations.mjs';
+import { redeemHostPage } from './lib/host-page.mjs';
 import { sql } from './lib/sqlcmd.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
@@ -66,10 +67,7 @@ const note = (m) => console.log(`  note  ${m}`);
 
 /** A fresh anonymous session, exactly as a browser hitting the public link would get one. */
 async function newSession() {
-  const html = await (await fetch(`${BASE}/f/${SLUG}`)).text();
-  const token = (html.match(/data-token="([^"]+)"/) || [])[1];
-  if (!token) throw new Error('no anonymous session token on the host page');
-  return token;
+  return (await redeemHostPage(BASE, SLUG)).token;
 }
 
 /**

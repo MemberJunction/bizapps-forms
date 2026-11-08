@@ -128,6 +128,13 @@ export interface SubmissionSeams {
   readonly kick?: (responseId: string) => void;
   /** "Now", for the link's window. */
   readonly now?: Date;
+  /**
+   * Awaited once, after every read-time check (the quota pre-check included) and before the
+   * transaction opens. It lets a concurrency spec order two saves from the inside — both past the
+   * pre-check, then one transaction at a time — instead of watching for a lock wait through a
+   * server-wide DMV a database-scoped login cannot read (#339).
+   */
+  readonly beforeCommit?: () => Promise<void>;
 }
 
 /** What `GetRespondentForm` returns: the projection, and the per-session extras. */
@@ -319,7 +326,7 @@ export class FormSubmissionEngine extends BaseSingleton<FormSubmissionEngine> {
     }
     timer.mark('shape');
 
-    // CanCreate on the response entities and on nothing that defines a form — the respondent role's
+    // CanCreate on the response entities and on NOTHING else — the respondent role's
     // exact grant, so a mis-scoped session is refused however its roles were assembled. The
     // operation's `Authorize` decided WHICH link this session may use; this decides that it is a
     // respondent session at all.
@@ -393,7 +400,7 @@ export class FormSubmissionEngine extends BaseSingleton<FormSubmissionEngine> {
     const needCaptcha = complete && captchaRequired(resolved.definition.settings.captchaRequired, resolved.distribution.CaptchaRequired);
     //     `remoteip` binds the token to the solver's address at Cloudflare's end; the expected
     //     hostnames (this API's public host + the distribution's authored embed origins) feed the
-    //     service's warn-only hostname check. Both are computed only when a captcha is actually
+    //     service's hostname check, enforcing by default. Both are computed only when a captcha is actually
     //     demanded, so an unchallenged save never triggers `apiOwnOrigin()`'s unset-variable
     //     diagnostic on a deployment that uses neither allowlists nor captchas.
     const turnstile = await verifyTurnstile(needCaptcha, request.turnstileToken, {
@@ -496,6 +503,9 @@ export class FormSubmissionEngine extends BaseSingleton<FormSubmissionEngine> {
     const trigger = queuedTrigger(resolved.definition, screenedOut ? 'knockout' : complete ? 'completion' : 'partial');
     const queue = seams.queue ?? OUTBOX_RESPONSE_SUBMITTED;
 
+    if (seams.beforeCommit) {
+      await seams.beforeCommit();
+    }
     const committed = await this.commit({
       gate,
       resolved,

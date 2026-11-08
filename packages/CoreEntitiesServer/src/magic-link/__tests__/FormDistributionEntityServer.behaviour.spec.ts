@@ -162,7 +162,8 @@ vi.mock('@mj-biz-apps/forms-entities', async () => {
         if (storeRead === 'fail') {
           throw new Error('read refused');
         }
-        const id = /\[ID\] = '([^']+)'/.exec(sql)?.[1] ?? '';
+        // `@ID = '…'` in the SQL Server procedure call, `[ID] = '…'` in a raw statement.
+        const id = /(?:@ID|\[ID\]) = '([^']+)'/.exec(sql)?.[1] ?? '';
         const row = store.get(id);
         return (row ? [{ ResponseCount: 0, ...row }] : []) as T[];
       },
@@ -529,15 +530,14 @@ describe('two writers of one row take turns on a DATABASE row lock (behaviour)',
     expect(s.events).toEqual(['begin', 'lock', 'save', 'commit']);
   });
 
-  it('locks the BASE TABLE row by its id with an update lock held to commit (SQL Server)', async () => {
+  it('locks the row by its id through the locked-read procedure (SQL Server)', async () => {
+    // The procedure holds the UPDLOCK, HOLDLOCK to commit (#338: a roles-only login may EXECUTE it
+    // but not read the base table); its body is pinned by guarded-write-sprocs.migration.spec.ts.
     const s = subject();
     s.ID = "dist-o'brien";
     MagicLinkMinterRegistry.Instance.Register(minterLoggingTo(s.events));
     await s.Save();
-    expect(s.statements).toEqual([
-      "SELECT [MagicLinkInviteID], [PublicLinkToken], [ResponseCount] FROM [__mj_BizAppsForms].[FormDistribution] " +
-        "WITH (UPDLOCK, HOLDLOCK) WHERE [ID] = 'dist-o''brien'",
-    ]);
+    expect(s.statements).toEqual(["EXEC [__mj_BizAppsForms].[spFormDistributionReadServerColumnsLocked] @ID = 'dist-o''brien'"]);
   });
 
   it('spells the lock FOR UPDATE on PostgreSQL, with PostgreSQL quoting', async () => {

@@ -32,6 +32,7 @@
 import { randomUUID } from 'node:crypto';
 import { resolveSlug, buildAnswers } from './lib/fixture.mjs';
 import { definitionQuestions, requireOperation } from './lib/operations.mjs';
+import { redeemHostPage } from './lib/host-page.mjs';
 import { requireDbEnv, sql } from './lib/sqlcmd.mjs';
 import { smokeBaseUrl } from './lib/target.mjs';
 
@@ -69,15 +70,7 @@ async function respondentForm(token) {
  * the pointer itself — so this is the only place the flag can be observed.
  */
 async function loadPage(cookie) {
-  const res = await fetch(`${BASE}/f/${SLUG}`, { headers: cookie ? { cookie } : {} });
-  if (res.status !== 200) {
-    throw new Error(`GET /f/${SLUG} returned ${res.status} — is the distribution published with a PublicLinkToken?`);
-  }
-  const html = await res.text();
-  const token = html.match(/data-token="([^"]+)"/)?.[1];
-  if (!token) {
-    throw new Error('host page carried no anonymous session token');
-  }
+  const { token, html } = await redeemHostPage(BASE, SLUG, { headers: cookie ? { cookie } : {} });
   return { token, hasDraft: html.includes('data-has-draft="1"') };
 }
 

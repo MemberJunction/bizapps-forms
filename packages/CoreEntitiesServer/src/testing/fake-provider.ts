@@ -517,6 +517,25 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
         config.readPermissions?.[entityName] ?? true,
         config.rowFilters?.[entityName] ?? '',
       ),
+    // The whole entity set, as `checkRespondentScope`'s allow-list sweep walks it. The fake's
+    // "whole set" is every entity the permission fixtures name — same per-entity answers as
+    // `EntityByName`, so a sweep and a point lookup cannot disagree.
+    get Entities(): EntityInfo[] {
+      const names = new Set([
+        ...Object.keys(config.createPermissions ?? {}),
+        ...Object.keys(config.updatePermissions ?? {}),
+        ...Object.keys(config.readPermissions ?? {}),
+      ]);
+      return [...names].map((entityName) =>
+        makeFakeEntityInfo(
+          entityName,
+          config.createPermissions?.[entityName] ?? false,
+          config.updatePermissions?.[entityName] ?? false,
+          config.readPermissions?.[entityName] ?? true,
+          config.rowFilters?.[entityName] ?? '',
+        ),
+      );
+    },
     EntityByID: (entityId: string) => {
       const entityName = fakeEntityNameOf(entityId);
       return entityName === undefined ? undefined : makeFakeEntityInfo(entityName, false, false);
@@ -587,8 +606,13 @@ function runFakeQuery(params: RunQueryParams, queries: Record<string, FakeQuery>
   return { QueryID: `query-${name}`, QueryName: name, Success: true, Results: rows, RowCount: rows.length, TotalRowCount: rows.length, ExecutionTime: 0, ErrorMessage: '' };
 }
 
-/** The submit path's quota statement: `UPDATE …FormDistribution SET ResponseCount = ResponseCount + 1 …`. */
-const DISTRIBUTION_SLOT_UPDATE = /UPDATE\s+\S*FormDistribution\S*\s+SET\s+\S*ResponseCount\S*\s*=\s*\S*ResponseCount\S*\s*\+\s*1/i;
+/**
+ * The submit path's quota statement, in either spelling: the SQL Server EXEC of
+ * `spFormDistributionConsumeResponseSlot` (#338), or PostgreSQL's raw
+ * `UPDATE …FormDistribution SET ResponseCount = ResponseCount + 1 …`.
+ */
+const DISTRIBUTION_SLOT_UPDATE =
+  /EXEC\s+\S*\[spFormDistributionConsumeResponseSlot\]|UPDATE\s+\S*FormDistribution\S*\s+SET\s+\S*ResponseCount\S*\s*=\s*\S*ResponseCount\S*\s*\+\s*1/i;
 
 /**
  * Emulate the conditional slot UPDATE against the `distribution` fixture, as the database would: one

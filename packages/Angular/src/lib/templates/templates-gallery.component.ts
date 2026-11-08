@@ -24,6 +24,7 @@ import {
   inject,
 } from '@angular/core';
 import { LogError } from '@memberjunction/core';
+import { RowActivateDirective } from '../shared/row-activate.directive';
 import {
   FormsDeleteTemplateOperation,
   STARTER_TEMPLATE_CATALOG,
@@ -55,6 +56,7 @@ export type TemplateChoice =
   selector: 'mjf-templates-gallery',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [RowActivateDirective],
   styles: [FORMS_UI_CSS, FORMS_VIZ_CSS, TEMPLATES_GALLERY_CSS],
   templateUrl: './templates-gallery.component.html',
 })

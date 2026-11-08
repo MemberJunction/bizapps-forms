@@ -18,7 +18,7 @@
 
 .mjf-question:focus-visible {
   outline: none;
-  box-shadow: var(--mjf-focus-ring);
+  box-shadow: var(--mjf-focus-shadow);
 }
 
 .mjf-question__label {
@@ -70,7 +70,7 @@
 .mjf-nps__btn:focus-visible {
   outline: none;
   border-color: var(--mjf-accent);
-  box-shadow: var(--mjf-focus-ring);
+  box-shadow: var(--mjf-focus-shadow);
 }
 
 .mjf-textarea {
@@ -311,7 +311,7 @@
 /* The input is the thing that takes focus; the label is the thing that can show it. */
 .mjf-file:focus-within .mjf-file__pick {
   border-color: var(--mjf-accent);
-  box-shadow: var(--mjf-focus-ring);
+  box-shadow: var(--mjf-focus-shadow);
 }
 
 .mjf-file--busy .mjf-file__pick {
@@ -396,7 +396,7 @@
 
 .mjf-file__failed-link:focus-visible {
   outline: none;
-  box-shadow: var(--mjf-focus-ring);
+  box-shadow: var(--mjf-focus-shadow);
 }
 
 /* ---- Statement (display-only) ---- */
@@ -454,7 +454,7 @@
 }
 
 .mjf-pic:hover { border-color: var(--mjf-accent); }
-.mjf-pic:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+.mjf-pic:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-shadow); }
 
 .mjf-pic--selected {
   background: var(--mjf-choice-selected-bg);
@@ -503,7 +503,7 @@
 }
 
 .mjf-scale__btn:hover { border-color: var(--mjf-accent); }
-.mjf-scale__btn:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+.mjf-scale__btn:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-shadow); }
 
 .mjf-scale__btn--selected {
   background: var(--mjf-accent);
@@ -701,7 +701,7 @@
 }
 
 .mjf-rank__move:hover:not(:disabled) { border-color: var(--mjf-accent); color: var(--mjf-accent); }
-.mjf-rank__move:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+.mjf-rank__move:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-shadow); }
 .mjf-rank__move:disabled { opacity: 0.35; cursor: default; }
 
 /* ---- Matrix ---- */
@@ -721,12 +721,17 @@
 }
 
 .mjf-matrix__row { text-align: left; color: var(--mjf-page-ink); white-space: nowrap; }
+/* A row a required Matrix still needs, shown only once the question's error is: a tint plus an
+   inset bar, so the marking does not depend on colour alone. */
+.mjf-matrix__row--missing { background: color-mix(in srgb, var(--mjf-status-error) 8%, transparent); }
+.mjf-matrix__row--missing .mjf-matrix__row { color: var(--mjf-status-error); box-shadow: inset 3px 0 0 var(--mjf-status-error); }
 .mjf-matrix__corner { padding: 0.5rem; }
 
 .mjf-matrix tbody tr { border-top: 1px solid var(--mjf-choice-border); }
 .mjf-matrix__cell { padding: 0.375rem; text-align: center; }
 
 .mjf-matrix__pick {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -739,7 +744,17 @@
 }
 
 .mjf-matrix__pick:hover { background: var(--mjf-accent-soft); }
-.mjf-matrix__pick:focus-visible { outline: none; box-shadow: var(--mjf-focus-ring); }
+/* The native radio covers the whole 44px target, invisible; the mark beside it is what shows. */
+.mjf-matrix__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.mjf-matrix__pick:has(.mjf-matrix__input:focus-visible) { box-shadow: var(--mjf-focus-shadow); }
 .mjf-matrix__pick--selected .mjf-choice__mark { border-color: var(--mjf-accent); background: var(--mjf-accent); }
 
 /* ---- Checkbox (single consent) / Legal ---- */
@@ -760,9 +775,26 @@
   border-radius: var(--mjf-input-radius);
 }
 
-.mjf-legal__terms:focus-visible { outline: none; box-shadow: var(--mjf-focus-ring); }
+.mjf-legal__terms:focus-visible { outline: none; box-shadow: var(--mjf-focus-shadow); }
 
 /* ---- Composites (Address / ContactInfo) ---- */
+/* A fieldset only for its semantics: no frame, no inset, and the legend reads like any header. */
+.mjf-composite-set {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.mjf-composite-set > legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+}
+.mjf-composite-set > legend + * { clear: both; }
+
 .mjf-composite {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

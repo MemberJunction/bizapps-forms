@@ -146,6 +146,20 @@ describe('FormUploadService — the request it sends', () => {
 
     expect(onProgress).toHaveBeenCalledWith(0.25);
   });
+
+  it('reports the storing phase once every byte is sent, before the server has answered', async () => {
+    const onProgress = vi.fn();
+    const pending = startUpload(onProgress);
+
+    wire().upload.onprogress?.(progress(4, 4));
+    // 100% of the BYTES, not a stored file: the server still has to write it and record it.
+    expect(onProgress).toHaveBeenLastCalledWith(1);
+
+    wire().upload.onload?.(progress(4, 4));
+
+    expect(onProgress).toHaveBeenLastCalledWith(null, 'storing');
+    expect(await peek(pending)).toBe('pending');
+  });
 });
 
 describe('FormUploadService — the stall watchdog', () => {

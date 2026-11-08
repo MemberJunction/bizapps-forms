@@ -346,6 +346,12 @@ jobs:
       - name: Smoke operation client tests
         run: node smoke/lib/operations.spec.mjs
 
+      # Stdlib-only, with a fake fetch. Ten suites redeem the public host page through one helper;
+      # this pins that a rate-limited redeem (429) is reported as such instead of as "no anonymous
+      # session token", which read like a broken fixture and cost a debugging session (F8).
+      - name: Smoke host-page tests
+        run: node smoke/lib/host-page.spec.mjs
+
       # Stdlib-only and databaseless. Guards the binding seed's grant MERGE: it must only ever
       # RAISE an EntityPermission flag, never lower one. An unconditional overwrite here once
       # silently revoked V202608201200's shipped CanUpdate on Form Response Answers, breaking

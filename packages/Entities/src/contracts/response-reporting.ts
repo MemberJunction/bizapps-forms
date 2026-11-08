@@ -15,6 +15,12 @@
 export const MAX_RESPONSE_PAGE_SIZE = 200;
 
 /**
+ * The longest `Forms.ListResponses` search the server accepts. It is a name, an email or a phrase
+ * from an answer, never a document; the client's search box carries the same `maxlength`.
+ */
+export const MAX_RESPONSE_SEARCH_LENGTH = 100;
+
+/**
  * The bucket (and Matrix row or column) label under which `Forms.GetResponseSummary` counts every
  * answer value outside the question's options. Such a value can be anything a client sent, so it is
  * never shipped as its own text. Worded so it cannot collide with an author's own "Other" option.

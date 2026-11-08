@@ -21,8 +21,22 @@ export interface UploadedFile {
   contentType: string;
 }
 
-/** Progress callback: fraction 0–1 of bytes sent, or `null` when indeterminate. */
-export type UploadProgress = (fraction: number | null) => void;
+/**
+ * Where an upload is: still sending bytes, or every byte sent and the server storing the file.
+ *
+ * Two phases because "100% sent" is not "saved". After the last byte the server still writes the
+ * file to storage (a second full transfer on a cloud provider) and records it, and the widget used
+ * to show "Uploading … 100%" for all of that — which a respondent reads as done.
+ */
+export type UploadPhase = 'sending' | 'storing';
+
+/**
+ * Progress callback: `fraction` is 0–1 of bytes sent, or `null` when indeterminate.
+ *
+ * `phase` defaults to `'sending'`, so a transport that never reports `'storing'` still works — its
+ * respondents just see the sending bar until the upload settles, as before.
+ */
+export type UploadProgress = (fraction: number | null, phase?: UploadPhase) => void;
 
 /**
  * The two kinds of upload failure, which call for opposite responses.

@@ -213,7 +213,7 @@ describe('the file control has ONE status display', () => {
 
   it('draws the focus ring on the stand-in, since the input is off screen', () => {
     const css = stripped('form-question.component.css');
-    expect(css).toMatch(/\.mjf-file:focus-within \.mjf-file__pick \{[\s\S]{0,160}--mjf-focus-ring/);
+    expect(css).toMatch(/\.mjf-file:focus-within \.mjf-file__pick \{[\s\S]{0,160}--mjf-focus-shadow/);
     // And positions the clipped input where the control is, so focusing it scrolls to the right
     // place on a failed submit.
     expect(css).toMatch(/\.mjf-file \{[\s\S]{0,300}position: relative;/);
@@ -277,9 +277,11 @@ describe('undo is a change of meaning, so it plays by the same rules as a stroke
 
   it('stops at the restored image rather than erasing it', () => {
     // A repainted PNG is flat pixels with no stroke history, so there is nothing in it to undo.
-    // Undo reads THIS SESSION's strokes and nothing else; `base` is only reachable through Clear.
-    expect(pad()).toMatch(/canUndo = computed\(\(\) => this\.strokes\(\)\.length > 0\)/);
-    expect(pad()).toMatch(/public undo\(\): void \{\s*if \(this\.strokes\(\)\.length === 0\) \{\s*return;/);
+    // Undo reads THIS SESSION's strokes (or a Clear it can take back) and never erases `base`. The
+    // rule itself lives in `undoPad` and is specced in doodle-history.spec.ts ("undo stops at the
+    // base image"); this checks only that the pad still asks it.
+    expect(pad()).toMatch(/canUndo = computed\(\(\) => canUndoPad\(this\.history\(\)\)\)/);
+    expect(pad()).toMatch(/public undo\(\): void \{\s*const next = undoPad\(this\.history\(\)\);\s*if \(!next\) \{\s*return;/);
     // And the button says so, rather than presenting a no-op.
     expect(pad()).toMatch(/\[disabled\]="!canUndo\(\)"/);
   });

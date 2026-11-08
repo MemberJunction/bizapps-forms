@@ -299,7 +299,7 @@ export class FormRuntime {
     computeProgress(
       this.visibleAnswerableQuestions().map((q) => ({
         required: q.isRequired,
-        completeness: answerCompleteness(q.type, this.valueFor(q.id)),
+        completeness: answerCompleteness(q, this.valueFor(q.id)),
       })),
     ),
   );

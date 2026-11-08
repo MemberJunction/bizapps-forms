@@ -93,13 +93,25 @@ describe('updateResponse never writes over a sealed row', () => {
  * the second wait for the first to commit, and its read then sees the seal.
  */
 describe('updateResponse takes the row before it judges it', () => {
-  it("locks the existing response row (UPDLOCK, HOLDLOCK) before reading its status", async () => {
+  it('locks the existing response row through its lock procedure before reading its status (SQL Server)', async () => {
+    // The procedure holds the UPDLOCK, HOLDLOCK the inline SELECT used to (#338: a roles-only
+    // login may EXECUTE it but may not read the base table directly).
     const { fake, responseId } = contextFor('Partial');
 
     await persistSubmission(fake.provider, inputsFor(responseId), makeContextUser());
 
-    const lock = fake.statements.find((statement) => /UPDLOCK/.test(statement.sql));
-    expect(lock?.sql).toBe(`SELECT [ID] FROM [__mj_BizAppsForms].[FormResponse] WITH (UPDLOCK, HOLDLOCK) WHERE [ID] = '${responseId}'`);
+    const lock = fake.statements.find((statement) => /spFormResponseLockRow/.test(statement.sql));
+    expect(lock?.sql).toBe(`EXEC [__mj_BizAppsForms].[spFormResponseLockRow] @ID = '${responseId}'`);
+  });
+
+  it('names the response it could not lock when FormResponse is missing from metadata (SQL Server)', async () => {
+    const { fake, responseId } = contextFor('Partial');
+    const real = fake.provider.EntityByName;
+    fake.provider.EntityByName = (name: string) => (name === 'MJ_BizApps_Forms: Form Responses' ? undefined : real(name));
+
+    await expect(persistSubmission(fake.provider, inputsFor(responseId), makeContextUser())).rejects.toThrow(
+      new RegExp(`response ${responseId} cannot be locked`),
+    );
   });
 
   it('spells the lock FOR UPDATE on PostgreSQL', async () => {

@@ -8,9 +8,11 @@
  *
  * This guard enforces exactly that grant:
  *  1. CanCreate must be present on BOTH response entities.
- *  2. CanCreate must NOT be present on the published-form definition entities
- *     (Forms / Form Versions / Form Distributions) — that would be privilege
- *     accretion and is rejected.
+ *  2. CanCreate must NOT be present on ANY other entity — an ALLOW-list, not a deny-list.
+ *     The guard used to deny-list only the three published-form definition entities
+ *     (Forms / Form Versions / Form Distributions), which left create access on every
+ *     other entity in the database (MJ core tables included) unchecked. Create access
+ *     anywhere outside the allow-list is privilege accretion and is rejected.
  *
  * It uses the live, per-user aggregated permissions (`EntityInfo.GetUserPermisions`),
  * so a mis-scoped session is denied regardless of how the role was assembled.
@@ -19,23 +21,24 @@ import type { EntityInfo, UserInfo } from '@memberjunction/core';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
 
 /**
- * The narrow capability the scope check needs — just entity-definition lookup. Both the
- * per-request `DatabaseProviderBase` (submit pipeline) and a global `Metadata` (upload
- * endpoint) satisfy this, so the same guard is reused across both entry points without
- * requiring the full `IMetadataProvider` surface.
+ * The ONLY entities the anonymous respondent session may hold CanCreate on — the two the submit
+ * pipeline writes. Create access on anything else is privilege accretion.
  */
-/**
- * Definition entities the anonymous respondent session must NOT be able to create (read-only for
- * it). Create access on any of these is privilege accretion.
- */
-export const FORM_DEFINITION_NO_CREATE_ENTITIES: readonly string[] = [
-  FORMS_ENTITY.Form,
-  FORMS_ENTITY.FormVersion,
-  FORMS_ENTITY.FormDistribution,
+export const RESPONDENT_CREATABLE_ENTITIES: readonly string[] = [
+  FORMS_ENTITY.FormResponse,
+  FORMS_ENTITY.FormResponseAnswer,
 ];
 
+/**
+ * The narrow capability the scope check needs — entity-definition lookup, plus the full entity
+ * list the allow-list sweep walks. Both the per-request `DatabaseProviderBase` (submit pipeline)
+ * and a global `Metadata` (upload endpoint) satisfy this, so the same guard is reused across both
+ * entry points without requiring the full `IMetadataProvider` surface.
+ */
 export interface ScopeMetadataProvider {
   EntityByName(entityName: string): EntityInfo | undefined;
+  /** Every entity the provider knows — what the allow-list sweep judges CanCreate over. */
+  readonly Entities: EntityInfo[];
 }
 
 /** Outcome of the scope check; `reason` is set only on denial. */
@@ -65,11 +68,17 @@ export function checkRespondentScope(provider: ScopeMetadataProvider, user: User
     return { allowed: false, reason: 'Session is not authorized to create form response answers.' };
   }
 
-  for (const definitionEntity of FORM_DEFINITION_NO_CREATE_ENTITIES) {
-    if (userCanCreate(provider, definitionEntity, user)) {
+  // The allow-list sweep: create access anywhere OUTSIDE the two response entities is accretion,
+  // whichever entity carries it. Names are compared case-insensitively, as `EntityByName` does.
+  const creatable = new Set(RESPONDENT_CREATABLE_ENTITIES.map((name) => name.toLowerCase()));
+  for (const entity of provider.Entities) {
+    if (creatable.has(entity.Name.trim().toLowerCase())) {
+      continue;
+    }
+    if (entity.GetUserPermisions(user).CanCreate) {
       return {
         allowed: false,
-        reason: `Privilege accretion detected: session has create access on "${definitionEntity}".`,
+        reason: `Privilege accretion detected: session has create access on "${entity.Name}".`,
       };
     }
   }

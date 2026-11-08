@@ -13,6 +13,7 @@
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 import { quoteSqlString, type mjBizAppsFormsFormAutomationEventEntity } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../../shared/entity-names.js';
+import { procedureCallInSchema } from '../../shared/forms-procedure.js';
 import { responseSubmittedPayloadRefusal, type ResponseSubmittedPayload } from './response-submitted-event.js';
 
 /** The one call the submit path makes on the outbox — a seam, so the engine's specs need no table. */
@@ -56,17 +57,25 @@ async function enqueueResponseSubmitted(payload: ResponseSubmittedPayload, provi
  * post-commit drain claims nothing while an older event is waiting. Once the response completes,
  * that partial is stale (the drain settles it Complete without running anything), so making it due
  * NOW lets the post-commit drain clear it and run the final in the same call.
+ *
+ * On SQL Server the UPDATE is `spFormAutomationEventBringPartialsForward` (#338): MJ's runtime roles
+ * may EXECUTE it but hold no rights on the base table. It runs on the save's provider, so inside the
+ * save's transaction. PostgreSQL keeps the raw UPDATE.
  */
 async function bringWaitingPartialsForward(responseId: string, provider: DatabaseProviderBase, contextUser: UserInfo): Promise<void> {
-  const q = (name: string): string => provider.QuoteIdentifier(name);
   const entity = provider.EntityByName(FORMS_ENTITY.FormAutomationEvent);
   if (!entity) {
     throw new Error(`"${FORMS_ENTITY.FormAutomationEvent}" is not in this host's metadata, so response ${responseId}'s automations cannot be queued.`);
   }
-  const now = provider.PlatformKey === 'postgresql' ? 'now()' : 'SYSDATETIMEOFFSET()';
+  if (provider.PlatformKey !== 'postgresql') {
+    const call = procedureCallInSchema(provider, entity.SchemaName, 'spFormAutomationEventBringPartialsForward', { FormResponseID: responseId });
+    await provider.ExecuteSQL(call, undefined, undefined, contextUser);
+    return;
+  }
+  const q = (name: string): string => provider.QuoteIdentifier(name);
   await provider.ExecuteSQL(
-    `UPDATE ${provider.QuoteSchemaAndView(entity.SchemaName, entity.BaseTable)} SET ${q('NextAttemptAt')} = ${now} ` +
-      `WHERE ${q('FormResponseID')} = ${quoteSqlString(responseId)} AND ${q('Trigger')} = 'OnPartial' AND ${q('Status')} = 'Pending' AND ${q('NextAttemptAt')} > ${now}`,
+    `UPDATE ${provider.QuoteSchemaAndView(entity.SchemaName, entity.BaseTable)} SET ${q('NextAttemptAt')} = now() ` +
+      `WHERE ${q('FormResponseID')} = ${quoteSqlString(responseId)} AND ${q('Trigger')} = 'OnPartial' AND ${q('Status')} = 'Pending' AND ${q('NextAttemptAt')} > now()`,
     undefined,
     undefined,
     contextUser,

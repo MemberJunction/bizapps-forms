@@ -20,6 +20,7 @@ import {
   BINDINGS,
   FORMS,
   PAGES,
+  OPTIONS,
   QUESTIONS,
   STYLES,
   VERSIONS,
@@ -28,6 +29,7 @@ import {
   draftTables,
   formRow,
   formsWorld,
+  optionRow,
   pageRow,
   questionRow,
   rowsOf,
@@ -294,6 +296,70 @@ describe('version numbers', () => {
 
     expect((await refusal(db)).message).toBe(PUBLISH_IN_PROGRESS_MESSAGE);
     expect(versions(db)).toEqual([]);
+  });
+});
+
+describe('rules are judged in display order, not in the order the database returns rows', () => {
+  // F9: SQL returns rows by GUID, so a rule reading an EARLIER question looked like it read a later one
+  // and the gate refused a form that reads fine on screen. Rows here come back reversed and in id order.
+  const showWhen = (questionId: string): string => JSON.stringify({ show: { all: [{ questionId, op: 'equals', value: 'x' }] } });
+
+  function sameOrderCases(): Array<[string, (rows: FakeRow[]) => FakeRow[]]> {
+    return [
+      ['reversed', (rows) => [...rows].reverse()],
+      ['in id order', (rows) => [...rows].sort((a, b) => String(a.ID).localeCompare(String(b.ID)))],
+    ];
+  }
+
+  it.each(sameOrderCases())('publishes a same-page rule reading an earlier question (%s)', async (_label, scramble) => {
+    const tables = draftTables();
+    tables[QUESTIONS] = scramble([
+      questionRow({ ID: 'qd', Prompt: 'Attending?', DisplayOrder: 0 }),
+      questionRow({ ID: 'qc', Prompt: 'NPS', DisplayOrder: 1, ConditionalRule: showWhen('qd') }),
+      questionRow({ ID: 'qb', Prompt: 'Pick', QuestionType: 'SingleChoice', DisplayOrder: 2 }),
+      questionRow({ ID: 'qa', Prompt: 'Email', DisplayOrder: 3 }),
+    ]);
+    tables[OPTIONS] = scramble([
+      optionRow({ ID: 'oz', QuestionID: 'qb', Label: 'First', DisplayOrder: 0 }),
+      optionRow({ ID: 'oy', QuestionID: 'qb', Label: 'Second', DisplayOrder: 1 }),
+    ]);
+    const db = world(tables);
+
+    const { definition } = await publish(db);
+
+    expect(definition.pages[0].questions.map((q) => q.id)).toEqual(['qd', 'qc', 'qb', 'qa']);
+    expect(definition.pages[0].questions[2].options.map((o) => o.label)).toEqual(['First', 'Second']);
+  });
+
+  it('publishes a page-level rule reading a question on an earlier page, pages returned reversed', async () => {
+    const tables = draftTables();
+    tables[PAGES] = [
+      pageRow({ ID: 'pa', Title: 'Second', DisplayOrder: 1, ConditionalRule: showWhen('qz') }),
+      pageRow({ ID: 'pb', Title: 'First', DisplayOrder: 0 }),
+    ];
+    tables[QUESTIONS] = [
+      questionRow({ ID: 'qa', PageID: 'pa', Prompt: 'Later' }),
+      questionRow({ ID: 'qz', PageID: 'pb', Prompt: 'Earlier' }),
+    ];
+    tables[OPTIONS] = [];
+    const db = world(tables);
+
+    const { definition } = await publish(db);
+
+    expect(definition.pages.map((p) => p.id)).toEqual(['pb', 'pa']);
+  });
+
+  it('still refuses a rule that reads a question displayed later', async () => {
+    const tables = draftTables();
+    tables[QUESTIONS] = [
+      questionRow({ ID: 'qa', Prompt: 'Early', DisplayOrder: 0, ConditionalRule: showWhen('qb') }),
+      questionRow({ ID: 'qb', Prompt: 'Late', DisplayOrder: 1 }),
+    ];
+    tables[OPTIONS] = [];
+
+    const error = await refusal(world(tables));
+
+    expect(error.brokenRules).toHaveLength(1);
   });
 });
 

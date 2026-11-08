@@ -38,11 +38,13 @@ export async function judgeWhenSettled(
   return judgeSettled(store, runtime, questions);
 }
 
-/** The waiting half of {@link judgeWhenSettled}: restart spent uploads, then wait for all of them. */
+/**
+ * The waiting half of {@link judgeWhenSettled}: restart spent uploads, then wait for all of them.
+ * The failure `settle` reports is not used here — the judge reads it per question, because an
+ * optional question with a failed upload is refused but never touched.
+ */
 async function settleUploads(store: FormUploadStore, questions: readonly PublishedFormQuestion[]): Promise<void> {
-  const ids = questions.map((question) => question.id);
-  store.retryUnsaved(ids);
-  await store.whenSettled(ids);
+  await store.settle(questions.map((question) => question.id));
 }
 
 /**

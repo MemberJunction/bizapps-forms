@@ -7,6 +7,7 @@ const loaded = {
   failed: false,
   isPublished: true,
   rowCount: 3,
+  searching: false,
   hasDetail: false,
 };
 
@@ -29,6 +30,10 @@ describe('resolveResponsesView', () => {
       'never-published',
     );
     expect(resolveResponsesView({ ...loaded, rowCount: 0 })).toBe('no-responses');
+  });
+
+  it('keeps the list, which says "no match", for a search that finds nothing', () => {
+    expect(resolveResponsesView({ ...loaded, rowCount: 0, searching: true })).toBe('list');
   });
 
   it('shows an open response in preference to the list behind it', () => {

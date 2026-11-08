@@ -77,7 +77,7 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
 .qtp-backdrop {
   position: absolute;
   inset: 0;
-  background: var(--mj-overlay-scrim, rgba(9, 17, 24, 0.55));
+  background: var(--mj-bg-overlay);
 }
 
 .qtp {
@@ -102,10 +102,10 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
   display: flex;
   align-items: center;
   gap: var(--mjf-gap-sm);
-  padding: 14px var(--mjf-gap);
+  padding: 12px var(--mjf-gap);
   border-bottom: 1px solid var(--mjf-rule);
 }
-.qtp-title { flex: 1 1 auto; margin: 0; font-size: 1rem; font-weight: 600; color: var(--mj-text-primary); }
+.qtp-title { flex: 1 1 auto; margin: 0; font-size: var(--mjf-section); font-weight: 600; color: var(--mj-text-primary); }
 .qtp-close {
   flex: none;
   width: 32px;
@@ -190,7 +190,7 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.9rem;
+  font-size: var(--mjf-body);
   border-radius: var(--mjf-radius-sm);
   background: color-mix(in srgb, var(--mjf-viz-fill) 14%, transparent);
 }

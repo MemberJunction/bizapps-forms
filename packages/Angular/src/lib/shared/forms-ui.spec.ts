@@ -101,3 +101,24 @@ describe('the Forms design layer', () => {
     expect(FORMS_UI_TOKENS).toMatch(/--mjf-rule:\s*var\(--mj-border-default\)/);
   });
 });
+
+describe('the row primary button (UI audit F05 follow-up, found in the live smoke)', () => {
+  // The row's name became a <button> wrapping the old title <span>. Inside a block button the
+  // span is inline, so its ellipsis stopped clipping: at 390px a long name ran to x=590 and the
+  // list grew a horizontal scrollbar. The button was also only as tall as one text line (19px),
+  // under WCAG 2.5.8's 24px.
+  const rule = (selector: string): string => {
+    const at = FORMS_UI_PRIMITIVES.indexOf(`${selector} {`);
+    expect(at, `no ${selector} rule`).toBeGreaterThan(-1);
+    return FORMS_UI_PRIMITIVES.slice(at, FORMS_UI_PRIMITIVES.indexOf('}', at));
+  };
+
+  it('clips its content, so a long name truncates instead of widening the row', () => {
+    expect(rule('.mjf-row-primary')).toMatch(/overflow:\s*hidden/);
+    expect(rule('.mjf-row-primary > .mjf-row-title')).toMatch(/display:\s*block/);
+  });
+
+  it('is at least 24px tall', () => {
+    expect(rule('.mjf-row-primary')).toMatch(/min-height:\s*24px/);
+  });
+});

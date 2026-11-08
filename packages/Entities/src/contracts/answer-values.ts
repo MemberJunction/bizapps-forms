@@ -11,8 +11,8 @@
  * Pure and I/O-free: the rows are `answer-canonical.ts`'s structural column bags, so a RunView row,
  * an entity object and a Remote Operation's stored-answer shape all fit.
  */
-import { analysisKindFor, answerColumnFor, FORM_QUESTION_TYPES } from './question-types';
-import type { FormQuestionType, QuestionAnalysisKind } from './question-types';
+import { analysisKindFor, answerColumnFor, FORM_QUESTION_TYPES, matrixAxisOf } from './question-types';
+import type { FormQuestionType, MatrixAxis, QuestionAnalysisKind } from './question-types';
 import type { PublishedFormQuestion } from './form-definition';
 import { dateAnswerText } from './answer-date';
 import { foldQuestionId, type StoredAnswerColumns, type StoredAnswerRow } from './answer-canonical';
@@ -115,25 +115,35 @@ function toInstant(value: Date | string | null | undefined): Date | null {
 }
 
 /**
- * A composite (Address / ContactInfo / Matrix) as one line. A Matrix maps its row keys and cell
- * values through the option labels: they are option VALUES, the author's internal identifiers.
+ * A composite (Address / ContactInfo / Matrix) as one line. A Matrix maps its row keys through the
+ * Row-axis options and its cell values through the Column-axis ones: they are option VALUES, the
+ * author's internal identifiers, and a row and a column may share one (`opt1` is both), so one
+ * value-to-label map over every option lets the columns overwrite the rows.
  */
 function renderComposite(question: PublishedFormQuestion, raw: string | null | undefined): string {
   const parsed = parseJsonObject(raw);
   if (!parsed) {
     return '';
   }
-  const labelByValue = new Map(question.options.map((o) => [o.value, o.label]));
-  const label = (value: unknown): string => labelByValue.get(String(value)) ?? String(value);
+  const isMatrix = question.type === 'Matrix';
+  const rowLabel = optionLabeller(question, isMatrix ? 'Row' : undefined);
+  const cellLabel = optionLabeller(question, isMatrix ? 'Column' : undefined);
   const parts: string[] = [];
   for (const [key, cell] of Object.entries(parsed)) {
-    const value = Array.isArray(cell) ? cell.map(label).join(' / ') : label(cell);
+    const value = Array.isArray(cell) ? cell.map(cellLabel).join(' / ') : cellLabel(cell);
     if (value.trim() === '') {
       continue;
     }
-    parts.push(question.type === 'Matrix' ? `${label(key)}: ${value}` : value);
+    parts.push(isMatrix ? `${rowLabel(key)}: ${value}` : value);
   }
-  return parts.join(question.type === 'Matrix' ? '; ' : ', ');
+  return parts.join(isMatrix ? '; ' : ', ');
+}
+
+/** Value to label over the options on one axis (all options when `axis` is omitted); an unknown value stands for itself. */
+function optionLabeller(question: PublishedFormQuestion, axis: MatrixAxis | undefined): (value: unknown) => string {
+  const options = axis ? question.options.filter((o) => matrixAxisOf(o) === axis) : question.options;
+  const labelByValue = new Map(options.map((o) => [o.value, o.label]));
+  return (value) => labelByValue.get(String(value)) ?? String(value);
 }
 
 /** A stored JSON object, or `undefined` when absent, malformed or not an object. */
