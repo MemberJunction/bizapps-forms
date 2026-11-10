@@ -318,7 +318,13 @@ jobs:
           # An open PR is the deliverable, so an existing one ends this step. Re-pushing over the
           # branch behind it would discard conflict resolutions a human may have committed there,
           # which is the one outcome worse than not opening the PR at all.
-          EXISTING=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base next --state open --json url --jq '.[0].url // ""')
+          #
+          # Same-repository PRs only. `--head` matches the branch NAME and takes no owner (gh:
+          # `"<owner>:<branch>" syntax not supported`), so without the filter a PR that a fork opened
+          # from a branch with this name counts as "already open": this step would stop, the real
+          # back-merge would never be pushed or opened, and the summary would point the release
+          # engineer at a stranger's pull request.
+          EXISTING=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base next --state open --json url,isCrossRepository --jq '[.[] | select(.isCrossRepository == false)][0].url // ""')
           if [ -n "$EXISTING" ]; then
             echo "::notice::back-merge PR already open: $EXISTING"
             echo "pr_url=$EXISTING" >> "$GITHUB_OUTPUT"
@@ -387,6 +393,11 @@ jobs:
       # `next` moving while the checks run (`next-protect` is strict, and GitHub does not update an
       # out-of-date branch for you). Runs for an already-open PR too, so a re-run arms a PR that an
       # earlier run opened and could not arm.
+      #
+      # On such a re-run the PR's checks may already be green. `gh pr merge --auto` then does not arm
+      # anything: it merges on the spot (gh skips auto-merge when the PR is CLEAN, HAS_HOOKS or
+      # UNSTABLE). That is the wanted result, and the required checks still gate it, but it is a
+      # different fact from "armed", so this step reads the PR back and reports which one happened.
       - name: Ask GitHub to merge the back-merge when its checks pass
         if: steps.backmerge_pr.outputs.pr_url != ''
         id: backmerge_auto
@@ -397,14 +408,14 @@ jobs:
         run: |
           set -euo pipefail
           not_armed() {
-            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "outcome=not-armed" >> "$GITHUB_OUTPUT"
             echo "::warning::auto-merge was not enabled on $PR_URL, so it needs a human merge. $(printf '%s' "$1" | tr '\n' ' ')"
           }
 
           # Arm only a pull request whose content is exactly `main`'s tip, from a branch in THIS
-          # repository. The step above finds an already-open PR by branch NAME, and a fork can open
-          # a PR from a branch with that name: `next` requires checks but no review, so arming it
-          # would merge a stranger's commits once CI is green. A same-repo PR whose head is not
+          # repository. The step above already skips fork PRs; this is the second, independent check,
+          # because the cost of being wrong is high: `next` requires checks but no review, so arming
+          # a fork's PR would merge a stranger's commits once CI is green. A same-repo PR whose head is not
           # `main`'s tip is one a human has pushed to (a conflict resolution), so a human merges it.
           if ! FACTS=$(gh pr view "$PR_URL" --json isCrossRepository,headRefOid --jq '"\(.isCrossRepository) \(.headRefOid)"' 2>&1); then
             not_armed "Could not read the pull request: $FACTS"
@@ -422,13 +433,28 @@ jobs:
 
           # A merge commit, as docs/release.md requires: a squash would give `next` a commit that
           # is not `main`'s tip, and `main` would still not be an ancestor of `next`.
-          # `--match-head-commit` closes the gap between the check above and the merge: GitHub
-          # refuses to merge if the branch has moved off `main`'s tip by then.
-          if OUT=$(gh pr merge "$PR_URL" --auto --merge --match-head-commit "$MAIN_SHA" 2>&1); then
-            echo "armed=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::auto-merge enabled on $PR_URL — GitHub merges it when its required checks pass."
-          else
+          #
+          # `--match-head-commit` is checked ONCE, by this call: GitHub refuses it if the branch has
+          # moved off `main`'s tip since the read above. It is not a standing pin. GitHub stores no
+          # expected head on an armed auto-merge, so a later push by someone with write access
+          # (*Update branch*, a conflict resolution) is still merged when the checks pass.
+          if ! OUT=$(gh pr merge "$PR_URL" --auto --merge --match-head-commit "$MAIN_SHA" 2>&1); then
             not_armed "gh said: $OUT"
+            exit 0
+          fi
+
+          # gh exits 0 both when it armed auto-merge and when it merged on the spot, so ask.
+          if ! STATE=$(gh pr view "$PR_URL" --json state --jq .state 2>&1); then
+            echo "outcome=unknown" >> "$GITHUB_OUTPUT"
+            echo "::warning::gh accepted the merge request for $PR_URL, but its state could not be read afterwards, so this run cannot say whether it merged or is waiting on checks. gh said: $(printf '%s' "$STATE" | tr '\n' ' ')"
+            exit 0
+          fi
+          if [ "$STATE" = "MERGED" ]; then
+            echo "outcome=merged" >> "$GITHUB_OUTPUT"
+            echo "::notice::$PR_URL merged — its required checks were already green."
+          else
+            echo "outcome=armed" >> "$GITHUB_OUTPUT"
+            echo "::notice::auto-merge enabled on $PR_URL — GitHub merges it when its required checks pass."
           fi
 
       - name: Summarise the back-merge
@@ -438,7 +464,7 @@ jobs:
           NOTHING: ${{ steps.backmerge_scope.outputs.nothing_to_merge }}
           BRANCH: ${{ steps.backmerge_pr.outputs.branch }}
           PR_URL: ${{ steps.backmerge_pr.outputs.pr_url }}
-          ARMED: ${{ steps.backmerge_auto.outputs.armed }}
+          OUTCOME: ${{ steps.backmerge_auto.outputs.outcome }}
         run: |
           set -euo pipefail
           if [ "$NOTHING" = "true" ]; then
@@ -446,6 +472,19 @@ jobs:
             {
               echo ""
               echo "\`main\` is already an ancestor of \`next\` — nothing to back-merge, and the release is complete."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "${OUTCOME:-}" = "merged" ]; then
+            {
+              echo ""
+              echo "### The back-merge is merged"
+              echo ""
+              echo "$PR_URL"
+              echo ""
+              echo "**v$VERSION published successfully**, and that pull request has carried \`main\` back into"
+              echo "\`next\`: its required checks were already green, so it merged during this run. The release"
+              echo "is complete."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -459,9 +498,12 @@ jobs:
               echo "**v$VERSION published successfully.** The packages are on npm and the tag is pushed; the only"
               echo "thing left is merging that pull request, which carries \`main\` back into \`next\`."
               echo ""
-              if [ "${ARMED:-}" = "true" ]; then
+              if [ "${OUTCOME:-}" = "armed" ]; then
                 echo "**Auto-merge is enabled on it**, so GitHub merges it when its required checks pass. It needs"
                 echo "you only if it conflicts, or if \`next\` moves while the checks run (then: *Update branch*)."
+              elif [ "${OUTCOME:-}" = "unknown" ]; then
+                echo "**GitHub accepted the merge request, but this run could not read the result.** Open the pull"
+                echo "request: it has either merged or is waiting on its checks. The warning on this run has the error."
               else
                 echo "**Auto-merge could not be enabled on it, so it needs a human merge** (merge commit). The"
                 echo "warning on this run carries GitHub's reason; the usual one is the repository setting"

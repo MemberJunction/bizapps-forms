@@ -116,7 +116,9 @@ required checks are green. It is still a pull request and it
 still passes every gate; only the click is gone. A direct push to `next` is not an option, for the
 reason in [Why it looks like this](#why-it-looks-like-this).
 
-Four cases leave it open for you, and the publish run's summary says which one you are in:
+Four cases leave it open for you. The publish run can only know about two of them, the first and
+the last: its summary says whether auto-merge was enabled, and the warning on the run gives the
+reason when it was not. The middle two happen after the run has ended, so look at the PR itself.
 
 - **The repository setting *Allow auto-merge* is off.** GitHub then refuses with `Auto merge is not
   allowed for this repository`, the run shows a warning, and the PR waits. Read the setting, do not
@@ -124,11 +126,16 @@ Four cases leave it open for you, and the publish run's summary says which one y
 - **`next` moved while the checks ran.** `next-protect` is strict and GitHub does not update an
   out-of-date branch for you. Press *Update branch*, then confirm the PR still shows auto-merge
   enabled.
-- **A merge conflict.** Resolve it on the branch and merge it yourself. Auto-merge is pinned to
-  `main`'s tip (`--match-head-commit`), so it does not merge a branch someone has pushed to.
-- **The PR was not opened by this workflow.** Auto-merge is enabled only on a PR from a branch in
-  this repository whose head is exactly `main`'s tip. A PR found by its branch name that fails
-  either test is left alone, and the warning says which test.
+- **A merge conflict.** GitHub cannot merge a conflicted PR. Resolve it on the branch, then confirm
+  the PR still shows auto-merge enabled; if it does not, merge it yourself.
+- **The PR is not the one this workflow opens.** Auto-merge is enabled only on a PR from a branch in
+  this repository whose head is exactly `main`'s tip at that moment. So a re-run of the publish
+  does not enable it on a branch someone has pushed to, and the warning says which test failed.
+  That test runs once, when auto-merge is enabled (`--match-head-commit`). It is not a standing pin:
+  once enabled, a later push by someone with write access is merged when the checks pass.
+
+A re-run of the publish while the back-merge PR is open with green checks merges it on the spot,
+and the summary then reads "The back-merge is merged".
 
 In each case merge with a **merge commit**. A squash gives `next` a commit that is not `main`'s tip,
 so `main` is still not an ancestor of `next`.
