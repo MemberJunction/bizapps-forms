@@ -19,6 +19,8 @@ class FakeScript {
   public async = false;
   public defer = false;
   public shouldError = false;
+  /** Set by the fake DOM: what a real `Element.remove()` does to `getElementById`. */
+  public remove: () => void = () => undefined;
   private listeners: Record<string, Array<() => void>> = {};
 
   public addEventListener(type: string, cb: () => void): void {
@@ -56,6 +58,7 @@ function installFakeDom(): void {
         appended.push(s);
         if (s.id) {
           byId.set(s.id, s);
+          s.remove = () => byId.delete(s.id);
         }
       },
     },
@@ -69,9 +72,8 @@ function completeLoad(): void {
     reset: () => undefined,
     remove: () => undefined,
   };
-  for (const s of appended) {
-    s.fire('load');
-  }
+  // Only the newest script can still load: a browser never fires `load` on one that already failed.
+  appended[appended.length - 1]?.fire('load');
 }
 
 describe('turnstile-loader', () => {
@@ -121,8 +123,10 @@ describe('turnstile-loader', () => {
     const p = ensureTurnstileScript();
     appended[0].fire('error');
     await expect(p).rejects.toThrow(/failed to load/i);
-    // After a failure the load state is cleared so a later attempt injects again.
+    // After a failure the dead tag is removed and the load state cleared, so a later attempt injects
+    // a FRESH script — listeners on the failed one would never fire again in a browser.
     const p2 = ensureTurnstileScript();
+    expect(appended).toHaveLength(2);
     completeLoad();
     await expect(p2).resolves.toBeUndefined();
   });

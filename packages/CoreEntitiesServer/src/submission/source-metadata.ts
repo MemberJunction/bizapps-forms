@@ -19,7 +19,7 @@
  * the client-supplied `ClientMeta`.
  */
 import { createHash } from 'node:crypto';
-import { LogStatus } from '@memberjunction/core';
+import { LogError } from '@memberjunction/core';
 import type { ClientMeta, JSONObject } from '@mj-biz-apps/forms-entities';
 
 // The salt BOTH privacy hashes share (this session hash, and forms-server's client-IP hash) lives in
@@ -160,28 +160,24 @@ export function sessionIdentity(sessionId: string): string | undefined {
 let warnedAboutDegradedKeying = false;
 
 /**
- * Say ONCE, loudly, when the abuse ceilings are running on the session fallback.
+ * Say ONCE, loudly, when the per-IP abuse ceilings are not being applied.
  *
  * Without this the degraded mode is invisible: the pipeline keeps working, the limits keep
  * appearing to fire, and the only symptom is that they can be walked around — which is exactly
  * the state this whole seam was built to end. Once per process, not per request, because a line
- * on every submission is a line nobody reads.
+ * on every submission is a line nobody reads. `LogError`, not `LogStatus`: status output is dropped
+ * in production, which is the one place this needs to be seen.
  */
 export function warnOnceIfAbuseKeyingDegraded(clientIpHash: string | undefined): void {
   if (clientIpHash?.trim() || warnedAboutDegradedKeying) {
     return;
   }
   warnedAboutDegradedKeying = true;
-  LogStatus(
-    '[Forms] WARNING: no resolved client IP for a public submission — abuse ceilings are falling ' +
-      'back to the client-supplied session id, which a caller can rotate. Confirm ' +
+  LogError(
+    '[Forms] WARNING: no resolved client IP for a public submission — the per-IP abuse ceilings ' +
+      'are NOT applied to it (there is no fallback identity). Confirm ' +
       'RequestIdentityMiddleware is registered (it ships in @mj-biz-apps/forms-server).',
   );
-}
-
-/** Test-only: forget that the warning has been emitted. */
-export function resetAbuseKeyingWarningForTests(): void {
-  warnedAboutDegradedKeying = false;
 }
 
 /**

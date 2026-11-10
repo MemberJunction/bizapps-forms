@@ -25,10 +25,10 @@ import { inspect } from 'node:util';
 
 
 import type { mjBizAppsFormsFormUploadEntity } from '@mj-biz-apps/forms-entities';
-import { redactStorageKey } from '../storage/read-object';
-import { contentTypeAllowed, getUploadConfig, uploadTooLargeMessage } from './config';
-import type { ParsedFile } from './multipart';
-import type { StageTimer } from '../http/stage-timer';
+import { redactStorageKey } from '../storage/read-object.js';
+import { contentTypeAllowed, getUploadConfig, uploadTooLargeMessage } from './config.js';
+import type { ParsedFile } from './multipart.js';
+import type { StageTimer } from '../http/stage-timer.js';
 import {
   checkEmbedOrigin,
   checkRespondentScope,
@@ -451,7 +451,7 @@ async function resolveOpenDistribution(
   // upload would read as "form not published". That is a host configuration error, said as one.
   if (!ctx.elevatedUser) {
     LogError(
-      `[Forms] upload refused for ${slug}: MJ has no system user on this host, so the form's status cannot be read ` +
+      `[Forms] upload refused for ${JSON.stringify(slug)}: MJ has no system user on this host, so the form's status cannot be read ` +
         'and the upload cannot be recorded. Check the host user configuration (UserCache.GetSystemUser).',
     );
     return fail(500, UPLOAD_FAILED_MESSAGE);
@@ -461,7 +461,7 @@ async function resolveOpenDistribution(
     // The reason is for the operator; the respondent gets one fixed sentence for every reason, as
     // `Forms.SaveResponse` answers (re-review N2). A status that could not be READ is the database's
     // failure, not a missing form: a 503 with the generic upload failure, never a 404.
-    LogStatus(`[Forms] upload refused for ${slug}: ${loaded.failure ?? 'not-found'}.`);
+    LogStatus(`[Forms] upload refused for ${JSON.stringify(slug)}: ${loaded.failure ?? 'not-found'}.`);
     return loaded.failure === 'form-unreadable' ? fail(503, UPLOAD_FAILED_MESSAGE) : fail(404, FORM_UNAVAILABLE_MESSAGE);
   }
   return {
@@ -640,7 +640,6 @@ function safeFileName(filename: string): string {
   return cleaned || 'upload.bin';
 }
 
-/** Default storage path prefix: `forms-uploads/<YYYY-MM-DD>`. */
 /**
  * The allow-list, as a sentence a respondent can act on.
  *

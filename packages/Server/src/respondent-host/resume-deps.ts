@@ -30,11 +30,11 @@ import {
   revokeResponseInvites,
   type AcquireIsolatedProvider,
 } from '@mj-biz-apps/forms-core-entities-server';
-import { findInviteByRawToken, mintResponseInvite, revokeInviteById } from '../magic-link/resume-invites.service';
-import { getRespondentHostConfig } from './config';
-import type { DeviceResumeDeps, ResumeDistribution, ResumeResponseRow } from './device-resume.service';
-import { redeemRawToken } from './redeem.service';
-import { buildResumeCookie, clearResumeCookieHeader } from './resume-cookie';
+import { findInviteByRawToken, mintResponseInvite, revokeInviteById } from '../magic-link/resume-invites.service.js';
+import { getRespondentHostConfig } from './config.js';
+import type { DeviceResumeDeps, ResumeDistribution, ResumeResponseRow } from './device-resume.service.js';
+import { redeemRawToken } from './redeem.service.js';
+import { buildResumeCookie, clearResumeCookieHeader } from './resume-cookie.js';
 
 /** What the adapter needs from the host: a principal for its reads, and the caller's identity. */
 export interface ResumeDepsContext {
@@ -131,7 +131,7 @@ async function loadDistribution(
     contextUser,
   );
   if (!result.Success) {
-    LogError(`[Forms] resume routes could not read distribution '${slug}': ${result.ErrorMessage}`);
+    LogError(`[Forms] resume routes could not read distribution ${JSON.stringify(slug)}: ${result.ErrorMessage}`);
     return undefined;
   }
   const row = result.Results[0];

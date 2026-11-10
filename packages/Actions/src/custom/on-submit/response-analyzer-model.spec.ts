@@ -73,6 +73,19 @@ describe('coerceAnalyzedAnswers', () => {
     expect(out[1].rationale).toBe('Somewhat vague.');
   });
 
+  it('stops at the first invalid object, so later scores cannot shift onto the wrong answers', () => {
+    // Scores are matched to answers BY INDEX. Skipping the invalid second object would hand the
+    // third answer's score to the second answer; stopping keeps every salvaged score aligned.
+    const truncated =
+      '{"answers":[' +
+      '{"score":90,"rationale":"first"},' +
+      '{"score":"not a number","rationale":"invalid"},' +
+      '{"score":10,"rationale":"third"},' +
+      '{"score":5,"rationale":"cut';
+    const out = coerceAnalyzedAnswers(undefined, truncated);
+    expect(out).toEqual([{ score: 90, rationale: 'first' }]);
+  });
+
   it('respects nested braces and string literals containing braces/quotes while salvaging', () => {
     const truncated =
       '{"answers":[' +

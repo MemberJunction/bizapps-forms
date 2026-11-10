@@ -158,6 +158,16 @@ export class AutomationTabComponent implements OnInit {
   protected readonly selectedId = signal('');
   protected readonly confirmingRemove = signal(false);
 
+  /**
+   * Select a step. The one way the selection changes from the UI, because an armed "Remove it"
+   * belongs to the step it was armed on: carried across a selection change it would remove a
+   * different step in one click.
+   */
+  protected selectStep(id: string): void {
+    this.selectedId.set(id);
+    this.confirmingRemove.set(false);
+  }
+
   // ---- the add flow -------------------------------------------------------------------------
   protected readonly adding = signal<AddStage | null>(null);
   protected readonly entityQuery = signal('');
@@ -876,7 +886,7 @@ export class AutomationTabComponent implements OnInit {
     await this.run(async () => {
       const outcome = await this.saveAutomation(input);
       if (outcome.ok) {
-        this.selectedId.set(outcome.output.FormAutomationID);
+        this.selectStep(outcome.output.FormAutomationID);
         this.adding.set(null);
         this.resetAddState();
         this.noteSeeded(outcome.output.SeededAutomationIDs);

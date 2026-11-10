@@ -261,7 +261,7 @@ async function loadDistribution(
   // "no such slug" tells the holder of a perfectly good link to go and check the link, and tells the
   // operator nothing at all. Same decision, and same wording, as `hasPublishedVersion` below.
   if (!result.Success) {
-    LogError(`[Forms] Distribution read failed for slug '${slug}': ${result.ErrorMessage}`);
+    LogError(`[Forms] Distribution read failed for slug ${JSON.stringify(slug)}: ${result.ErrorMessage}`);
     return { lookup: 'unreadable' };
   }
   const row = result.Results[0];

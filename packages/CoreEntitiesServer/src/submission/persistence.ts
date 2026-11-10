@@ -781,6 +781,8 @@ async function reconcileAnswers(
       EntityName: FORMS_ENTITY.FormResponseAnswer,
       ExtraFilter: `ResponseID=${quoteSqlString(responseId)}`,
       ResultType: 'entity_object',
+      // A capped read would hide stored answers and reconcile would insert duplicates of them.
+      IgnoreMaxRows: true,
     },
     contextUser,
   );

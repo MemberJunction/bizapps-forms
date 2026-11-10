@@ -17,10 +17,11 @@
  *
  * All reads go through the per-request provider as MJ's system user, the elevated reader the
  * engine supplies, because the respondent's read grant is row-filtered to its own response;
- * RunView results are checked for `.Success` (RunView never throws). Callers decide fail-open vs
- * fail-closed from the returned `ok` flag.
+ * RunView results are checked for `.Success` (RunView never throws). A failed read is logged HERE,
+ * with its `ErrorMessage`, because callers only see `ok: false` and decide fail-open vs fail-closed
+ * from it — without the log an outage and a missing row are the same silence.
  */
-import type { UserInfo } from '@memberjunction/core';
+import { LogError, type UserInfo } from '@memberjunction/core';
 import { escapeSqlString, quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormResponseEntityType } from '@mj-biz-apps/forms-entities';
 import type { DefinitionRunViewProvider } from './published-link.js';
@@ -80,6 +81,7 @@ export async function findSessionResponse(
     contextUser,
   );
   if (!result.Success) {
+    LogError(`[Forms] findSessionResponse: the response read failed: ${result.ErrorMessage ?? 'no total row count returned'}`);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };
@@ -142,6 +144,7 @@ export async function findResponseById(
     contextUser,
   );
   if (!result.Success) {
+    LogError(`[Forms] findResponseById: the response read failed: ${result.ErrorMessage ?? 'no total row count returned'}`);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };
@@ -190,6 +193,7 @@ export async function countPartialResponses(
   // MJ 6.2 types TotalRowCount as optional (absent only under SkipTotalRowCount, which this read
   // never passes); a count without one is as unusable as a failed one, so both fail closed.
   if (!result.Success || result.TotalRowCount == null) {
+    LogError(`[Forms] countPartialResponses: the response read failed: ${result.ErrorMessage ?? 'no total row count returned'}`);
     return { ok: false, count: 0 };
   }
   return { ok: true, count: result.TotalRowCount };
@@ -237,6 +241,7 @@ export async function findScopedResponse(
     contextUser,
   );
   if (!result.Success) {
+    LogError(`[Forms] findScopedResponse: the response read failed: ${result.ErrorMessage ?? 'no total row count returned'}`);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };
@@ -300,6 +305,7 @@ export async function findResumableResponseById(
     contextUser,
   );
   if (!result.Success) {
+    LogError(`[Forms] findResumableResponseById: the response read failed: ${result.ErrorMessage ?? 'no total row count returned'}`);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };
@@ -345,6 +351,7 @@ export async function findOwnedResponseById(
     contextUser,
   );
   if (!result.Success) {
+    LogError(`[Forms] findOwnedResponseById: the response read failed: ${result.ErrorMessage ?? 'no total row count returned'}`);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };

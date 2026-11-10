@@ -181,6 +181,8 @@ interface TabInternals {
   chosenEntity: { set(choice: { name: string; label: string; schema: string } | null): void };
   mappings: { set(rows: { targetField: string; questionId: string; rule: string }[]): void };
   selectedId(): string;
+  selectStep(id: string): void;
+  confirmingRemove: { set(armed: boolean): void; (): boolean };
   actionError(): string;
   runsFor(id: string): { id: string }[];
   seededNote(): string;
@@ -361,6 +363,18 @@ describe('reordering', () => {
 });
 
 describe('removing a step', () => {
+  it('disarms the remove confirmation when another step is selected', async () => {
+    // Armed on step a, then b picked in the rail: b must not show a one-click "Remove it".
+    const tab = await tabWith([step('a', 1), step('b', 2)]);
+    tab.selectStep('a');
+    tab.confirmingRemove.set(true);
+
+    tab.selectStep('b');
+
+    expect(tab.selectedId()).toBe('b');
+    expect(tab.confirmingRemove()).toBe(false);
+  });
+
   it('is one Forms.RemoveAutomation — the server keeps the binding and marks the form', async () => {
     const tab = await tabWith([step('a', 1)]);
     operations = installFakeOperations(() =>

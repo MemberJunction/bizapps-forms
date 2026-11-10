@@ -21,7 +21,6 @@ import { runOperation } from '../shared/remote-operation';
 import { IconComponent } from '../widget/components/icon.component';
 import type {
   DetailPosition,
-  ResponseAnswerView,
   ResponseFileView,
   ResponseAutomationAttempt,
   ResponseAutomationEventView,

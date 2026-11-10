@@ -69,9 +69,7 @@ function injectScript(scriptUrl: string): Promise<void> {
     const existing = document.getElementById(SCRIPT_ELEMENT_ID) as HTMLScriptElement | null;
     if (existing) {
       existing.addEventListener('load', () => resolve(), { once: true });
-      existing.addEventListener('error', () => reject(new Error('Turnstile script failed to load.')), {
-        once: true,
-      });
+      existing.addEventListener('error', () => failAndAllowRetry(existing, reject), { once: true });
       return;
     }
     const script = document.createElement('script');
@@ -80,12 +78,22 @@ function injectScript(scriptUrl: string): Promise<void> {
     script.async = true;
     script.defer = true;
     script.addEventListener('load', () => resolve(), { once: true });
-    script.addEventListener('error', () => {
-      loadPromise = null; // allow a later retry
-      reject(new Error('Turnstile script failed to load.'));
-    }, { once: true });
+    script.addEventListener('error', () => failAndAllowRetry(script, reject), { once: true });
     document.head.appendChild(script);
   });
+}
+
+/**
+ * Reject this load and leave the page able to try again.
+ *
+ * Clearing `loadPromise` alone is not enough: a `<script>` that has failed never fires `load` or
+ * `error` again, so a retry that found the dead tag by id would wait on it forever — Submit stays
+ * disabled with no message. The tag is removed so the next attempt injects a fresh one.
+ */
+function failAndAllowRetry(script: HTMLScriptElement, reject: (reason: Error) => void): void {
+  loadPromise = null;
+  script.remove();
+  reject(new Error('Turnstile script failed to load.'));
 }
 
 /** Test-only: reset the module-level load state so specs start clean. */
