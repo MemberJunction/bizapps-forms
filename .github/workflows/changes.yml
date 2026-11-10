@@ -75,10 +75,11 @@ jobs:
           fi
 
           # Check that at least one changeset has 'minor' or 'major' bump. Only the front matter
-          # is read: a `patch` changeset whose prose says "minor fix" must not satisfy this.
+          # is read: a `patch` changeset whose prose says "minor fix" must not satisfy this. The `\r`
+          # is stripped so a CRLF file's `---` fences still match and a real `minor` is not refused.
           HAS_SUFFICIENT_BUMP=false
           for f in $CHANGESET_FILES; do
-            if awk 'NR==1 && $0=="---" {fm=1; next} fm && $0=="---" {exit} fm' "$f" | grep -qE ":[[:space:]]*(minor|major)[[:space:]]*$"; then
+            if awk '{sub(/\r$/, "")} NR==1 && $0=="---" {fm=1; next} fm && $0=="---" {exit} fm' "$f" | grep -qE ":[[:space:]]*(minor|major)[[:space:]]*$"; then
               HAS_SUFFICIENT_BUMP=true
               break
             fi
