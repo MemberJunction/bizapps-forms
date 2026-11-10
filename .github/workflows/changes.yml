@@ -74,10 +74,11 @@ jobs:
             exit 1
           fi
 
-          # Check that at least one changeset has 'minor' or 'major' bump
+          # Check that at least one changeset has 'minor' or 'major' bump. Only the front matter
+          # is read: a `patch` changeset whose prose says "minor fix" must not satisfy this.
           HAS_SUFFICIENT_BUMP=false
           for f in $CHANGESET_FILES; do
-            if grep -qE "minor|major" "$f"; then
+            if awk 'NR==1 && $0=="---" {fm=1; next} fm && $0=="---" {exit} fm' "$f" | grep -qE ":[[:space:]]*(minor|major)[[:space:]]*$"; then
               HAS_SUFFICIENT_BUMP=true
               break
             fi

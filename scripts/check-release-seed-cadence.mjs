@@ -49,7 +49,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SEED_PATTERN = /Metadata_Sync.*\.sql$/i;
@@ -241,7 +241,9 @@ export function findUnshippedMetadataDrift(repoRoot = REPO_ROOT, readState = rea
     return { problems, tag: state.tag, changed };
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+// Compared as paths, not as a hand-built file:// URL: that form is false from a checkout whose path
+// has a space or a non-ASCII character, and a release gate that runs nothing exits 0.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
     const cadence = findUnconsolidatedSeedDeltas();
     const drift = findUnshippedMetadataDrift();
     const problems = [...cadence.problems, ...drift.problems];
