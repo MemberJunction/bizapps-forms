@@ -29,6 +29,14 @@ import { FORMS_ENTITY } from '../shared/entity-names.js';
 import { RESUMABLE_RESPONSE_STATUSES, UNCOUNTED_BY_QUOTA } from './response-status.js';
 import type { FormResponseStatus } from './response-status.js';
 
+/**
+ * The one wording for a failed read in this module. Callers see only `ok: false`, so this line is
+ * the only place an outage is told apart from a missing row (see the header).
+ */
+function logFailedRead(reader: string, errorMessage: string | undefined): void {
+  LogError(`[Forms] ${reader}: the response read failed: ${errorMessage || 'no error message returned'}`);
+}
+
 /** The identity of the session+form whose response we are looking up. */
 export interface ResponseLookupKey {
   formVersionId: string;
@@ -81,7 +89,7 @@ export async function findSessionResponse(
     contextUser,
   );
   if (!result.Success) {
-    LogError(`[Forms] findSessionResponse: the response read failed: ${result.ErrorMessage ?? 'no total row count returned'}`);
+    logFailedRead('findSessionResponse', result.ErrorMessage);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };
@@ -144,7 +152,7 @@ export async function findResponseById(
     contextUser,
   );
   if (!result.Success) {
-    LogError(`[Forms] findResponseById: the response read failed: ${result.ErrorMessage ?? 'no total row count returned'}`);
+    logFailedRead('findResponseById', result.ErrorMessage);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };
@@ -193,7 +201,7 @@ export async function countPartialResponses(
   // MJ 6.2 types TotalRowCount as optional (absent only under SkipTotalRowCount, which this read
   // never passes); a count without one is as unusable as a failed one, so both fail closed.
   if (!result.Success || result.TotalRowCount == null) {
-    LogError(`[Forms] countPartialResponses: the response read failed: ${result.ErrorMessage ?? 'no total row count returned'}`);
+    logFailedRead('countPartialResponses', result.Success ? 'it returned no total row count' : result.ErrorMessage);
     return { ok: false, count: 0 };
   }
   return { ok: true, count: result.TotalRowCount };
@@ -241,7 +249,7 @@ export async function findScopedResponse(
     contextUser,
   );
   if (!result.Success) {
-    LogError(`[Forms] findScopedResponse: the response read failed: ${result.ErrorMessage ?? 'no total row count returned'}`);
+    logFailedRead('findScopedResponse', result.ErrorMessage);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };
@@ -305,7 +313,7 @@ export async function findResumableResponseById(
     contextUser,
   );
   if (!result.Success) {
-    LogError(`[Forms] findResumableResponseById: the response read failed: ${result.ErrorMessage ?? 'no total row count returned'}`);
+    logFailedRead('findResumableResponseById', result.ErrorMessage);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };
@@ -351,7 +359,7 @@ export async function findOwnedResponseById(
     contextUser,
   );
   if (!result.Success) {
-    LogError(`[Forms] findOwnedResponseById: the response read failed: ${result.ErrorMessage ?? 'no total row count returned'}`);
+    logFailedRead('findOwnedResponseById', result.ErrorMessage);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };
