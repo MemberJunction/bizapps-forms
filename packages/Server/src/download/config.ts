@@ -71,11 +71,25 @@ export const DOWNLOAD_RESPONSE_HEADERS: Readonly<Record<string, string>> = Objec
  *
  * A single trailing segment is all that is accepted: `/forms/files/a/b` is not a request for `a`,
  * and treating it as one is how a route that looks strict starts matching things nobody intended.
+ *
+ * A segment that cannot be percent-decoded declines too — the same rule as
+ * `matchSingleSegmentRoute` (`http/route-match.ts`). This runs outside the handler's `.catch`, so a
+ * `URIError` here would leave through Express's error path instead of the route's uniform 404.
  */
 export function fileIdFromPath(path: string): string | undefined {
   if (!path.startsWith(`${DOWNLOAD_ROUTE}/`)) {
     return undefined;
   }
   const rest = path.slice(DOWNLOAD_ROUTE.length + 1);
-  return rest.length > 0 && !rest.includes('/') ? decodeURIComponent(rest) : undefined;
+  if (rest.length === 0 || rest.includes('/')) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(rest);
+  } catch (e) {
+    if (e instanceof URIError) {
+      return undefined;
+    }
+    throw e;
+  }
 }

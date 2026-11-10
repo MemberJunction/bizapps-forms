@@ -27,7 +27,6 @@ import type {
   mjBizAppsFormsFormStyleEntity,
   FormQuestionType,
   FormRenderMode,
-  FormStyleTokens,
   PublishedFormDefinition,
   PublishedFormAutomation,
 } from '@mj-biz-apps/forms-entities';

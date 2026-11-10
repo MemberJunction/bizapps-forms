@@ -150,7 +150,9 @@ function tryParse(rawResult: string | undefined): unknown {
  * Locates the `"answers"` array, walks it extracting balanced `{...}` objects with a
  * brace-depth scanner that respects string literals + escapes, JSON.parses each in
  * isolation, and keeps those passing {@link isAnalyzedAnswer}. Stops at the first object
- * that fails to parse (the truncated tail). No eval.
+ * that is incomplete (the truncated tail) OR invalid: the caller matches scores to answers by
+ * index, so skipping one and carrying on would shift every later score onto the wrong answer.
+ * No eval.
  */
 function salvageAnswers(rawResult: string): AnalyzedAnswer[] {
   const start = arrayStartIndex(rawResult);
@@ -169,9 +171,10 @@ function salvageAnswers(rawResult: string): AnalyzedAnswer[] {
       break; // trailing object is incomplete (truncated); stop.
     }
     const candidate = tryParse(rawResult.slice(open, end + 1));
-    if (isAnalyzedAnswer(candidate)) {
-      salvaged.push(candidate);
+    if (!isAnalyzedAnswer(candidate)) {
+      break;
     }
+    salvaged.push(candidate);
     i = end + 1;
   }
   return salvaged;

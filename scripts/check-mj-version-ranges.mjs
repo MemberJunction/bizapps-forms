@@ -66,7 +66,7 @@
  * single answer for a union, so there is nothing honest to compare.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -514,7 +514,8 @@ export function runCheck(root) {
     return violations;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compared as paths, not as a hand-built file:// URL, which is false from a path with a space.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
     const violations = runCheck(REPO_ROOT);
     if (violations.length > 0) {
         console.error('check-mj-version-ranges: FAILED\n');

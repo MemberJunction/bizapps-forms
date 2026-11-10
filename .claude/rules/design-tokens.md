@@ -6,7 +6,7 @@ paths:
 
 # 🚨 CRITICAL: Design Token System — NO HARDCODED COLORS 🚨
 
-MemberJunction ships a CSS custom property (design token) system; bizapps-forms consumes it via `@memberjunction/ng-ui-components` rather than defining its own. The respondent widget layers its own `--mjf-*` tokens on top, fed from `FormStyle.Tokens` so a form can be themed per-distribution without code. **Every color in component CSS MUST use design tokens.** Hardcoded hex values (`#264FAF`, `#333`, `#f5f5f5`, etc.) break dark mode, prevent white-labeling, and create maintenance debt.
+MemberJunction ships a CSS custom property (design token) system; bizapps-forms consumes it via `@memberjunction/ng-ui-components` rather than defining its own. The respondent widget layers its own `--mjf-*` tokens on top, fed from `FormStyle.CSSVariables` so a form can be themed per-distribution without code. **Every color in component CSS MUST use design tokens.** Hardcoded hex values (`#264FAF`, `#333`, `#f5f5f5`, etc.) break dark mode, prevent white-labeling, and create maintenance debt.
 
 ## The Rule
 
@@ -140,19 +140,16 @@ Run this mental checklist:
 
 ## Button styling
 
-Don't override `.mj-btn` in component CSS — see [`packages/Angular/CLAUDE.md`](../../packages/Angular/CLAUDE.md) for the rule and the sanctioned customization path. Enforced by `npm run check:ui-buttons`.
+Don't override `.mj-btn` in component CSS. (MJ's `packages/Angular/CLAUDE.md` and its `check:ui-buttons` gate are MJ-only; the raw-button gate in `scripts/check-ui-tokens.mjs` ships OFF here — the script's header says why.)
 
 ## Local CI mirror
 
-These rules are enforced by CI on PRs targeting `next`. Run them locally before pushing (requires your changes to be committed — the check diffs against `origin/next`):
+The `ui-token-gate` job enforces these rules on every PR. Run it locally before pushing:
 
-- `npm run check:ui` — both gates against changed CSS/SCSS vs `origin/next` (matches PR behavior)
-- `npm run check:ui-tokens` — hardcoded-color gate only (hex, rgb/rgba, hsl/hsla — except shadow neutrals `rgba(0,0,0,X)` / `rgba(255,255,255,X)`)
-- `npm run check:ui-buttons` — `.mj-btn` override gate only
-- `npm run check:ui:all` — audit the whole `packages/Angular/` tree (cleanup work; reports pre-existing violations CI doesn't gate on)
-- `npm run check:ui:adoption` — re-run the measurement script (writes to `plans/adoption-metrics.md`)
+- `npm run lint:ui` — the hardcoded-colour gate (`scripts/check-ui-tokens.mjs`)
+- `npm run lint:ui:test` — the gate's own spec
 
-Scripts live at `.github/scripts/check-css-hex-tokens.sh` and `.github/scripts/check-mj-btn-override.sh`. Both accept `--file <path>` for single-file checks.
+MJ's `check:ui*` scripts and `.github/scripts/check-css-hex-tokens.sh` / `check-mj-btn-override.sh` do not exist in this repo.
 
 ## Related
 

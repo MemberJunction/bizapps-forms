@@ -334,14 +334,16 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
 /**
  * A fresh `simple` read of the named columns. Fresh because a publish must see the rows as they are
  * now — and, inside its transaction, as this unit of work has written them — never a cached copy.
+ * `IgnoreMaxRows` because the entity's `UserViewMaxRows` (1000) would otherwise cut the read short
+ * with no error, and a snapshot published from a truncated read silently loses the rows past it.
  */
 function simpleRead(entityName: string, filter: string, fields: readonly string[]): RunViewParams {
-  return { EntityName: entityName, ExtraFilter: filter, Fields: [...fields], ResultType: 'simple', BypassCache: true };
+  return { EntityName: entityName, ExtraFilter: filter, Fields: [...fields], ResultType: 'simple', BypassCache: true, IgnoreMaxRows: true };
 }
 
 /** A fresh read of whole entity objects — for the rows publish writes back (the form, the live versions). */
 function entityRead(entityName: string, filter: string): RunViewParams {
-  return { EntityName: entityName, ExtraFilter: filter, ResultType: 'entity_object', BypassCache: true };
+  return { EntityName: entityName, ExtraFilter: filter, ResultType: 'entity_object', BypassCache: true, IgnoreMaxRows: true };
 }
 
 /** Save a version, translating a concurrent-publish collision into words an author can act on. */

@@ -370,7 +370,7 @@
                 [class.is-on]="step.id === selectedId()"
                 [class.is-disabled]="!step.enabled"
                 [attr.aria-current]="step.id === selectedId()"
-                (click)="selectedId.set(step.id)"
+                (click)="selectStep(step.id)"
               >
                 <span class="at-step-num" [class.is-off]="!step.enabled" aria-hidden="true">
                   {{ step.position ?? '–' }}

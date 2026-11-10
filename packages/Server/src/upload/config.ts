@@ -57,7 +57,6 @@ export interface UploadConfig {
   allowedTypes: readonly string[];
   storageAccountId: string | undefined;
   pathPrefix: string | undefined;
-  /** Per-IP sliding-window ceiling (a generous ceiling — see UploadMiddleware for the shared-proxy caveat). */
   /** Simultaneous in-flight uploads across the process — the concurrency bound beside the IP ceiling. */
   maxInFlight: number;
 }

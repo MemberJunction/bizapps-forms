@@ -129,7 +129,7 @@ node scripts/pg-objectmodel-test.mjs     # measured: 19 passed, 0 failed
 And boot the API against it:
 
 ```bash
-npm run build && npm run start:api
+npm run build && (cd apps/MJAPI && node server.mjs)
 #   DB   PostgreSQL · localhost:5436/FORMS_Test · 404 entities
 #   Ready http://localhost:4113/
 ```

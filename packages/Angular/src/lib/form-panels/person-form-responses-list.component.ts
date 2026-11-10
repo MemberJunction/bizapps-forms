@@ -56,7 +56,7 @@ const LOAD_FAILED_MESSAGE = "This person's form responses could not be loaded.";
             <span class="mjf-empty-icon"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i></span>
             <span class="mjf-empty-title">Responses could not be loaded</span>
             <p class="mjf-empty-body">{{ ErrorMessage() }}</p>
-            <button type="button" class="mjf-btn mjf-btn--sm" (click)="Retry()">
+            <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" (click)="Retry()">
               <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
               Retry
             </button>

@@ -1,18 +1,18 @@
 # Create Pull Request
 
-Create a GitHub pull request for the current branch targeting the `main` branch.
+Create a GitHub pull request for the current branch targeting the `next` branch.
 
 ## Instructions
 
 1. **Verify git status:**
    - Run: `git status`
-   - Ensure current branch is not `main`
+   - Ensure current branch is not `main` or `next`
    - Check if branch tracks a remote and is up to date
 
 2. **Analyze changes:**
-   - Get commit history: `git log main...HEAD --oneline --no-merges`
-   - Get file changes: `git diff main...HEAD --name-only`
-   - Get detailed diff: `git diff main...HEAD --stat`
+   - Get commit history: `git log next...HEAD --oneline --no-merges`
+   - Get file changes: `git diff next...HEAD --name-only`
+   - Get detailed diff: `git diff next...HEAD --stat`
 
 3. **Generate PR title:**
    - Create a concise, descriptive title based on the commit messages
@@ -44,18 +44,18 @@ Generated with [Claude Code](https://claude.com/claude-code)
    - If branch is behind remote, warn user and ask before force pushing
 
 6. **Create PR:**
-   - Use `gh pr create --base main --title "<title>" --body "$(cat <<'EOF'
+   - Use `gh pr create --base next --title "<title>" --body "$(cat <<'EOF'
 <body content>
 EOF
 )"`
-   - Ensure the base branch is `main`
+   - Ensure the base branch is `next`
    - After creation, display the PR URL
 
 ## Important Notes
 
-- Always target `main` branch
+- Always target `next` branch (`main` only receives the release PR)
 - Never force push without explicit user approval
-- If there are no commits compared to `main`, inform the user (nothing to create PR for)
+- If there are no commits compared to `next`, inform the user (nothing to create PR for)
 - Use HEREDOC syntax for the body to handle multi-line content correctly
 - The PR description should be concise but informative
 - Test plan should be specific to the changes made

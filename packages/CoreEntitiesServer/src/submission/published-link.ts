@@ -81,6 +81,9 @@ async function loadDistribution(
     contextUser,
   );
   if (!result.Success) {
+    // Logged for the reason `loadPublishedVersion` logs: the caller reports `undefined` as
+    // distribution-not-found, so only the log tells an outage from a slug that names nothing.
+    LogError(`[Forms] distribution read failed for slug ${JSON.stringify(slug)}: ${result.ErrorMessage}`);
     return undefined;
   }
   return result.Results[0];

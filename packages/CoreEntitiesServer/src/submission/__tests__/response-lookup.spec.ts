@@ -1,7 +1,13 @@
 /**
  * Unit tests for the session-response lookup behind dedupe + partial upsert/promotion.
  */
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const logError = vi.hoisted(() => vi.fn());
+vi.mock('@memberjunction/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memberjunction/core')>()),
+  LogError: logError,
+}));
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import {
   countPartialResponses,
@@ -19,6 +25,7 @@ function makeProvider(options: {
   capture?: (params: RunViewParams) => void;
   /** Drop TotalRowCount from the result, as MJ 6.2's optional type allows. */
   omitTotal?: boolean;
+  errorMessage?: string;
 }) {
   return {
     RunView: async <T>(params: RunViewParams): Promise<RunViewResult<T>> => {
@@ -29,7 +36,7 @@ function makeProvider(options: {
         RowCount: options.rows?.length ?? 0,
         TotalRowCount: options.omitTotal ? undefined : (options.rows?.length ?? 0),
         ExecutionTime: 0,
-        ErrorMessage: '',
+        ErrorMessage: options.errorMessage ?? '',
       } as RunViewResult<T>;
     },
     RunViews: async () => [],
@@ -168,5 +175,27 @@ describe('countPartialResponses (the durable row ceiling)', () => {
   it('fails CLOSED when a successful count carries no TotalRowCount (MJ 6.2 types it optional)', async () => {
     const provider = makeProvider({ omitTotal: true });
     expect((await countPartialResponses(provider, { formVersionId: 'v' }, USER)).ok).toBe(false);
+  });
+});
+
+describe('a failed read is logged with its own reason', () => {
+  beforeEach(() => logError.mockClear());
+
+  it('logs the provider error for a lookup, never the count-only wording', async () => {
+    const provider = makeProvider({ success: false, errorMessage: 'connection reset' });
+
+    await findSessionResponse(provider, { formVersionId: 'ver-1', sessionId: 'sess-1' }, ['Complete'], USER);
+
+    expect(logError).toHaveBeenCalledTimes(1);
+    expect(logError.mock.calls[0][0]).toContain('findSessionResponse: the response read failed: connection reset');
+    expect(logError.mock.calls[0][0]).not.toContain('total row count');
+  });
+
+  it('says a successful count returned no total, rather than an empty error', async () => {
+    const provider = makeProvider({ omitTotal: true });
+
+    await countPartialResponses(provider, { formVersionId: 'ver-1' }, USER);
+
+    expect(logError.mock.calls[0][0]).toContain('countPartialResponses: the response read failed: it returned no total row count');
   });
 });

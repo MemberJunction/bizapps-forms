@@ -111,10 +111,7 @@ import './download/DownloadMiddleware.js';
 // deployment that configures neither behaves exactly as it does without this import.
 import './storage/LocalDiskFileStorage.js';
 
-// Import generated class registrations manifest
-import { CLASS_REGISTRATIONS } from './generated/class-registrations-manifest.js';
-
-// Re-export the manifest for consumers
+// Re-export the generated class registrations manifest for consumers
 export { CLASS_REGISTRATIONS } from './generated/class-registrations-manifest.js';
 
 import { fileURLToPath } from 'node:url';

@@ -13,7 +13,7 @@ paths:
 ## Running tests
 
 ```bash
-npm test                    # every workspace, via turbo — 434 tests
+npm test                    # every workspace, via turbo
 npm run test:packages       # the five @mj-biz-apps/forms-* packages only
 cd packages/Server && npx vitest run     # one package
 cd packages/Server && npx vitest         # watch mode
@@ -26,17 +26,12 @@ npm run lint:guard-mutants  # neutralise each declared load-bearing guard; its n
 > believe a partial per-package loop was the whole thing. If `npm test` ever fails with *"Could not
 > find task `test` in project"*, the `test` task has been dropped from `turbo.json`.
 
-**`npm test` covers a workspace the per-package loop misses.** `apps/MJAPI` has its own tests. Looping
-the five packages reports 432 and looks complete; the real total is **434**.
-
 There is no `test:coverage` or `test:watch` script — use `npx vitest --coverage` / `npx vitest`
 directly. MJ's rule lists both; they do not exist here.
 
 ## Conventions here (these differ from MJ core)
 
-- Test files are **`.spec.ts`** in all five `packages/*`. The one exception is
-  `apps/MJAPI/src/__tests__/index.test.ts`, which follows MJ's `.test.ts` convention because it came
-  from the MJ app scaffold — leave it alone; new package tests use `.spec.ts`.
+- Test files are **`.spec.ts`** in all five `packages/*`. (`apps/MJAPI` has no tests of its own.)
 - Two placements, both in use:
   - **colocated** beside the source — `create-followup-task.action.spec.ts`
   - **`__tests__/`** subdirectory — `packages/CoreEntitiesServer/src/submission/__tests__/`
@@ -47,7 +42,8 @@ directly. MJ's rule lists both; they do not exist here.
   `packages/CoreEntitiesServer/src/testing/fake-provider.ts` (imported as
   `@mj-biz-apps/forms-core-entities-server/testing`) is the shared one, and worth extending rather than copying.
 - No database connections in unit tests. Stack-level checks live elsewhere (below).
-- There is no `scripts/scaffold-tests.mjs` and no `guides/` directory — both are MJ-only.
+- There is no `scripts/scaffold-tests.mjs`, and MJ's `guides/*.md` are not here (`guides/` holds only
+  `ENTITY_BINDING_GUIDE.md`).
 
 ## What unit tests here cannot catch
 
@@ -152,7 +148,8 @@ status" forever. The path list now lives in the `scope` job, which feeds
 `scripts/check-paths-touched.mjs` and gates `build-and-test` with a job-level `if:` — a job skipped
 that way reports `skipped`, which counts as passing. See CLAUDE.md, "Every gate reports on every PR".
 
-That list covers `packages/`, `apps/`, `scripts/`, `smoke/`, `migrations/`, `.claude/`,
+That list covers `packages/`, `apps/`, `scripts/`, `smoke/`, `migrations/`, `metadata/`, `mj-app.json`,
+`mj.config.cjs`, `.claude/`,
 `.github/scripts/`, the root tsconfigs, `pnpm-workspace.yaml`, `.npmrc`, `pnpm-lock.yaml`,
 `turbo.json` and `package.json`; previously only `packages/**` and `package-lock.json` triggered the
 workflow, so a change breaking MJAPI or a gate script never ran CI at all. Every entry is pinned by
