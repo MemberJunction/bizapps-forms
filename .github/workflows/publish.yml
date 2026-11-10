@@ -371,6 +371,40 @@ jobs:
           echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
           echo "::notice::back-merge PR: $PR_URL"
 
+      # Auto-merge, not a merge. The PR above cannot merge yet: its seven required checks have not
+      # run, and nothing may bypass them. This step only records the intent, and GitHub performs the
+      # merge itself when every required check on that PR is green. So the back-merge still goes
+      # through the pull request and every gate; what disappears is the human click.
+      #
+      # It needs the repository setting "Allow auto-merge". With the setting off GitHub answers
+      # "Auto merge is not allowed for this repository (enablePullRequestAutoMerge)", and the PR
+      # simply stays open for a human, which is what this workflow did before this step existed.
+      # That is why a refusal here is a warning and never fails the run: the release is published,
+      # the PR is open, and `release-prep.mjs` still refuses the next release until `main` reaches
+      # `next`.
+      #
+      # Two cases GitHub will not finish by itself, both left as an open PR: a merge conflict, and
+      # `next` moving while the checks run (`next-protect` is strict, and GitHub does not update an
+      # out-of-date branch for you). Runs for an already-open PR too, so a re-run arms a PR that an
+      # earlier run opened and could not arm.
+      - name: Ask GitHub to merge the back-merge when its checks pass
+        if: steps.backmerge_pr.outputs.pr_url != ''
+        id: backmerge_auto
+        env:
+          GH_TOKEN: ${{ steps.backmerge_token.outputs.token }}
+          PR_URL: ${{ steps.backmerge_pr.outputs.pr_url }}
+        run: |
+          set -euo pipefail
+          # A merge commit, as docs/release.md requires: a squash would give `next` a commit that
+          # is not `main`'s tip, and `main` would still not be an ancestor of `next`.
+          if OUT=$(gh pr merge "$PR_URL" --auto --merge 2>&1); then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::auto-merge enabled on $PR_URL — GitHub merges it when its required checks pass."
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::auto-merge could not be enabled on $PR_URL, so it needs a human merge. gh said: $(printf '%s' "$OUT" | tr '\n' ' ')"
+          fi
+
       - name: Summarise the back-merge
         if: always() && steps.backmerge_scope.conclusion == 'success'
         env:
@@ -378,6 +412,7 @@ jobs:
           NOTHING: ${{ steps.backmerge_scope.outputs.nothing_to_merge }}
           BRANCH: ${{ steps.backmerge_pr.outputs.branch }}
           PR_URL: ${{ steps.backmerge_pr.outputs.pr_url }}
+          ARMED: ${{ steps.backmerge_auto.outputs.armed }}
         run: |
           set -euo pipefail
           if [ "$NOTHING" = "true" ]; then
@@ -397,6 +432,15 @@ jobs:
               echo ""
               echo "**v$VERSION published successfully.** The packages are on npm and the tag is pushed; the only"
               echo "thing left is merging that pull request, which carries \`main\` back into \`next\`."
+              echo ""
+              if [ "${ARMED:-}" = "true" ]; then
+                echo "**Auto-merge is enabled on it**, so GitHub merges it when its required checks pass. It needs"
+                echo "you only if it conflicts, or if \`next\` moves while the checks run (then: *Update branch*)."
+              else
+                echo "**Auto-merge could not be enabled on it, so it needs a human merge** (merge commit). The"
+                echo "warning on this run carries GitHub's reason; the usual one is the repository setting"
+                echo "*Allow auto-merge* being off."
+              fi
               echo ""
               echo "Nothing here is chasing you to do it today. \`protect-main\` requires a branch to be up to date"
               echo "with its base, so the cost of leaving it lands on the NEXT release — and that is where it is"
