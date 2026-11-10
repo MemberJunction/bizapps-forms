@@ -131,9 +131,10 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
   *introduced*, so a direct push — which introduces a SHA the remote has never seen — can never
   satisfy them; no retry wins that race. That finding is permanent and `npm run lint:release-pushes`
   (inside `build-and-test`) keeps it enforced.
-  What changed is everything built on top of it. The release is now **one dispatch and two merges**:
+  What changed is everything built on top of it. The release is now **one dispatch and one merge by hand**:
   *Prepare a release* cuts `release/vX.Y.Z`, bumps, and opens the PR into `main`; `publish.yml`
-  publishes, tags, and opens the `main` → `next` back-merge PR. Runbook:
+  publishes, tags, opens the `main` → `next` back-merge PR and enables auto-merge on it (GitHub merges
+  it when its checks pass; needs the *Allow auto-merge* repo setting, else it waits for a human). Runbook:
   [`docs/release.md`](docs/release.md); `npm run release:plan` answers "is a release due?" read-only
   from any checkout.
   - **The pull requests are opened by a GitHub App, and that is not a bypass.** It writes only to

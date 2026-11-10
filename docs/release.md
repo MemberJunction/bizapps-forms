@@ -1,6 +1,6 @@
 # Cutting a release
 
-Two pull requests, and both are opened for you. Nothing is ever pushed to `main` or `next` — not by
+Two pull requests, and both are opened for you. You merge the first; GitHub merges the second. Nothing is ever pushed to `main` or `next` — not by
 you, not by a workflow. That constraint is not a limitation being worked around; it is the shape of
 the design (see [Why it looks like this](#why-it-looks-like-this)).
 
@@ -9,8 +9,8 @@ the design (see [Why it looks like this](#why-it-looks-like-this)).
 | 0. Prep the seed | you, once per release | the consolidated `Metadata_Sync` — needs a database, so no workflow can do it |
 | 1. Dispatch **Prepare a release** | you, one click | cuts `release/vX.Y.Z`, bumps, opens the PR into `main` |
 | 2. Review and merge that PR | you | the only place the seed and the version get human eyes |
-| 3. Publish | `publish.yml` | builds, publishes to npm, tags, opens the back-merge PR |
-| 4. Merge the back-merge PR | you | carries `main` back into `next` |
+| 3. Publish | `publish.yml` | builds, publishes to npm, tags, opens the back-merge PR and enables auto-merge on it |
+| 4. The back-merge PR merges | GitHub, when its checks pass | carries `main` back into `next`; yours only if auto-merge could not finish |
 
 ---
 
@@ -87,7 +87,8 @@ Merge it with a **merge commit**.
 ## 3. Publishing happens by itself
 
 The merge pushes to `main`, which triggers `publish.yml`. It builds, runs the release-readiness
-checks, publishes to npm, pushes the `vX.Y.Z` tag, and opens the back-merge pull request.
+checks, publishes to npm, pushes the `vX.Y.Z` tag, opens the back-merge pull request, and enables
+auto-merge on it.
 
 Every gate sits before `Publish to npm`, so a failure costs a re-run and nothing has been published.
 Three are worth knowing by name:
@@ -105,10 +106,39 @@ Three are worth knowing by name:
 **A green run means the automation did its job.** It is red only when the back-merge pull request
 could not be opened — which means no one is tracking the outstanding merge, and a human is needed.
 
-## 4. Merge the back-merge PR
+## 4. The back-merge PR merges itself
 
 `chore/backmerge-vX.Y.Z → next`, opened for you in step 3. It carries the release merge commit and
 the version bump back to `next`.
+
+`publish.yml` enables GitHub auto-merge on it, so GitHub merges it (merge commit) when its seven
+required checks are green. It is still a pull request and it
+still passes every gate; only the click is gone. A direct push to `next` is not an option, for the
+reason in [Why it looks like this](#why-it-looks-like-this).
+
+Four cases leave it open for you. The publish run can only know about two of them, the first and
+the last: its summary says whether auto-merge was enabled, and the warning on the run gives the
+reason when it was not. The middle two happen after the run has ended, so look at the PR itself.
+
+- **The repository setting *Allow auto-merge* is off.** GitHub then refuses with `Auto merge is not
+  allowed for this repository`, the run shows a warning, and the PR waits. Read the setting, do not
+  recall it: `gh api repos/MemberJunction/bizapps-forms --jq .allow_auto_merge`.
+- **`next` moved while the checks ran.** `next-protect` is strict and GitHub does not update an
+  out-of-date branch for you. Press *Update branch*, then confirm the PR still shows auto-merge
+  enabled.
+- **A merge conflict.** GitHub cannot merge a conflicted PR. Resolve it on the branch, then confirm
+  the PR still shows auto-merge enabled; if it does not, merge it yourself.
+- **The PR is not the one this workflow opens.** Auto-merge is enabled only on a PR from a branch in
+  this repository whose head is exactly `main`'s tip at that moment. So a re-run of the publish
+  does not enable it on a branch someone has pushed to, and the warning says which test failed.
+  That test runs once, when auto-merge is enabled (`--match-head-commit`). It is not a standing pin:
+  once enabled, a later push by someone with write access is merged when the checks pass.
+
+A re-run of the publish while the back-merge PR is open with green checks merges it on the spot,
+and the summary then reads "The back-merge is merged".
+
+In each case merge with a **merge commit**. A squash gives `next` a commit that is not `main`'s tip,
+so `main` is still not an ancestor of `next`.
 
 This is not bookkeeping, and the cost of skipping it lands somewhere surprising: `protect-main` sets
 `strict: true` — "branch must be up to date with base" — so leaving it costs **this** release nothing
@@ -137,7 +167,7 @@ Both rulesets keep `bypass_actors: []`, and `npm run lint:release-pushes` (insid
 still fails any workflow or script that pushes to `main` or `next`. Nothing here asks for an
 exception to anything.
 
-**Why there is still a human merge, twice.** MJ built a one-click release button, never dispatched
+**Why there is still a human merge.** MJ built a one-click release button, never dispatched
 it, and deleted it — because every release carries prep that must be *reviewed*, and a metadata-sync
 migration is permanent, append-only history. That argument holds here verbatim. What is automated is
 the mechanical part: computing the version, writing the commit, opening the pull requests. What stays
@@ -179,5 +209,6 @@ npm: both stopped before `Publish to npm`, which is what every gate sitting ahea
 | Some packages appear published and others do not, right after a green run | **Wait three minutes and look again before doing anything.** npm's packument is eventually consistent: after `v0.11.0` the registry served `0.11.0` for one package and `0.10.0` for four, and converged over ~3 minutes. Read the `Publish to npm` step's own output — `changeset publish` names every package it published — and trust that over the registry. |
 | Some packages genuinely did not publish (the step's output says so, or they are still absent well after the run) | `changeset publish` works concurrently and expects a retry. Re-run the workflow; `release-plan.mjs` asks *publish* and *tag* separately, so it finishes the job rather than reporting a green no-op. |
 | A push in the release path is refused with a 403 naming `github-actions[bot]` | The push used the ambient token, not the App, whatever its remote URL says — `actions/checkout`'s persisted `extraheader` outranks URL credentials. See `#226` and `#229`. |
+| Publish run is green with a warning that auto-merge could not be enabled | The back-merge PR is open and needs a human merge. See step 4; the usual cause is the *Allow auto-merge* repository setting. |
 | The back-merge branch exists at an unexpected SHA | The workflow refuses to force-push over it, because someone may have resolved conflicts there. Delete the branch or open the PR by hand. |
 | `release:plan` says the seed is owed | Step 0. `migrations/README.md`. |
