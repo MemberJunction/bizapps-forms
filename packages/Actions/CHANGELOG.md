@@ -1,5 +1,20 @@
 # @mj-biz-apps/forms-actions
 
+## 1.0.0
+
+### Major Changes
+
+- 346a76b: MJ Forms 1.0. Publish, clone, response reads and automation runs moved to the server in 0.16.0; this release declares that surface stable. It ships no migration and no metadata, so `mj app install` has nothing extra to apply. A host pinned to `^0.16.x` does not receive 1.0.0 until its range is widened.
+
+### Patch Changes
+
+- c44c977: Fix a set of verified defects found in a whole-repo audit. Publish, clone, automation-run and resume reads no longer stop silently at the entity's 1000-row view limit. The written-response analyzer stops salvaging at the first invalid score so later scores cannot land on the wrong answers. A failed Turnstile script load can be retried. An armed "Remove it" in the Automate tab no longer carries over to another step. A malformed escape on `/forms/files/<id>` is declined like any other path the route does not claim, instead of throwing a `URIError` that answered 500 with a stack trace. A deleted agent is a permanent automation failure rather than five retries. Failed response and distribution reads are now logged with their error, and the "per-IP ceilings not applied" warning is visible in production.
+- Updated dependencies [c44c977]
+- Updated dependencies [346a76b]
+- Updated dependencies [346a76b]
+  - @mj-biz-apps/forms-core-entities-server@1.0.0
+  - @mj-biz-apps/forms-entities@1.0.0
+
 ## 0.16.0
 
 ### Minor Changes
