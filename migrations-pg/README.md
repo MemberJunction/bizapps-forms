@@ -5,7 +5,7 @@ PostgreSQL migrations for Forms, converted from `../migrations` via
 carries CodeGen's native plpgsql output.
 
 **Verified end to end: see [`docs/PG_INSTALL_VERIFICATION.md`](docs/PG_INSTALL_VERIFICATION.md).**
-A fresh install is 3 migrations, **no codegen**, and a subsequent `mj codegen` run
+A fresh install is 5 migrations, **no codegen**, and a subsequent `mj codegen` run
 changes nothing in the database. `scripts/pg-objectmodel-test.mjs` (19 assertions)
 proves the resulting model actually works, not merely that the objects exist.
 Measured on PostgreSQL **16.11** — the oldest major we support, deliberately, not
@@ -15,7 +15,7 @@ the newest.
 
 | kind | files | what they are |
 |---|---|---|
-| `*.pg.sql` | 2 | 1:1 conversions of `../migrations/*.sql` — DDL, comments, entity metadata |
+| `*.pg.sql` | 4 | 1:1 conversions of `../migrations/*.sql` — DDL, comments, entity metadata |
 | `*.pgonly.sql` | 1 | CodeGen's base views, CRUD functions, triggers, grants and column defaults — no T-SQL counterpart |
 
 The capture file exists because on SQL Server CodeGen **appends** its output into

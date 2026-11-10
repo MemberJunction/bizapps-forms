@@ -31,11 +31,11 @@ judgement. They are still wrong here, for a reason that is not about semver at a
 
 A fixed group takes the **highest** bump present in the release and applies that one version to
 all of its packages. So a single `minor` written anywhere, for any reason, moves
-`forms-entities`, `forms-actions`, `forms-server` and `forms-ng` together — including the three
-that the change never touched.
+`forms-entities`, `forms-core-entities-server`, `forms-actions`, `forms-server` and `forms-ng`
+together — including the four that the change never touched.
 
 That is why an unjustified `minor` is not a small overstatement. It is a claim, made on behalf of
-four packages, that hosts installing this app have something new to reckon with. When there is no
+five packages, that hosts installing this app have something new to reckon with. When there is no
 migration and no metadata, they do not: `mj app install` has nothing extra to apply, and the
 version is telling them otherwise.
 
@@ -53,7 +53,7 @@ requires at least one to carry `minor` or `major`:
 ```
 
 Nothing checks the other direction. A `minor` on a PR with no migration is green, ships, and
-moves all four packages. CI will not catch it — which is precisely why the rule is written here.
+moves all five packages. CI will not catch it — which is precisely why the rule is written here.
 
 Note also that the gate fires on **migrations only**. `metadata/` is in the rule above because
 metadata is release work that reaches a host (see `CLAUDE.md` → Migrations), not because CI reads

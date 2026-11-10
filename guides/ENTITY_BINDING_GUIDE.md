@@ -242,7 +242,7 @@ field, no attachment — is written to that record. A create policy still create
 ## 7. Testing
 
 ```bash
-npm test                                   # 595 unit tests, no database
+npm test                                   # unit tests, no database
 npm run smoke:binding:seed                 # seed a live binding (dev DB only)
 npm run smoke:binding                      # 5 real submissions, then verify the database
 npm run smoke:respondent -- <slug>         # the public path, unchanged
@@ -250,7 +250,7 @@ npm run smoke:provenance                   # a second session cannot claim your 
 ```
 
 Both smoke scripts need `set -a && . ./.env && set +a` first, MJAPI running, and the raised rate
-limit (`FORMS_RATELIMIT_MAX=200 npm run start:api`) because the binding test submits five times in
+limit (`cd apps/MJAPI && FORMS_RATELIMIT_MAX=200 node server.mjs`) because the binding test submits five times in
 a row.
 
 The binding smoke test asserts the invariants whose failure is *silent*: a repeat submission merges
