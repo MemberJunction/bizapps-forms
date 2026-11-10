@@ -393,16 +393,42 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.backmerge_token.outputs.token }}
           PR_URL: ${{ steps.backmerge_pr.outputs.pr_url }}
+          MAIN_SHA: ${{ steps.backmerge_scope.outputs.main_sha }}
         run: |
           set -euo pipefail
+          not_armed() {
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::auto-merge was not enabled on $PR_URL, so it needs a human merge. $(printf '%s' "$1" | tr '\n' ' ')"
+          }
+
+          # Arm only a pull request whose content is exactly `main`'s tip, from a branch in THIS
+          # repository. The step above finds an already-open PR by branch NAME, and a fork can open
+          # a PR from a branch with that name: `next` requires checks but no review, so arming it
+          # would merge a stranger's commits once CI is green. A same-repo PR whose head is not
+          # `main`'s tip is one a human has pushed to (a conflict resolution), so a human merges it.
+          if ! FACTS=$(gh pr view "$PR_URL" --json isCrossRepository,headRefOid --jq '"\(.isCrossRepository) \(.headRefOid)"' 2>&1); then
+            not_armed "Could not read the pull request: $FACTS"
+            exit 0
+          fi
+          read -r CROSS HEAD_SHA <<< "$FACTS"
+          if [ "$CROSS" != "false" ]; then
+            not_armed "Its head branch is in another repository (isCrossRepository=$CROSS); this workflow did not open it."
+            exit 0
+          fi
+          if [ "$HEAD_SHA" != "$MAIN_SHA" ]; then
+            not_armed "Its head is $HEAD_SHA, not main's tip $MAIN_SHA, so someone has pushed to the branch."
+            exit 0
+          fi
+
           # A merge commit, as docs/release.md requires: a squash would give `next` a commit that
           # is not `main`'s tip, and `main` would still not be an ancestor of `next`.
-          if OUT=$(gh pr merge "$PR_URL" --auto --merge 2>&1); then
+          # `--match-head-commit` closes the gap between the check above and the merge: GitHub
+          # refuses to merge if the branch has moved off `main`'s tip by then.
+          if OUT=$(gh pr merge "$PR_URL" --auto --merge --match-head-commit "$MAIN_SHA" 2>&1); then
             echo "armed=true" >> "$GITHUB_OUTPUT"
             echo "::notice::auto-merge enabled on $PR_URL — GitHub merges it when its required checks pass."
           else
-            echo "armed=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::auto-merge could not be enabled on $PR_URL, so it needs a human merge. gh said: $(printf '%s' "$OUT" | tr '\n' ' ')"
+            not_armed "gh said: $OUT"
           fi
 
       - name: Summarise the back-merge

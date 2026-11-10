@@ -116,7 +116,7 @@ required checks are green. It is still a pull request and it
 still passes every gate; only the click is gone. A direct push to `next` is not an option, for the
 reason in [Why it looks like this](#why-it-looks-like-this).
 
-Three cases leave it open for you, and the publish run's summary says which one you are in:
+Four cases leave it open for you, and the publish run's summary says which one you are in:
 
 - **The repository setting *Allow auto-merge* is off.** GitHub then refuses with `Auto merge is not
   allowed for this repository`, the run shows a warning, and the PR waits. Read the setting, do not
@@ -124,7 +124,11 @@ Three cases leave it open for you, and the publish run's summary says which one 
 - **`next` moved while the checks ran.** `next-protect` is strict and GitHub does not update an
   out-of-date branch for you. Press *Update branch*, then confirm the PR still shows auto-merge
   enabled.
-- **A merge conflict.** Resolve it on the branch, then confirm the PR still shows auto-merge enabled.
+- **A merge conflict.** Resolve it on the branch and merge it yourself. Auto-merge is pinned to
+  `main`'s tip (`--match-head-commit`), so it does not merge a branch someone has pushed to.
+- **The PR was not opened by this workflow.** Auto-merge is enabled only on a PR from a branch in
+  this repository whose head is exactly `main`'s tip. A PR found by its branch name that fails
+  either test is left alone, and the warning says which test.
 
 In each case merge with a **merge commit**. A squash gives `next` a commit that is not `main`'s tip,
 so `main` is still not an ancestor of `next`.
