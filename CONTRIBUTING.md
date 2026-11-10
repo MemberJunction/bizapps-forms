@@ -31,7 +31,7 @@ pnpm install              # repo root only — never inside a package dir
 pnpm run build            # turbo, all @mj-biz-apps/* packages
 pnpm run build:packages
 pnpm run build:widget     # just the <mj-form> bundle
-npm test                  # the ONLY command that covers all six packages
+npm test                  # the ONLY command that covers all five packages
 ```
 
 After changing a package's source, build that package and run its tests. Fix or update tests
@@ -64,7 +64,7 @@ Generated code lives in `packages/*/src/generated/`. **Never hand-edit it.** Run
 > **[migrations/README.md](migrations/README.md)**.
 
 
-- Highest `migrations/` version folder; filename `VYYYYMMDDHHMM__v<ver>__<Description>.sql`.
+- `migrations/` is flat (no version folders); filename `VYYYYMMDDHHMM__v<ver>__<Description>.sql`.
 - Hardcoded UUIDs. New tables in schema `__mj_BizAppsForms`.
 - No `__mj_*` timestamp columns and no FK indexes — CodeGen adds both.
 - `sp_addextendedproperty` on every business column; single multi-`ADD` `ALTER`s.

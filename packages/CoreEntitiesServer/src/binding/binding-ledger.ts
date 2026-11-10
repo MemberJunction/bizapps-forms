@@ -99,6 +99,15 @@ export async function recordBindingLedgerRow(
     },
     contextUser,
   );
+  if (!existing.Success) {
+    // A failed read is not "no row": falling through to the insert would hit the unique index when
+    // a row exists and report that as a save failure, hiding this error.
+    LogError(
+      `Forms binding: could not read the ledger row for binding ${bindingId}, response ${responseId}: ` +
+        `${existing.ErrorMessage}; the bound record was still written.`,
+    );
+    return;
+  }
 
   const row = await provider.GetEntityObject<mjBizAppsFormsFormEntityBindingRecordEntity>(
     BINDING_RECORD_ENTITY,
@@ -108,7 +117,7 @@ export async function recordBindingLedgerRow(
     LogError('Forms binding: could not create a ledger row object; the bound record was still written.');
     return;
   }
-  if (existing.Success && (existing.Results?.length ?? 0) > 0) {
+  if ((existing.Results?.length ?? 0) > 0) {
     if (!(await row.Load(existing.Results[0].ID))) {
       LogError(`Forms binding: could not load ledger row ${existing.Results[0].ID} to update it.`);
       return;

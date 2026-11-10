@@ -72,6 +72,7 @@ function makeDeps(config: DepsConfig = {}): { deps: DeviceResumeDeps; rec: Recor
           status: 'Partial',
           anonymousSessionId: OWNER_SESSION,
           formDistributionId: DIST_ID,
+          clientIdProven: false,
           ...config.response,
         };
   const other: ResumeResponseRow | undefined =
@@ -84,6 +85,7 @@ function makeDeps(config: DepsConfig = {}): { deps: DeviceResumeDeps; rec: Recor
             status: 'Partial',
             anonymousSessionId: OWNER_SESSION,
             formDistributionId: DIST_ID,
+            clientIdProven: false,
             ...config.otherResponse,
           };
 
@@ -316,6 +318,42 @@ describe('runRemember', () => {
 
     expect(out.status).toBe(403);
     expect(rec.mints).toHaveLength(0);
+  });
+
+  it('mints nothing for an UNOWNED row without the client-id proof', async () => {
+    // `responseIsOurs` answers "ours" for ANY caller on a blank-owner row — safe at the write,
+    // where the lookups demand the SourceMetadata proof to find the row at all, and not here,
+    // where the response id arrived in a request body. Without the proof, naming the UUID must
+    // not be enough to mint a bearer credential.
+    const { deps, rec } = makeDeps({ response: { anonymousSessionId: '', clientIdProven: false } });
+
+    const out = await runRemember(deps, args);
+
+    expect(out.status).toBe(403);
+    expect(rec.mints).toHaveLength(0);
+  });
+
+  it('mints for an unowned row that carries the client-id proof (the genuinely headerless flow)', async () => {
+    // The widget-minted 122-bit id recorded in SourceMetadata is the only capability a headerless
+    // sitting has — the same one `findResumableResponseById` accepts on the submit path.
+    const { deps, rec } = makeDeps({ response: { anonymousSessionId: '', clientIdProven: true } });
+
+    const out = await runRemember(deps, args);
+
+    expect(out.status).toBe(204);
+    expect(rec.mints).toEqual([ROW_ID]);
+  });
+
+  it('still mints for a RESUMED session on an unowned row with no proof — the scope names the row', async () => {
+    // A verified response-scoped JWT was minted from an invite naming this very row: strictly
+    // stronger evidence than the SourceMetadata proof, and what keeps pre-client-id drafts
+    // resumable.
+    const { deps, rec } = makeDeps({ response: { anonymousSessionId: '', clientIdProven: false } });
+
+    const out = await runRemember(deps, { ...args, sessionId: 'sess-second', scopeId: ROW_ID });
+
+    expect(out.status).toBe(204);
+    expect(rec.mints).toEqual([ROW_ID]);
   });
 
   it('mints nothing when the row came through a DIFFERENT link than the JWT names', async () => {

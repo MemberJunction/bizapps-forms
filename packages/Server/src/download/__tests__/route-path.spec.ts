@@ -23,4 +23,8 @@ describe('fileIdFromPath', () => {
   it('decodes a percent-encoded segment', () => {
     expect(fileIdFromPath('/forms/files/a%2Db')).toBe('a-b');
   });
+
+  it('declines a segment that cannot be percent-decoded instead of throwing', () => {
+    expect(fileIdFromPath('/forms/files/%E0')).toBeUndefined();
+  });
 });

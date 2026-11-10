@@ -23,16 +23,18 @@ import {
   distributionOfResponse,
   distributionQuotaExceeded,
   distributionWindowRefusal,
+  findResumableResponseById,
+  foldId,
   FormsRateLimiter,
   FORMS_ENTITY,
   revokeResponseInvites,
   type AcquireIsolatedProvider,
 } from '@mj-biz-apps/forms-core-entities-server';
-import { findInviteByRawToken, mintResponseInvite, revokeInviteById } from '../magic-link/resume-invites.service';
-import { getRespondentHostConfig } from './config';
-import type { DeviceResumeDeps, ResumeDistribution, ResumeResponseRow } from './device-resume.service';
-import { redeemRawToken } from './redeem.service';
-import { buildResumeCookie, clearResumeCookieHeader } from './resume-cookie';
+import { findInviteByRawToken, mintResponseInvite, revokeInviteById } from '../magic-link/resume-invites.service.js';
+import { getRespondentHostConfig } from './config.js';
+import type { DeviceResumeDeps, ResumeDistribution, ResumeResponseRow } from './device-resume.service.js';
+import { redeemRawToken } from './redeem.service.js';
+import { buildResumeCookie, clearResumeCookieHeader } from './resume-cookie.js';
 
 /** What the adapter needs from the host: a principal for its reads, and the caller's identity. */
 export interface ResumeDepsContext {
@@ -129,7 +131,7 @@ async function loadDistribution(
     contextUser,
   );
   if (!result.Success) {
-    LogError(`[Forms] resume routes could not read distribution '${slug}': ${result.ErrorMessage}`);
+    LogError(`[Forms] resume routes could not read distribution ${JSON.stringify(slug)}: ${result.ErrorMessage}`);
     return undefined;
   }
   const row = result.Results[0];
@@ -178,7 +180,32 @@ async function loadResponse(
     status: row.Status,
     anonymousSessionId: row.AnonymousSessionID,
     formDistributionId: distributionOfResponse(row),
+    clientIdProven: await clientIdProven(row, contextUser, provider),
   };
+}
+
+/**
+ * Whether an UNOWNED row (blank `AnonymousSessionID`) carries the widget's client-id capability —
+ * its `SourceMetadata` recording the row's own primary key. Answered by the SAME lookup the submit
+ * pipeline's adopt path trusts, `findResumableResponseById`, rather than a second spelling of its
+ * `LIKE` proof. An owned row reports false WITHOUT querying: ownership is its proof, and
+ * `ownsDraft` never consults this field for one. Fail-CLOSED: a query error reports no proof, so a
+ * database blip cannot mint a bearer credential for a row nothing vouches for.
+ */
+async function clientIdProven(
+  row: mjBizAppsFormsFormResponseEntityType,
+  contextUser: UserInfo,
+  provider: DatabaseProviderBase,
+): Promise<boolean> {
+  if (foldId(row.AnonymousSessionID) !== '') {
+    return false;
+  }
+  const proof = await findResumableResponseById(
+    new RunView(provider),
+    { responseId: row.ID, formVersionId: row.FormVersionID },
+    contextUser,
+  );
+  return proof.ok && proof.response !== undefined;
 }
 
 /**

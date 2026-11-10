@@ -197,7 +197,6 @@ export const FORMS_UI_PRIMITIVES = /* css */ `
   color: var(--mj-text-primary);
 }
 .mjf-card--pad { padding: var(--mjf-card-pad); }
-.mjf-card--raised { box-shadow: var(--mj-shadow-sm); }
 
 /* --------------------------------------------------------------------- buttons */
 

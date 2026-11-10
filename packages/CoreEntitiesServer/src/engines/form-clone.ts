@@ -144,9 +144,13 @@ async function readOptions(
   return rowsOrThrow(options, "the form's answer options");
 }
 
-/** A fresh read of every column — inside the transaction, so it sees the rows as they are now. */
+/**
+ * A fresh read of every column — inside the transaction, so it sees the rows as they are now.
+ * `IgnoreMaxRows` so a form with more rows than the entity's `UserViewMaxRows` is copied whole
+ * rather than silently truncated.
+ */
 function sourceRead(entityName: string, filter: string, orderBy?: string): RunViewParams {
-  return { EntityName: entityName, ExtraFilter: filter, OrderBy: orderBy, ResultType: 'simple', BypassCache: true };
+  return { EntityName: entityName, ExtraFilter: filter, OrderBy: orderBy, ResultType: 'simple', BypassCache: true, IgnoreMaxRows: true };
 }
 
 /**

@@ -517,6 +517,25 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
         config.readPermissions?.[entityName] ?? true,
         config.rowFilters?.[entityName] ?? '',
       ),
+    // The whole entity set, as `checkRespondentScope`'s allow-list sweep walks it. The fake's
+    // "whole set" is every entity the permission fixtures name — same per-entity answers as
+    // `EntityByName`, so a sweep and a point lookup cannot disagree.
+    get Entities(): EntityInfo[] {
+      const names = new Set([
+        ...Object.keys(config.createPermissions ?? {}),
+        ...Object.keys(config.updatePermissions ?? {}),
+        ...Object.keys(config.readPermissions ?? {}),
+      ]);
+      return [...names].map((entityName) =>
+        makeFakeEntityInfo(
+          entityName,
+          config.createPermissions?.[entityName] ?? false,
+          config.updatePermissions?.[entityName] ?? false,
+          config.readPermissions?.[entityName] ?? true,
+          config.rowFilters?.[entityName] ?? '',
+        ),
+      );
+    },
     EntityByID: (entityId: string) => {
       const entityName = fakeEntityNameOf(entityId);
       return entityName === undefined ? undefined : makeFakeEntityInfo(entityName, false, false);

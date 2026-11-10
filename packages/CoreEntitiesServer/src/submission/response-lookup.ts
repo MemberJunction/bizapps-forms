@@ -17,16 +17,25 @@
  *
  * All reads go through the per-request provider as MJ's system user, the elevated reader the
  * engine supplies, because the respondent's read grant is row-filtered to its own response;
- * RunView results are checked for `.Success` (RunView never throws). Callers decide fail-open vs
- * fail-closed from the returned `ok` flag.
+ * RunView results are checked for `.Success` (RunView never throws). A failed read is logged HERE,
+ * with its `ErrorMessage`, because callers only see `ok: false` and decide fail-open vs fail-closed
+ * from it — without the log an outage and a missing row are the same silence.
  */
-import type { UserInfo } from '@memberjunction/core';
+import { LogError, type UserInfo } from '@memberjunction/core';
 import { escapeSqlString, quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormResponseEntityType } from '@mj-biz-apps/forms-entities';
 import type { DefinitionRunViewProvider } from './published-link.js';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
 import { RESUMABLE_RESPONSE_STATUSES, UNCOUNTED_BY_QUOTA } from './response-status.js';
 import type { FormResponseStatus } from './response-status.js';
+
+/**
+ * The one wording for a failed read in this module. Callers see only `ok: false`, so this line is
+ * the only place an outage is told apart from a missing row (see the header).
+ */
+function logFailedRead(reader: string, errorMessage: string | undefined): void {
+  LogError(`[Forms] ${reader}: the response read failed: ${errorMessage || 'no error message returned'}`);
+}
 
 /** The identity of the session+form whose response we are looking up. */
 export interface ResponseLookupKey {
@@ -80,6 +89,7 @@ export async function findSessionResponse(
     contextUser,
   );
   if (!result.Success) {
+    logFailedRead('findSessionResponse', result.ErrorMessage);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };
@@ -142,6 +152,7 @@ export async function findResponseById(
     contextUser,
   );
   if (!result.Success) {
+    logFailedRead('findResponseById', result.ErrorMessage);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };
@@ -190,6 +201,7 @@ export async function countPartialResponses(
   // MJ 6.2 types TotalRowCount as optional (absent only under SkipTotalRowCount, which this read
   // never passes); a count without one is as unusable as a failed one, so both fail closed.
   if (!result.Success || result.TotalRowCount == null) {
+    logFailedRead('countPartialResponses', result.Success ? 'it returned no total row count' : result.ErrorMessage);
     return { ok: false, count: 0 };
   }
   return { ok: true, count: result.TotalRowCount };
@@ -237,6 +249,7 @@ export async function findScopedResponse(
     contextUser,
   );
   if (!result.Success) {
+    logFailedRead('findScopedResponse', result.ErrorMessage);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };
@@ -300,6 +313,7 @@ export async function findResumableResponseById(
     contextUser,
   );
   if (!result.Success) {
+    logFailedRead('findResumableResponseById', result.ErrorMessage);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };
@@ -345,6 +359,7 @@ export async function findOwnedResponseById(
     contextUser,
   );
   if (!result.Success) {
+    logFailedRead('findOwnedResponseById', result.ErrorMessage);
     return { ok: false };
   }
   return { ok: true, response: result.Results[0] };

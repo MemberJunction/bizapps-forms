@@ -96,7 +96,7 @@ node -p "require('./apps/MJAPI/package.json').dependencies['@memberjunction/core
 
 **On every MJ upgrade, diff `@memberjunction/ng-auth-services`'s peer set.** It is the trap most likely to break the Angular build. That package has added auth providers as **required** peers (empty `peerDependenciesMeta`), and the Angular build cannot resolve a peer that is not installed — which is why MJExplorer carries auth SDKs this repo never authenticates with. A version bump that needs a new one fails at build time with a bare module-resolution error that says nothing about auth.
 
-**Angular pinning model** (family-wide, 2026-08-07, with MemberJunction/MJ#3580; platform pin revved to the MJ 6.1.0 era on 2026-09-14): `@angular/*` peers in `packages/*` are **caret ranges at the platform pin** (`^21.2.22`) — compatibility claims, never exact. Each package that consumes Angular **anchors** the concrete version with exact `21.2.22` entries in its own `devDependencies`; the anchor is what actually installs. **A patch on the MJ line does not imply an Angular rev** — 6.1.1's `@angular/*` requirements are byte-identical to 6.1.0's, 6.1.4's (and its `ng-auth-services` provider peers) to 6.1.1's, 6.1.5's to 6.1.4's, and 6.1.6's to 6.1.5's (zero `@angular` lines change across every MJ manifest between the tags), so none of those upgrades moved an Angular pin. A minor need not either: 6.2.0 kept core `21.2.22`, cdk `21.2.14` and tooling `21.2.23`, and its `ng-auth-services` added no auth-provider peer (only `@angular/cdk ^21.2.14`). Diff the two tags rather than assuming either way.
+**Angular pinning model** (family-wide, 2026-08-07, with MemberJunction/MJ#3580; platform pin revved to the MJ 6.1.0 era on 2026-09-14): `@angular/*` peers in `packages/*` are **caret ranges at the platform pin** (`^21.2.22`) — compatibility claims, never exact. Each package that consumes Angular **anchors** the concrete version with exact `21.2.22` entries in its own `devDependencies`; the anchor is what actually installs. **A patch on the MJ line does not imply an Angular rev** — 6.1.1's `@angular/*` requirements are byte-identical to 6.1.0's, 6.1.4's (and its `ng-auth-services` provider peers) to 6.1.1's, 6.1.5's to 6.1.4's, 6.1.6's to 6.1.5's, and 6.2.1's to 6.2.0's (zero `@angular` lines change across every MJ manifest between the tags), so none of those upgrades moved an Angular pin. A minor need not either: 6.2.0 kept core `21.2.22`, cdk `21.2.14` and tooling `21.2.23`, and its `ng-auth-services` added no auth-provider peer (only `@angular/cdk ^21.2.14`). Diff the two tags rather than assuming either way.
 
 **Three Angular version lines, not one — do not collapse them.** `@angular/cdk` moves independently of `@angular/core` and is at **21.2.14**, the build tooling (`@angular/cli`, `@angular/build`, `@angular-devkit/build-angular`) at **21.2.23**, everything else at **21.2.22**. Taking one number for all three is what #211 was: an anchor written at the core version that no host's CDK could satisfy.
 
@@ -108,12 +108,12 @@ node -p "require('./apps/MJAPI/package.json').dependencies['@memberjunction/core
 npx mj migrate -t v<version>      # NOT `npm run mj:migrate`, which only targets __mj_BizAppsForms
 ```
 
-Read the first line of its output. A real core run prints `Detected installed migration version: <N> — fetching only migrations newer than it.` — that `<N>` must equal the frontier you recorded beforehand (`SELECT MAX(version) FROM __mj.flyway_schema_history WHERE version IS NOT NULL AND success = 1`). A higher `<N>` means a poisoned watermark that will silently hide every migration below it. No watermark line at all means you are not migrating core. Judge success by the **frontier reaching the target tag's own top migration version**, never by the `N applied` count — `R__RefreshMetadata.sql` is repeatable, so an already-current run and a fully-skipped run both report `1 applied` and exit 0. Note that *advancing* is the usual case, not the rule: a patch release on a line may ship **no new versioned migration at all** (6.1.1 amended an already-applied file in place and added none; 6.1.6 added none either), so the frontier correctly stands still. Compare it against the tag, not against where it was — `git ls-tree -r --name-only v<version> -- migrations/ | grep -oE 'V[0-9]+' | sort -n | tail -1` in the MJ checkout says what the target band's top is. An amended file below the watermark is never re-fetched, so it raises no checksum conflict — and its fix never reaches a database that is already past it. Finish by restarting MJAPI and grepping its startup log for `not found in metadata`; it must be clean, because MJAPI starts fine either way.
+Read the first line of its output. A real core run prints `Detected installed migration version: <N> — fetching only migrations newer than it.` — that `<N>` must equal the frontier you recorded beforehand (`SELECT MAX(version) FROM __mj.flyway_schema_history WHERE version IS NOT NULL AND success = 1`). A higher `<N>` means a poisoned watermark that will silently hide every migration below it. No watermark line at all means you are not migrating core. Judge success by the **frontier reaching the target tag's own top migration version**, never by the `N applied` count — `R__RefreshMetadata.sql` is repeatable, so an already-current run and a fully-skipped run both report `1 applied` and exit 0. Note that *advancing* is the usual case, not the rule: a patch release on a line may ship **no new versioned migration at all** (6.1.1 amended an already-applied file in place and added none; 6.1.6 and 6.2.1 added none either), so the frontier correctly stands still. Compare it against the tag, not against where it was — `git ls-tree -r --name-only v<version> -- migrations/ | grep -oE 'V[0-9]+' | sort -n | tail -1` in the MJ checkout says what the target band's top is. An amended file below the watermark is never re-fetched, so it raises no checksum conflict — and its fix never reaches a database that is already past it. Finish by restarting MJAPI and grepping its startup log for `not found in metadata`; it must be clean, because MJAPI starts fine either way.
 
-`bizapps-caliber` carries a full `mj-upgrade` skill covering this end to end (watermark repair, `TURBO_FORCE` builds, post-migration verification). Port it here rather than re-deriving it.
+The `mj-upgrade` skill (`.claude/skills/mj-upgrade/`, ported from `bizapps-caliber`) covers this end to end (watermark repair, `TURBO_FORCE` builds, post-migration verification). Use it rather than re-deriving it.
 
 ## Repository facts
-- **npm scope:** `@mj-biz-apps/forms-*` (packages: `forms-entities`, `forms-actions`, `forms-server`, `forms-ng`)
+- **npm scope:** `@mj-biz-apps/forms-*` (packages: `forms-entities`, `forms-core-entities-server`, `forms-actions`, `forms-server`, `forms-ng`)
 - **Database schema:** `__mj_BizAppsForms` (follows the bizapps-common / bizapps-tasks `__mj_BizApps*` convention; never put Forms tables in `__mj`)
 - **Ports:** MJAPI `4121`, MJExplorer `4321`
 - **Entity-name prefix:** Forms entities get the `MJ_BizApps_Forms: ` prefix (set in `mj.config.cjs`), matching the `MJ_BizApps_Common:` / `MJ_BizApps_Tasks:` sibling convention.
@@ -127,15 +127,15 @@ several details in the originals are wrong here, and each file says where and wh
 rule mapping is the table at the top of this file.
 
 Known corrections applied during the port, so nobody re-derives them: this repo uses `.spec.ts` not
-`.test.ts`; `@memberjunction/test-utils`, `scripts/scaffold-tests.mjs` and `guides/` do not exist
-here; there is no Sass; and Caliber's `bump-pins.sh` omits `packages/CoreEntitiesServer`, which this
+`.test.ts`; `@memberjunction/test-utils`, `scripts/scaffold-tests.mjs` and MJ's `guides/*.md` do not
+exist here (`guides/` holds only `ENTITY_BINDING_GUIDE.md`); there is no Sass; and Caliber's `bump-pins.sh` omits `packages/CoreEntitiesServer`, which this
 repo has.
 
 ## Structure
 ```
 mj-app.json   package.json   mj.config.cjs   turbo.json
 migrations/   migrations-pg/   metadata/   plans/
-packages/{Entities,Actions,Server,Angular}
+packages/{Entities,CoreEntitiesServer,Actions,Server,Angular}
 apps/MJAPI            # API-only harness; there is no MJExplorer here
 ```
 

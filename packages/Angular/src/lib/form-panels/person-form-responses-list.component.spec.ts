@@ -40,9 +40,15 @@ vi.mock('@memberjunction/core', async () => {
   };
 });
 
-vi.mock('@memberjunction/ng-base-forms', () => ({
-  FormRecordRefreshCoordinator: class FormRecordRefreshCoordinator {},
-}));
+vi.mock('@memberjunction/ng-base-forms', async () => {
+  const { NgModule } = await import('@angular/core');
+  @NgModule()
+  class BaseFormsModule {}
+  return {
+    BaseFormsModule,
+    FormRecordRefreshCoordinator: class FormRecordRefreshCoordinator {},
+  };
+});
 
 const { FormRecordRefreshCoordinator } = await import('@memberjunction/ng-base-forms');
 const { PersonFormResponsesListComponent } = await import('./person-form-responses-list.component');

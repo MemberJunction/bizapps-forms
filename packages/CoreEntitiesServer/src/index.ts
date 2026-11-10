@@ -276,6 +276,7 @@ export {
   type ResolvedDefinition,
 } from './submission/published-link.js';
 export { checkRespondentScope, type ScopeCheckResult, type ScopeMetadataProvider } from './submission/respondent-scope.js';
+export { findResumableResponseById, type ResponseLookupResult } from './submission/response-lookup.js';
 export { foldId, responseIsOurs, scopeNamesResponse, withoutQueryEcho, type ResponseCaller } from './submission/persistence.js';
 export { isTerminalResponseStatus, type FormResponseStatus } from './submission/response-status.js';
 export { deviceResumeAllowed, distributionOfResponse } from './submission/resume-columns.js';

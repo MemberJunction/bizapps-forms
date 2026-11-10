@@ -257,21 +257,22 @@ export interface CloseOpenRunsRequest {
  */
 export async function closeOpenRuns(request: CloseOpenRunsRequest, provider: DatabaseProviderBase, user: UserInfo): Promise<string[]> {
   const id = requireResponseId(request.responseId);
+  const event = request.eventId?.trim().toLowerCase() ?? '';
+  if (!event) {
+    throw new FormAutomationError(`Closing the open runs of response ${id} needs the event they belong to; none was given.`);
+  }
   const read = await provider.RunView<mjBizAppsFormsFormAutomationRunEntity>(
     {
       EntityName: FORMS_ENTITY.FormAutomationRun,
       ExtraFilter: `FormResponseID=${quoteSqlString(id)} AND Status IN ('Running','Pending')`,
       ResultType: 'entity_object',
       BypassCache: true,
+      IgnoreMaxRows: true,
     },
     user,
   );
   if (!read.Success) {
     throw readFailure(id, read.ErrorMessage);
-  }
-  const event = request.eventId?.trim().toLowerCase() ?? '';
-  if (!event) {
-    throw new FormAutomationError(`Closing the open runs of response ${id} needs the event they belong to; none was given.`);
   }
   const prefix = request.closedAs === 'DeadLettered' ? DEAD_LETTERED_RUN_PREFIX : ABANDONED_RUN_PREFIX;
   const closed: string[] = [];
@@ -398,6 +399,7 @@ async function loadResponse(responseId: string, provider: DatabaseProviderBase, 
       Fields: ['QuestionID', 'TextValue', 'NumericValue', 'DateValue', 'BooleanValue', 'JSONValue', 'FileID'],
       ResultType: 'simple',
       BypassCache: true,
+      IgnoreMaxRows: true,
     },
     {
       EntityName: FORMS_ENTITY.FormAutomationRun,
@@ -406,6 +408,8 @@ async function loadResponse(responseId: string, provider: DatabaseProviderBase, 
       OrderBy: '__mj_CreatedAt',
       ResultType: 'simple',
       BypassCache: true,
+      // Ascending by creation, so a row cap would drop the NEWEST runs — the current event's.
+      IgnoreMaxRows: true,
     },
   ];
   const [responses, answers, runs] = await provider.RunViews<unknown>(reads, user);

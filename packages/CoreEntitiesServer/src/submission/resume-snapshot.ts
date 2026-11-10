@@ -125,6 +125,7 @@ export async function loadStoredAnswerRows(
       ExtraFilter: `ResponseID=${quoteSqlString(responseId)}`,
       Fields: ['QuestionID', 'TextValue', 'NumericValue', 'DateValue', 'BooleanValue', 'JSONValue', 'FileID'],
       ResultType: 'simple',
+      IgnoreMaxRows: true,
     },
     contextUser,
   );

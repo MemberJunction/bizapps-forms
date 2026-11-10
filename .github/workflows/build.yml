@@ -52,6 +52,12 @@ jobs:
   #               CHECK 2 wants the CodeGen output appended INTO the migration file), so without
   #               this entry the most ordinary schema PR there is skips the suite that validates it
   #               and reports `skipped` = pass.
+  #   - metadata/, mj-app.json, mj.config.cjs
+  #               same argument again. A metadata-only PR is the documented normal shape of a
+  #               feature PR's seed contribution, and the specs that read metadata/ —
+  #               `lint:forms-application:test` (the #212 guard), `lint:designer-template:test`, and
+  #               the package specs that pin Remote Operations, result codes and route metadata — run
+  #               only in this job. `lint:mj-ranges` and sync-app-version.spec.mjs read mj-app.json.
   #   - .claude/  same argument, for the hook specs: `lint:hook-guard:test` and `lint:git-gate:test`
   #               run nowhere else in this repo, so a PR editing only a hook must still run this
   #               job — otherwise the PR that disables a hook is exactly the PR that skips the
@@ -113,6 +119,9 @@ jobs:
             scripts/ \
             smoke/ \
             migrations/ \
+            metadata/ \
+            mj-app.json \
+            mj.config.cjs \
             .github/scripts/ \
             .claude/ \
             .github/workflows/ \

@@ -243,7 +243,9 @@ async function runAgentTarget(
   }
   const agent = await ctx.provider.GetEntityObject<MJAIAgentEntityExtended>('MJ: AI Agents', ctx.principal);
   if (!agent || !(await agent.Load(automation.agentId))) {
-    throw new Error(`Agent ${automation.agentId} for "${automation.name}" could not be loaded.`);
+    // Permanent, like a missing Action or Binding: a deleted agent does not come back on a retry.
+    // (A database error makes `Load` THROW, and that still propagates as retryable.)
+    throw configFailure(`Agent ${automation.agentId} for "${automation.name}" could not be loaded.`);
   }
 
   const result = await new AgentRunner().RunAgent({

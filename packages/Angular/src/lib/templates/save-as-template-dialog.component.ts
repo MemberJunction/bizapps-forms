@@ -15,6 +15,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { FORMS_UI_CSS } from '../shared';
+import { FORMS_VIZ_CSS } from '../shared/forms-viz';
 
 /** What the author confirmed. */
 export interface SaveAsTemplateRequest {
@@ -69,7 +70,7 @@ const SAVE_TEMPLATE_CSS = /* css */ `
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule],
-  styles: [FORMS_UI_CSS, SAVE_TEMPLATE_CSS],
+  styles: [FORMS_UI_CSS, FORMS_VIZ_CSS, SAVE_TEMPLATE_CSS],
   template: `
     <div
       class="st-backdrop"

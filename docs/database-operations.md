@@ -113,7 +113,7 @@ views and `EntityField` rows even when the migration you added did none of that.
 | `--force-advanced-gen`, `--format` | Rarely needed. |
 
 Neither flag skips the integrity checks or the AFTER commands — and in this repo the AFTER commands
-build four packages (`mj.config.cjs`), so a CodeGen failure can surface as a *build* error.
+build five packages (`mj.config.cjs`), so a CodeGen failure can surface as a *build* error.
 
 ### What it changes in the database
 
@@ -145,7 +145,7 @@ deletes real classes. MJ's summary of the failure mode (`MJ/migrations/CLAUDE.md
 
 MJ's default output folder is `../../migrations/v5/` (`CodeGenLib/src/Config/config.ts:346`) — an
 MJ-monorepo path that is wrong for an app. **This repo already repoints it** to
-`./migrations/codegen/` (`mj.config.cjs:118`), which is gitignored *staging*, not shippable output.
+`./migrations/codegen/` (`mj.config.cjs`, `folderPath`), which is gitignored *staging*, not shippable output.
 
 To ship it: append the SQL to the migration that caused it, under 50+ blank lines and a do-not-edit
 banner, then delete the standalone file. **If your change had no schema DDL there is nothing to
@@ -179,8 +179,6 @@ Two implementation notes: author the value as native nested JSON, never an escap
 (`MJ/metadata/CLAUDE.md:29-31`); and `mj sync push` is a single transaction, so one bad `@lookup`
 rolls back the whole push and CodeGen then strips the columns again — which looks exactly like the
 fix not working.
-
-> Forms is currently missing this file. See issue #156.
 
 ---
 
@@ -226,11 +224,12 @@ when #201 and #219 shipped.
 # a database, and it refuses the one named in .env before it spawns anything — but its "must be
 # empty" check can only run AFTER `mj migrate` has reported the watermark, and that same command
 # applies everything newer than it. So a non-empty database that is not the .env one gets the core
-# chain applied and is refused afterwards. Drop MJ_HostTruth between runs.
+# chain applied and is refused afterwards. Name it
+# MJ_Forms_HostTruth_<ver>: sibling sessions share this container, and a bare MJ_HostTruth collides.
 docker exec sql-mj-it /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$DB_PASSWORD" -C -Q \
-  "CREATE DATABASE [MJ_HostTruth]; ALTER AUTHORIZATION ON DATABASE::[MJ_HostTruth] TO [sa];"
+  "CREATE DATABASE [MJ_Forms_HostTruth_<ver>]; ALTER AUTHORIZATION ON DATABASE::[MJ_Forms_HostTruth_<ver>] TO [sa];"
 
-npm run check:host-truth -- --database MJ_HostTruth \
+npm run check:host-truth -- --database MJ_Forms_HostTruth_<ver> \
   --common-migrations ../bizapps-common/migrations \
   --tasks-migrations ../bizapps-tasks/migrations
 ```
@@ -276,7 +275,7 @@ None sets **`READ_COMMITTED_SNAPSHOT`**, which a host needs — that is a host s
 [`docs/local-host.md` §5](local-host.md#5-host-requirements-since-303-the-automation-outbox-and-read_committed_snapshot).
 
 **Everything else is metadata**, declared under `metadata/` and shipped at release in the one
-consolidated `Metadata_Sync` (see `migrations/README.md`): the 19 `Forms.*` Remote Operations and
+consolidated `Metadata_Sync` (see `migrations/README.md`): the 20 `Forms.*` Remote Operations and
 their category, the three reporting queries, the automation outbox sweep's Scheduled Job Type and
 Scheduled Job, the four builder `RelatedRecordCollection`s, and the
 `forms` / `forms:read` / `forms:write` API scopes. So until that release migration exists,
@@ -301,10 +300,10 @@ emits `packages/Entities/src/generated/remote_operations.ts` (one `Forms*Operati
 the metadata was pushed to.
 
 **Building a #303 sandbox.** Build it with the clean-room chain above at the pinned MJ tag
-(`-t v6.1.6`), never by migrating an older room upward past a tag it was not built at.
+(`-t v6.2.1`), never by migrating an older room upward past a tag it was not built at.
 `check:host-truth` derives its core tag from the highest `mjVersionRange` floor among this app,
 bizapps-common and bizapps-tasks (a room holding all three can sit no lower); pass
-`--core-tag v6.1.6` to build at the pin. Moving #303's automations onto MJ's Work Queue once a 6.2 LTS ships is a separate,
+`--core-tag v6.2.1` to build at the pin. Moving #303's automations onto MJ's Work Queue, now that 6.2 LTS has shipped, is a separate,
 later change: the outbox stays the record of what a save owes, and the queue would only wake the
 drain.
 

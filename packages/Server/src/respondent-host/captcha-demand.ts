@@ -19,7 +19,7 @@
  * reads the parsed snapshot and enforces on its own.
  */
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
-import type { CaptchaDemand } from './host-readiness';
+import type { CaptchaDemand } from './host-readiness.js';
 import { FORMS_ENTITY } from '@mj-biz-apps/forms-core-entities-server';
 
 /**

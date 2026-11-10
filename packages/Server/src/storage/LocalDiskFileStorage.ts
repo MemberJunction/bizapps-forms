@@ -41,7 +41,7 @@ import {
   type StorageProviderConfig,
 } from '@memberjunction/storage';
 
-import { resolveWithinRoot } from './local-disk-path';
+import { resolveWithinRoot } from './local-disk-path.js';
 
 /** The `ServerDriverKey` a `FileStorageProvider` row must carry to select this driver. */
 export const LOCAL_DISK_DRIVER_KEY = 'Local Disk Storage';

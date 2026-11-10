@@ -29,7 +29,11 @@ import { FormsRateLimiter, type RateLimitResult, abuseIdentity, warnOnceIfAbuseK
 export interface UploadCaller {
   /** Salted hash of the resolved peer IP, from `RequestIdentityMiddleware`. */
   clientIpHash?: string;
-  /** Anonymous session id — the fallback identity only, since the caller supplies it. */
+  /**
+   * Anonymous session id. Deliberately NOT read: the caller supplies it, so keying on it would let a
+   * rotated id walk around the ceiling (the spec pins that). Accepted so call sites can pass the
+   * whole caller without this module growing a fallback identity.
+   */
   sessionId?: string;
 }
 
