@@ -31,9 +31,11 @@ export const ACTIONS = 'MJ: Actions';
 /** The columns each real subclass loads from its row — every one the engine or the rules read. */
 export const FORM_COLUMNS = [
   'ID', 'Name', 'Description', 'Status', 'RenderMode', 'Settings', 'IsTemplate', 'StyleID', 'OwnerUserID',
-  'CategoryID', 'TemplateSourceFormID',
+  'CategoryID', 'TemplateSourceFormID', 'RequiresPublishApproval', 'PublishApproverRoleID',
 ] as const;
-export const VERSION_COLUMNS = ['ID', 'FormID', 'VersionNumber', 'Status', 'PublishedAt', 'DefinitionSnapshot'] as const;
+export const VERSION_COLUMNS = [
+  'ID', 'FormID', 'VersionNumber', 'Status', 'PublishedAt', 'DefinitionSnapshot', 'ApprovalWorkflowTaskID', 'ReviewNotes',
+] as const;
 export const DISTRIBUTION_COLUMNS = [
   'ID', 'FormID', 'Name', 'Slug', 'ChannelType', 'Status', 'OpenAt', 'CloseAt', 'MaxResponses', 'ResponseCount',
   'MagicLinkInviteID', 'PublicLinkToken', 'CaptchaRequired', 'IsActive', 'AllowedOrigins',
@@ -67,6 +69,8 @@ export function formRow(overrides: Partial<FakeRow> = {}): FakeRow {
     OwnerUserID: null,
     CategoryID: null,
     TemplateSourceFormID: null,
+    RequiresPublishApproval: false,
+    PublishApproverRoleID: null,
     ...overrides,
   };
 }

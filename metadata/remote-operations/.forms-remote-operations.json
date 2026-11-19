@@ -475,5 +475,28 @@
     "primaryKey": {
       "ID": "2A8946C7-0045-4B58-9B34-5E030D9D0DF0"
     }
+  },
+  {
+    "fields": {
+      "Name": "Request Publish Approval",
+      "OperationKey": "Forms.RequestPublishApproval",
+      "CategoryID": "@lookup:MJ: Remote Operation Categories.Name=Forms",
+      "Description": "For a form that requires publish approval: build the snapshot of its current authored structure as a new version under review, and start the review workflow — a reviewer from the form's approver role approves or rejects it as a Tasks approval, and the workflow publishes or rejects exactly that version. Refused for a form that does not require approval, has no approver role, or already has a version under review.",
+      "InputTypeName": "FormsRequestPublishApprovalInput",
+      "InputTypeDefinition": "@file:types/forms-request-publish-approval.input.ts",
+      "InputTypeIsArray": false,
+      "OutputTypeName": "FormsRequestPublishApprovalOutput",
+      "OutputTypeDefinition": "@file:types/forms-request-publish-approval.output.ts",
+      "OutputTypeIsArray": false,
+      "ExecutionMode": "Sync",
+      "RequiredScope": "forms:write",
+      "RequiresSystemUser": false,
+      "GenerationType": "Manual",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "D7B3DC32-40BF-4CC5-9A0A-229B71ECC865"
+    }
   }
 ]

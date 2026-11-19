@@ -697,5 +697,98 @@
       "lastModified": "2026-08-08T18:25:28.262Z",
       "checksum": "d5c7c78d1c9f165e890353bed24286a17c3fc0fe3ee265f694c98f0319ef9bd9"
     }
+  },
+  {
+    "fields": {
+      "Name": "Forms: Settle Publish Review",
+      "Description": "The last step of a form's publish-approval workflow. Reads the reviewer's decision from the workflow's own approval step and publishes the version under review, or marks it Rejected. It takes only the version: the decision is never an input, so invoking it directly cannot publish an unapproved version. Idempotent — a version already settled reports its outcome again.",
+      "DriverClass": "Forms: Settle Publish Review",
+      "Type": "Custom",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Forms",
+      "Status": "Active",
+      "IconClass": "fa-solid fa-stamp",
+      "IsIdempotent": true
+    },
+    "primaryKey": {
+      "ID": "45695031-6941-4250-A22E-347FFEFBF175"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "FormVersionID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": true,
+            "Description": "The MJ_BizApps_Forms: Form Versions row under review."
+          },
+          "primaryKey": {
+            "ID": "07671A21-A238-4879-9425-93A5C45FEB21"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Outcome",
+            "Type": "Output",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Published or Rejected."
+          },
+          "primaryKey": {
+            "ID": "3242AEE3-59C2-4880-994E-93172206FE20"
+          }
+        }
+      ],
+      "MJ: Action Result Codes": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "ResultCode": "SUCCESS",
+            "IsSuccess": true,
+            "Description": "The version was published or rejected (or already had been)."
+          },
+          "primaryKey": {
+            "ID": "F3537CD2-6251-4419-969C-21AAFAA980F5"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "ResultCode": "NOT_DECIDED",
+            "IsSuccess": false,
+            "Description": "The workflow's approval step has not been decided, so there is nothing to settle."
+          },
+          "primaryKey": {
+            "ID": "BD3D76E1-686D-4B49-A422-5740D1B087C3"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "ResultCode": "MISSING_PARAMETERS",
+            "IsSuccess": false,
+            "Description": "FormVersionID was not given."
+          },
+          "primaryKey": {
+            "ID": "F3DD2632-E783-42E3-9DAF-876735465092"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "ResultCode": "FAILED",
+            "IsSuccess": false,
+            "Description": "The version could not be settled; the message says why."
+          },
+          "primaryKey": {
+            "ID": "FEA65235-3808-40A9-9230-6B624A137F99"
+          }
+        }
+      ]
+    }
   }
 ]

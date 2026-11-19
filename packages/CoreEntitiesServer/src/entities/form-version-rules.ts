@@ -18,6 +18,14 @@
  * `Status = 'Published'` with a snapshot of its own choosing is exactly what this refuses: the
  * engine signals itself with `FormVersionEntityServer.AuthorizedByEngine`, a transient field no
  * wire format carries.
+ *
+ * A form that requires publish approval adds two statuses. Its version is created `InReview`, with
+ * the snapshot the reviewer approves, and the review settles it once: `Published` or `Rejected`.
+ * Both are the engine's moves. A version in review has the same frozen identity as a published one —
+ * the reviewer approves exactly that snapshot — and `Rejected` is terminal, like `Retired`. The two
+ * review columns, the workflow that carries the review and the reviewer's notes, are written only by
+ * the engine: settling reads the decision through that workflow, so pointing a version at another
+ * workflow would let it borrow someone else's approval.
  */
 import type { mjBizAppsFormsFormVersionEntityType } from '@mj-biz-apps/forms-entities';
 import type { RuleViolation } from './entity-refusal.js';
@@ -27,8 +35,17 @@ export type FormVersionStatus = mjBizAppsFormsFormVersionEntityType['Status'];
 /** The columns that identify what a published version IS. */
 export const FROZEN_VERSION_FIELDS = ['DefinitionSnapshot', 'VersionNumber', 'FormID'] as const;
 
+/** The columns only the publishing engine writes: the review's workflow and the reviewer's notes. */
+export const ENGINE_ONLY_VERSION_FIELDS = ['ApprovalWorkflowTaskID', 'ReviewNotes'] as const;
+
 /** The statuses after which a version's identity is fixed for good. */
-const FROZEN_STATUSES: readonly FormVersionStatus[] = ['Published', 'Retired'];
+const FROZEN_STATUSES: readonly FormVersionStatus[] = ['Published', 'Retired', 'InReview', 'Rejected'];
+
+/** The statuses that can never change again. */
+const TERMINAL_STATUSES: readonly FormVersionStatus[] = ['Retired', 'Rejected'];
+
+/** The statuses a version that cannot be deleted holds: responses or a live review reference it. */
+const UNDELETABLE_STATUSES: readonly FormVersionStatus[] = ['Published', 'Retired', 'InReview'];
 
 /** A save of one `FormVersion`, reduced to what the rules read. */
 export interface FormVersionWrite {
@@ -40,17 +57,20 @@ export interface FormVersionWrite {
   status: FormVersionStatus;
   /** Which of {@link FROZEN_VERSION_FIELDS} this save changes. */
   changedFields: readonly string[];
+  /** Which of {@link ENGINE_ONLY_VERSION_FIELDS} this save sets or changes. Omitted: none. */
+  engineOnlyFields?: readonly string[];
   /** Whether the publishing engine is the writer. */
   authorizedByEngine: boolean;
 }
 
 /** Every rule a `FormVersion` save breaks; empty when it may proceed. */
 export function formVersionWriteViolations(write: FormVersionWrite): RuleViolation[] {
+  const engineOnly = engineOnlyViolations(write);
   if (write.isNew || write.storedStatus === null) {
-    return insertViolations(write);
+    return [...insertViolations(write), ...engineOnly];
   }
   const stored = write.storedStatus;
-  const violations: RuleViolation[] = [];
+  const violations: RuleViolation[] = [...engineOnly];
   if (FROZEN_STATUSES.includes(stored)) {
     for (const field of write.changedFields) {
       violations.push({
@@ -72,8 +92,11 @@ export function formVersionWriteViolations(write: FormVersionWrite): RuleViolati
 
 /** Why a version in `stored` may not be deleted, or `null` when it may. */
 export function formVersionDeleteRefusal(stored: FormVersionStatus): string | null {
-  if (!FROZEN_STATUSES.includes(stored)) {
+  if (!UNDELETABLE_STATUSES.includes(stored)) {
     return null;
+  }
+  if (stored === 'InReview') {
+    return 'A form version in review cannot be deleted: its approval is still open. It is settled when the reviewer decides.';
   }
   return (
     `A ${stored.toLowerCase()} form version cannot be deleted: responses reference it, and it is the record ` +
@@ -95,12 +118,31 @@ function insertViolations(write: FormVersionWrite): RuleViolation[] {
   ];
 }
 
+function engineOnlyViolations(write: FormVersionWrite): RuleViolation[] {
+  if (write.authorizedByEngine) {
+    return [];
+  }
+  return (write.engineOnlyFields ?? []).map((field) => ({
+    field,
+    message: `${field} records a publish review, and only the publishing engine writes it — request approval instead.`,
+  }));
+}
+
 function statusChangeRefusal(stored: FormVersionStatus, next: FormVersionStatus, engine: boolean): string | null {
-  if (stored === 'Retired') {
-    return `A retired form version cannot change status (Retired → ${next}). Publish a new version instead.`;
+  if (TERMINAL_STATUSES.includes(stored)) {
+    return `A ${stored.toLowerCase()} form version cannot change status (${stored} → ${next}). Publish a new version instead.`;
   }
   if (stored === 'Published' && next === 'Draft') {
     return 'A published form version cannot return to Draft. Publish a new version instead.';
+  }
+  if (stored === 'Published' && (next === 'InReview' || next === 'Rejected')) {
+    return `A published form version cannot go back to review (Published → ${next}). Request approval for a new version instead.`;
+  }
+  if (stored === 'InReview' && next !== 'Published' && next !== 'Rejected') {
+    return `A form version in review is settled by its review, as Published or Rejected — not ${next}.`;
+  }
+  if (next === 'InReview' && stored !== 'Draft') {
+    return `Only a Draft form version can go to review, not a ${stored.toLowerCase()} one.`;
   }
   if (!engine) {
     return (

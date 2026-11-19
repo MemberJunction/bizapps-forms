@@ -915,6 +915,35 @@ export interface FormsReplayAutomationEventOutput {
 }
 
 /**
+ * Input for `Forms.RequestPublishApproval`.
+ *
+ * For a form whose `RequiresPublishApproval` is on: the server builds the snapshot of the form's
+ * CURRENT authored structure as a new version with status `InReview`, then starts the review
+ * workflow. The reviewer approves exactly that snapshot — edits made to the form afterwards are not
+ * in it. Nothing the client holds is trusted, so the only input is which form.
+ *
+ * NO import statements — definitions are emitted verbatim into remote_operations.ts.
+ */
+export interface FormsRequestPublishApprovalInput {
+    /** The `MJ_BizApps_Forms: Forms` row to send for review. */
+    FormID: string;
+}
+
+/**
+ * Output for `Forms.RequestPublishApproval`.
+ *
+ * NO import statements — definitions are emitted verbatim into remote_operations.ts.
+ */
+export interface FormsRequestPublishApprovalOutput {
+    /** The new `MJ_BizApps_Forms: Form Versions` row, now `InReview`. It goes live only if approved. */
+    FormVersionID: string;
+    /** Its version number: the form's highest existing VersionNumber plus one. */
+    VersionNumber: number;
+    /** The review workflow run (the parent `MJ: Tasks` row), also stored on the version. */
+    WorkflowTaskID: string;
+}
+
+/**
  * Input for `Forms.SaveAutomation`: create or update one on-submit step, together with the entity
  * binding it runs when it is a "send responses to a record" step.
  *
@@ -1184,6 +1213,7 @@ export class FormsArchiveFormOperation extends BaseRemotableOperation<FormsFormL
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_f2a894a9a46d507c";
 }
 
 // ============================================================
@@ -1200,6 +1230,7 @@ export class FormsCloneFormOperation extends BaseRemotableOperation<FormsCloneFo
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_03b2e199540d8e42";
 }
 
 // ============================================================
@@ -1216,6 +1247,7 @@ export class FormsCloseDistributionOperation extends BaseRemotableOperation<Form
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_88bc11c09d87c2a8";
 }
 
 // ============================================================
@@ -1232,6 +1264,7 @@ export class FormsCreateFormFromTemplateOperation extends BaseRemotableOperation
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_e9391d39f6445642";
 }
 
 // ============================================================
@@ -1248,6 +1281,7 @@ export class FormsDeleteTemplateOperation extends BaseRemotableOperation<FormsDe
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_0a67cbcd8693117d";
 }
 
 // ============================================================
@@ -1264,6 +1298,7 @@ export class FormsGetDistributionClaimsOperation extends BaseRemotableOperation<
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:read";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_fabe210a22547fd1";
 }
 
 // ============================================================
@@ -1279,6 +1314,7 @@ export class FormsGetRespondentFormOperation extends BaseRemotableOperation<Form
     public readonly OperationKey = "Forms.GetRespondentForm";
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_80555cc553b7b97f";
 }
 
 // ============================================================
@@ -1295,6 +1331,7 @@ export class FormsGetResponseDetailOperation extends BaseRemotableOperation<Form
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:read";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_586a31e48e056b91";
 }
 
 // ============================================================
@@ -1311,6 +1348,7 @@ export class FormsGetResponseSummaryOperation extends BaseRemotableOperation<For
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:read";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_f409eb51c470ff1f";
 }
 
 // ============================================================
@@ -1327,6 +1365,7 @@ export class FormsIssueDistributionLinkOperation extends BaseRemotableOperation<
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_d1919cb092225ffb";
 }
 
 // ============================================================
@@ -1343,6 +1382,7 @@ export class FormsListResponsesOperation extends BaseRemotableOperation<FormsLis
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:read";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_90694e44920915d8";
 }
 
 // ============================================================
@@ -1359,6 +1399,7 @@ export class FormsOpenDistributionOperation extends BaseRemotableOperation<Forms
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_0519c65c90abce69";
 }
 
 // ============================================================
@@ -1375,6 +1416,7 @@ export class FormsPublishFormOperation extends BaseRemotableOperation<FormsPubli
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_1def885365874c65";
 }
 
 // ============================================================
@@ -1391,6 +1433,7 @@ export class FormsReissueDistributionLinkOperation extends BaseRemotableOperatio
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_6074658066da87b5";
 }
 
 // ============================================================
@@ -1407,6 +1450,7 @@ export class FormsRemoveAutomationOperation extends BaseRemotableOperation<Forms
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_336bf1f1d6878ecc";
 }
 
 // ============================================================
@@ -1423,6 +1467,7 @@ export class FormsReorderAutomationsOperation extends BaseRemotableOperation<For
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_3b5d5d77f4c73add";
 }
 
 // ============================================================
@@ -1439,6 +1484,24 @@ export class FormsReplayAutomationEventOperation extends BaseRemotableOperation<
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_e414a3c92ad82334";
+}
+
+// ============================================================
+// Forms.RequestPublishApproval — Request Publish Approval
+// ============================================================
+/**
+ * Request Publish Approval
+ * For a form that requires publish approval: build the snapshot of its current authored structure as a new version under review, and start the review workflow — a reviewer from the form's approver role approves or rejects it as a Tasks approval, and the workflow publishes or rejects exactly that version. Refused for a form that does not require approval, has no approver role, or already has a version under review.
+ * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
+ * under 'Forms.RequestPublishApproval'. This generated base provides the typed contract only (client-safe).
+ */
+export class FormsRequestPublishApprovalOperation extends BaseRemotableOperation<FormsRequestPublishApprovalInput, FormsRequestPublishApprovalOutput> {
+    public readonly OperationKey = "Forms.RequestPublishApproval";
+    public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "forms:write";
+    public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_fb4923bf00bf9a99";
 }
 
 // ============================================================
@@ -1455,6 +1518,7 @@ export class FormsRestoreFormOperation extends BaseRemotableOperation<FormsFormL
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_d20cc6e904807582";
 }
 
 // ============================================================
@@ -1471,6 +1535,7 @@ export class FormsSaveAutomationOperation extends BaseRemotableOperation<FormsSa
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "forms:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_db72bffead25a795";
 }
 
 // ============================================================
@@ -1486,5 +1551,6 @@ export class FormsSaveResponseOperation extends BaseRemotableOperation<FormsSave
     public readonly OperationKey = "Forms.SaveResponse";
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_0e57de9fa8f684f8";
 }
 

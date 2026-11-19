@@ -52,7 +52,8 @@
     "@memberjunction/redis-provider": "^6.2.0-edge.8",
     "@memberjunction/scheduling-base-types": "^6.2.0-edge.8",
     "@memberjunction/scheduling-engine": "^6.2.0-edge.8",
-    "@memberjunction/sqlserver-dataprovider": "^6.2.0-edge.8"
+    "@memberjunction/sqlserver-dataprovider": "^6.2.0-edge.8",
+    "@memberjunction/task-graph": "^6.2.0-edge.8"
   },
   "repository": {
     "type": "git",

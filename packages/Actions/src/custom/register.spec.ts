@@ -19,6 +19,7 @@ const AUTHORING_ACTION_NAMES = [
   'Forms: Generate Form From Brief',
   'Forms: Create Form From Template',
   'Forms: Bind Response To Entity',
+  'Forms: Settle Publish Review',
 ] as const;
 
 /**
@@ -53,8 +54,8 @@ function classChain(cls: unknown): string[] {
 }
 
 describe('action registration', () => {
-  it('LoadFormsActions reports all seven action classes', () => {
-    expect(LoadFormsActions()).toBe(7);
+  it('LoadFormsActions reports all eight action classes', () => {
+    expect(LoadFormsActions()).toBe(8);
   });
 
   it.each([...S3_ACTION_NAMES, ...AUTHORING_ACTION_NAMES])(

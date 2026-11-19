@@ -315,6 +315,9 @@ importers:
       '@memberjunction/sqlserver-dataprovider':
         specifier: ^6.2.0-edge.8
         version: 6.2.1(@aws-sdk/credential-provider-node@3.972.92)(@modelcontextprotocol/sdk@1.30.0(zod@4.6.7))(@smithy/signature-v4@5.7.5)(@types/node@25.9.5)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.22.1)(zod@4.6.7)
+      '@memberjunction/task-graph':
+        specifier: ^6.2.0-edge.8
+        version: 6.2.1(@aws-sdk/credential-provider-node@3.972.92)(@modelcontextprotocol/sdk@1.30.0(zod@4.6.7))(@smithy/signature-v4@5.7.5)(@types/node@25.9.5)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.22.1)(zod@4.6.7)
       '@mj-biz-apps/forms-entities':
         specifier: 1.0.0
         version: link:../Entities

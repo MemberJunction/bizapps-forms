@@ -18,6 +18,7 @@ export class mjBizAppsFormsFormFormComponent extends BaseFormComponent {
         this.initSections([
             { sectionKey: 'formInformation', sectionName: 'Form Information', isExpanded: true },
             { sectionKey: 'presentationSettings', sectionName: 'Presentation & Settings', isExpanded: true },
+            { sectionKey: 'details', sectionName: 'Details', isExpanded: true },
             { sectionKey: 'systemMetadata', sectionName: 'System Metadata', isExpanded: false },
             { sectionKey: 'mJBizAppsFormsFormDistributions', sectionName: 'Form Distributions', isExpanded: false },
             { sectionKey: 'mJBizAppsFormsFormVersions', sectionName: 'Form Versions', isExpanded: false },

@@ -651,7 +651,8 @@ function automationRunOf(run: mjBizAppsFormsFormAutomationRunEntityType): FormsR
   return {
     ID: run.ID,
     FormAutomationID: run.FormAutomationID,
-    FormAutomation: run.FormAutomation,
+    // The view's joined name is nullable (a LEFT JOIN); the contract carries a string.
+    FormAutomation: run.FormAutomation ?? '',
     Status: run.Status,
     AttemptCount: run.AttemptCount,
     FormAutomationEventID: run.FormAutomationEventID ?? null,
@@ -684,7 +685,7 @@ function bindingRecordOf(record: mjBizAppsFormsFormEntityBindingRecordEntityType
   return {
     ID: record.ID,
     BindingID: record.BindingID,
-    Binding: record.Binding,
+    Binding: record.Binding ?? '',
     TargetEntityID: record.TargetEntityID,
     TargetEntityName: provider.EntityByID(record.TargetEntityID)?.Name ?? null,
     TargetRecordID: record.TargetRecordID ?? null,
