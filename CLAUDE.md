@@ -84,8 +84,10 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
 
 ## 🚨 CRITICAL RULES — VIOLATIONS ARE UNACCEPTABLE 🚨
 
-### 1. NO COMMITS WITHOUT EXPLICIT APPROVAL
-- **NEVER run `git commit` without the user explicitly asking.** Each commit needs one-time explicit approval. Never ask "should I commit?" — wait for the request. Only commit what is staged.
+### 1. AGENTS MAY COMMIT AND OPEN PULL REQUESTS — NEVER MERGE
+- An agent may commit on its own feature branch, push it, and open or update a pull request into `next`. Stage files explicitly (`git add <file>`) and commit only the task's own work.
+- **Never merge, approve or enable auto-merge on a pull request, and never push to `next` or `main`.** A person merges.
+- In a checkout that holds someone else's uncommitted work, ask before committing.
 
 ### 2. NO `any` TYPES — EVER
 - No `as any`, `: any`, `<any>`, or `unknown` as a lazy alternative. MJ has strong typing throughout — ask for the proper type if stuck.
