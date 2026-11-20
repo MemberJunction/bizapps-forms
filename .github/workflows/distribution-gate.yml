@@ -32,9 +32,9 @@ on:
   # say. It now reports success on such a PR rather than not reporting at all, which is the only
   # difference.
   push:
-    branches: [next, main]
+    branches: [next, main, 'lts/**']
   pull_request:
-    branches: [next, main]
+    branches: [next, main, 'lts/**']
 
 permissions:
   contents: read

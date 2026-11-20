@@ -283,10 +283,10 @@ export function admitsOwnPrereleases(range) {
  * app's own `mjVersionRange` refuses. The repo already had the precedent — `sync-app-version.mjs`
  * compares the full floor string, prerelease included.
  */
-export function classifyPeerRange(range, floorSpec) {
+export function classifyPeerRange(range, floorSpec, { requirePrerelease = true } = {}) {
     if (isUnionRange(range)) return 'union';
     if (!isValidRange(range)) return 'invalid';
-    if (!admitsOwnPrereleases(range)) return 'no-prerelease';
+    if (requirePrerelease && !admitsOwnPrereleases(range)) return 'no-prerelease';
     const floor = rangeFloor(range);
     const target = parseVersion(floorSpec);
     if (target === null) return 'wrong-line';
@@ -324,11 +324,11 @@ export function findExactMJDeps(manifest, relPath) {
  * for the ways a range can fail and why the order between them matters. `floorSpec` is the app's
  * own `mjVersionRange` floor, prerelease included, threaded in by the caller (`runCheck`).
  */
-export function findNonPrereleasePeers(manifest, relPath, floorSpec) {
+export function findNonPrereleasePeers(manifest, relPath, floorSpec, options) {
     const hits = [];
     for (const [peer, version] of Object.entries(manifest?.peerDependencies ?? {})) {
         if (!peer.startsWith(MJ_SCOPE)) continue;
-        const reason = classifyPeerRange(version, floorSpec);
+        const reason = classifyPeerRange(version, floorSpec, options);
         if (reason !== null) hits.push({ file: relPath, peer, version: String(version).trim(), reason });
     }
     return hits;
@@ -382,13 +382,20 @@ function loadManifest(root, relPath) {
 }
 
 /**
- * Reads `mjVersionRange`'s floor from the repo-root `mj-app.json` — WHOLE, prerelease tag
- * included, because Rule 2 ties every MJ peer's anchor to it exactly and a tuple-only comparison
- * lets `^6.1.0-edge.9` pass against a `6.1.0-edge.6` floor. Throws rather than silently skipping
- * Rule 2's check: a missing or unparseable `mj-app.json` means the check cannot be evaluated, not
- * that it passes.
+ * Reads `mjVersionRange`'s floor and release-line marker from the repo-root `mj-app.json` — WHOLE,
+ * prerelease tag included, because Rule 2 ties every MJ peer's anchor to it exactly and a
+ * tuple-only comparison lets `^6.1.0-edge.9` pass against a `6.1.0-edge.6` floor.
+ *
+ * When `mj-app.json` declares a release `"line"` (e.g. `"6.2"` on an `lts/6.2` branch, written by
+ * `check-mj-line.mjs --fix`), the line targets stable MJ releases (`>=6.2.1 <6.3.0`) rather than
+ * Edge prereleases, so Rule 2 still pins every MJ peer's floor to `mjVersionRange`'s exact floor
+ * (tuple + prerelease parity) without demanding an `-edge` prerelease tag. On `next` (no `"line"`
+ * field), Edge prerelease admission stays strictly enforced.
+ *
+ * Throws rather than silently skipping Rule 2's check: a missing or unparseable `mj-app.json`
+ * means the check cannot be evaluated, not that it passes.
  */
-function mjVersionFloor(root) {
+function readMjAppTarget(root) {
     const manifestPath = join(root, MJ_APP_MANIFEST_PATH);
     let raw;
     try {
@@ -413,9 +420,11 @@ function mjVersionFloor(root) {
                 `is not a usable semver range to anchor MJ peer ranges against.`,
         );
     }
-    return floor.prerelease === null
+    const floorSpec = floor.prerelease === null
         ? `${floor.major}.${floor.minor}.${floor.patch}`
         : `${floor.major}.${floor.minor}.${floor.patch}-${floor.prerelease}`;
+    const isReleaseLine = typeof manifest?.line === 'string' && /^\d+\.\d+$/.test(manifest.line.trim());
+    return { floorSpec, requirePrerelease: !isReleaseLine };
 }
 
 /** Renders one `findExactMJDeps` hit as a CLI violation message, by kind. */
@@ -494,7 +503,7 @@ function peerRangeMessage(hit) {
 /** Runs both rules over `root`. Returns violation messages; empty means pass. */
 export function runCheck(root) {
     const violations = [];
-    let floorSpec = null;
+    let appTarget = null;
 
     for (const relPath of scannedManifests(root)) {
         const manifest = loadManifest(root, relPath);
@@ -506,8 +515,10 @@ export function runCheck(root) {
 
         const hasMJPeer = Object.keys(manifest?.peerDependencies ?? {}).some((peer) => peer.startsWith(MJ_SCOPE));
         if (!hasMJPeer) continue;
-        if (floorSpec === null) floorSpec = mjVersionFloor(root);
-        for (const hit of findNonPrereleasePeers(manifest, relPath, floorSpec)) {
+        if (appTarget === null) appTarget = readMjAppTarget(root);
+        for (const hit of findNonPrereleasePeers(manifest, relPath, appTarget.floorSpec, {
+            requirePrerelease: appTarget.requirePrerelease,
+        })) {
             violations.push(peerRangeMessage(hit));
         }
     }

@@ -15,9 +15,9 @@ on:
   # the PR's own `pull_request` run checked, and until now that merge commit never got a UI-token
   # verdict of its own.
   push:
-    branches: [next, main]
+    branches: [next, main, 'lts/**']
   pull_request:
-    branches: [next, main]
+    branches: [next, main, 'lts/**']
 
 concurrency:
   group: ui-gate-${{ github.ref }}
