@@ -13,9 +13,9 @@ on:
   # the `scope` job — a job-level `if:` here, though `distribution-gate.yml` makes the same move at
   # step level for its one expensive step. Either is fine; `on: paths:` never is.
   push:
-    branches: [next, main]
+    branches: [next, main, 'lts/**']
   pull_request:
-    branches: [next, main]
+    branches: [next, main, 'lts/**']
 
 concurrency:
   group: build-${{ github.ref }}
@@ -196,10 +196,23 @@ jobs:
           node .github/scripts/check-dependency-model.mjs --self-test
           node .github/scripts/check-dependency-model.mjs
 
+      # The release-line model relies on `mj migrate` refusing an out-of-order migration. Through
+      # `mj app install` / `upgrade` that check is always on, but the CLI path passes
+      # mj.config.cjs `outOfOrder` straight to Skyway, and `true` switches it off. Keep it unset.
+      - name: mj.config.cjs does not turn on out-of-order migrations
+        run: |
+          if grep -nE '^\s*[^/]*outOfOrder\s*:\s*true' mj.config.cjs; then
+            echo "::error file=mj.config.cjs::outOfOrder: true lets 'mj migrate' apply a migration older than one the database already ran. Release lines depend on that refusal; remove the setting."
+            exit 1
+          fi
+          echo "outOfOrder is not enabled"
+
       # A gate whose own test is not wired into CI is a gate nobody is checking — and this one
       # spent its whole life unable to detect the mis-casing it exists for.
       - name: CI guard script tests
-        run: ./.github/scripts/__tests__/validate-package-lock-case.test.sh
+        run: |
+          ./.github/scripts/__tests__/validate-package-lock-case.test.sh
+          node --test .github/scripts/__tests__/release-lines.spec.mjs
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

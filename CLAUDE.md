@@ -69,7 +69,7 @@ several details in the originals are wrong here, and each file says where and wh
 
 Known corrections applied during the port, so nobody re-derives them: this repo uses `.spec.ts` not
 `.test.ts`; `@memberjunction/test-utils`, `scripts/scaffold-tests.mjs` and MJ's `guides/*.md` do not
-exist here (`guides/` holds only `ENTITY_BINDING_GUIDE.md`); there is no Sass; and Caliber's `bump-pins.sh` omits `packages/CoreEntitiesServer`, which this
+exist here (`guides/` holds `ENTITY_BINDING_GUIDE.md` and `RELEASE_LINES.md`); there is no Sass; and Caliber's `bump-pins.sh` omits `packages/CoreEntitiesServer`, which this
 repo has.
 
 ## Structure
@@ -108,8 +108,8 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
 
 ---
 
-## Branching model: `next` → `main`
-- **`next`** = integration branch (feature PRs land here). **`main`** = release branch (publishes on push).
+## Branching model & release lines
+- **`next`** = integration branch (tracks MJ Edge, never publishes; all new work lands here first). **`lts/<MJ major.minor>`** = release lines tracked in [`release-lines.json`](release-lines.json) (populated by backports from `next` via `backport lts/X.Y` labels and `.github/workflows/backport.yml`, enforced by `.github/workflows/release-lines-gates.yml`; see [`guides/RELEASE_LINES.md`](guides/RELEASE_LINES.md)). **`main`** = release branch (publishes on push for the newest line).
 - Cut feature branches **from `next`**, push, open a PR → `next`. A single coordinating PR promotes `next` → `main`.
 - **Feature branches MUST track the same-named remote** (`origin/<branch>`), never `origin/next` or `origin/main`. Verify with `git branch -vv` before every push.
 - Never commit directly to `main`. Never hand-author the `chore: Update package-lock.json` commit — the publish workflow creates it.
