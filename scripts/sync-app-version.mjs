@@ -22,11 +22,16 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** The MJ package whose pin decides the supported range. */
 const MJ_ANCHOR = '@memberjunction/core';
 
+/** Already-bounded `>=floor <ceiling` range (used on release lines like `>=6.2.1 <6.3.0`). */
+const BOUNDED_RANGE_RE = /^>=\s*(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s+<\s*(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
+
 /**
  * `mj-app.json`'s derived fields, from the entities package's own manifest.
  *
- * `mjVersionRange` is `>=<pin> <(major+1).0.0>`, the pinning model CLAUDE.md describes: an app
- * supports the MJ line it is built against, up to but not including the next major.
+ * On `next`, the entities peer is a caret (`^6.2.0-edge.8`) and `mjVersionRange` spans to the next
+ * MJ major (`>=6.2.0-edge.8 <7.0.0`). On a release line (`lts/X.Y`), the entities peer is already a
+ * minor-capped range (`>=6.2.1 <6.3.0`), which is preserved verbatim rather than re-capped to the
+ * next major.
  */
 export function deriveAppFields(entitiesPkg) {
     const version = entitiesPkg?.version;
@@ -40,7 +45,12 @@ export function deriveAppFields(entitiesPkg) {
                 'mjVersionRange has no input to derive from',
         );
     }
-    const min = pin.replace(/^[^0-9]*/, '');
+    const trimmed = pin.trim();
+    const bounded = BOUNDED_RANGE_RE.exec(trimmed);
+    if (bounded) {
+        return { version, mjVersionRange: `>=${bounded[1]} <${bounded[2]}` };
+    }
+    const min = trimmed.replace(/^[^0-9]*/, '');
     const nextMajor = `${Number(min.split('.')[0]) + 1}.0.0`;
     return { version, mjVersionRange: `>=${min} <${nextMajor}` };
 }

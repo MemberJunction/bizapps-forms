@@ -43,6 +43,18 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: 'pnpm-lock.yaml'
 
+      # `next` never publishes. Even a manual `workflow_dispatch` must only run from `main`, where
+      # the newest release line (`releasesThrough: "main"` in release-lines.json) publishes as
+      # `latest`. See guides/RELEASE_LINES.md.
+      - name: Refuse to publish from next or an unconfigured branch
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::Releases publish only from main (got $REF). Branch next never publishes; see guides/RELEASE_LINES.md."
+            exit 1
+          fi
+
       - name: Validate pnpm-lock.yaml case-sensitivity
         run: ./.github/scripts/validate-package-lock-case.sh
 

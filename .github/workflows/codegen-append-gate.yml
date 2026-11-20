@@ -29,9 +29,9 @@ on:
   # creates no check run at all, which hangs the pull request on "Expected" forever. It costs 0.7s
   # to simply always run. See #173.
   push:
-    branches: [next, main]
+    branches: [next, main, 'lts/**']
   pull_request:
-    branches: [next, main]
+    branches: [next, main, 'lts/**']
 
 permissions:
   contents: read

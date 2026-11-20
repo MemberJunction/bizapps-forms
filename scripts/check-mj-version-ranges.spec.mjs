@@ -578,3 +578,57 @@ test('optionalDependencies is a pinning block too — it installs', () => {
     assert.equal(hits.length, 1);
     assert.equal(hits[0].block, 'optionalDependencies');
 });
+
+// ── release-line manifests (`mj-app.json` with `"line": "X.Y"`) ─────────────
+// Release lines target stable MJ minor bands (e.g. `>=6.2.1 <6.3.0`), not Edge prereleases.
+// Rule 2 still checks that every MJ peer matches `mjVersionRange`'s floor (tuple + prerelease),
+// while dropping the Edge-prerelease demand only when `mj-app.json` names a release line.
+
+test('release-line manifest accepts stable line-floor peers matching mjVersionRange', () => {
+    const root = scratchRepo({ mjAppRange: null });
+    writeFileSync(
+        path.join(root, 'mj-app.json'),
+        JSON.stringify({ line: '6.2', mjVersionRange: '>=6.2.1 <6.3.0' }),
+    );
+    writeFileSync(
+        path.join(root, 'packages', 'P', 'package.json'),
+        JSON.stringify({
+            name: 'p',
+            peerDependencies: { '@memberjunction/core': '>=6.2.1 <6.3.0' },
+            devDependencies: { '@memberjunction/cli': '>=6.2.1 <6.3.0' },
+        }),
+    );
+    assert.deepEqual(runCheck(root), []);
+});
+
+test('release-line manifest still rejects stale Edge peers, wrong floors, and exact dev pins', () => {
+    const root = scratchRepo({ mjAppRange: null });
+    writeFileSync(
+        path.join(root, 'mj-app.json'),
+        JSON.stringify({ line: '6.2', mjVersionRange: '>=6.2.1 <6.3.0' }),
+    );
+    writeFileSync(
+        path.join(root, 'packages', 'P', 'package.json'),
+        JSON.stringify({
+            name: 'p',
+            peerDependencies: {
+                '@memberjunction/core': '^6.2.0-edge.8',
+                '@memberjunction/global': '>=6.2.1-edge.1 <6.3.0',
+            },
+            devDependencies: { '@memberjunction/cli': '6.2.1' },
+        }),
+    );
+    const violations = runCheck(root);
+    assert.equal(violations.length, 3);
+});
+
+test('non-release-line manifest still rejects stable peers even when mjVersionRange is stable', () => {
+    const root = scratchRepo({ mjAppRange: '>=6.2.1 <7.0.0' });
+    writeFileSync(
+        path.join(root, 'packages', 'P', 'package.json'),
+        JSON.stringify({ name: 'p', peerDependencies: { '@memberjunction/core': '>=6.2.1 <7.0.0' } }),
+    );
+    const violations = runCheck(root);
+    assert.equal(violations.length, 1);
+    assert.match(violations[0], /ERESOLVE/);
+});
