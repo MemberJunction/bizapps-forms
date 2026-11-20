@@ -24,6 +24,11 @@ test('a caret peer dependency is read when there is no direct dependency', () =>
     assert.equal(mjVersionRange, '>=6.1.0 <7.0.0');
 });
 
+test('a minor-capped release-line peer range is preserved verbatim', () => {
+    const { mjVersionRange } = deriveAppFields({ version: '1.0.0', peerDependencies: { '@memberjunction/core': '>=6.2.1 <6.3.0' } });
+    assert.equal(mjVersionRange, '>=6.2.1 <6.3.0');
+});
+
 // Guard clause, not a silent skip: an entities package with no MJ dependency at all means the
 // derivation has lost its input, and writing a stale range would be worse than stopping.
 test('an entities package with no MJ dependency throws', () => {
