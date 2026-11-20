@@ -420,11 +420,11 @@ UPDATE [${mjSchema}].[EntityFieldValue] SET Sequence=5 WHERE ID='3D7C6481-453B-4
 DECLARE @RoleEntityID UNIQUEIDENTIFIER = (
     SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity] WHERE [BaseTable] = 'Role' AND [SchemaName] = '${mjSchema}');
 IF @RoleEntityID IS NULL
-    THROW 51305, 'V202611191337: no [Entity] row for the core Role table. Run the MJ core migrations first.', 1;
+    THROW 51305, 'V202611201515: no [Entity] row for the core Role table. Run the MJ core migrations first.', 1;
 DECLARE @TaskEntityID UNIQUEIDENTIFIER = (
     SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity] WHERE [BaseTable] = 'Task' AND [SchemaName] = '${mjSchema}');
 IF @TaskEntityID IS NULL
-    THROW 51306, 'V202611191337: no [Entity] row for the core Task table. Run the MJ core migrations first.', 1;
+    THROW 51306, 'V202611201515: no [Entity] row for the core Task table. Run the MJ core migrations first.', 1;
 
 /* Create Entity Relationship: MJ: Roles -> MJ_BizApps_Forms: Forms (One To Many via PublishApproverRoleID) */
    IF NOT EXISTS (
