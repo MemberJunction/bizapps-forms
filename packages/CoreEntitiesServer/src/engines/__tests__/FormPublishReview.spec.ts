@@ -105,6 +105,11 @@ describe('ReadReviewDecision', () => {
     expect(ReadReviewDecision(step('Waiting'))).toMatchObject({ settled: false });
     expect(ReadReviewDecision(undefined)).toMatchObject({ settled: false });
   });
+
+  it('rejects a review that was cancelled or skipped, so the version does not stay in review forever', () => {
+    expect(ReadReviewDecision(step('Cancelled'))).toEqual({ approved: false, notes: 'The approval request was cancelled before anyone decided.' });
+    expect(ReadReviewDecision(step('Skipped'))).toEqual({ approved: false, notes: 'The approval request was skipped before anyone decided.' });
+  });
 });
 
 describe('FormPublishReview', () => {

@@ -116,8 +116,9 @@ export function BuildPublishReviewSpec(review: FormReviewStart): TaskGraphSpec {
 
 /**
  * Pure: the decision a settled review step records, or why it does not settle the version yet.
- * A step that failed (expired, never raised) rejects; a completed step's `approval` must say
- * `Approved: true` to publish — anything else, including a malformed payload, rejects.
+ * A step that failed (expired, never raised), was cancelled or was skipped rejects; a completed
+ * step's `approval` must say `Approved: true` to publish — anything else, including a malformed
+ * payload, rejects.
  */
 export function ReadReviewDecision(step: PublishReviewStepRow | undefined): FormReviewDecision | PublishReviewPending {
   if (!step) {
@@ -125,6 +126,10 @@ export function ReadReviewDecision(step: PublishReviewStepRow | undefined): Form
   }
   if (step.Status === 'Failed') {
     return { approved: false, notes: `The approval request did not complete: ${step.ErrorMessage || 'it failed or expired'}.` };
+  }
+  if (step.Status === 'Cancelled' || step.Status === 'Skipped') {
+    // The review will never be decided; settling it as rejected frees the form for a new request.
+    return { approved: false, notes: `The approval request was ${step.Status.toLowerCase()} before anyone decided.` };
   }
   if (step.Status !== 'Complete') {
     return { settled: false, reason: `The approver has not decided yet (the review is ${step.Status}).` };

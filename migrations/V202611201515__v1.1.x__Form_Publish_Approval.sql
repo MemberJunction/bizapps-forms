@@ -139,11 +139,23 @@ GO
 -- EDITS to CodeGen's raw output, all of them guards, none changing what a fresh install ends with:
 --   1. The two MJ core entities the new foreign keys point at, `MJ: Roles` and `MJ: Tasks`, are
 --      resolved by natural key into `@RoleEntityID` / `@TaskEntityID`, with a THROW when either is
---      missing, rather than named by the ids this database holds (lint:distribution, #155).
+--      missing, rather than named by the ids this database holds (lint:distribution, #155). The
+--      lookups sit at the top of this batch: the EntityField inserts below use them, and T-SQL
+--      scopes a variable from its DECLARE onward.
 --   2. Each EntityFieldValue INSERT is guarded on (EntityFieldID, Value) as well as its id, and each
 --      EntityRelationship INSERT keeps CodeGen's (EntityID, RelatedEntityID, RelatedEntityJoinField)
---      guard, now over the resolved ids.
+--      guard, now over the resolved ids. The EntityUniqueKey INSERT is guarded on its id and on
+--      (EntityID, Name), for a host where CodeGen already registered the index.
 -- =============================================================================================
+
+DECLARE @RoleEntityID UNIQUEIDENTIFIER = (
+    SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity] WHERE [BaseTable] = 'Role' AND [SchemaName] = '${mjSchema}');
+IF @RoleEntityID IS NULL
+    THROW 51305, 'V202611201515: no [Entity] row for the core Role table. Run the MJ core migrations first.', 1;
+DECLARE @TaskEntityID UNIQUEIDENTIFIER = (
+    SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity] WHERE [BaseTable] = 'Task' AND [SchemaName] = '${mjSchema}');
+IF @TaskEntityID IS NULL
+    THROW 51306, 'V202611201515: no [Entity] row for the core Task table. Run the MJ core migrations first.', 1;
 
 /* SQL text to insert 4 new entity field(s) */
 
@@ -400,6 +412,7 @@ GO
       END;
 
 /* SQL text to sync entity unique keys (1 added, 0 updated, 0 removed) */
+IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityUniqueKey] WHERE [ID] = '9d1774b9-b010-4d4f-8c49-5171f69e260b' OR ([EntityID] = '622E2804-5B6D-4B43-92A4-294ADC538F50' AND [Name] = 'UQ_FormVersion_OneInReview'))
 INSERT INTO [${mjSchema}].[EntityUniqueKey] ([ID], [EntityID], [Name], [FieldNames], [FilterDefinition]) VALUES ('9d1774b9-b010-4d4f-8c49-5171f69e260b', '622E2804-5B6D-4B43-92A4-294ADC538F50', 'UQ_FormVersion_OneInReview', 'FormID', '([Status]=''InReview'')');
 
 /* SQL text to sync 4 entity field value row(s) for entity field ID 36801486-E291-48F4-BC02-432BE04642F3 */
@@ -417,14 +430,6 @@ UPDATE [${mjSchema}].[EntityFieldValue] SET Sequence=3 WHERE ID='C7020CBB-CDB4-4
 UPDATE [${mjSchema}].[EntityFieldValue] SET Sequence=5 WHERE ID='3D7C6481-453B-4DEF-A7FA-CFBD99A3665F';
 
 
-DECLARE @RoleEntityID UNIQUEIDENTIFIER = (
-    SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity] WHERE [BaseTable] = 'Role' AND [SchemaName] = '${mjSchema}');
-IF @RoleEntityID IS NULL
-    THROW 51305, 'V202611201515: no [Entity] row for the core Role table. Run the MJ core migrations first.', 1;
-DECLARE @TaskEntityID UNIQUEIDENTIFIER = (
-    SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity] WHERE [BaseTable] = 'Task' AND [SchemaName] = '${mjSchema}');
-IF @TaskEntityID IS NULL
-    THROW 51306, 'V202611201515: no [Entity] row for the core Task table. Run the MJ core migrations first.', 1;
 
 /* Create Entity Relationship: MJ: Roles -> MJ_BizApps_Forms: Forms (One To Many via PublishApproverRoleID) */
    IF NOT EXISTS (

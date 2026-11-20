@@ -199,3 +199,117 @@ describe('the review columns are the engine\'s alone', () => {
     expect(version.LatestResult?.CompleteMessage).toMatch(/only the publishing engine writes it/);
   });
 });
+
+describe('the approval settings cannot be switched off by the author they gate', () => {
+  const APPROVER = { ...AUTHOR, ID: 'approver-1', UserRoles: [{ RoleID: ROLE_ID.toUpperCase() }] } as unknown as UserInfo;
+  const OWNER = { ...AUTHOR, ID: 'owner-1', Type: 'Owner' } as unknown as UserInfo;
+  const OTHER_ROLE = 'd4d4d4d4-0000-4000-8000-000000000004';
+
+  type FormRecord = Record<string, unknown> & {
+    Load(id: string): Promise<boolean>;
+    Save(): Promise<boolean>;
+    LatestResult: { CompleteMessage: string } | null;
+  };
+
+  async function formAs(db: ReturnType<typeof world>, user: UserInfo): Promise<FormRecord> {
+    const form = (await db.provider.GetEntityObject(FORMS, user)) as unknown as FormRecord;
+    expect(await form.Load(FORM_ID)).toBe(true);
+    // The world attaches AUTHOR to every entity it builds; this test is about who the writer is.
+    form.ContextCurrentUser = user;
+    return form;
+  }
+
+  it('an author cannot turn approval off, so Publish stays refused', async () => {
+    const db = world();
+    const form = await formAs(db, AUTHOR);
+    Object.assign(form, { RequiresPublishApproval: false, PublishApproverRoleID: null });
+
+    expect(await form.Save()).toBe(false);
+    expect(form.LatestResult?.CompleteMessage).toMatch(/Only a member of its approver role, or an owner/);
+    expect(rowsOf(db, FORMS)[0]).toMatchObject({ RequiresPublishApproval: true, PublishApproverRoleID: ROLE_ID });
+    await expect(FormPublishingEngine.Instance.Publish(FORM_ID, db.provider, AUTHOR)).rejects.toThrow(/requires approval/);
+  });
+
+  it('an author cannot point approval at a different role', async () => {
+    const db = world();
+    const form = await formAs(db, AUTHOR);
+    form.PublishApproverRoleID = OTHER_ROLE;
+
+    expect(await form.Save()).toBe(false);
+    expect(rowsOf(db, FORMS)[0].PublishApproverRoleID).toBe(ROLE_ID);
+  });
+
+  it('a member of the approver role may turn approval off (role ids compared case-insensitively)', async () => {
+    const db = world();
+    const form = await formAs(db, APPROVER);
+    Object.assign(form, { RequiresPublishApproval: false, PublishApproverRoleID: null });
+
+    expect(await form.Save(), form.LatestResult?.CompleteMessage).toBe(true);
+    expect(rowsOf(db, FORMS)[0]).toMatchObject({ RequiresPublishApproval: false, PublishApproverRoleID: null });
+  });
+
+  it('an owner may change the approver role', async () => {
+    const db = world();
+    const form = await formAs(db, OWNER);
+    form.PublishApproverRoleID = OTHER_ROLE;
+
+    expect(await form.Save(), form.LatestResult?.CompleteMessage).toBe(true);
+    expect(rowsOf(db, FORMS)[0].PublishApproverRoleID).toBe(OTHER_ROLE);
+  });
+
+  it('nobody, not even an approver, changes the settings while a version is waiting for approval', async () => {
+    const tables = reviewTables();
+    tables[VERSIONS] = [{ ...versionRow(REVIEWED_ID, 1, 'InReview'), PublishedAt: null, ApprovalWorkflowTaskID: WORKFLOW_ID }];
+    const db = world(tables);
+    const form = await formAs(db, APPROVER);
+    form.RequiresPublishApproval = false;
+    form.PublishApproverRoleID = null;
+
+    expect(await form.Save()).toBe(false);
+    expect(form.LatestResult?.CompleteMessage).toMatch(/waiting for approval/);
+  });
+
+  it('any author may opt a form in, but only by naming the approver role', async () => {
+    const db = world(reviewTables({ RequiresPublishApproval: false, PublishApproverRoleID: null }));
+    const form = await formAs(db, AUTHOR);
+    form.RequiresPublishApproval = true;
+    expect(await form.Save()).toBe(false);
+    expect(form.LatestResult?.CompleteMessage).toMatch(/must name the role/);
+
+    form.PublishApproverRoleID = ROLE_ID;
+    expect(await form.Save()).toBe(true);
+    expect(rowsOf(db, FORMS)[0]).toMatchObject({ RequiresPublishApproval: true, PublishApproverRoleID: ROLE_ID });
+  });
+});
+
+describe('a review never puts an older snapshot over a newer one', () => {
+  it('Publish is refused while a version is waiting for approval', async () => {
+    const tables = reviewTables({ RequiresPublishApproval: false, PublishApproverRoleID: null });
+    tables[VERSIONS] = [
+      versionRow('v1', 1, 'Published'),
+      { ...versionRow(REVIEWED_ID, 2, 'InReview'), PublishedAt: null, ApprovalWorkflowTaskID: WORKFLOW_ID },
+    ];
+    const db = world(tables);
+
+    await expect(FormPublishingEngine.Instance.Publish(FORM_ID, db.provider, AUTHOR)).rejects.toThrow(
+      /Version 2 of form .* is waiting for approval/,
+    );
+    expect(versions(db).map((v) => [v.ID, v.Status])).toEqual([['v1', 'Published'], [REVIEWED_ID, 'InReview']]);
+  });
+
+  it('an approval of a version older than the live one settles as rejected, and the newer version keeps serving', async () => {
+    const tables = reviewTables();
+    tables[VERSIONS] = [
+      versionRow('v1', 1, 'Retired'),
+      { ...versionRow(REVIEWED_ID, 2, 'InReview'), PublishedAt: null, ApprovalWorkflowTaskID: WORKFLOW_ID, ReviewNotes: null },
+      versionRow('v3', 3, 'Published'),
+    ];
+    const db = world(tables);
+
+    const result = await FormPublishingEngine.Instance.SettleReview(REVIEWED_ID, { approved: true, notes: 'ok' }, db.provider, AUTHOR);
+
+    expect(result).toMatchObject({ outcome: 'Rejected', alreadySettled: false, retiredVersionIds: [] });
+    expect(versions(db).map((v) => [v.ID, v.Status])).toEqual([['v1', 'Retired'], [REVIEWED_ID, 'Rejected'], ['v3', 'Published']]);
+    expect(versions(db)[1].ReviewNotes).toMatch(/version 3 went live while this one was in review.*Approver's notes: ok/);
+  });
+});

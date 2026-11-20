@@ -176,6 +176,8 @@ interface PublishDraft {
   bindings: AuthoredBindingRow[];
   liveVersions: FormVersionEntityServer[];
   nextVersionNumber: number;
+  /** The number of the version waiting for approval, or `null` when none is. */
+  versionInReview: number | null;
 }
 
 /** A question as read: `FormQuestion.PageID` is nullable. */
@@ -220,6 +222,11 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
     if (draft.form.RequiresPublishApproval) {
       throw new FormPublishError(
         `Form ${formId} requires approval before it is published. Request approval instead; it goes live when the approver approves it.`,
+      );
+    }
+    if (draft.versionInReview !== null) {
+      throw new FormPublishError(
+        `Version ${draft.versionInReview} of form ${formId} is waiting for approval. Wait for the approver to decide before publishing.`,
       );
     }
     const definition = this.buildSnapshot(draft);
@@ -320,6 +327,13 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
       return { formVersionId, outcome: 'Rejected', alreadySettled: false, retiredVersionIds: [] };
     }
     const { form, liveVersions } = await this.readFormAndLiveVersions(version.FormID, provider, user);
+    const newer = newerLiveVersion(version, liveVersions);
+    if (newer) {
+      version.Status = 'Rejected';
+      version.ReviewNotes = supersededNote(newer, decision.notes);
+      await saveVersion(version, `reject version ${version.VersionNumber}, superseded by version ${newer.VersionNumber}`, saveAsEngine);
+      return { formVersionId, outcome: 'Rejected', alreadySettled: false, retiredVersionIds: [] };
+    }
     const retiredVersionIds = await this.retire(liveVersions);
     version.Status = 'Published';
     version.PublishedAt = new Date();
@@ -411,7 +425,7 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
         entityRead(ENTITY.FormVersion, `${byForm} AND Status='Published'`),
         // Every version's number, not `ORDER BY … MaxRows 1`: a form has few versions, and the max
         // computed here does not depend on how the provider orders a capped read.
-        simpleRead(ENTITY.FormVersion, byForm, ['VersionNumber']),
+        simpleRead(ENTITY.FormVersion, byForm, ['VersionNumber', 'Status']),
       ],
       user,
     );
@@ -423,7 +437,8 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
     const pageRows = rowsOrRefuse<AuthoredPageRow>(pages, 'the form\'s pages');
     const questionRows = placePagelessQuestions(rowsOrRefuse<QuestionRow>(questions, 'the form\'s questions'), pageRows, formId);
     const [options, style] = await this.readQuestionOptionsAndStyle(form, questionRows, provider, user);
-    const versionNumbers = rowsOrRefuse<{ VersionNumber: number }>(numbers, 'the form\'s versions').map((v) => v.VersionNumber);
+    const versionRows = rowsOrRefuse<{ VersionNumber: number; Status: string }>(numbers, 'the form\'s versions');
+    const versionNumbers = versionRows.map((v) => v.VersionNumber);
     const screenRows = rowsOrRefuse<AuthoredScreenRow>(screens, 'the form\'s screens');
     return {
       form,
@@ -435,6 +450,7 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
         requireServerEntity(version, FormVersionEntityServer, ENTITY.FormVersion),
       ),
       nextVersionNumber: Math.max(0, ...versionNumbers) + 1,
+      versionInReview: versionRows.find((v) => v.Status === 'InReview')?.VersionNumber ?? null,
     };
   }
 
@@ -526,6 +542,23 @@ function requireReviewRequest(formId: string, user: UserInfo): string {
     throw new FormPublishError(`Requesting approval for form ${id} needs the acting user; none was given.`);
   }
   return id;
+}
+
+/**
+ * A live version newer than the reviewed one, if any. Approving the review would put an older
+ * snapshot back over it, so the review settles as rejected instead. `Publish` refuses while a
+ * version is in review, so this is the backstop for a version that went live some other way.
+ */
+function newerLiveVersion(
+  reviewed: FormVersionEntityServer,
+  liveVersions: readonly FormVersionEntityServer[],
+): FormVersionEntityServer | undefined {
+  return liveVersions.find((live) => live.VersionNumber > reviewed.VersionNumber);
+}
+
+function supersededNote(newer: FormVersionEntityServer, approverNotes: string | null): string {
+  const note = `Approved, but version ${newer.VersionNumber} went live while this one was in review, so this older version was not published.`;
+  return (approverNotes ? `${note} Approver's notes: ${approverNotes}` : note).slice(0, REVIEW_NOTES_MAX);
 }
 
 /** The approver role of a form that may be sent for review, or a refusal saying why it may not. */
