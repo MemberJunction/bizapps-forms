@@ -100,6 +100,11 @@ import './asset/AssetMiddleware.js';
 // Boot-time storage-account pin check (#290); registers no route, and is not gated on assets.
 import './storage/StorageReadinessMiddleware.js';
 
+// Boot-time re-assertion of the Respondent-grant hardening (#39): the deny-all Create RLS rows
+// that close the direct-create bypass are asserted only at migration apply time, and a sibling
+// app's install/uninstall or an operator edit can silently reopen them. Logs at ERROR; no route.
+import './security/RespondentGrantReadinessMiddleware.js';
+
 // Import the response-file download middleware so its @RegisterClass fires and MJ server
 // bootstrap discovers GET /forms/files/:fileId — an AUTHENTICATED reader downloading one
 // respondent-uploaded answer. Mounted post-auth because identity is the guard here, unlike the
