@@ -15,6 +15,7 @@
  *   - 'Forms: Generate Form From Brief'
  *   - 'Forms: Create Form From Template'
  *   - 'Forms: Bind Response To Entity'
+ *   - 'Forms: Settle Publish Review'
  *
  * It also registers the SIBLING APPS' entity classes the on-submit actions write through — see
  * {@link LoadSiblingEntities}.
@@ -28,6 +29,7 @@ import { CreateFollowupTaskAction } from './on-submit/create-followup-task.actio
 import { AnalyzeWrittenResponsesAction } from './on-submit/analyze-written-responses.action';
 import { GenerateFormFromBriefAction } from './authoring/generate-form.action';
 import { CreateFormFromTemplateAction } from './templates/create-form-from-template.action';
+import { SettlePublishReviewAction } from './review/settle-publish-review.action';
 
 // Re-export the action classes + the seams/helpers consumers may want.
 export {
@@ -37,6 +39,7 @@ export {
   AnalyzeWrittenResponsesAction,
   GenerateFormFromBriefAction,
   CreateFormFromTemplateAction,
+  SettlePublishReviewAction,
 };
 export {
   setResponseAnalyzerModel,
@@ -87,6 +90,7 @@ const FORMS_ACTION_CLASSES = [
   GenerateFormFromBriefAction,
   CreateFormFromTemplateAction,
   BindResponseToEntityAction,
+  SettlePublishReviewAction,
 ] as const;
 
 /**

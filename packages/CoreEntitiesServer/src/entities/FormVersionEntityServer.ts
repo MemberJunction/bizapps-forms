@@ -29,6 +29,7 @@ import {
   untrackedUpdateViolation,
 } from './entity-refusal.js';
 import {
+  ENGINE_ONLY_VERSION_FIELDS,
   FROZEN_VERSION_FIELDS,
   formVersionDeleteRefusal,
   formVersionWriteViolations,
@@ -63,9 +64,21 @@ export class FormVersionEntityServer extends mjBizAppsFormsFormVersionEntity {
       storedStatus: storedValue<FormVersionStatus>(this, 'Status'),
       status: this.Status,
       changedFields: changedFields(this, FROZEN_VERSION_FIELDS),
+      engineOnlyFields: this.engineOnlyFieldsWritten(),
       authorizedByEngine: this.AuthorizedByEngine,
     });
     return addViolations(result, violations, (field) => this.GetFieldByName(field)?.Value);
+  }
+
+  /**
+   * The review columns this save writes. On an insert `Dirty` is not a reliable signal, so a new
+   * row counts any review column that holds a value.
+   */
+  private engineOnlyFieldsWritten(): string[] {
+    if (!this.IsSaved) {
+      return ENGINE_ONLY_VERSION_FIELDS.filter((field) => this.GetFieldByName(field)?.Value != null);
+    }
+    return changedFields(this, ENGINE_ONLY_VERSION_FIELDS);
   }
 
   public override async Save(options?: EntitySaveOptions): Promise<boolean> {

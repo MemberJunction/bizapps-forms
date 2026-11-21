@@ -115,6 +115,7 @@ const EXPECTED_SCOPE = {
     'mj-app.json': 'lint:mj-ranges and sync-app-version.spec.mjs read it',
     'mj.config.cjs': 'the entity-name prefix and CodeGen output map the packages are built against',
     '.github/scripts/': 'validate-widget-bundle.sh and the package-lock case test run here',
+    '.github/actions/': 'ci-install decides how build-and-test installs (MJ next workspace vs the committed lockfile)',
     '.claude/': 'lint:hook-guard:test and lint:git-gate:test run nowhere else',
     '.github/workflows/': 'check-release-pushes.mjs reads every workflow, so a PR editing any one of them must run it',
     'ci/': 'the release scripts that pushed straight to main and next lived here (#177); a PR reintroducing the directory must run the gate that forbids it',

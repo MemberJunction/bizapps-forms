@@ -49,7 +49,7 @@ The `mj-upgrade` skill (`.claude/skills/mj-upgrade/`, ported from `bizapps-calib
 - **Ports:** MJAPI `4121`, MJExplorer `4321`
 - **Entity-name prefix:** Forms entities get the `MJ_BizApps_Forms: ` prefix (set in `mj.config.cjs`), matching the `MJ_BizApps_Common:` / `MJ_BizApps_Tasks:` sibling convention.
 - **Hard dependencies (auto-installed Open Apps):** MJ Forms **requires** `bizapps-common` (identity — `MJ_BizApps_Common: People`, hard FK from `FormResponse.RespondentPersonID`) and `bizapps-tasks` (review/approve-before-publish routing). Both are declared in `mj-app.json` `dependencies` and installed automatically by `mj app install` (leaf-first: common → tasks → forms). They're free OSS and part of our stack — build on them directly with hard FKs; do **not** use soft polymorphic links to avoid the dependency.
-- **Approval routing (Phase 2):** publish gating uses `bizapps-tasks` — a `FormVersion` going to review creates a Task + TaskLink(→FormVersion) + TaskAssignment(→approver People); the Task's `TaskType` `OnComplete`/`OnReject` action hooks call back into Forms actions to publish or return-to-draft. Forms owns the `FormVersion` status state machine; tasks owns assignment/decisions/UI/audit/notifications.
+- **Publish approval (per form, off by default):** a form with `RequiresPublishApproval` is never published directly. `Forms.RequestPublishApproval` writes the version `InReview` and submits a two-step MJ task graph (`FormPublishReview`): a Human step raised through `bizapps-tasks` (`provider: 'BizAppsTasks'`, assigned to `PublishApproverRoleID`, linked to the version), then the `Forms: Settle Publish Review` action, which publishes or rejects the version from the decision the review step recorded. Forms owns the `FormVersion` status machine (`Draft → InReview → Published | Rejected`); tasks owns assignment, decisions, UI, audit and notifications.
 
 ## Rules and skills (`.claude/`)
 
@@ -84,8 +84,10 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
 
 ## 🚨 CRITICAL RULES — VIOLATIONS ARE UNACCEPTABLE 🚨
 
-### 1. NO COMMITS WITHOUT EXPLICIT APPROVAL
-- **NEVER run `git commit` without the user explicitly asking.** Each commit needs one-time explicit approval. Never ask "should I commit?" — wait for the request. Only commit what is staged.
+### 1. AGENTS MAY COMMIT AND OPEN PULL REQUESTS — NEVER MERGE
+- An agent may commit on its own feature branch, push it, and open or update a pull request into `next`. Stage files explicitly (`git add <file>`) and commit only the task's own work.
+- **Never merge, approve or enable auto-merge on a pull request, and never push to `next` or `main`.** A person merges.
+- In a checkout that holds someone else's uncommitted work, ask before committing.
 
 ### 2. NO `any` TYPES — EVER
 - No `as any`, `: any`, `<any>`, or `unknown` as a lazy alternative. MJ has strong typing throughout — ask for the proper type if stuck.

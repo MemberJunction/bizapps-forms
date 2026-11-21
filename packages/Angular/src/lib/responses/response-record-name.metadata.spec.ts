@@ -26,7 +26,7 @@ interface EntityRecord {
 }
 
 const ENTITIES = join(__dirname, '../../../../../metadata/entities/.entities.json');
-const GENERATED = join(__dirname, '../../../../Entities/src/generated/entities/__mj_BizAppsForms.ts');
+const GENERATED = join(__dirname, '../../../../Entities/src/generated/schemas/__mj_BizAppsForms.ts');
 const entity = (name: string): EntityRecord | undefined =>
   (JSON.parse(readFileSync(ENTITIES, 'utf8')) as EntityRecord[]).find(
     (e) => e.primaryKey.ID === `@lookup:MJ: Entities.Name=${name}`,
@@ -62,7 +62,7 @@ describe('a form response has a record name', () => {
   });
 });
 
-/** `[entity, field]` for every Forms field whose foreign key is a response — read from CodeGen's zod schemas. */
+/** `[entity, field]` for every Forms field whose foreign key is a response — read from CodeGen's zod schemas (`generated/schemas/`, where CodeGen writes them since MJ 6.3). */
 function foreignKeysToResponses(): [string, string][] {
   const generated = readFileSync(GENERATED, 'utf8');
   const pairs: [string, string][] = [];

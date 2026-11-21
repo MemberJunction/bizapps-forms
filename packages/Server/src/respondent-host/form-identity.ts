@@ -45,7 +45,10 @@ export async function loadFormIdentity(
   source: FormIdentitySource,
 ): Promise<FormIdentity> {
   const description = await loadDescription(provider, contextUser, source);
-  return description ? { name: source.Form, description } : { name: source.Form };
+  // `Form` is the join through the distribution's NOT NULL FormID, so it is always present; MJ 6.3's
+  // CodeGen types every joined name as nullable all the same.
+  const name = source.Form ?? '';
+  return description ? { name, description } : { name };
 }
 
 /** One primary-key read of one column, or `undefined` (logged) if it cannot be read. */
