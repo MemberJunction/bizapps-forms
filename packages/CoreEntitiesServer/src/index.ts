@@ -99,6 +99,7 @@ export {
 export {
   formVersionWriteViolations,
   formVersionDeleteRefusal,
+  ENGINE_ONLY_VERSION_FIELDS,
   FROZEN_VERSION_FIELDS,
   type FormVersionStatus,
   type FormVersionWrite,
@@ -126,8 +127,27 @@ export {
   FormPublishingEngine,
   FormPublishError,
   PUBLISH_IN_PROGRESS_MESSAGE,
+  REVIEW_IN_PROGRESS_MESSAGE,
   type FormPublishResult,
+  type FormReviewDecision,
+  type FormReviewRequestResult,
+  type FormReviewSettleResult,
+  type FormReviewStart,
+  type StartReviewWorkflow,
 } from './engines/FormPublishingEngine.js';
+export {
+  BuildPublishReviewSpec,
+  FormPublishReview,
+  PUBLISH_REVIEW_EXPIRES_IN_HOURS,
+  PUBLISH_REVIEW_OUTPUT_KEY,
+  PUBLISH_REVIEW_PROVIDER,
+  PUBLISH_REVIEW_TASK_TYPE,
+  ReadReviewDecision,
+  SETTLE_PUBLISH_REVIEW_ACTION,
+  type PublishReviewPending,
+  type PublishReviewSettlement,
+  type PublishReviewStepRow,
+} from './engines/FormPublishReview.js';
 export {
   FormAuthoringEngine,
   type BuildFromBlueprintOptions,
@@ -187,6 +207,7 @@ export { FORMS_ENTITY } from './shared/entity-names.js';
 
 // Remote Operation server subclasses (spec #303 §2) and the authoring rule they share.
 export { PublishFormServerOperation, LoadPublishFormOperation } from './operations/PublishFormServerOperation.js';
+export { RequestPublishApprovalServerOperation, LoadRequestPublishApprovalOperation } from './operations/RequestPublishApprovalServerOperation.js';
 export { CloneFormServerOperation, LoadCloneFormOperation } from './operations/CloneFormServerOperation.js';
 export {
   CreateFormFromTemplateServerOperation,

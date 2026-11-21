@@ -21,6 +21,13 @@
  *     the browser's client-minted-id reconcile has nothing left to do;
  *  6. move the form to Published if it is not already.
  * Any failure rolls all of it back: the previous version is still live and still serving.
+ *
+ * A form with `RequiresPublishApproval` is never published this way; {@link Publish} refuses it.
+ * Its author asks for approval instead ({@link FormPublishingEngine.SubmitForReview}): the same
+ * gates and the same snapshot, written to a new version held `InReview`, plus the workflow that
+ * asks the approver. The review settles that version once ({@link FormPublishingEngine.SettleReview}):
+ * approved, it goes live exactly as steps 4–6 above, with the snapshot the reviewer saw; rejected,
+ * it is `Rejected` and the live version keeps serving.
  */
 import {
   LogError,
@@ -74,6 +81,10 @@ const ENTITY = FORMS_ENTITY;
 export const PUBLISH_IN_PROGRESS_MESSAGE = 'Another publish of this form is in progress; reload and try again.';
 const CONCURRENT_PUBLISH_CONSTRAINTS = ['UQ_FormVersion_Form_VersionNumber', 'UQ_FormVersion_OnePublishedPerForm'];
 
+/** What the losing side of two approval requests for one form sees (`UQ_FormVersion_OneInReview`). */
+export const REVIEW_IN_PROGRESS_MESSAGE = 'This form already has a version waiting for approval; it must be decided first.';
+const REVIEW_IN_PROGRESS_CONSTRAINT = 'UQ_FormVersion_OneInReview';
+
 /** What a publish wrote. */
 export interface FormPublishResult {
   /** The new version — now the form's one Published version. */
@@ -83,6 +94,47 @@ export interface FormPublishResult {
   retiredVersionIds: string[];
   /** The snapshot as stored in the new version's `DefinitionSnapshot`. */
   definition: PublishedFormDefinition;
+}
+
+/** The version a review is about, handed to whoever starts the review's workflow. */
+export interface FormReviewStart {
+  formId: string;
+  formName: string;
+  /** The version created `InReview`; the reviewer approves its snapshot. */
+  formVersionId: string;
+  versionNumber: number;
+  /** `Form.PublishApproverRoleID`: who is asked. */
+  approverRoleId: string;
+}
+
+/**
+ * Starts the workflow that asks the approver, and returns its parent task id. Called inside the
+ * review request's transaction, so a workflow that cannot start leaves no version behind.
+ */
+export type StartReviewWorkflow = (review: FormReviewStart) => Promise<string>;
+
+/** What an approval request wrote. */
+export interface FormReviewRequestResult {
+  formVersionId: string;
+  versionNumber: number;
+  /** The parent task of the workflow carrying the review, stored on the version. */
+  workflowTaskId: string;
+}
+
+/** The approver's decision, as the review recorded it. */
+export interface FormReviewDecision {
+  approved: boolean;
+  notes: string | null;
+}
+
+/** What settling a review did. */
+export interface FormReviewSettleResult {
+  formVersionId: string;
+  outcome: 'Published' | 'Rejected';
+  /** True when the version was already settled: nothing was written this time. */
+  alreadySettled: boolean;
+  /** The versions moved from Published to Retired (empty unless approved now). */
+  retiredVersionIds: string[];
 }
 
 /**
@@ -124,6 +176,8 @@ interface PublishDraft {
   bindings: AuthoredBindingRow[];
   liveVersions: FormVersionEntityServer[];
   nextVersionNumber: number;
+  /** The number of the version waiting for approval, or `null` when none is. */
+  versionInReview: number | null;
 }
 
 /** A question as read: `FormQuestion.PageID` is nullable. */
@@ -165,6 +219,16 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
 
   private async publishInTransaction(formId: string, provider: DatabaseProviderBase, user: UserInfo): Promise<FormPublishResult> {
     const draft = await this.readDraft(formId, provider, user);
+    if (draft.form.RequiresPublishApproval) {
+      throw new FormPublishError(
+        `Form ${formId} requires approval before it is published. Request approval instead; it goes live when the approver approves it.`,
+      );
+    }
+    if (draft.versionInReview !== null) {
+      throw new FormPublishError(
+        `Version ${draft.versionInReview} of form ${formId} is waiting for approval. Wait for the approver to decide before publishing.`,
+      );
+    }
     const definition = this.buildSnapshot(draft);
 
     const version = await this.insertDraftVersion(formId, draft.nextVersionNumber, provider, user);
@@ -174,6 +238,138 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
     await this.markFormPublished(draft.form);
 
     return { formVersionId: version.ID, versionNumber: version.VersionNumber, retiredVersionIds, definition: published };
+  }
+
+  /**
+   * Ask for approval to publish: build the snapshot with every publish gate, write it to a new
+   * version held `InReview`, and start the workflow that asks the approver (`startWorkflow`) — all
+   * in one transaction, so a refusal, a failed write or a workflow that cannot start leaves nothing.
+   * Refuses a form that does not require approval, one with no approver role, and one that already
+   * has a version waiting.
+   */
+  public async SubmitForReview(
+    formId: string,
+    provider: DatabaseProviderBase,
+    user: UserInfo,
+    startWorkflow: StartReviewWorkflow,
+  ): Promise<FormReviewRequestResult> {
+    const id = requireReviewRequest(formId, user);
+    requireEntityTransactions(provider, `Requesting approval for form ${id}`);
+    return runEngineUnitOfWork(provider, `[FormPublishingEngine] approval for form ${id} was not requested (user ${user.ID})`, () =>
+      callerSafePublish(() => this.submitInTransaction(id, provider, user, startWorkflow)),
+    );
+  }
+
+  /**
+   * Settle a version's review with the approver's decision: approved, it goes live in place of the
+   * current version; rejected, it is `Rejected`. Idempotent — a version already settled returns what
+   * it was settled as and writes nothing, so a retried workflow step is harmless.
+   */
+  public async SettleReview(
+    formVersionId: string,
+    decision: FormReviewDecision,
+    provider: DatabaseProviderBase,
+    user: UserInfo,
+  ): Promise<FormReviewSettleResult> {
+    const id = formVersionId?.trim() ?? '';
+    if (!isGuid(id)) {
+      throw new FormPublishError('A valid form version ID is required to settle a review.');
+    }
+    if (!user) {
+      throw new FormPublishError(`Settling the review of form version ${id} needs the acting user; none was given.`);
+    }
+    requireEntityTransactions(provider, `Settling the review of form version ${id}`);
+    return runEngineUnitOfWork(provider, `[FormPublishingEngine] review of form version ${id} was not settled (user ${user.ID})`, () =>
+      callerSafePublish(() => this.settleInTransaction(id, decision, provider, user)),
+    );
+  }
+
+  private async submitInTransaction(
+    formId: string,
+    provider: DatabaseProviderBase,
+    user: UserInfo,
+    startWorkflow: StartReviewWorkflow,
+  ): Promise<FormReviewRequestResult> {
+    const draft = await this.readDraft(formId, provider, user);
+    const approverRoleId = requireReviewable(draft.form);
+    const definition = this.buildSnapshot(draft);
+
+    const version = await this.insertDraftVersion(formId, draft.nextVersionNumber, provider, user);
+    version.DefinitionSnapshot = JSON.stringify({ ...definition, formVersionId: version.ID });
+    version.Status = 'InReview';
+    await saveVersion(version, `hold version ${version.VersionNumber} for review`, saveAsEngine);
+
+    const workflowTaskId = await startWorkflow({
+      formId, formName: draft.form.Name, formVersionId: version.ID, versionNumber: version.VersionNumber, approverRoleId,
+    });
+    version.ApprovalWorkflowTaskID = workflowTaskId;
+    await saveVersion(version, `record the review of version ${version.VersionNumber}`, saveAsEngine);
+    return { formVersionId: version.ID, versionNumber: version.VersionNumber, workflowTaskId };
+  }
+
+  private async settleInTransaction(
+    formVersionId: string,
+    decision: FormReviewDecision,
+    provider: DatabaseProviderBase,
+    user: UserInfo,
+  ): Promise<FormReviewSettleResult> {
+    const version = await this.readVersion(formVersionId, provider, user);
+    if (version.Status === 'Published' || version.Status === 'Rejected') {
+      return { formVersionId, outcome: version.Status, alreadySettled: true, retiredVersionIds: [] };
+    }
+    if (version.Status !== 'InReview') {
+      throw new FormPublishError(`Form version ${formVersionId} is ${version.Status}, not waiting for approval, so there is no review to settle.`);
+    }
+    version.ReviewNotes = decision.notes ? decision.notes.slice(0, REVIEW_NOTES_MAX) : null;
+    if (!decision.approved) {
+      version.Status = 'Rejected';
+      await saveVersion(version, `reject version ${version.VersionNumber}`, saveAsEngine);
+      return { formVersionId, outcome: 'Rejected', alreadySettled: false, retiredVersionIds: [] };
+    }
+    const { form, liveVersions } = await this.readFormAndLiveVersions(version.FormID, provider, user);
+    const newer = newerLiveVersion(version, liveVersions);
+    if (newer) {
+      version.Status = 'Rejected';
+      version.ReviewNotes = supersededNote(newer, decision.notes);
+      await saveVersion(version, `reject version ${version.VersionNumber}, superseded by version ${newer.VersionNumber}`, saveAsEngine);
+      return { formVersionId, outcome: 'Rejected', alreadySettled: false, retiredVersionIds: [] };
+    }
+    const retiredVersionIds = await this.retire(liveVersions);
+    version.Status = 'Published';
+    version.PublishedAt = new Date();
+    await saveVersion(version, `publish version ${version.VersionNumber}`, saveAsEngine);
+    await this.markFormPublished(form);
+    return { formVersionId, outcome: 'Published', alreadySettled: false, retiredVersionIds };
+  }
+
+  /** One version as a writable server entity, read fresh. */
+  private async readVersion(formVersionId: string, provider: DatabaseProviderBase, user: UserInfo): Promise<FormVersionEntityServer> {
+    const [result] = await provider.RunViews<unknown>([entityRead(ENTITY.FormVersion, `ID=${quoteSqlString(formVersionId)}`)], user);
+    const rows = rowsOrRefuse(result, `form version ${formVersionId}`);
+    if (rows.length === 0) {
+      throw new FormPublishError(`Form version ${formVersionId} does not exist.`);
+    }
+    return requireServerEntity(rows[0], FormVersionEntityServer, ENTITY.FormVersion);
+  }
+
+  /** The form and its Published version(s) — what an approved review replaces. */
+  private async readFormAndLiveVersions(
+    formId: string,
+    provider: DatabaseProviderBase,
+    user: UserInfo,
+  ): Promise<{ form: FormEntityServer; liveVersions: FormVersionEntityServer[] }> {
+    const [forms, live] = await provider.RunViews<unknown>(
+      [entityRead(ENTITY.Form, `ID=${quoteSqlString(formId)}`), entityRead(ENTITY.FormVersion, `FormID=${quoteSqlString(formId)} AND Status='Published'`)],
+      user,
+    );
+    const formRows = rowsOrRefuse(forms, `the form ${formId}`);
+    if (formRows.length === 0) {
+      throw new FormPublishError(`Form ${formId} does not exist, so its reviewed version cannot be published.`);
+    }
+    return {
+      form: requireServerEntity(formRows[0], FormEntityServer, ENTITY.Form),
+      liveVersions: rowsOrRefuse(live, 'the form\'s live versions').map((v) => requireServerEntity(v, FormVersionEntityServer, ENTITY.FormVersion)),
+    };
   }
 
   /**
@@ -229,7 +425,7 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
         entityRead(ENTITY.FormVersion, `${byForm} AND Status='Published'`),
         // Every version's number, not `ORDER BY … MaxRows 1`: a form has few versions, and the max
         // computed here does not depend on how the provider orders a capped read.
-        simpleRead(ENTITY.FormVersion, byForm, ['VersionNumber']),
+        simpleRead(ENTITY.FormVersion, byForm, ['VersionNumber', 'Status']),
       ],
       user,
     );
@@ -241,7 +437,8 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
     const pageRows = rowsOrRefuse<AuthoredPageRow>(pages, 'the form\'s pages');
     const questionRows = placePagelessQuestions(rowsOrRefuse<QuestionRow>(questions, 'the form\'s questions'), pageRows, formId);
     const [options, style] = await this.readQuestionOptionsAndStyle(form, questionRows, provider, user);
-    const versionNumbers = rowsOrRefuse<{ VersionNumber: number }>(numbers, 'the form\'s versions').map((v) => v.VersionNumber);
+    const versionRows = rowsOrRefuse<{ VersionNumber: number; Status: string }>(numbers, 'the form\'s versions');
+    const versionNumbers = versionRows.map((v) => v.VersionNumber);
     const screenRows = rowsOrRefuse<AuthoredScreenRow>(screens, 'the form\'s screens');
     return {
       form,
@@ -253,6 +450,7 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
         requireServerEntity(version, FormVersionEntityServer, ENTITY.FormVersion),
       ),
       nextVersionNumber: Math.max(0, ...versionNumbers) + 1,
+      versionInReview: versionRows.find((v) => v.Status === 'InReview')?.VersionNumber ?? null,
     };
   }
 
@@ -331,6 +529,49 @@ export class FormPublishingEngine extends BaseSingleton<FormPublishingEngine> {
   }
 }
 
+/** `FormVersion.ReviewNotes` is NVARCHAR(2000). */
+const REVIEW_NOTES_MAX = 2000;
+
+/** The trimmed form id of an approval request, or a refusal; and a refusal when no acting user was given. */
+function requireReviewRequest(formId: string, user: UserInfo): string {
+  const id = formId?.trim() ?? '';
+  if (!isGuid(id)) {
+    throw new FormPublishError('A valid form ID is required to request approval.');
+  }
+  if (!user) {
+    throw new FormPublishError(`Requesting approval for form ${id} needs the acting user; none was given.`);
+  }
+  return id;
+}
+
+/**
+ * A live version newer than the reviewed one, if any. Approving the review would put an older
+ * snapshot back over it, so the review settles as rejected instead. `Publish` refuses while a
+ * version is in review, so this is the backstop for a version that went live some other way.
+ */
+function newerLiveVersion(
+  reviewed: FormVersionEntityServer,
+  liveVersions: readonly FormVersionEntityServer[],
+): FormVersionEntityServer | undefined {
+  return liveVersions.find((live) => live.VersionNumber > reviewed.VersionNumber);
+}
+
+function supersededNote(newer: FormVersionEntityServer, approverNotes: string | null): string {
+  const note = `Approved, but version ${newer.VersionNumber} went live while this one was in review, so this older version was not published.`;
+  return (approverNotes ? `${note} Approver's notes: ${approverNotes}` : note).slice(0, REVIEW_NOTES_MAX);
+}
+
+/** The approver role of a form that may be sent for review, or a refusal saying why it may not. */
+function requireReviewable(form: FormEntityServer): string {
+  if (!form.RequiresPublishApproval) {
+    throw new FormPublishError(`Form ${form.ID} does not require approval to publish. Publish it instead.`);
+  }
+  if (!form.PublishApproverRoleID) {
+    throw new FormPublishError(`Form ${form.ID} requires approval to publish but names no approver role. Choose one, then request approval.`);
+  }
+  return form.PublishApproverRoleID;
+}
+
 /**
  * A fresh `simple` read of the named columns. Fresh because a publish must see the rows as they are
  * now — and, inside its transaction, as this unit of work has written them — never a cached copy.
@@ -356,6 +597,9 @@ async function saveVersion(
     return;
   }
   const why = saveFailure(version);
+  if (why.includes(REVIEW_IN_PROGRESS_CONSTRAINT)) {
+    throw new FormPublishError(REVIEW_IN_PROGRESS_MESSAGE);
+  }
   if (CONCURRENT_PUBLISH_CONSTRAINTS.some((constraint) => why.includes(constraint))) {
     throw new FormPublishError(PUBLISH_IN_PROGRESS_MESSAGE);
   }

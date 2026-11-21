@@ -123,6 +123,7 @@ jobs:
             mj-app.json \
             mj.config.cjs \
             .github/scripts/ \
+            .github/actions/ \
             .claude/ \
             .github/workflows/ \
             ci/)
@@ -154,7 +155,7 @@ jobs:
     #   - That trade is the reason for the choice; revisit it if the concurrency group ever changes.
     if: ${{ !cancelled() && (needs.scope.result != 'success' || needs.scope.outputs.relevant == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     # The rate limiter's Redis store is a Lua script, and only a real Redis can run it, so
     # rate-limit.redis-store.spec.ts runs against this service (FORMS_TEST_REDIS_URL on the test
     # step below). Without the variable the spec skips in a developer's shell but fails when CI is
@@ -214,8 +215,11 @@ jobs:
           ./.github/scripts/__tests__/validate-package-lock-case.test.sh
           node --test .github/scripts/__tests__/release-lines.spec.mjs
 
+      # PRs into next (and next itself) build against MJ next and the sibling apps' next, from
+      # source, in one generated pnpm workspace; release PRs and lts/* lines install the committed
+      # lockfile. See .github/actions/ci-install/action.yml.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        uses: ./.github/actions/ci-install
 
       - name: Build all packages
         run: pnpm run build:packages

@@ -32,6 +32,7 @@ import {
   LoadListResponsesOperation,
   LoadOpenDistributionOperation,
   LoadPublishFormOperation,
+  LoadRequestPublishApprovalOperation,
   LoadReissueDistributionLinkOperation,
   LoadRemoveAutomationOperation,
   LoadReorderAutomationsOperation,
@@ -151,6 +152,7 @@ export function LoadBizAppsFormsServer(): void {
     // dropping the entity server subclasses and the operation server subclasses as unused.
     LoadFormsEntityServerSubclasses();
     LoadPublishFormOperation();
+    LoadRequestPublishApprovalOperation();
     LoadCloneFormOperation();
     LoadCreateFormFromTemplateOperation();
     LoadArchiveFormOperation();
