@@ -16,7 +16,8 @@
 // The commit is printed in the log and the job summary, so a run can be reproduced.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const MJ_REPO = 'MemberJunction/MJ';
@@ -31,8 +32,18 @@ const appName = path.basename(appDir);
 const mjDir = path.join(parentDir, 'MJ');
 const stateFile = path.join(process.env.RUNNER_TEMP || parentDir, 'mj-next-workspace.json');
 
+const startedAt = Date.now();
+
 function log(message) {
-  console.log(`[mj-next-workspace] ${message}`);
+  const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0).padStart(4);
+  console.log(`[mj-next-workspace +${elapsed}s] ${message}`);
+}
+
+/** Parallel builds: one per CPU, but never more than memory allows at ~3 GB per tsc/ngc. */
+function buildConcurrency() {
+  const cpus = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
+  const byMemory = Math.max(1, Math.floor(os.totalmem() / (3 * 1024 ** 3)));
+  return Math.max(1, Math.min(cpus, byMemory));
 }
 
 function fail(message) {
@@ -412,7 +423,7 @@ function fetchDist() {
  * (`workspace:*` overrides), so the build order follows names too.
  */
 function build() {
-  const mjReady = process.env.MJ_DIST_READY === 'true';
+  const mjReady = process.env.MJ_DIST_READY === 'true' || restoreCachedDist();
   if (!mjReady) log('building MJ from source — no build of this commit was downloaded or cached');
   const projects = workspaceProjects();
   const byName = new Map(projects.map((p) => [p.name, p]));
@@ -425,12 +436,38 @@ function build() {
   });
   const levels = topologicalLevels(new Set(toBuild), byName);
   log(`building ${toBuild.length} packages in ${levels.length} dependency levels`);
-  const env = { ...process.env, NODE_OPTIONS: process.env.NODE_OPTIONS || '--max-old-space-size=6144' };
-  for (const level of levels) {
+  const env = { ...process.env, NODE_OPTIONS: process.env.NODE_OPTIONS || '--max-old-space-size=4096' };
+  const concurrency = buildConcurrency();
+  levels.forEach((level, index) => {
+    log(`level ${index + 1}/${levels.length}: ${level.length} package(s)`);
     const filters = level.flatMap((name) => ['--filter', name]);
-    run('pnpm', ['-r', ...filters, '--workspace-concurrency=4', 'run', 'build'], { cwd: parentDir, env });
-  }
+    run('pnpm', ['-r', ...filters, `--workspace-concurrency=${concurrency}`, '--reporter=append-only', 'run', 'build'], { cwd: parentDir, env });
+  });
+  if (!mjReady) packDistForCache();
   relink();
+}
+
+/** The cached tarball for this MJ commit, if the cache step restored one. */
+function restoreCachedDist() {
+  const archive = process.env.MJ_DIST_CACHE && path.join(process.env.MJ_DIST_CACHE, 'mj-dist.tar.gz');
+  if (!archive || !existsSync(archive)) return false;
+  run('tar', ['-xzf', archive, '-C', mjDir]);
+  log('MJ build restored from the cache');
+  return true;
+}
+
+/** Writes MJ's dist/ folders as one tarball for the cache step (node_modules excluded). */
+function packDistForCache() {
+  if (!process.env.MJ_DIST_CACHE) return;
+  mkdirSync(process.env.MJ_DIST_CACHE, { recursive: true });
+  const archive = path.join(process.env.MJ_DIST_CACHE, 'mj-dist.tar.gz');
+  run('bash', ['-c', `find packages -name node_modules -prune -o -name dist -type d -prune -print0 | tar --null -czf "${archive}" -T -`], { cwd: mjDir });
+  log(`packed MJ's build for the cache (${(readFileSize(archive) / 1024 / 1024).toFixed(0)} MB)`);
+  setOutput('built-mj', 'true');
+}
+
+function readFileSize(file) {
+  return statSync(file).size;
 }
 
 function isUnder(child, parent) {

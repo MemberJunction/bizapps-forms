@@ -61,6 +61,11 @@ runs:
       shell: bash
       run: ${{ inputs.published-install }}
 
+    - name: Make sure pnpm is available (next mode joins a pnpm workspace even in an npm repo)
+      if: steps.mode.outputs.mode == 'next'
+      shell: bash
+      run: command -v pnpm >/dev/null || npm install -g pnpm@10.33.0
+
     - name: Clone MJ next and sibling apps, generate the workspace
       id: prepare
       if: steps.mode.outputs.mode == 'next'
@@ -87,19 +92,23 @@ runs:
       if: steps.mode.outputs.mode == 'next' && steps.artifact.outputs.found != 'true'
       uses: actions/cache/restore@v4
       with:
-        path: ${{ steps.prepare.outputs.mj-dir }}/packages/**/dist
+        path: ${{ runner.temp }}/mj-dist-cache
         key: ${{ steps.prepare.outputs.dist-key }}
 
     - name: Build MJ (if needed) and the sibling apps
+      id: build
       if: steps.mode.outputs.mode == 'next'
       shell: bash
       env:
-        MJ_DIST_READY: ${{ steps.artifact.outputs.found == 'true' || steps.cache.outputs.cache-hit == 'true' }}
+        MJ_DIST_READY: ${{ steps.artifact.outputs.found == 'true' }}
+        MJ_DIST_CACHE: ${{ runner.temp }}/mj-dist-cache
       run: node "$GITHUB_ACTION_PATH/mj-next-workspace.mjs" build
 
+    # One tarball of MJ's dist/ folders (written by the build step), not a glob over the tree: a
+    # `packages/**/dist` glob walks every node_modules symlink and never finishes.
     - name: Cache the MJ build
-      if: steps.mode.outputs.mode == 'next' && steps.artifact.outputs.found != 'true' && steps.cache.outputs.cache-hit != 'true'
+      if: steps.mode.outputs.mode == 'next' && steps.build.outputs.built-mj == 'true'
       uses: actions/cache/save@v4
       with:
-        path: ${{ steps.prepare.outputs.mj-dir }}/packages/**/dist
+        path: ${{ runner.temp }}/mj-dist-cache
         key: ${{ steps.prepare.outputs.dist-key }}
