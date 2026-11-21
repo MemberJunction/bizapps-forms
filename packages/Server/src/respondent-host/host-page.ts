@@ -257,6 +257,20 @@ const BOOT_SCRIPT = `
   var slug = DEFAULT_SLUG || readParam('slug');
   // Token: the server-redeemed JWT wins; #fragment / ?token= remain a manual-testing fallback.
   var token = SERVER_TOKEN || readParam('token');
+  // A bearer token must not linger in the address bar, browser history, or anything that copies
+  // the URL (share buttons, extensions): once read, scrub token= from both the query and the
+  // fragment. Best-effort — the page works the same if replaceState is unavailable.
+  if (token && !SERVER_TOKEN) {
+    try {
+      var scrub = new URL(window.location.href);
+      scrub.searchParams.delete('token');
+      var cleanHash = window.location.hash.replace(/^#/, '');
+      var hashParams = new URLSearchParams(cleanHash);
+      hashParams.delete('token');
+      var rebuiltHash = hashParams.toString();
+      window.history.replaceState(null, '', scrub.pathname + (scrub.searchParams.toString() ? '?' + scrub.searchParams.toString() : '') + (rebuiltHash ? '#' + rebuiltHash : ''));
+    } catch (scrubErr) { /* URL scrubbing is best-effort */ }
+  }
   // Resume (#138). The page knows only that a pointer was PRESENT — the cookie is HttpOnly and
   // nothing here can read it. Everything cookie-shaped happens on the host routes below; the
   // widget never learns any of it exists, which is why an embedded widget (a page without this
