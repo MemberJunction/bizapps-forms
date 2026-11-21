@@ -144,8 +144,7 @@ GO
 --      scopes a variable from its DECLARE onward.
 --   2. Each EntityFieldValue INSERT is guarded on (EntityFieldID, Value) as well as its id, and each
 --      EntityRelationship INSERT keeps CodeGen's (EntityID, RelatedEntityID, RelatedEntityJoinField)
---      guard, now over the resolved ids. The EntityUniqueKey INSERT is guarded on its id and on
---      (EntityID, Name), for a host where CodeGen already registered the index.
+--      guard, now over the resolved ids.
 -- =============================================================================================
 
 DECLARE @RoleEntityID UNIQUEIDENTIFIER = (
@@ -412,7 +411,6 @@ IF @TaskEntityID IS NULL
       END;
 
 /* SQL text to sync entity unique keys (1 added, 0 updated, 0 removed) */
-IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityUniqueKey] WHERE [ID] = '9d1774b9-b010-4d4f-8c49-5171f69e260b' OR ([EntityID] = '622E2804-5B6D-4B43-92A4-294ADC538F50' AND [Name] = 'UQ_FormVersion_OneInReview'))
 INSERT INTO [${mjSchema}].[EntityUniqueKey] ([ID], [EntityID], [Name], [FieldNames], [FilterDefinition]) VALUES ('9d1774b9-b010-4d4f-8c49-5171f69e260b', '622E2804-5B6D-4B43-92A4-294ADC538F50', 'UQ_FormVersion_OneInReview', 'FormID', '([Status]=''InReview'')');
 
 /* SQL text to sync 4 entity field value row(s) for entity field ID 36801486-E291-48F4-BC02-432BE04642F3 */
