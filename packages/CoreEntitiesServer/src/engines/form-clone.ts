@@ -237,6 +237,9 @@ class FormTreeCopier {
     copy.StyleID = source.StyleID;
     copy.RenderMode = source.RenderMode;
     copy.Settings = source.Settings;
+    // A copy of a form that needs approval to publish needs it too: copying is not a way round review.
+    copy.RequiresPublishApproval = source.RequiresPublishApproval;
+    copy.PublishApproverRoleID = source.PublishApproverRoleID;
     copy.IsTemplate = plan.asTemplate;
     // Provenance is recorded on templates ONLY — it is what the builder's "Saved as template"
     // indicator looks up. A form created FROM a template is an independent copy that diverges at

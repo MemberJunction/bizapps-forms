@@ -8,6 +8,10 @@
  * `Closed` form keeps a live magic-link credential for a form nobody is serving. Closing them is
  * not a separate step a caller may forget; it is what `Closed` means. Each distribution's own
  * subclass then withdraws its credential, as it does for any other close.
+ *
+ * It also enforces who may change the publish-approval settings (`form-approval-rules.ts`): once a
+ * form requires approval, only a member of its approver role or an owner may turn that off or move
+ * it to another role, and nobody may while a version is waiting for approval.
  */
 import {
   BaseEntity,
@@ -17,6 +21,7 @@ import {
   type EntitySaveOptions,
   type IEntityDataProvider,
   type IRunViewProvider,
+  type UserInfo,
   type ValidationResult,
 } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
@@ -33,11 +38,20 @@ import {
   type FormStatus,
   type FormStatusWrite,
 } from './form-status-rules.js';
+import { approvalSettingsViolations, needsInReviewCheck, type ApprovalSettingsWrite } from './form-approval-rules.js';
 import { FORM_VERSION_ENTITY_NAME } from './FormVersionEntityServer.js';
 import { DISTRIBUTION_ENTITY_NAME } from '../magic-link/provision-runner.js';
 import { FORMS_ENTITY } from '../shared/entity-names.js';
 
 export const FORM_ENTITY_NAME = FORMS_ENTITY.Form;
+
+/** The writer as the approval-settings rules see them, or `null` when the save names no user. */
+function writerOf(user: UserInfo | undefined): ApprovalSettingsWrite['writer'] {
+  if (!user) {
+    return null;
+  }
+  return { roleIds: (user.UserRoles ?? []).map((userRole) => userRole.RoleID), isOwner: user.Type === 'Owner' };
+}
 
 /** Whether the row's provider also runs views — every server provider does. */
 function runsViews(provider: IEntityDataProvider | undefined): provider is IEntityDataProvider & IRunViewProvider {
@@ -68,7 +82,15 @@ export class FormEntityServer extends mjBizAppsFormsFormEntity {
     if (needsPublishedVersionCheck(write)) {
       write.publishedVersionExists = await this.hasPublishedVersion();
     }
-    return addViolations(result, formStatusViolations(write), (field) => this.GetFieldByName(field)?.Value);
+    const approval = this.approvalSettingsWrite();
+    if (needsInReviewCheck(approval)) {
+      approval.versionInReview = await this.hasVersionInStatus('InReview');
+    }
+    return addViolations(
+      result,
+      [...formStatusViolations(write), ...approvalSettingsViolations(approval)],
+      (field) => this.GetFieldByName(field)?.Value,
+    );
   }
 
   /**
@@ -110,8 +132,30 @@ export class FormEntityServer extends mjBizAppsFormsFormEntity {
     };
   }
 
+  private approvalSettingsWrite(): ApprovalSettingsWrite {
+    const isNew = !this.IsSaved;
+    return {
+      isNew,
+      stored: isNew
+        ? null
+        : {
+            requires: storedValue<boolean>(this, 'RequiresPublishApproval') ?? false,
+            roleId: storedValue<string>(this, 'PublishApproverRoleID'),
+          },
+      requires: this.RequiresPublishApproval,
+      roleId: this.PublishApproverRoleID,
+      authorizedByEngine: this.AuthorizedByEngine,
+      writer: writerOf(this.ContextCurrentUser),
+    };
+  }
+
   /** Whether the form has a Published version; `undefined` when that could not be read. */
   private async hasPublishedVersion(): Promise<boolean | undefined> {
+    return this.hasVersionInStatus('Published');
+  }
+
+  /** Whether the form has a version in `status`; `undefined` when that could not be read. */
+  private async hasVersionInStatus(status: 'Published' | 'InReview'): Promise<boolean | undefined> {
     const provider = this.ProviderToUse;
     if (!runsViews(provider)) {
       LogError(`[FormEntityServer] Form ${this.ID}: the provider cannot run views, so its versions cannot be read.`);
@@ -120,7 +164,7 @@ export class FormEntityServer extends mjBizAppsFormsFormEntity {
     const read = await new RunView(provider).RunView<{ ID: string }>(
       {
         EntityName: FORM_VERSION_ENTITY_NAME,
-        ExtraFilter: `FormID=${quoteSqlString(this.ID)} AND Status='Published'`,
+        ExtraFilter: `FormID=${quoteSqlString(this.ID)} AND Status=${quoteSqlString(status)}`,
         Fields: ['ID'],
         ResultType: 'simple',
         MaxRows: 1,
@@ -129,7 +173,7 @@ export class FormEntityServer extends mjBizAppsFormsFormEntity {
       this.ContextCurrentUser,
     );
     if (!read.Success) {
-      LogError(`[FormEntityServer] Could not read the published version of form ${this.ID}: ${read.ErrorMessage}`);
+      LogError(`[FormEntityServer] Could not read the ${status} versions of form ${this.ID}: ${read.ErrorMessage}`);
       return undefined;
     }
     return read.Results.length > 0;

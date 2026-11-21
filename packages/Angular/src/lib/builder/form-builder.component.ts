@@ -18,6 +18,7 @@ import { BaseFormComponent } from '@memberjunction/ng-base-forms';
 import {
   FormsCloneFormOperation,
   FormsPublishFormOperation,
+  FormsRequestPublishApprovalOperation,
   quoteSqlString,
 } from '@mj-biz-apps/forms-entities';
 import type {
@@ -2311,6 +2312,10 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (!this.tree || this.busy) {
       return;
     }
+    if (this.RequiresApproval) {
+      await this.requestApproval();
+      return;
+    }
     const tree = this.tree;
     this.busy = true;
     this.statusMessage = '';
@@ -2350,6 +2355,38 @@ export class FormBuilderComponent extends BaseFormComponent {
       // the control would sit on "Checking…" forever and the author would have no way to retry.
       this.publishStateReady = true;
     }
+    this.cdr.markForCheck();
+  }
+
+  /** True when this form goes live only once its approver approves (`Form.RequiresPublishApproval`). */
+  public get RequiresApproval(): boolean {
+    return this.record?.RequiresPublishApproval === true;
+  }
+
+  /**
+   * Ask for approval instead of publishing — `Forms.RequestPublishApproval`, which snapshots the
+   * stored rows into a version held for review and asks the form's approver role. Nothing goes
+   * live here: the version is published when the approver approves it.
+   */
+  protected async requestApproval(): Promise<void> {
+    const formId = this.record.ID;
+    this.busy = true;
+    this.statusMessage = '';
+    this.refusedRules = null;
+    await this.state.flushPendingSaves();
+    this.ownOperations += 1;
+    const outcome = await runOperation(
+      new FormsRequestPublishApprovalOperation(),
+      { FormID: formId },
+      `requesting approval for form ${formId}`,
+      [FORMS_ENTITY.FormVersion],
+    ).finally(() => {
+      this.ownOperations -= 1;
+    });
+    this.busy = false;
+    this.statusMessage = outcome.ok
+      ? `Sent version ${outcome.output.VersionNumber} for approval. It goes live when the approver approves it.`
+      : outcome.error;
     this.cdr.markForCheck();
   }
 

@@ -18,6 +18,7 @@ export class mjBizAppsFormsFormVersionFormComponent extends BaseFormComponent {
         this.initSections([
             { sectionKey: 'formReference', sectionName: 'Form Reference', isExpanded: true },
             { sectionKey: 'versionDetails', sectionName: 'Version Details', isExpanded: true },
+            { sectionKey: 'details', sectionName: 'Details', isExpanded: true },
             { sectionKey: 'systemMetadata', sectionName: 'System Metadata', isExpanded: false },
             { sectionKey: 'mJBizAppsFormsFormResponses', sectionName: 'Form Responses', isExpanded: false }
         ]);

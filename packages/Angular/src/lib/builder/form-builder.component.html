@@ -186,7 +186,8 @@
           title="Your edits are not published yet. Publishing pushes them live."
           (click)="publish()"
         >
-          <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Publish<span class="fb-publish-more"> changes</span>
+          <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i>
+          @if (RequiresApproval) { Request approval } @else { Publish<span class="fb-publish-more"> changes</span> }
         </button>
       }
       @case ('publish') {
@@ -197,7 +198,8 @@
           title="Publish this form so it can be shared and answered."
           (click)="publish()"
         >
-          <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Publish
+          <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i>
+          @if (RequiresApproval) { Request approval } @else { Publish }
         </button>
       }
     }
