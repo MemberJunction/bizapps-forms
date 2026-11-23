@@ -45,8 +45,8 @@ jobs:
         run: ./.github/scripts/validate-migration-filenames.sh
 
       # `next` only. On a release line, a backported migration keeps its original timestamp from
-      # `next`, so it can legitimately be older than the line's newest migration. `lines: migrations`
-      # in release-lines-gates.yml enforces migration ordering on `lts/*` instead.
+      # `next`, so it can legitimately be older than the line's newest migration. `lines: migrations` keeps a
+      # watermark on a line instead: a backport may not add a migration older than the line's newest.
       - name: Validate migration timestamps are newer than existing
         if: |
           steps.migration_check.outputs.has_migrations == 'true' &&
