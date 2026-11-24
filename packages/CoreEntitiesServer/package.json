@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/forms-core-entities-server",
   "type": "module",
-  "version": "1.0.0",
+  "version": "6.3.0-edge.1",
   "description": "Server-side domain layer for MJ Forms — entity server subclasses (invariants that hold for every writer), the engines and Remote Operations, the on-submit automation outbox and its drain, and the shared helpers the actions and the server both run (response context, entity binding, provider resolution).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -37,23 +37,23 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
-    "@mj-biz-apps/forms-entities": "1.0.0"
+    "@mj-biz-apps/forms-entities": "6.3.0-edge.1"
   },
   "peerDependencies": {
-    "@memberjunction/actions": "^6.3.0-edge.0",
-    "@memberjunction/actions-base": "^6.3.0-edge.0",
-    "@memberjunction/ai-agents": "^6.3.0-edge.0",
-    "@memberjunction/ai-core-plus": "^6.3.0-edge.0",
-    "@memberjunction/core": "^6.3.0-edge.0",
-    "@memberjunction/core-entities": "^6.3.0-edge.0",
-    "@memberjunction/generic-database-provider": "^6.3.0-edge.0",
-    "@memberjunction/global": "^6.3.0-edge.0",
-    "@memberjunction/notifications": "^6.3.0-edge.0",
-    "@memberjunction/redis-provider": "^6.3.0-edge.0",
-    "@memberjunction/scheduling-base-types": "^6.3.0-edge.0",
-    "@memberjunction/scheduling-engine": "^6.3.0-edge.0",
-    "@memberjunction/sqlserver-dataprovider": "^6.3.0-edge.0",
-    "@memberjunction/task-graph": "^6.3.0-edge.0"
+    "@memberjunction/actions": "^6.3.0-edge.1",
+    "@memberjunction/actions-base": "^6.3.0-edge.1",
+    "@memberjunction/ai-agents": "^6.3.0-edge.1",
+    "@memberjunction/ai-core-plus": "^6.3.0-edge.1",
+    "@memberjunction/core": "^6.3.0-edge.1",
+    "@memberjunction/core-entities": "^6.3.0-edge.1",
+    "@memberjunction/generic-database-provider": "^6.3.0-edge.1",
+    "@memberjunction/global": "^6.3.0-edge.1",
+    "@memberjunction/notifications": "^6.3.0-edge.1",
+    "@memberjunction/redis-provider": "^6.3.0-edge.1",
+    "@memberjunction/scheduling-base-types": "^6.3.0-edge.1",
+    "@memberjunction/scheduling-engine": "^6.3.0-edge.1",
+    "@memberjunction/sqlserver-dataprovider": "^6.3.0-edge.1",
+    "@memberjunction/task-graph": "^6.3.0-edge.1"
   },
   "repository": {
     "type": "git",
