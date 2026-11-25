@@ -201,7 +201,16 @@
             "TourID": "@parent:ID",
             "FromStepID": "EBF813B8-1D38-43BC-A079-984FA18BD94E",
             "ToStepID": "63A3B0F6-F6B9-4601-8755-B589E853A48E",
-            "Condition": "Choice:entity-binding",
+            "Condition": {
+              "logic": "and",
+              "filters": [
+                {
+                  "field": "lastChoiceKey",
+                  "operator": "eq",
+                  "value": "entity-binding"
+                }
+              ]
+            },
             "Label": "Direct MJ Entity Field Bindings",
             "Priority": 100,
             "Sequence": 1,
@@ -216,7 +225,16 @@
             "TourID": "@parent:ID",
             "FromStepID": "EBF813B8-1D38-43BC-A079-984FA18BD94E",
             "ToStepID": "B5C4ED41-C213-4E90-8C6C-7C44614CC23B",
-            "Condition": "Choice:post-submit-automation",
+            "Condition": {
+              "logic": "and",
+              "filters": [
+                {
+                  "field": "lastChoiceKey",
+                  "operator": "eq",
+                  "value": "post-submit-automation"
+                }
+              ]
+            },
             "Label": "Post-Submit Actions & Notifications",
             "Priority": 90,
             "Sequence": 2,
