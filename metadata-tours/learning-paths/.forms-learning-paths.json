@@ -15,13 +15,13 @@
       "ID": "61D6F71A-A597-4F6B-A6DA-C7A44FBDFA15"
     },
     "relatedEntities": {
-      "MJ: Learning Path Tours": [
+      "MJ: Tour Learning Path Tour Links": [
         {
           "fields": {
-            "LearningPathID": "@parent:ID",
             "TourID": "@lookup:MJ: Tours.TourKey=forms.builder-bindings",
             "Sequence": 1,
-            "IsRequired": true
+            "IsRequired": true,
+            "TourLearningPathID": "@parent:ID"
           },
           "primaryKey": {
             "ID": "47C11D8B-7D87-4225-932E-758824CF3F70"
@@ -29,10 +29,10 @@
         },
         {
           "fields": {
-            "LearningPathID": "@parent:ID",
             "TourID": "@lookup:MJ: Tours.TourKey=forms.distribution-analytics",
             "Sequence": 2,
-            "IsRequired": true
+            "IsRequired": true,
+            "TourLearningPathID": "@parent:ID"
           },
           "primaryKey": {
             "ID": "B91213B8-AE4A-4F86-9E89-FE9D13429CA9"
