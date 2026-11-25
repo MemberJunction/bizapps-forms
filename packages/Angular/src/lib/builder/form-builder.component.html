@@ -245,7 +245,7 @@
 
   <!-- Tabs. One Tab stop: the selected tab is tabindex 0, the rest -1, and the arrow keys move
        along the strip (builder-tabs.ts). -->
-  <nav class="fb-tabs" role="tablist" aria-label="Builder workspace" (keydown)="onTabKey($event)">
+  <nav class="fb-tabs" role="tablist" aria-label="Builder workspace" data-mj-tour-anchor="forms.builder.tabs" (keydown)="onTabKey($event)">
     @for (item of tabItems; track item.tab) {
       <button
         #tabButton

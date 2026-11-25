@@ -1,0 +1,430 @@
+[
+  {
+    "fields": {
+      "Name": "Form Builder, Conditional Logic & Entity Bindings",
+      "TourKey": "forms.builder-bindings",
+      "Description": "Design multi-page forms with conditional rules, then choose between mapping answers directly to MJ entity records or wiring post-submit automations.",
+      "ApplicationID": "@lookup:MJ: Applications.Name=Forms",
+      "RunInAuthenticatedHosts": true,
+      "Status": "Draft",
+      "EstimatedMinutes": 4,
+      "Priority": 90,
+      "DefaultGuideMode": "Visual",
+      "AllowAgentActions": false,
+      "Goal": {
+        "Type": "Navigation",
+        "Application": "Forms",
+        "Description": "User explores Forms Home, the Form Builder canvas, and entity bindings or post-submit automations."
+      },
+      "StartLocation": {
+        "Application": "Forms",
+        "NavItem": "FormsHomeDashboard"
+      }
+    },
+    "primaryKey": {
+      "ID": "0847F1B5-CB72-414A-B1D6-D766EEAE21CB"
+    },
+    "relatedEntities": {
+      "MJ: Tour Steps": [
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "forms-welcome",
+            "Sequence": 1,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Modal",
+            "Title": "Welcome to BizApps Forms",
+            "Body": "Create intake forms and surveys from scratch, starter templates, or AI briefs — complete with branching logic, validated MJ entity bindings, and public share links.",
+            "Configuration": {
+              "Variant": "welcome",
+              "PrimaryButtonText": "Explore Form Builder",
+              "ShowProgress": true
+            },
+            "Placement": "Center",
+            "Mode": "Show",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "130692B2-9BD4-4170-A77E-3532E8004471"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "forms-home-canvas",
+            "Sequence": 2,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Spotlight",
+            "Title": "Forms Studio, Pages & Question Canvas",
+            "Body": "Start from **Templates**, **Author with AI**, or **New form** in `FormsHomeDashboard`. Opening any form launches the visual builder with **Scroll** or **One question** render modes, multi-page sections, Welcome/Ending screens, and conditional visibility or jump rules.",
+            "Configuration": {
+              "ShowProgress": true
+            },
+            "Anchor": {
+              "Strategy": "Registered",
+              "Key": "forms.home.actions"
+            },
+            "Placement": "Bottom",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "59E1AF76-05EF-4175-BEC0-A1026BD1BADF"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "submission-workflow-choice",
+            "Sequence": 3,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Choice",
+            "Title": "Choose Your Submission Workflow",
+            "Body": "Decide whether you want to explore direct MJ entity field bindings or post-submit actions and notifications.",
+            "Configuration": {
+              "Question": "What should happen when a respondent submits your form?",
+              "Options": [
+                {
+                  "Key": "entity-binding",
+                  "Label": "Direct MJ Entity Field Bindings",
+                  "Description": "Map form answers into Common People, Organizations, or domain records."
+                },
+                {
+                  "Key": "post-submit-automation",
+                  "Label": "Post-Submit Actions & Notifications",
+                  "Description": "Trigger workflows, task creation, or confirmation emails on submission."
+                }
+              ]
+            },
+            "Placement": "Center",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "EBF813B8-1D38-43BC-A079-984FA18BD94E"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "entity-bindings-mapping",
+            "Sequence": 4,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Spotlight",
+            "Title": "Bindings: Validated Entity Mapping",
+            "Body": "Under the **Automate** tab, pick a target entity (such as People or Organizations), map compatible questions to fields, choose overwrite rules (`neverBlank`, `latestWins`, `writeOnce`) and identity matching, and test with **Try it against a real response**.",
+            "Configuration": {
+              "ShowProgress": true
+            },
+            "Anchor": {
+              "Strategy": "Registered",
+              "Key": "forms.builder.tabs"
+            },
+            "Placement": "Bottom",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "63A3B0F6-F6B9-4601-8755-B589E853A48E"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "post-submit-automations",
+            "Sequence": 5,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Spotlight",
+            "Title": "Automations: Triggers & Respondent Routing",
+            "Body": "On the **Automate** tab, chain sequential or background **Actions** and **AI Agents** alongside built-in confirmation hooks. Answers always commit first in the outbox so a slow or failed step never loses a submission.",
+            "Configuration": {
+              "ShowProgress": true
+            },
+            "Anchor": {
+              "Strategy": "Registered",
+              "Key": "forms.builder.tabs"
+            },
+            "Placement": "Bottom",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "B5C4ED41-C213-4E90-8C6C-7C44614CC23B"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "forms-builder-summary",
+            "Sequence": 6,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Modal",
+            "Title": "Builder & Bindings Summary",
+            "Body": "Once your form, logic, and submission automations are ready, publish a FormVersion and share it publicly. Continue to Distribution & Analytics next.",
+            "Configuration": {
+              "Variant": "summary",
+              "PrimaryButtonText": "Next: Distribution & Analytics",
+              "NextTourKey": "forms.distribution-analytics",
+              "LearningPathKey": "forms.essentials",
+              "ShowProgress": true
+            },
+            "Placement": "Center",
+            "Mode": "Show",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "2BA9C015-58A9-4A03-BC44-9D71B7B994A6"
+          }
+        }
+      ],
+      "MJ: Tour Step Paths": [
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "FromStepID": "EBF813B8-1D38-43BC-A079-984FA18BD94E",
+            "ToStepID": "63A3B0F6-F6B9-4601-8755-B589E853A48E",
+            "Condition": "Choice:entity-binding",
+            "Label": "Direct MJ Entity Field Bindings",
+            "Priority": 100,
+            "Sequence": 1,
+            "IsDefault": false
+          },
+          "primaryKey": {
+            "ID": "1D3FFA8C-754E-4174-917F-884BDBB20370"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "FromStepID": "EBF813B8-1D38-43BC-A079-984FA18BD94E",
+            "ToStepID": "B5C4ED41-C213-4E90-8C6C-7C44614CC23B",
+            "Condition": "Choice:post-submit-automation",
+            "Label": "Post-Submit Actions & Notifications",
+            "Priority": 90,
+            "Sequence": 2,
+            "IsDefault": false
+          },
+          "primaryKey": {
+            "ID": "9361A35A-1C61-4E6B-9EA2-7B3E6AF3DB3A"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "FromStepID": "EBF813B8-1D38-43BC-A079-984FA18BD94E",
+            "ToStepID": "63A3B0F6-F6B9-4601-8755-B589E853A48E",
+            "Condition": null,
+            "Label": "Default: Direct MJ Entity Field Bindings",
+            "Priority": 0,
+            "Sequence": 3,
+            "IsDefault": true
+          },
+          "primaryKey": {
+            "ID": "E807CE39-1E1D-4737-A885-78FC9224FC13"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "FromStepID": "63A3B0F6-F6B9-4601-8755-B589E853A48E",
+            "ToStepID": "2BA9C015-58A9-4A03-BC44-9D71B7B994A6",
+            "Condition": null,
+            "Label": "Continue to Summary",
+            "Priority": 10,
+            "Sequence": 1,
+            "IsDefault": true
+          },
+          "primaryKey": {
+            "ID": "B88DDB3D-5688-4C58-B326-765B70F7B3F6"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "FromStepID": "B5C4ED41-C213-4E90-8C6C-7C44614CC23B",
+            "ToStepID": "2BA9C015-58A9-4A03-BC44-9D71B7B994A6",
+            "Condition": null,
+            "Label": "Continue to Summary",
+            "Priority": 10,
+            "Sequence": 1,
+            "IsDefault": true
+          },
+          "primaryKey": {
+            "ID": "BED1BF95-EC91-4D86-9778-42086D3E634D"
+          }
+        }
+      ],
+      "MJ: Tour Triggers": [
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "TriggerType": "FirstVisit",
+            "Configuration": {
+              "Application": "Forms"
+            },
+            "Delivery": "Offer",
+            "CooldownDays": 30,
+            "Priority": 90,
+            "Status": "Active"
+          },
+          "primaryKey": {
+            "ID": "C5EC933C-BFB5-40EA-83C8-5AF1789A0BDD"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "fields": {
+      "Name": "Public Embeds, Distributions & Completion Analytics",
+      "TourKey": "forms.distribution-analytics",
+      "Description": "Issue public share links, QR codes, and origin-restricted embeds, then track drop-off funnels, breakdowns, and exports in Forms Reporting.",
+      "ApplicationID": "@lookup:MJ: Applications.Name=Forms",
+      "RunInAuthenticatedHosts": true,
+      "Status": "Draft",
+      "EstimatedMinutes": 3,
+      "Priority": 85,
+      "DefaultGuideMode": "Visual",
+      "AllowAgentActions": false,
+      "Goal": {
+        "Type": "Navigation",
+        "Application": "Forms",
+        "Description": "User explores Form Distributions, embed allowlists, and FormsReportingDashboard analytics."
+      },
+      "StartLocation": {
+        "Application": "Forms",
+        "NavItem": "FormsReportingDashboard"
+      }
+    },
+    "primaryKey": {
+      "ID": "1B9006A6-E652-4C5D-B794-29608F31ABF2"
+    },
+    "relatedEntities": {
+      "MJ: Tour Steps": [
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "dist-analytics-welcome",
+            "Sequence": 1,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Modal",
+            "Title": "Publishing, Public Links & Analytics",
+            "Body": "Share published forms securely with anonymous respondents and monitor completion rates from first view to final submission.",
+            "Configuration": {
+              "Variant": "welcome",
+              "PrimaryButtonText": "Explore Distributions & Analytics",
+              "ShowProgress": true
+            },
+            "Placement": "Center",
+            "Mode": "Show",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "80A8DD03-8E2D-4DBE-8852-137F3F9F8905"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "share-links-qr-embeds",
+            "Sequence": 2,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Spotlight",
+            "Title": "Share Links, QR Codes & Embed Allowlists",
+            "Body": "On the **Distribute** tab, create trackable share links with downloadable vector **QR codes**, **Embed** iframe snippets with site allowlists, optional Turnstile captcha, response limits, expiration dates, and instant token reissuance.",
+            "Configuration": {
+              "ShowProgress": true
+            },
+            "Anchor": {
+              "Strategy": "Registered",
+              "Key": "forms.distribution.shell"
+            },
+            "Placement": "Bottom",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "A88EC2F4-B697-4305-89ED-C3EB6A123F51"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "reporting-funnels-exports",
+            "Sequence": 3,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Spotlight",
+            "Title": "Drop-Off Funnels, Breakdowns & Exports",
+            "Body": "In **Responses & Analytics** (`FormsReportingDashboard`), select any published form from the rail to inspect **Where people stop** funnels, per-question breakdowns, open-text insights, and export responses to **CSV** or **Excel**.",
+            "Configuration": {
+              "ShowProgress": true
+            },
+            "Anchor": {
+              "Strategy": "Registered",
+              "Key": "forms.reporting.rail"
+            },
+            "Placement": "Right",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "7A1145CE-4160-4197-8C63-E9D70DAF3DDD"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "dist-analytics-summary",
+            "Sequence": 4,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Modal",
+            "Title": "Forms & Intake Mastery Complete",
+            "Body": "You are ready to author conditional forms, bind submissions into MJ records, publish public embeds, and measure completion performance.",
+            "Configuration": {
+              "Variant": "summary",
+              "PrimaryButtonText": "Finish",
+              "LearningPathKey": "forms.essentials",
+              "ShowProgress": true
+            },
+            "Placement": "Center",
+            "Mode": "Show",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "4AB89128-783A-4E98-A4F8-8EE54DD4FB33"
+          }
+        }
+      ]
+    }
+  }
+]

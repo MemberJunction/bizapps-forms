@@ -1,0 +1,44 @@
+[
+  {
+    "fields": {
+      "Name": "Forms & Intake Mastery",
+      "PathKey": "forms.essentials",
+      "Description": "Form builder, conditional logic, entity bindings, post-submit automations, public distributions, and analytics mastery.",
+      "ApplicationID": "@lookup:MJ: Applications.Name=Forms",
+      "Status": "Active",
+      "Configuration": {
+        "AllowSkipOptional": true,
+        "ShowNextConcreteStep": true
+      }
+    },
+    "primaryKey": {
+      "ID": "61D6F71A-A597-4F6B-A6DA-C7A44FBDFA15"
+    },
+    "relatedEntities": {
+      "MJ: Learning Path Tours": [
+        {
+          "fields": {
+            "LearningPathID": "@parent:ID",
+            "TourID": "@lookup:MJ: Tours.TourKey=forms.builder-bindings",
+            "Sequence": 1,
+            "IsRequired": true
+          },
+          "primaryKey": {
+            "ID": "47C11D8B-7D87-4225-932E-758824CF3F70"
+          }
+        },
+        {
+          "fields": {
+            "LearningPathID": "@parent:ID",
+            "TourID": "@lookup:MJ: Tours.TourKey=forms.distribution-analytics",
+            "Sequence": 2,
+            "IsRequired": true
+          },
+          "primaryKey": {
+            "ID": "B91213B8-AE4A-4F86-9E89-FE9D13429CA9"
+          }
+        }
+      ]
+    }
+  }
+]

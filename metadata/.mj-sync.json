@@ -30,7 +30,10 @@
     "scheduled-jobs",
     "notification-types",
     "users",
-    "user-roles"
+    "user-roles",
+    "tours",
+    "learning-paths",
+    "tour-publications"
   ],
   "emitSyncNotes": false,
   "sqlLogging": {
