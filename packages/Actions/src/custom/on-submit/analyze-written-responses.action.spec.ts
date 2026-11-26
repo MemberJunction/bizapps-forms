@@ -100,10 +100,19 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
     }
   }
   class RunView {
-    constructor(private readonly provider?: { RunView(p: unknown, u?: unknown): Promise<unknown> } | null) {}
+    constructor(
+      private readonly provider?: {
+        RunView(p: unknown, u?: unknown): Promise<unknown>;
+        RunViews?(ps: unknown[], u?: unknown): Promise<unknown[]>;
+      } | null,
+    ) {}
     async RunView(params: unknown, user?: unknown): Promise<unknown> {
       if (!this.provider) throw new Error('global provider used');
       return this.provider.RunView(params, user);
+    }
+    async RunViews(params: unknown[], user?: unknown): Promise<unknown[]> {
+      if (!this.provider) throw new Error('global provider used');
+      return this.provider.RunViews ? this.provider.RunViews(params, user) : Promise.all(params.map((p) => this.provider!.RunView(p, user)));
     }
   }
   return { ...actual, Metadata, RunView };
@@ -111,6 +120,15 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 
 /** The provider `RunActionParams.Provider` supplies — everything below reads/writes through it. */
 function fakeProvider(): ActionDataProvider {
+  const runView = async <T>(opts: { EntityName: string }): Promise<{ Success: boolean; Results: T[] }> => {
+    let results: unknown[] = [];
+    // The response context reads its form through a view since #303 (`Form.Load()` would also
+    // fill the form's immediate Pages/Screens collections, which the automation principal cannot read).
+    if (opts.EntityName === 'MJ_BizApps_Forms: Forms') results = [new FakeEntity()];
+    else if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') results = state.answerRows;
+    else if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') results = state.questionRows;
+    return { Success: true, Results: results as T[] };
+  };
   return {
     async GetEntityObject<T>(entityName: string): Promise<T> {
       if (entityName === 'MJ_BizApps_Forms: Form Responses' || entityName === 'MJ_BizApps_Forms: Forms') {
@@ -123,19 +141,9 @@ function fakeProvider(): ActionDataProvider {
       }
       throw new Error(`Unexpected GetEntityObject('${entityName}')`);
     },
-    async RunView<T>(opts: { EntityName: string }): Promise<{ Success: boolean; Results: T[] }> {
-      let results: unknown[] = [];
-      // The response context reads its form through a view since #303 (`Form.Load()` would also
-      // fill the form's immediate Pages/Screens collections, which the automation principal cannot read).
-      if (opts.EntityName === 'MJ_BizApps_Forms: Forms') results = [new FakeEntity()];
-      else if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') results = state.answerRows;
-      else if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') results = state.questionRows;
-      return { Success: true, Results: results as T[] };
-    },
-    // Present only so `isActionDataProvider` accepts this fake — the action never calls it.
-    async RunViews(): Promise<never> {
-      throw new Error('RunViews was not expected to be called');
-    },
+    RunView: runView,
+    RunViews: async <T>(params: { EntityName: string }[]): Promise<{ Success: boolean; Results: T[] }[]> =>
+      Promise.all(params.map((p) => runView<T>(p))),
   } as unknown as ActionDataProvider;
 }
 

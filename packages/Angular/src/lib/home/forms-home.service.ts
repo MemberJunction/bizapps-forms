@@ -13,6 +13,7 @@ import type { ActionParam } from '@memberjunction/actions-base';
 import {
   FormsArchiveFormOperation,
   FormsCreateFormFromTemplateOperation,
+  FormsEngineBase,
   FormsRestoreFormOperation,
   type FormsCreateFormFromTemplateOutput,
   type FormsFormLifecycleOutput,
@@ -39,6 +40,11 @@ export interface AuthoringResult {
 export class FormsHomeService {
   /** The Forms grid: every working form with its category and Complete-response count. */
   public async loadForms(): Promise<FormSummaryRow[]> {
+    try {
+      await FormsEngineBase.Instance.Config(false);
+    } catch {
+      // Non-fatal: `readFormListing` falls back to batching FormCategory if the engine cannot warm.
+    }
     const listing = await readFormListing();
     return buildFormRows(listing.forms, listing.categories, listing.counts);
   }

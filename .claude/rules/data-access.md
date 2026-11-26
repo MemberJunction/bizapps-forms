@@ -284,6 +284,28 @@ const data = results.Results as unknown as SomeEntity[];
 
 ## Performance Best Practices
 
+### BizApps Performance & Caching Standard (5 Rules — MJ Forms)
+
+Every data-access path in `bizapps-forms` follows these five rules:
+
+1. **`BaseEngine` taxonomy & lookup caching (`FormsEngineBase`)**
+   - `FormsEngineBase` (`packages/Entities/src/FormsEngineBase.ts`, exported from `@mj-biz-apps/forms-entities`) caches shared non-RLS reference tables (`MJ_BizApps_Forms: Form Categories`, `MJ_BizApps_Forms: Form Styles`) with `CacheLocal: true` and lazy O(1) lookup maps (`FormCategoryById`, `FormCategoriesByParentId`, `FormStyleById`, `FormStyleByName`, `ActiveFormCategories`, `GalleryFormStyles`).
+   - Components and services warm `FormsEngineBase.Instance.Config(false)` once and read from memory instead of issuing repeated `FormCategory` / `FormStyle` `RunView` queries.
+2. **Multi-provider, impersonation & RLS `CacheLocal` safety**
+   - `FormsEngineBase` overrides `get ProviderToUse(): IMetadataProvider { return this._activeProvider ?? Metadata.Provider; }` so multi-provider and persona-impersonated sessions never read through a stale first-wins provider latch.
+   - `CacheLocal: true` is permitted **ONLY** on shared, non-RLS reference tables. Any RLS- or user-scoped entity MUST use `CacheLocal: false` to prevent cross-persona IndexedDB bleed.
+   - Optional or permission-restricted entities are gated with `md.EntityByName(name)?.GetUserPermisions(effectiveUser)?.CanRead !== false` before adding to `Load(...)` or `RunViews(...)` so restricted principals (`Form Respondent`, `Forms Automation Runner`) never fail `Config()`.
+   - Track `_loadedForUserId` and automatically invalidate both taxonomy caches and per-container caches on user switch.
+3. **`rv.RunViews([...])` batching**
+   - Collapse `Promise.all([new RunView().RunView(...), ...])` and sequential independent `await rv.RunView(...)` waterfalls into a single `rv.RunViews([...])` GraphQL / DB batch call.
+   - Construct with `RunView.FromMetadataProvider(provider)` (or `new RunView(provider)` server-side) and pass `ResultType: 'simple'` + `Fields` for read-only projections.
+4. **`ConversationEngine`-style bounded container caching**
+   - Use `FormsEngineBase.Instance.GetFormDefinition(formId)` to load and cache a form's bounded structural definition (`Form`, `Form Pages`, `Form Questions`, `Form Question Options`, `Form Screens`, `Form Automations`, `Form Entity Bindings`) in one batched `RunViews` round trip (plus chunked options when questions exist).
+   - Bounded by LRU eviction (`MaxCachedFormDefinitions`, default 50), deduplicates concurrent in-flight promises, clears on user switch, and automatically invalidates on `BaseEntityEvent` (`save`, `delete`, and `remote-invalidate` from Remote Operations / pub-sub).
+   - **NEVER** cache unbounded transactional tables (`Form Responses`, `Form Response Answers`, `Form Automation Runs`, `Form Automation Events`, `Form Entity Binding Records`, `Form Uploads`) or arbitrary filtered lists.
+5. **RLS-safe two-step entity reads**
+   - Never bypass entity RLS with raw SQL subqueries over restricted views. Resolve accessible parent IDs via a first-class `RunView` under the caller's `contextUser`, chunk child `IN (...)` predicates (e.g., 200 IDs per chunk) batched through `rv.RunViews([...])`, and always check and surface `!res.Success` errors (never silently treat a failed read as empty).
+
 ### Server-Side Caching (Critical Architecture)
 
 MemberJunction's multi-tier caching system is a cornerstone of server performance. **Always consult [guides/CACHING_AND_PUBSUB_GUIDE.md](../../guides/CACHING_AND_PUBSUB_GUIDE.md)** when working on caching, RunView optimization, or data loading patterns.

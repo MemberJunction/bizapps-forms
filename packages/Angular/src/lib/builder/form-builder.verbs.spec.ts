@@ -36,6 +36,8 @@ import type { ShareLinkFacts } from './share-state';
 
 /** Rows the mocked RunView answers with, by entity name. */
 const views = new Map<string, unknown[]>();
+/** Entities whose mocked RunView returns Success: false. */
+const failingViews = new Set<string>();
 /** The template-lookup answer (`IsTemplate = 1` reads of Forms), kept apart from other Form reads. */
 let templateRows: unknown[] = [];
 const viewsAsked: RunViewParams[] = [];
@@ -52,11 +54,15 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
   class RunView {
     public async RunView(params: RunViewParams) {
       viewsAsked.push(params);
+      const entityName = params.EntityName ?? '';
+      if (failingViews.has(entityName)) {
+        return { Success: false, Results: [], ErrorMessage: 'simulated read failure' };
+      }
       const filter = typeof params.ExtraFilter === 'string' ? params.ExtraFilter : '';
-      if (params.EntityName === 'MJ_BizApps_Forms: Forms' && filter.includes('IsTemplate = 1')) {
+      if (entityName === 'MJ_BizApps_Forms: Forms' && filter.includes('IsTemplate = 1')) {
         return { Success: true, Results: templateRows, ErrorMessage: '' };
       }
-      return { Success: true, Results: views.get(params.EntityName ?? '') ?? [], ErrorMessage: '' };
+      return { Success: true, Results: views.get(entityName) ?? [], ErrorMessage: '' };
     }
     public async RunViews(params: RunViewParams[]) {
       return Promise.all(params.map((p) => this.RunView(p)));
@@ -661,25 +667,30 @@ describe('a refused reorder', () => {
 // --- the header's reach --------------------------------------------------------------------------
 
 describe('the reach the header renders', () => {
-  it('is read from the share links, and re-read when an operation writes one anywhere in the app', async () => {
+  it('is read from the share links in the bootstrap batch, and re-read when an operation writes one anywhere in the app', async () => {
     const { builder, distributions } = await loaded();
-    expect(distributions.shareLinkFacts).toHaveBeenCalledTimes(1);
-    expect(distributions.shareLinkFacts).toHaveBeenCalledWith('form-1');
+    expect(viewsAsked.some((v) => v.EntityName === DISTRIBUTIONS)).toBe(true);
+    expect(distributions.shareLinkFacts).toHaveBeenCalledTimes(0);
 
     announceWrites([DISTRIBUTIONS]);
     await Promise.resolve();
 
-    expect(distributions.shareLinkFacts).toHaveBeenCalledTimes(2);
+    expect(distributions.shareLinkFacts).toHaveBeenCalledTimes(1);
+    expect(distributions.shareLinkFacts).toHaveBeenCalledWith('form-1');
     builder.ngOnDestroy();
   });
 
   it('survives a failed read as "unknown" — never as "no links", which would invite a duplicate', async () => {
-    const made = makeBuilder();
-    made.distributions.shareLinkFacts.mockResolvedValueOnce(null);
-    await made.builder.loadBuilder();
+    failingViews.add(DISTRIBUTIONS);
+    try {
+      const made = makeBuilder();
+      await made.builder.loadBuilder();
 
-    expect(made.builder.publishReach.kind).toBe('unknown');
-    made.builder.ngOnDestroy();
+      expect(made.builder.publishReach.kind).toBe('unknown');
+      made.builder.ngOnDestroy();
+    } finally {
+      failingViews.delete(DISTRIBUTIONS);
+    }
   });
 
   it('reads "not shared" only when the read succeeded and found no links', async () => {
@@ -695,7 +706,7 @@ describe('the reach the header renders', () => {
     announceWrites([DISTRIBUTIONS]);
     await Promise.resolve();
 
-    expect(distributions.shareLinkFacts).toHaveBeenCalledTimes(1);
+    expect(distributions.shareLinkFacts).toHaveBeenCalledTimes(0);
   });
 });
 

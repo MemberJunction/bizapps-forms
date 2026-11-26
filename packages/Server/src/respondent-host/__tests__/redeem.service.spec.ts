@@ -1023,3 +1023,29 @@ describe('the door never hands core something that is not an address', () => {
   });
 });
 
+describe('redeemSlugToToken — batched RunViews gate', () => {
+  it('batches FormVersion and Form checks into a single RunViews call when the provider supports RunViews', async () => {
+    const base = fakeProvider({ rows: [fakeDistribution()] });
+    let runViewsCalls = 0;
+    const provider: RedeemRunViewProvider = {
+      RunView: base.provider.RunView,
+      RunViews: async <T = unknown>(params: RunViewParams[], user?: UserInfo): Promise<RunViewResult<T>[]> => {
+        runViewsCalls += 1;
+        return Promise.all(params.map((p) => base.provider.RunView<T>(p, user)));
+      },
+    };
+    const { fetchImpl } = capturingFetch({ success: true, token: 'batched-jwt' });
+
+    const outcome = await redeemSlugToToken(deps({ provider, fetchImpl }), 'customer-survey');
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.token).toBe('batched-jwt');
+    expect(runViewsCalls).toBe(1);
+    expect(base.calls.map((c) => c.EntityName)).toEqual([
+      FORM_DISTRIBUTION_ENTITY,
+      FORM_VERSION_ENTITY,
+      FORM_ENTITY,
+    ]);
+  });
+});
+

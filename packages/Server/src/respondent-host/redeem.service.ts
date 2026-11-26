@@ -32,15 +32,19 @@ import {
 } from '@mj-biz-apps/forms-core-entities-server';
 
 /**
- * The narrow slice of a data provider this flow uses: a single `RunView`. Typed minimally (not
- * the full `IRunViewProvider`) so both the core `RunView` class and a unit-test fake satisfy it
- * without casts — the flow never calls anything else on the provider.
+ * The narrow slice of a data provider this flow uses: `RunView` plus optional `RunViews` batching.
+ * Typed minimally (not the full `IRunViewProvider`) so both the core `RunView` class and a
+ * unit-test fake satisfy it without casts.
  */
 export interface RedeemRunViewProvider {
   RunView<T = mjBizAppsFormsFormDistributionEntityType>(
     params: RunViewParams,
     contextUser?: UserInfo,
   ): Promise<RunViewResult<T>>;
+  RunViews?<T = unknown>(
+    params: RunViewParams[],
+    contextUser?: UserInfo,
+  ): Promise<RunViewResult<T>[]>;
 }
 
 /**
@@ -301,6 +305,72 @@ async function hasPublishedVersion(
     return undefined;
   }
   return result.Results.length > 0;
+}
+
+interface PublishedGateReads {
+  published: boolean | undefined;
+  publication: 'published' | 'not-published' | 'unreadable' | undefined;
+}
+
+/**
+ * Read both whether the form has a Published version AND whether the Form row itself has
+ * `Status = 'Published'` in a single `RunViews` batch when the provider supports batching,
+ * falling back to sequential `RunView`s for minimal test fakes.
+ */
+async function readPublishedGate(
+  deps: RedeemDeps,
+  dist: mjBizAppsFormsFormDistributionEntityType,
+  slug: string,
+): Promise<PublishedGateReads> {
+  if (typeof deps.provider.RunViews === 'function') {
+    const [versionResult, formResult] = await deps.provider.RunViews(
+      [
+        {
+          EntityName: FORMS_ENTITY.FormVersion,
+          ExtraFilter: publishedVersionFilter(dist.FormID),
+          Fields: ['ID'],
+          ResultType: 'simple',
+          MaxRows: 1,
+        },
+        {
+          EntityName: FORMS_ENTITY.Form,
+          ExtraFilter: `ID=${quoteSqlString(dist.FormID)}`,
+          Fields: ['ID', 'Status'],
+          ResultType: 'simple',
+          MaxRows: 1,
+        },
+      ],
+      deps.contextUser,
+    );
+    if (!versionResult?.Success) {
+      LogError(
+        `[Forms] Published-version read failed for distribution '${dist.Slug}' (form ${dist.FormID}): ${versionResult?.ErrorMessage}`,
+      );
+      return { published: undefined, publication: undefined };
+    }
+    const published = (versionResult.Results?.length ?? 0) > 0;
+    if (!published) {
+      return { published: false, publication: undefined };
+    }
+    if (!formResult?.Success) {
+      LogError(
+        `[Forms] Could not read the status of form ${dist.FormID} (the /f/${slug} door): ${formResult?.ErrorMessage}`,
+      );
+      return { published: true, publication: 'unreadable' };
+    }
+    const formRow = (formResult.Results as { Status: string }[] | undefined)?.[0];
+    return {
+      published: true,
+      publication: formRow?.Status === 'Published' ? 'published' : 'not-published',
+    };
+  }
+
+  const published = await hasPublishedVersion(deps, dist);
+  if (!published) {
+    return { published, publication: undefined };
+  }
+  const publication = await readFormPublication(deps.provider, dist.FormID, deps.contextUser, `the /f/${slug} door`);
+  return { published, publication };
 }
 
 /**
@@ -648,21 +718,17 @@ export async function redeemSlugToToken(deps: RedeemDeps, slug: string): Promise
   if (judged.verdict === 'refuse') {
     return { ok: false, reason: judged.reason, opensAt: judged.opensAt };
   }
-  // Window and cap first, from the row already in hand; this one costs a read, so only a link
-  // that is open and not full pays for it. When both apply, "opens on <date>" is what the holder
-  // hears — the distribution's stated intent, and something they can act on.
-  const published = await hasPublishedVersion(deps, dist);
+  // Window and cap first, from the row already in hand; these two checks cost reads, so only a link
+  // that is open and not full pays for them, and both travel in one `RunViews` batch when the
+  // provider supports batching. When both apply, "opens on <date>" is what the holder hears — the
+  // distribution's stated intent, and something they can act on.
+  const { published, publication } = await readPublishedGate(deps, dist, slug);
   if (published === undefined) {
     return { ok: false, reason: 'redeem-failed' };
   }
   if (!published) {
     return { ok: false, reason: 'form-unpublished' };
   }
-  // The FORM must be Published too (#303 Task 8 fix round 1) — the same read the respondent
-  // operations make, as this door's system user. A form archived while a link's status escaped the
-  // archive rule is refused exactly as a closed link is: the same reason, so the same page and words.
-  // A read that failed is a failure, never a closure.
-  const publication = await readFormPublication(deps.provider, dist.FormID, deps.contextUser, `the /f/${slug} door`);
   if (publication === 'unreadable') {
     return { ok: false, reason: 'redeem-failed' };
   }

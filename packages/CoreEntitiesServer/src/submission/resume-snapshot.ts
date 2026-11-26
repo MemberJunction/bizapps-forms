@@ -52,6 +52,47 @@ export async function loadResumeSnapshot(
   if (id === '') {
     return undefined;
   }
+  if (typeof provider.RunViews === 'function') {
+    const [responseResult, answersResult] = await provider.RunViews(
+      [
+        {
+          EntityName: FORMS_ENTITY.FormResponse,
+          ExtraFilter: `ID=${quoteSqlString(id)}`,
+          Fields: ['ID', 'Status', 'FormVersionID', 'StartedAt'],
+          ResultType: 'simple',
+          MaxRows: 1,
+        },
+        {
+          EntityName: FORMS_ENTITY.FormResponseAnswer,
+          ExtraFilter: `ResponseID=${quoteSqlString(id)}`,
+          Fields: ['QuestionID', 'TextValue', 'NumericValue', 'DateValue', 'BooleanValue', 'JSONValue', 'FileID'],
+          ResultType: 'simple',
+          IgnoreMaxRows: true,
+        },
+      ],
+      contextUser,
+    );
+    if (!responseResult?.Success) {
+      LogError(`[Forms] resume read failed for response ${id}: ${responseResult?.ErrorMessage}`);
+      return undefined;
+    }
+    const response = (responseResult.Results as ResumeResponseRow[] | undefined)?.[0];
+    if (!response) {
+      return undefined;
+    }
+    if (!answersResult?.Success) {
+      LogError(`[Forms] resume answers read failed for response ${response.ID}: ${answersResult?.ErrorMessage}`);
+      return undefined;
+    }
+    return {
+      responseId: response.ID,
+      status: response.Status,
+      formVersionId: response.FormVersionID,
+      startedAt: toIsoString(response.StartedAt),
+      answers: (answersResult.Results as StoredAnswerRow[] | undefined) ?? [],
+    };
+  }
+
   const response = await loadScopedResponseRow(provider, id, contextUser);
   if (!response) {
     return undefined;

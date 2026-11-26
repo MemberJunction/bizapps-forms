@@ -13,6 +13,9 @@ export * from './contracts/share-link'
 // The builder's structural-save graph (`form-structure-graph.ts`): authoring-only, and not pure — it
 // drives BaseEntity collections — so it stays out of the `./contracts` barrel the widget bundles.
 export * from './form-structure-graph'
+// Browser- and server-safe metadata & bounded form-definition cache engine (`FormsEngineBase`).
+// Kept out of `./contracts` so the respondent widget stays free of BaseEngine / RunView runtime code.
+export * from './FormsEngineBase'
 
 /**
  * Forces the generated entity subclasses to be loaded so their @RegisterClass

@@ -10,10 +10,11 @@
  *
  * Each takes the `RunView` it reads through, so a spec can hand it a fake.
  */
-import { LogError, type RunView } from '@memberjunction/core';
+import { LogError, type RunView, type RunViewParams, type RunViewResult } from '@memberjunction/core';
 import {
   AUTHORED_AUTOMATION_FIELDS,
   AUTHORED_BINDING_FIELDS,
+  escapeSqlString,
   quoteSqlString,
   tryBuildPublishedAutomations,
   type AuthoredAutomationRow,
@@ -21,6 +22,149 @@ import {
   type PublishedFormAutomation,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
+import { SHARE_LINK_FIELDS, type ShareLinkFacts } from './share-state';
+
+/** Combined publish-baseline read: live snapshot + draft automations in one `RunViews` batch. */
+export interface PublishStateBatch {
+  readonly liveSnapshot: string | null;
+  readonly draftAutomations: PublishedFormAutomation[] | null;
+}
+
+/**
+ * Combined builder-open metadata batch: live snapshot + draft automations/bindings + share links
+ * + saved-template pointer, collapsed from five sequential round trips into one `RunViews` batch.
+ */
+export interface BuilderBootstrapBatch extends PublishStateBatch {
+  readonly shareLinks: ShareLinkFacts[] | null;
+  readonly savedTemplateId: string | null;
+}
+
+function buildPublishStateQueries(formId: string): [RunViewParams, RunViewParams, RunViewParams] {
+  const quotedId = quoteSqlString(formId);
+  return [
+    {
+      EntityName: FORMS_ENTITY.FormVersion,
+      ExtraFilter: `FormID=${quotedId} AND Status='Published'`,
+      OrderBy: 'VersionNumber DESC',
+      Fields: ['DefinitionSnapshot'],
+      MaxRows: 1,
+      ResultType: 'simple',
+    },
+    {
+      EntityName: FORMS_ENTITY.FormAutomation,
+      ExtraFilter: `FormID=${quotedId}`,
+      OrderBy: 'DisplayOrder ASC',
+      Fields: [...AUTHORED_AUTOMATION_FIELDS],
+      ResultType: 'simple',
+    },
+    {
+      EntityName: FORMS_ENTITY.FormEntityBinding,
+      ExtraFilter: `FormID=${quotedId}`,
+      Fields: [...AUTHORED_BINDING_FIELDS],
+      ResultType: 'simple',
+    },
+  ];
+}
+
+function parseDraftAutomationsResults(
+  formId: string,
+  automations: RunViewResult | undefined,
+  bindings: RunViewResult | undefined,
+): PublishedFormAutomation[] | null {
+  if (!automations?.Success || !bindings?.Success) {
+    LogError(
+      `Forms builder: could not read the automations of form ${formId}: ` +
+        `${automations?.ErrorMessage || bindings?.ErrorMessage || 'no result'}`,
+    );
+    return null;
+  }
+  const built = tryBuildPublishedAutomations(
+    (automations.Results ?? []) as AuthoredAutomationRow[],
+    (bindings.Results ?? []) as AuthoredBindingRow[],
+  );
+  if (!built.ok) {
+    LogError(`Forms builder: the automations of form ${formId} cannot be read: ${built.error.message}`);
+    return null;
+  }
+  return built.automations;
+}
+
+function parseLiveSnapshotResult(
+  formId: string,
+  result: RunViewResult | undefined,
+): string | null {
+  if (!result?.Success) {
+    LogError(`Forms builder: could not read the published snapshot of form ${formId}: ${result?.ErrorMessage}`);
+    return null;
+  }
+  const row = (result.Results as { DefinitionSnapshot: string | null }[] | undefined)?.[0];
+  return row?.DefinitionSnapshot ?? null;
+}
+
+/**
+ * Reads the live published snapshot and draft automations/bindings in a single `RunViews` batch.
+ */
+export async function readPublishStateBatch(
+  rv: Pick<RunView, 'RunViews'>,
+  formId: string,
+): Promise<PublishStateBatch> {
+  const [versionRes, automationsRes, bindingsRes] = await rv.RunViews(buildPublishStateQueries(formId));
+  return {
+    liveSnapshot: parseLiveSnapshotResult(formId, versionRes),
+    draftAutomations: parseDraftAutomationsResults(formId, automationsRes, bindingsRes),
+  };
+}
+
+/**
+ * Reads the live snapshot, draft automations/bindings, share-link facts, and saved-template
+ * pointer for `formId` in a single `RunViews` GraphQL batch call.
+ */
+export async function readBuilderBootstrapBatch(
+  rv: Pick<RunView, 'RunViews'>,
+  formId: string,
+): Promise<BuilderBootstrapBatch> {
+  const [versionRes, automationsRes, bindingsRes, distributionsRes, templateRes] = await rv.RunViews([
+    ...buildPublishStateQueries(formId),
+    {
+      EntityName: FORMS_ENTITY.FormDistribution,
+      ExtraFilter: `FormID=${quoteSqlString(formId)}`,
+      Fields: [...SHARE_LINK_FIELDS],
+      ResultType: 'simple',
+    },
+    {
+      EntityName: FORMS_ENTITY.Form,
+      ExtraFilter: `IsTemplate = 1 AND TemplateSourceFormID='${escapeSqlString(formId)}'`,
+      ResultType: 'simple',
+      Fields: ['ID'],
+      OrderBy: '__mj_UpdatedAt DESC',
+      MaxRows: 1,
+    },
+  ]);
+
+  let shareLinks: ShareLinkFacts[] | null;
+  if (!distributionsRes?.Success) {
+    LogError(`Failed to read share links for form ${formId}: ${distributionsRes?.ErrorMessage ?? 'unknown error'}`);
+    shareLinks = null;
+  } else {
+    shareLinks = (distributionsRes.Results as ShareLinkFacts[] | undefined) ?? [];
+  }
+
+  let savedTemplateId: string | null;
+  if (!templateRes?.Success) {
+    LogError(`Could not check whether form ${formId} has a saved template: ${templateRes?.ErrorMessage}`);
+    savedTemplateId = null;
+  } else {
+    const row = (templateRes.Results as { ID: string }[] | undefined)?.[0];
+    savedTemplateId = row?.ID ?? null;
+  }
+
+  return {
+    liveSnapshot: parseLiveSnapshotResult(formId, versionRes),
+    draftAutomations: parseDraftAutomationsResults(formId, automationsRes, bindingsRes),
+    shareLinks,
+    savedTemplateId,
+  };
+}
 
 /**
  * The form's authored automations, shaped as the published snapshot carries them — or null when

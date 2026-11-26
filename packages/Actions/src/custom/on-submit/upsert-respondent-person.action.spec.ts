@@ -142,10 +142,19 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
     }
   }
   class RunView {
-    constructor(private readonly provider?: { RunView(p: unknown, u?: unknown): Promise<unknown> } | null) {}
+    constructor(
+      private readonly provider?: {
+        RunView(p: unknown, u?: unknown): Promise<unknown>;
+        RunViews?(ps: unknown[], u?: unknown): Promise<unknown[]>;
+      } | null,
+    ) {}
     async RunView(params: unknown, user?: unknown): Promise<unknown> {
       if (!this.provider) throw new Error('global provider used');
       return this.provider.RunView(params, user);
+    }
+    async RunViews(params: unknown[], user?: unknown): Promise<unknown[]> {
+      if (!this.provider) throw new Error('global provider used');
+      return this.provider.RunViews ? this.provider.RunViews(params, user) : Promise.all(params.map((p) => this.provider!.RunView(p, user)));
     }
   }
   return { ...actual, Metadata, RunView };
@@ -157,6 +166,23 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
  * reached only via the provider the action is handed.
  */
 function fakeProvider(): ActionDataProvider {
+  const runView = async <T>(opts: { EntityName: string }): Promise<RunViewResult & { Results: T[] }> => {
+    if (opts.EntityName === 'MJ_BizApps_Common: People' && state.peopleReadError) {
+      return { Success: false, Results: [], ErrorMessage: state.peopleReadError };
+    }
+    if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers' && state.answersReadError) {
+      return { Success: false, Results: [], ErrorMessage: state.answersReadError };
+    }
+    state.runViewCalls.push(opts.EntityName);
+    let results: unknown[] = [];
+    // The response context reads its form through a view since #303 (`Form.Load()` would also
+    // fill the form's immediate Pages/Screens collections, which the automation principal cannot read).
+    if (opts.EntityName === 'MJ_BizApps_Forms: Forms') results = [state.form];
+    else if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') results = state.answers;
+    else if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') results = state.questions;
+    else if (opts.EntityName === 'MJ_BizApps_Common: People') results = state.existingPeople;
+    return { Success: true, Results: results as T[] };
+  };
   return {
     async GetEntityObject<T>(entityName: string): Promise<T> {
       state.getEntityCalls.push(entityName);
@@ -171,28 +197,9 @@ function fakeProvider(): ActionDataProvider {
       }
       throw new Error(`Unexpected GetEntityObject('${entityName}')`);
     },
-    async RunView<T>(opts: { EntityName: string }): Promise<RunViewResult & { Results: T[] }> {
-      if (opts.EntityName === 'MJ_BizApps_Common: People' && state.peopleReadError) {
-        return { Success: false, Results: [], ErrorMessage: state.peopleReadError };
-      }
-      if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers' && state.answersReadError) {
-        return { Success: false, Results: [], ErrorMessage: state.answersReadError };
-      }
-      state.runViewCalls.push(opts.EntityName);
-      let results: unknown[] = [];
-      // The response context reads its form through a view since #303 (`Form.Load()` would also
-      // fill the form's immediate Pages/Screens collections, which the automation principal cannot read).
-      if (opts.EntityName === 'MJ_BizApps_Forms: Forms') results = [state.form];
-      else if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') results = state.answers;
-      else if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') results = state.questions;
-      else if (opts.EntityName === 'MJ_BizApps_Common: People') results = state.existingPeople;
-      return { Success: true, Results: results as T[] };
-    },
-    // Present only so `isActionDataProvider` accepts this fake as a real ActionDataProvider — the
-    // action never calls RunViews (plural).
-    async RunViews(): Promise<never> {
-      throw new Error('RunViews was not expected to be called');
-    },
+    RunView: runView,
+    RunViews: async <T>(params: { EntityName: string }[]): Promise<(RunViewResult & { Results: T[] })[]> =>
+      Promise.all(params.map((p) => runView<T>(p))),
   } as unknown as ActionDataProvider;
 }
 

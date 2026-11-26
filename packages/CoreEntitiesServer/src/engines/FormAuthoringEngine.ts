@@ -294,14 +294,20 @@ export class FormAuthoringEngine extends BaseSingleton<FormAuthoringEngine> {
       }
       await refuseAttachedRecords(form.ID, provider, user);
       const byForm = `FormID=${quoteSqlString(form.ID)}`;
-      const questions = await rowsToDelete(ENTITY.FormQuestion, byForm, provider, user);
+      const [questions, automations, bindings, screens, pages] = await rowsToDeleteBatch(
+        [
+          { entityName: ENTITY.FormQuestion, filter: byForm },
+          { entityName: ENTITY.FormAutomation, filter: byForm },
+          { entityName: ENTITY.FormEntityBinding, filter: byForm },
+          { entityName: ENTITY.FormScreen, filter: byForm },
+          { entityName: ENTITY.FormPage, filter: byForm },
+        ],
+        provider,
+        user,
+      );
       const options = questions.length
         ? await rowsToDelete(ENTITY.FormQuestionOption, `QuestionID IN (${questions.map((q) => quoteSqlString(q.ID)).join(',')})`, provider, user)
         : [];
-      const automations = await rowsToDelete(ENTITY.FormAutomation, byForm, provider, user);
-      const bindings = await rowsToDelete(ENTITY.FormEntityBinding, byForm, provider, user);
-      const screens = await rowsToDelete(ENTITY.FormScreen, byForm, provider, user);
-      const pages = await rowsToDelete(ENTITY.FormPage, byForm, provider, user);
       for (const rows of [options, questions, automations, bindings, screens, pages]) {
         await deleteEach(rows, form.ID);
       }
@@ -678,6 +684,34 @@ async function rowsToDelete(entityName: string, filter: string, provider: Databa
     throw new FormAuthoringError(`Could not read ${entityName}, so nothing was deleted.`, { fault: true, logDetail: result.ErrorMessage || 'no detail' });
   }
   return result.Results ?? [];
+}
+
+/** Batch multiple independent entity-object delete reads into a single `RunViews` round trip. */
+async function rowsToDeleteBatch(
+  targets: readonly { entityName: string; filter: string }[],
+  provider: DatabaseProviderBase,
+  user: UserInfo,
+): Promise<DeletableRow[][]> {
+  const results = await provider.RunViews<DeletableRow>(
+    targets.map((t) => ({
+      EntityName: t.entityName,
+      ExtraFilter: t.filter,
+      ResultType: 'entity_object' as const,
+      BypassCache: true,
+      IgnoreMaxRows: true,
+    })),
+    user,
+  );
+  return targets.map((t, i) => {
+    const res = results[i];
+    if (!res?.Success) {
+      throw new FormAuthoringError(`Could not read ${t.entityName}, so nothing was deleted.`, {
+        fault: true,
+        logDetail: res?.ErrorMessage || 'no detail',
+      });
+    }
+    return res.Results ?? [];
+  });
 }
 
 /** Delete each row in order, or throw naming the one refused — which rolls the whole delete back. */

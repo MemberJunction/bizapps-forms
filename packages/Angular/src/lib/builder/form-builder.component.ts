@@ -17,6 +17,7 @@ import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
 import {
   FormsCloneFormOperation,
+  FormsEngineBase,
   FormsPublishFormOperation,
   FormsRequestPublishApprovalOperation,
   quoteSqlString,
@@ -37,7 +38,11 @@ import { UndoToastComponent } from './undo-toast.component';
 import type { HeldDelete } from './pending-delete';
 import { answeredRefusal } from './delete-refusal';
 import { DesignStateService } from './design-state.service';
-import { readDraftAutomations, readLiveSnapshot } from './publish-baseline';
+import {
+  readBuilderBootstrapBatch,
+  readDraftAutomations,
+  readPublishStateBatch,
+} from './publish-baseline';
 import { runOperation } from '../shared/remote-operation';
 import { onFormsWrite, type FormsWriteSubscription } from '../shared/forms-writes';
 import { findTemplateSavedFrom, loadFormRecord } from '../shared/form-catalog';
@@ -574,18 +579,27 @@ export class FormBuilderComponent extends BaseFormComponent {
       : null;
   }
 
-  /** Read the live snapshot and the current draft, so `dirty` has both sides to compare. */
+  /** Read the live snapshot and the current draft in one `RunViews` batch, so `dirty` has both sides to compare. */
   private async refreshPublishState(): Promise<void> {
-    this.appliedStyle = this.record.StyleID
-      ? ((await this.design.loadStyleById(this.record.StyleID)) ?? undefined)
-      : undefined;
-    this.publishedFingerprint = storedSnapshotFingerprint(
-      await readLiveSnapshot(new RunView(), this.record.ID),
-      this.record.ID,
-    );
-    await this.refreshDraftAutomations();
+    await this.ensureFormsEngineWarmed();
+    const [style, publishBatch] = await Promise.all([
+      this.record.StyleID ? this.design.loadStyleById(this.record.StyleID) : Promise.resolve(null),
+      readPublishStateBatch(new RunView(), this.record.ID),
+    ]);
+    this.appliedStyle = style ?? undefined;
+    this.publishedFingerprint = storedSnapshotFingerprint(publishBatch.liveSnapshot, this.record.ID);
+    this.automationsUnknown = publishBatch.draftAutomations === null;
+    this.draftAutomations = publishBatch.draftAutomations ?? [];
     this.publishStateReady = true;
     this.markDirty();
+  }
+
+  private async ensureFormsEngineWarmed(): Promise<void> {
+    try {
+      await FormsEngineBase.Instance.Config(false);
+    } catch {
+      // Non-fatal: style lookups fall back to direct entity loads when the engine cannot warm.
+    }
   }
 
   override async ngOnInit(): Promise<void> {
@@ -623,9 +637,26 @@ export class FormBuilderComponent extends BaseFormComponent {
         this.tree.pages.push(page);
       }
     }
-    await this.refreshPublishState();
-    await this.refreshShareLinks();
-    await this.refreshSavedTemplate(this.record.ID);
+    // Collapse publish baseline, automations/bindings, share links, and saved-template check
+    // into a single `RunViews` batch (and warm FormsEngineBase for cached FormStyle lookup).
+    await this.ensureFormsEngineWarmed();
+    const [bootstrap, appliedStyle] = await Promise.all([
+      readBuilderBootstrapBatch(new RunView(), this.record.ID),
+      this.record.StyleID ? this.design.loadStyleById(this.record.StyleID) : Promise.resolve(null),
+    ]);
+    this.appliedStyle = appliedStyle ?? undefined;
+    this.publishedFingerprint = storedSnapshotFingerprint(bootstrap.liveSnapshot, this.record.ID);
+    this.automationsUnknown = bootstrap.draftAutomations === null;
+    this.draftAutomations = bootstrap.draftAutomations ?? [];
+    this.publishStateReady = true;
+    this.markDirty();
+    this.shareLinks = bootstrap.shareLinks;
+    this.savedTemplateId = bootstrap.savedTemplateId;
+    this.savedTemplateName = null;
+    this.savedTemplateFingerprint = null;
+    if (this.savedTemplateId) {
+      await this.loadSavedTemplateComparison(this.savedTemplateId);
+    }
     this.watchForTemplateChanges();
     this.watchForAutomationChanges();
     this.watchForDistributionChanges();
@@ -2229,32 +2260,36 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.savedTemplateName = null;
     this.savedTemplateFingerprint = null;
     if (this.savedTemplateId) {
-      const templateForm = await loadFormRecord(this.savedTemplateId);
-      if (templateForm) {
-        this.savedTemplateName = templateForm.Name;
-        const templateTree = await this.state.loadTree(templateForm).catch((err: unknown) => {
-          // Not fatal to the builder: without the template's tree the indicator cannot say whether
-          // the form has drifted from it, and says "saved" without the comparison instead.
-          LogError(`Forms builder could not read template ${templateForm.ID}: ${err instanceof Error ? err.message : String(err)}`);
-          return null;
-        });
-        if (!templateTree) {
-          this.cdr.markForCheck();
-          return;
-        }
-        const style = templateForm.StyleID
-          ? await this.design.loadStyleById(templateForm.StyleID)
-          : undefined;
-        const templateDraft = draftDefinition(
-          templateTree,
-          style ?? undefined,
-          FINGERPRINT_VERSION_ID,
-          [],
-        );
-        this.savedTemplateFingerprint = templateDraft ? templateFingerprint(templateDraft) : null;
-      }
+      await this.loadSavedTemplateComparison(this.savedTemplateId);
     }
     this.cdr.markForCheck();
+  }
+
+  private async loadSavedTemplateComparison(templateId: string): Promise<void> {
+    const templateForm = await loadFormRecord(templateId);
+    if (!templateForm) {
+      return;
+    }
+    this.savedTemplateName = templateForm.Name;
+    const templateTree = await this.state.loadTree(templateForm).catch((err: unknown) => {
+      // Not fatal to the builder: without the template's tree the indicator cannot say whether
+      // the form has drifted from it, and says "saved" without the comparison instead.
+      LogError(`Forms builder could not read template ${templateForm.ID}: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    });
+    if (!templateTree) {
+      return;
+    }
+    const style = templateForm.StyleID
+      ? await this.design.loadStyleById(templateForm.StyleID)
+      : undefined;
+    const templateDraft = draftDefinition(
+      templateTree,
+      style ?? undefined,
+      FINGERPRINT_VERSION_ID,
+      [],
+    );
+    this.savedTemplateFingerprint = templateDraft ? templateFingerprint(templateDraft) : null;
   }
 
   /**
