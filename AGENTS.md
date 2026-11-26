@@ -246,6 +246,14 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
 - Use `RunViews` (plural) to batch; `ResultType: 'entity_object'` only when mutating, `'simple'` (+ `Fields`) for read-only.
 - Never spread a BaseEntity — use `.GetAll()`.
 
+## BizApps Performance & Caching Standard (5 Rules)
+Full detail in `.claude/rules/data-access.md`:
+1. **`BaseEngine` taxonomy caching**: Use `FormsEngineBase.Instance` (`@mj-biz-apps/forms-entities`, `CacheLocal: true` only on shared non-RLS `Form Categories`/`Form Styles`) with O(1) lookups; never re-query taxonomy tables in components.
+2. **Multi-provider, impersonation & RLS safety**: Override `ProviderToUse` (`_activeProvider ?? Metadata.Provider`), keep `CacheLocal: false` on RLS/user-scoped entities, gate restricted entities with `CanRead` (`GetUserPermisions(user)?.CanRead !== false`), and invalidate on user switch.
+3. **`rv.RunViews([...])` batching**: Zero `Promise.all([rv.RunView...])` or sequential independent `RunView` waterfalls; use `RunView.FromMetadataProvider(provider)` and `ResultType: 'simple'` + `Fields` for read-only projections.
+4. **`ConversationEngine`-style bounded container caching**: Use `FormsEngineBase.Instance.GetFormDefinition(formId)` (LRU max 50, in-flight dedup, `BaseEntityEvent` invalidation); **NEVER** cache unbounded transactional tables (`Form Responses`/`Answers`/`Runs`/`Events`/`Uploads`) or arbitrary filtered lists.
+5. **RLS-safe two-step entity reads**: Never bypass RLS with raw SQL subqueries over restricted views; resolve parent IDs via first-class `RunView`, chunk `IN (...)` filters via `RunViews`, and surface `!res.Success` errors.
+
 ## Anonymous submission (the crux — see plan §4)
 - Public submissions ride an **anonymous, multi-use, scoped magic link** wrapped by a `FormDistribution` record. Authorization is enforced from the JWT `mj_scopes` union — never DB roles — so there is no privilege accretion.
 - The one deliberate exception to magic-link read-only convention is a restricted **"Form Respondent"** role with **CanCreate on response entities only** (authored as mj-sync metadata, like the Magic Link recipe in `MJ/guides/MAGIC_LINK_GUIDE.md`).

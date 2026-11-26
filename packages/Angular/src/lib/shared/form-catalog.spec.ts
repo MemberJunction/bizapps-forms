@@ -112,6 +112,23 @@ describe('readFormListing — the Forms home grid', () => {
     const failure = readFormListing(reader(answer));
     await expect(failure).rejects.toThrow('the Forms view reported a failure with no error message');
   });
+
+  it('reuses cached Form Categories from FormsEngineBase when loaded instead of re-querying FormCategory', async () => {
+    const { FormsEngineBase } = await import('@mj-biz-apps/forms-entities');
+    const engine = FormsEngineBase.Instance;
+    const internal = engine as unknown as Record<string, unknown>;
+    internal['_loaded'] = true;
+    internal['_formCategories'] = [{ ID: 'c1', Name: 'Cached Category' }];
+    try {
+      const rv = reader(answer);
+      const listing = await readFormListing(rv);
+      expect(listing.categories).toEqual([{ ID: 'c1', Name: 'Cached Category' }]);
+      expect(rv.asked.some((p) => p.EntityName === FORMS_ENTITY.FormCategory)).toBe(false);
+    } finally {
+      engine.InvalidateCache();
+      internal['_loaded'] = false;
+    }
+  });
 });
 
 describe('readSavedTemplates — the gallery', () => {

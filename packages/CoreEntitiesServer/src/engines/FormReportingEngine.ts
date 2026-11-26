@@ -231,11 +231,13 @@ export class FormReportingEngine extends BaseSingleton<FormReportingEngine> {
         );
         const responses = rowsOrFault<ResponseRow>(page, `The responses of form ${listing.formId} could not be read.`);
         rowsOrFault(counted, `The responses of form ${listing.formId} could not be counted.`);
-        const [answers, label] = await Promise.all([
-          readAnswersOf(provider, responses.map((response) => response.ID), user, listing.formId),
-          // The version the list is narrowed to labels it, as the summary does; else the Published one.
-          readLabelVersion(provider, listing.formId, listing.formVersionId, user),
-        ]);
+        const { answers, label } = await readAnswersAndLabel(
+          provider,
+          responses.map((response) => response.ID),
+          listing.formId,
+          listing.formVersionId,
+          user,
+        );
         const questions = label ? labelQuestions(label) : [];
         const answersByResponse = groupByFolded(answers, (answer) => answer.ResponseID);
         const output: FormsListResponsesOutput = {
@@ -276,10 +278,7 @@ export class FormReportingEngine extends BaseSingleton<FormReportingEngine> {
         const runs = rowsOrDegrade<mjBizAppsFormsFormAutomationRunEntityType>(runsResult, 'automation runs', responseId, unavailable);
         const events = rowsOrDegrade<mjBizAppsFormsFormAutomationEventEntityType>(eventsResult, 'automation events', responseId, unavailable);
         const bindings = rowsOrDegrade<mjBizAppsFormsFormEntityBindingRecordEntityType>(bindingsResult, 'created records', responseId, unavailable);
-        const [uploads, label] = await Promise.all([
-          readUploadsOf(provider, answers, user, responseId, unavailable),
-          labelVersionId ? readResponseLabel(provider, response, labelVersionId, user) : readPinnedLabel(provider, response, user, unavailable),
-        ]);
+        const { uploads, label } = await readUploadsAndLabel(provider, response, answers, labelVersionId, user, unavailable);
         return {
           Response: {
             ID: response.ID,
@@ -474,52 +473,93 @@ function listRow(response: ResponseRow, answers: AnswerRow[], questions: readonl
 }
 
 /**
- * The answers of one page of responses, read as the caller. `IgnoreMaxRows` because the entity's
- * default row limit would silently cut a page short; the read is bounded by the page instead (at most
- * {@link MAX_RESPONSE_PAGE_SIZE} responses, one row per question each).
+ * The answers for a response page and the labelling version, batched into a single `RunViews`
+ * round trip instead of parallel `RunView` + `RunViews` calls.
  */
-async function readAnswersOf(provider: DatabaseProviderBase, responseIds: readonly string[], user: UserInfo, formId: string): Promise<AnswerRow[]> {
-  if (responseIds.length === 0) {
-    return [];
-  }
-  const result = await provider.RunView<AnswerRow>(
+async function readAnswersAndLabel(
+  provider: DatabaseProviderBase,
+  responseIds: readonly string[],
+  formId: string,
+  formVersionId: string | undefined,
+  user: UserInfo,
+): Promise<{ answers: AnswerRow[]; label: LabelVersion | null }> {
+  const reads: RunViewParams[] = [
+    { EntityName: FORMS_ENTITY.Form, ExtraFilter: `ID=${quoteSqlString(formId)}`, Fields: ['ID'], ResultType: 'simple' },
     {
+      EntityName: FORMS_ENTITY.FormVersion,
+      ExtraFilter: formVersionId
+        ? `ID=${quoteSqlString(formVersionId)} AND FormID=${quoteSqlString(formId)}`
+        : `FormID=${quoteSqlString(formId)} AND Status='Published'`,
+      Fields: ['ID', 'FormID', 'DefinitionSnapshot'],
+      // One Published version per form is an index's promise; the order makes the pick deterministic anyway.
+      OrderBy: 'VersionNumber DESC',
+      MaxRows: 1,
+      ResultType: 'simple',
+    },
+  ];
+  if (responseIds.length > 0) {
+    // `IgnoreMaxRows` because the entity's default row limit would silently cut a page short;
+    // the read is bounded by the page instead (at most MAX_RESPONSE_PAGE_SIZE responses).
+    reads.push({
       EntityName: FORMS_ENTITY.FormResponseAnswer,
       ExtraFilter: `ResponseID IN (${responseIds.map(quoteSqlString).join(',')})`,
       Fields: ANSWER_FIELDS,
       ResultType: 'simple',
       IgnoreMaxRows: true,
-    },
-    user,
-  );
-  return rowsOrFault(result, `The answers of form ${formId} could not be read.`);
+    });
+  }
+  const [formResult, versionResult, answersResult] = await provider.RunViews(reads, user);
+  const answers = responseIds.length > 0
+    ? rowsOrFault<AnswerRow>(answersResult as RunViewResult<AnswerRow> | undefined, `The answers of form ${formId} could not be read.`)
+    : [];
+  const label = parseLabelVersionResults(formResult, versionResult, formId, formVersionId);
+  return { answers, label };
 }
 
 /**
- * The provenance rows of the files these answers reference, or none without a query when no answer
- * holds a file (the common case). Degrades like the other satellite sections.
+ * The provenance rows of any uploaded files referenced by `answers` and the version labelling the
+ * response, batched into a single `RunViews` round trip.
  */
-async function readUploadsOf(
+async function readUploadsAndLabel(
   provider: DatabaseProviderBase,
+  response: ResponseRow,
   answers: readonly AnswerRow[],
+  explicitVersionId: string | undefined,
   user: UserInfo,
-  responseId: string,
   unavailable: string[],
-): Promise<mjBizAppsFormsFormUploadEntityType[]> {
+): Promise<{ uploads: mjBizAppsFormsFormUploadEntityType[]; label: LabelVersion }> {
   const fileIds = [...new Set(answers.map((answer) => answer.FileID).filter((id): id is string => !!id && isGuid(id)))];
-  if (fileIds.length === 0) {
-    return [];
-  }
-  const result = await provider.RunView<mjBizAppsFormsFormUploadEntityType>(
+  const targetVersionId = explicitVersionId ?? response.FormVersionID;
+  const reads: RunViewParams[] = [
     {
+      EntityName: FORMS_ENTITY.FormVersion,
+      ExtraFilter: `ID=${quoteSqlString(targetVersionId)}`,
+      Fields: ['ID', 'FormID', 'DefinitionSnapshot'],
+      ResultType: 'simple',
+    },
+  ];
+  if (fileIds.length > 0) {
+    reads.push({
       EntityName: FORMS_ENTITY.FormUpload,
       ExtraFilter: `FileID IN (${fileIds.map(quoteSqlString).join(',')})`,
       Fields: ['ID', 'FileID', 'FileName', 'ContentType', 'SizeBytes', 'Status'],
       ResultType: 'simple',
-    },
-    user,
-  );
-  return rowsOrDegrade(result, 'file details', responseId, unavailable);
+    });
+  }
+  const [versionResult, uploadsResult] = await provider.RunViews(reads, user);
+  const uploads = fileIds.length > 0
+    ? rowsOrDegrade<mjBizAppsFormsFormUploadEntityType>(
+        uploadsResult as RunViewResult<mjBizAppsFormsFormUploadEntityType> | undefined,
+        'file details',
+        response.ID,
+        unavailable,
+      )
+    : [];
+  const typedVersionResult = versionResult as RunViewResult<{ ID: string; FormID: string; DefinitionSnapshot: string | null }> | undefined;
+  const label = explicitVersionId
+    ? parseExplicitResponseLabel(typedVersionResult, response, explicitVersionId)
+    : parsePinnedResponseLabel(typedVersionResult, response, unavailable);
+  return { uploads, label };
 }
 
 /**
@@ -545,11 +585,23 @@ async function readLabelVersion(provider: DatabaseProviderBase, formId: string, 
     ],
     user,
   );
-  const forms = rowsOrFault<{ ID: string }>(formResult, `Form ${formId} could not be read.`);
+  return parseLabelVersionResults(formResult, versionResult, formId, formVersionId);
+}
+
+function parseLabelVersionResults(
+  formResult: RunViewResult | undefined,
+  versionResult: RunViewResult | undefined,
+  formId: string,
+  formVersionId: string | undefined,
+): LabelVersion | null {
+  const forms = rowsOrFault<{ ID: string }>(formResult as RunViewResult<{ ID: string }> | undefined, `Form ${formId} could not be read.`);
   if (forms.length === 0) {
     throw new FormReportingError(`Form ${formId} was not found.`);
   }
-  const [version] = rowsOrFault<{ ID: string; FormID: string; DefinitionSnapshot: string | null }>(versionResult, `The versions of form ${formId} could not be read.`);
+  const [version] = rowsOrFault<{ ID: string; FormID: string; DefinitionSnapshot: string | null }>(
+    versionResult as RunViewResult<{ ID: string; FormID: string; DefinitionSnapshot: string | null }> | undefined,
+    `The versions of form ${formId} could not be read.`,
+  );
   if (!version) {
     if (formVersionId) {
       throw new FormReportingError(`Form version ${formVersionId} is not a version of form ${formId}.`);
@@ -560,11 +612,11 @@ async function readLabelVersion(provider: DatabaseProviderBase, formId: string, 
 }
 
 /** The version that labels a response's answers, refused unless it is a version of the response's own form. */
-async function readResponseLabel(provider: DatabaseProviderBase, response: ResponseRow, versionId: string, user: UserInfo): Promise<LabelVersion> {
-  const result = await provider.RunView<{ ID: string; FormID: string; DefinitionSnapshot: string | null }>(
-    { EntityName: FORMS_ENTITY.FormVersion, ExtraFilter: `ID=${quoteSqlString(versionId)}`, Fields: ['ID', 'FormID', 'DefinitionSnapshot'], ResultType: 'simple' },
-    user,
-  );
+function parseExplicitResponseLabel(
+  result: RunViewResult<{ ID: string; FormID: string; DefinitionSnapshot: string | null }> | undefined,
+  response: ResponseRow,
+  versionId: string,
+): LabelVersion {
   const [version] = rowsOrFault(result, `Form version ${versionId} could not be read.`);
   if (!version || !UUIDsEqual(version.FormID, response.FormID)) {
     throw new FormReportingError(`Form version ${versionId} is not a version of the form response ${response.ID} was submitted to.`);
@@ -578,13 +630,13 @@ async function readResponseLabel(provider: DatabaseProviderBase, response: Respo
  * Nobody ASKED for this version (the record view passes none), so a version the caller cannot read,
  * or whose row is gone, is a missing section like the runs or the ledger: the answers, runs and
  * records are still the caller's to see, and the view says the labels are unavailable. A version
- * the caller NAMES goes through {@link readResponseLabel} and is refused instead.
+ * the caller NAMES goes through {@link parseExplicitResponseLabel} and is refused instead.
  */
-async function readPinnedLabel(provider: DatabaseProviderBase, response: ResponseRow, user: UserInfo, unavailable: string[]): Promise<LabelVersion> {
-  const result = await provider.RunView<{ ID: string; FormID: string; DefinitionSnapshot: string | null }>(
-    { EntityName: FORMS_ENTITY.FormVersion, ExtraFilter: `ID=${quoteSqlString(response.FormVersionID)}`, Fields: ['ID', 'FormID', 'DefinitionSnapshot'], ResultType: 'simple' },
-    user,
-  );
+function parsePinnedResponseLabel(
+  result: RunViewResult<{ ID: string; FormID: string; DefinitionSnapshot: string | null }> | undefined,
+  response: ResponseRow,
+  unavailable: string[],
+): LabelVersion {
   const [version] = rowsOrDegrade(result, 'question labels', response.ID, unavailable);
   if (version && UUIDsEqual(version.FormID, response.FormID)) {
     return { id: version.ID, formId: version.FormID, snapshot: version.DefinitionSnapshot ?? null };

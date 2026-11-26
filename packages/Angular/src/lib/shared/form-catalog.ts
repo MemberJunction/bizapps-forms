@@ -13,7 +13,13 @@
  * spec can hand it a fake.
  */
 import { LogError, RunView, type RunViewResult } from '@memberjunction/core';
-import { escapeSqlString, quoteSqlString, type mjBizAppsFormsFormEntity, type mjBizAppsFormsFormEntityType } from '@mj-biz-apps/forms-entities';
+import {
+  escapeSqlString,
+  FormsEngineBase,
+  quoteSqlString,
+  type mjBizAppsFormsFormEntity,
+  type mjBizAppsFormsFormEntityType,
+} from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from './entity-names';
 import { loadCompleteResponseCounts } from './complete-response-counts';
 import { toDate } from './runview-dates';
@@ -52,27 +58,39 @@ export interface FormListing {
  * logged), never as "0 responses" (#247). A failed read of the forms themselves THROWS.
  */
 export async function readFormListing(rv: Reader = new RunView()): Promise<FormListing> {
-  const [formsRes, catsRes] = (await rv.RunViews([
-    {
-      EntityName: FORMS_ENTITY.Form,
-      ExtraFilter: 'IsTemplate = 0',
-      ResultType: 'simple',
-      Fields: ['ID', 'Name', 'Status', 'CategoryID', '__mj_UpdatedAt'],
-      OrderBy: 'Name',
-    },
-    { EntityName: FORMS_ENTITY.FormCategory, ResultType: 'simple', Fields: ['ID', 'Name'] },
-  ])) as [RunViewResult<FormListRecord>, RunViewResult<FormCategoryRecord>];
+  const formQuery = {
+    EntityName: FORMS_ENTITY.Form,
+    ExtraFilter: 'IsTemplate = 0',
+    ResultType: 'simple' as const,
+    Fields: ['ID', 'Name', 'Status', 'CategoryID', '__mj_UpdatedAt'],
+    OrderBy: 'Name',
+  };
+
+  let formsRes: RunViewResult<FormListRecord>;
+  let categories: FormCategoryRecord[];
+
+  if (FormsEngineBase.Instance.Loaded) {
+    formsRes = await rv.RunView<FormListRecord>(formQuery);
+    categories = FormsEngineBase.Instance.FormCategories.map((c) => ({ ID: c.ID, Name: c.Name }));
+  } else {
+    const [loadedForms, catsRes] = (await rv.RunViews([
+      formQuery,
+      { EntityName: FORMS_ENTITY.FormCategory, ResultType: 'simple', Fields: ['ID', 'Name'] },
+    ])) as [RunViewResult<FormListRecord>, RunViewResult<FormCategoryRecord>];
+    formsRes = loadedForms;
+    if (!catsRes.Success) {
+      LogError(`Forms home: form categories could not be read, so none are named: ${catsRes.ErrorMessage}`);
+    }
+    categories = catsRes.Success ? catsRes.Results : [];
+  }
 
   if (!formsRes.Success) {
     // This message is the DETAIL of the home alert, which already leads with "Failed to load forms"
     // (see failureMessage) — so the fallback states a reason, not the headline again.
     throw new Error(formsRes.ErrorMessage || 'the Forms view reported a failure with no error message');
   }
-  if (!catsRes.Success) {
-    LogError(`Forms home: form categories could not be read, so none are named: ${catsRes.ErrorMessage}`);
-  }
   const forms = formsRes.Results;
-  return { forms, categories: catsRes.Success ? catsRes.Results : [], counts: await readCountsOrNull(rv, forms) };
+  return { forms, categories, counts: await readCountsOrNull(rv, forms) };
 }
 
 async function readCountsOrNull(rv: Reader, forms: readonly FormListRecord[]): Promise<Map<string, number> | null> {

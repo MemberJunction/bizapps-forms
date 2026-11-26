@@ -94,8 +94,7 @@ function runViewProvider(
   } = {},
 ) {
   const open = options.openDistribution ?? true;
-  return {
-    RunView: async <T>(params: RunViewParams, contextUser?: UserInfo): Promise<RunViewResult<T>> => {
+  const runView = async <T>(params: RunViewParams, contextUser?: UserInfo): Promise<RunViewResult<T>> => {
       if (options.formReadFails && params.EntityName === FORMS_ENTITY.Form) {
         return { Success: false, Results: [], RowCount: 0, TotalRowCount: 0, ExecutionTime: 0, ErrorMessage: 'login timeout' } as RunViewResult<T>;
       }
@@ -124,8 +123,11 @@ function runViewProvider(
         rows = [makeVersion(makeUploadDefinition())];
       }
       return { Success: true, Results: rows as T[], RowCount: rows.length, TotalRowCount: rows.length, ExecutionTime: 0, ErrorMessage: '' } as RunViewResult<T>;
-    },
-    RunViews: async () => [],
+  };
+  return {
+    RunView: runView,
+    RunViews: async <T>(params: RunViewParams[], contextUser?: UserInfo): Promise<RunViewResult<T>[]> =>
+      Promise.all(params.map((p) => runView<T>(p, contextUser))),
   };
 }
 

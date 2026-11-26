@@ -31,12 +31,14 @@ import { FORMS_ENTITY } from '../shared/entity-names.js';
 import { parsePublishedDefinition } from '../shared/snapshot-parser.js';
 
 /**
- * The narrow slice of a data provider this flow uses — a single `RunView`. Typed minimally
- * (not the full `IRunViewProvider`) so BOTH the per-request `DatabaseProviderBase` (submit
- * pipeline) and a global `RunView` instance (upload endpoint) satisfy it without casts.
+ * The narrow slice of a data provider this flow uses — `RunView` plus optional `RunViews` batching.
+ * Typed minimally (not the full `IRunViewProvider`) so BOTH the per-request `DatabaseProviderBase`
+ * (submit pipeline) and a global `RunView` instance (upload endpoint) satisfy it without casts,
+ * while unit-test fakes that only implement `RunView` continue to work.
  */
 export interface DefinitionRunViewProvider {
   RunView<T = unknown>(params: RunViewParams, contextUser?: UserInfo): Promise<RunViewResult<T>>;
+  RunViews?<T = unknown>(params: RunViewParams[], contextUser?: UserInfo): Promise<RunViewResult<T>[]>;
 }
 
 /** Why a slug could not be resolved to an open, published form. */
@@ -232,12 +234,10 @@ export async function resolvePublishedDefinition(
     return { ok: false, failure: 'distribution-closed' };
   }
 
-  const publication = await readFormPublication(provider, distribution.FormID, systemReader, `link '${slug}'`);
+  const { publication, version } = await loadPublicationAndVersion(provider, distribution.FormID, systemReader, slug);
   if (publication !== 'published') {
     return { ok: false, failure: publication === 'unreadable' ? 'form-unreadable' : 'form-not-published' };
   }
-
-  const version = await loadPublishedVersion(provider, distribution.FormID, systemReader, slug);
   if (!version) {
     return { ok: false, failure: 'no-published-version' };
   }
@@ -250,4 +250,57 @@ export async function resolvePublishedDefinition(
     return { ok: false, failure: 'invalid-snapshot' };
   }
   return { ok: true, value: { distribution, version, definition } };
+}
+
+/**
+ * Load the form's publication status and its Published version in a single `RunViews` batch when
+ * the provider supports batching, falling back to sequential `RunView`s for minimal test fakes.
+ */
+async function loadPublicationAndVersion(
+  provider: DefinitionRunViewProvider,
+  formId: string,
+  systemReader: UserInfo,
+  slug: string,
+): Promise<{ publication: FormPublication; version: mjBizAppsFormsFormVersionEntityType | undefined }> {
+  if (typeof provider.RunViews === 'function') {
+    const [formResult, versionResult] = await provider.RunViews(
+      [
+        {
+          EntityName: FORMS_ENTITY.Form,
+          ExtraFilter: `ID=${quoteSqlString(formId)}`,
+          Fields: ['ID', 'Status'],
+          ResultType: 'simple',
+          MaxRows: 1,
+        },
+        {
+          EntityName: FORMS_ENTITY.FormVersion,
+          ExtraFilter: publishedVersionFilter(formId),
+          OrderBy: 'VersionNumber DESC',
+          ResultType: 'simple',
+        },
+      ],
+      systemReader,
+    );
+    if (!formResult?.Success) {
+      LogError(`[Forms] Could not read the status of form ${formId} (link '${slug}'): ${formResult?.ErrorMessage}`);
+      return { publication: 'unreadable', version: undefined };
+    }
+    const formRow = (formResult.Results as { Status: string }[] | undefined)?.[0];
+    if (formRow?.Status !== 'Published') {
+      return { publication: 'not-published', version: undefined };
+    }
+    if (!versionResult?.Success) {
+      LogError(`[Forms] Could not read the published version of form ${formId} (link '${slug}'): ${versionResult?.ErrorMessage}`);
+      return { publication: 'published', version: undefined };
+    }
+    const version = (versionResult.Results as mjBizAppsFormsFormVersionEntityType[] | undefined)?.[0];
+    return { publication: 'published', version };
+  }
+
+  const publication = await readFormPublication(provider, formId, systemReader, `link '${slug}'`);
+  if (publication !== 'published') {
+    return { publication, version: undefined };
+  }
+  const version = await loadPublishedVersion(provider, formId, systemReader, slug);
+  return { publication, version };
 }

@@ -120,20 +120,14 @@ export async function loadFormResponseContext(
     return { status: 'absent' };
   }
 
-  const formRead = await loadFormRow(response.FormID, contextUser, provider);
-  if (!formRead.ok || !formRead.value) {
-    // The response exists, so a missing form is not "nothing to do" — it is a read that failed.
-    const why = formRead.ok ? 'no such record' : formRead.error;
-    return { status: 'failed', error: `form ${response.FormID} of response ${responseId} could not be loaded: ${why}` };
+  const formAndAnswers = await loadFormAndAnswerRows(response.FormID, responseId, contextUser, provider);
+  if (!formAndAnswers.ok) {
+    return { status: 'failed', error: formAndAnswers.error };
   }
-  const form = formRead.value;
+  const { form, answers: rawAnswerRows } = formAndAnswers.value;
 
-  const answerRows = await loadAnswerRows(responseId, contextUser, provider);
-  if (!answerRows.ok) {
-    return { status: 'failed', error: answerRows.error };
-  }
   const questionsById = await loadQuestionsById(
-    answerRows.value.map((a) => a.QuestionID),
+    rawAnswerRows.map((a) => a.QuestionID),
     responseId,
     contextUser,
     provider,
@@ -141,14 +135,14 @@ export async function loadFormResponseContext(
   if (!questionsById.ok) {
     return { status: 'failed', error: questionsById.error };
   }
-  const answers = answerRows.value.map((a) => toAnswerWithType(a, questionsById.value.get(a.QuestionID)));
+  const answers = rawAnswerRows.map((a) => toAnswerWithType(a, questionsById.value.get(a.QuestionID)));
 
   // The generated answer entities structurally satisfy `StoredAnswerRow` (same column names and
   // types), so the canonical view is built straight from the rows — no second projection to keep
   // in step with the first.
   return {
     status: 'loaded',
-    context: { response, form, answers, canonicalAnswers: new CanonicalAnswers(answerRows.value) },
+    context: { response, form, answers, canonicalAnswers: new CanonicalAnswers(rawAnswerRows) },
   };
 }
 
@@ -170,51 +164,52 @@ async function loadRecord(
 }
 
 /**
- * The response's form row, through a view rather than `Load()`.
+ * The response's form row and all stored answers, batched in one `RunViews` round trip.
  *
- * `Form.Load()` also fills the form's `Load: immediate` Pages and Screens collections (#303), so it
- * needs Read on Form Pages and Form Screens as well — which the Forms Automation Runner does not
- * hold, and every Action automation failed on it on the first live run. No hook needs the page tree,
- * and a view materialises the row through `LoadFromData`, which never cascades.
+ * `Form` is read through a view rather than `Load()`: `Form.Load()` also fills the form's
+ * `Load: immediate` Pages and Screens collections (#303), so it needs Read on Form Pages and Form
+ * Screens as well — which the Forms Automation Runner does not hold, and every Action automation
+ * failed on it on the first live run. No hook needs the page tree, and a view materialises the row
+ * through `LoadFromData`, which never cascades.
  */
-async function loadFormRow(
+async function loadFormAndAnswerRows(
   formId: string,
-  contextUser: UserInfo,
-  provider: ActionDataProvider,
-): Promise<ReadOutcome<mjBizAppsFormsFormEntity | undefined>> {
-  const result = await new RunView(provider).RunView<mjBizAppsFormsFormEntity>(
-    { EntityName: ENTITY.Form, ExtraFilter: `ID=${quoteSqlString(formId)}`, ResultType: 'entity_object' },
-    contextUser,
-  );
-  if (!result.Success) {
-    return { ok: false, error: `could not read ${ENTITY.Form} ${formId}: ${result.ErrorMessage}` };
-  }
-  return { ok: true, value: result.Results[0] };
-}
-
-async function loadAnswerRows(
   responseId: string,
   contextUser: UserInfo,
   provider: ActionDataProvider,
-): Promise<ReadOutcome<mjBizAppsFormsFormResponseAnswerEntity[]>> {
+): Promise<ReadOutcome<{ form: mjBizAppsFormsFormEntity; answers: mjBizAppsFormsFormResponseAnswerEntity[] }>> {
   const rv = new RunView(provider);
-  const answerResult = await rv.RunView<mjBizAppsFormsFormResponseAnswerEntity>(
-    {
-      EntityName: ENTITY.FormResponseAnswer,
-      ExtraFilter: `ResponseID=${quoteSqlString(responseId)}`,
-      ResultType: 'entity_object',
-    },
+  const [formResult, answerResult] = await rv.RunViews(
+    [
+      { EntityName: ENTITY.Form, ExtraFilter: `ID=${quoteSqlString(formId)}`, ResultType: 'entity_object' },
+      { EntityName: ENTITY.FormResponseAnswer, ExtraFilter: `ResponseID=${quoteSqlString(responseId)}`, ResultType: 'entity_object' },
+    ],
     contextUser,
   );
-  if (!answerResult.Success) {
+  if (!formResult?.Success) {
+    const reason = `could not read ${ENTITY.Form} ${formId}: ${formResult?.ErrorMessage ?? 'no result'}`;
+    return { ok: false, error: `form ${formId} of response ${responseId} could not be loaded: ${reason}` };
+  }
+  const form = (formResult.Results as mjBizAppsFormsFormEntity[] | undefined)?.[0];
+  if (!form) {
+    // The response exists, so a missing form is not "nothing to do" — it is a read that failed.
+    return { ok: false, error: `form ${formId} of response ${responseId} could not be loaded: no such record` };
+  }
+  if (!answerResult?.Success) {
     // A failed read is NOT an unanswered response: consumers WRITE from these answers, and a
     // binding handed `[]` would create a record with every mapped field blank.
     return {
       ok: false,
-      error: `could not read ${ENTITY.FormResponseAnswer} for response ${responseId}: ${answerResult.ErrorMessage}`,
+      error: `could not read ${ENTITY.FormResponseAnswer} for response ${responseId}: ${answerResult?.ErrorMessage ?? 'no result'}`,
     };
   }
-  return { ok: true, value: answerResult.Results };
+  return {
+    ok: true,
+    value: {
+      form,
+      answers: (answerResult.Results as mjBizAppsFormsFormResponseAnswerEntity[] | undefined) ?? [],
+    },
+  };
 }
 
 function toAnswerWithType(

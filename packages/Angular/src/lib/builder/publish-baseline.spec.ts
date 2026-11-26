@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { RunView, RunViewParams } from '@memberjunction/core';
 import type { PublishedFormAutomation } from '@mj-biz-apps/forms-entities';
-import { readDraftAutomations, readLiveSnapshot } from './publish-baseline';
+import {
+  readBuilderBootstrapBatch,
+  readDraftAutomations,
+  readLiveSnapshot,
+  readPublishStateBatch,
+} from './publish-baseline';
 
 /**
  * The two reads the builder compares its draft against, now that `Forms.PublishForm` does the
@@ -172,5 +177,76 @@ describe('readLiveSnapshot', () => {
     const rv = runView({ [VERSIONS]: { Success: false, Results: [], ErrorMessage: 'timeout' } });
 
     expect(await readLiveSnapshot(rv, 'form-1')).toBeNull();
+  });
+});
+
+describe('readPublishStateBatch & readBuilderBootstrapBatch — single RunViews round trip', () => {
+  const DISTRIBUTIONS = 'MJ_BizApps_Forms: Form Distributions';
+  const FORMS = 'MJ_BizApps_Forms: Forms';
+
+  it('batches live snapshot, automations, and bindings in one RunViews call', async () => {
+    let runViewsCalls = 0;
+    const base = runView({
+      [VERSIONS]: { Success: true, Results: [{ DefinitionSnapshot: '{"v":2}' }] },
+      [AUTOMATIONS]: { Success: true, Results: [automation()] },
+      [BINDINGS]: { Success: true, Results: [binding] },
+    });
+    const rv = {
+      ...base,
+      RunViews: async (params: RunViewParams[]) => {
+        runViewsCalls += 1;
+        return base.RunViews(params);
+      },
+    } as unknown as Pick<RunView, 'RunViews'>;
+
+    const result = await readPublishStateBatch(rv, 'form-1');
+
+    expect(runViewsCalls).toBe(1);
+    expect(result.liveSnapshot).toBe('{"v":2}');
+    expect(result.draftAutomations).toHaveLength(1);
+  });
+
+  it('batches snapshot, automations, bindings, share links, and saved template in one RunViews call', async () => {
+    let runViewsCalls = 0;
+    const base = runView({
+      [VERSIONS]: { Success: true, Results: [{ DefinitionSnapshot: '{"v":5}' }] },
+      [AUTOMATIONS]: { Success: true, Results: [] },
+      [BINDINGS]: { Success: true, Results: [] },
+      [DISTRIBUTIONS]: {
+        Success: true,
+        Results: [{ Status: 'Active', IsActive: true, PublicLinkToken: 'tok', OpenAt: null, CloseAt: null, MaxResponses: null, ResponseCount: 0 }],
+      },
+      [FORMS]: { Success: true, Results: [{ ID: 'tpl-1' }] },
+    });
+    const rv = {
+      ...base,
+      RunViews: async (params: RunViewParams[]) => {
+        runViewsCalls += 1;
+        return base.RunViews(params);
+      },
+    } as unknown as Pick<RunView, 'RunViews'>;
+
+    const result = await readBuilderBootstrapBatch(rv, 'form-1');
+
+    expect(runViewsCalls).toBe(1);
+    expect(result.liveSnapshot).toBe('{"v":5}');
+    expect(result.draftAutomations).toEqual([]);
+    expect(result.shareLinks).toHaveLength(1);
+    expect(result.savedTemplateId).toBe('tpl-1');
+  });
+
+  it('keeps shareLinks null (not empty) when the distributions slice fails', async () => {
+    const rv = runView({
+      [VERSIONS]: { Success: true, Results: [] },
+      [AUTOMATIONS]: { Success: true, Results: [] },
+      [BINDINGS]: { Success: true, Results: [] },
+      [DISTRIBUTIONS]: { Success: false, Results: [], ErrorMessage: 'denied' },
+      [FORMS]: { Success: true, Results: [] },
+    });
+
+    const result = await readBuilderBootstrapBatch(rv, 'form-1');
+
+    expect(result.shareLinks).toBeNull();
+    expect(result.savedTemplateId).toBeNull();
   });
 });

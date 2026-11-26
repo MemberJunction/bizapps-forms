@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
 import { EntitySaveOptions, Metadata, RunView, LogError, type UserInfo } from '@memberjunction/core';
-import type {
-  mjBizAppsFormsFormEntity,
-  mjBizAppsFormsFormStyleEntity,
+import {
+  FormsEngineBase,
+  type mjBizAppsFormsFormEntity,
+  type mjBizAppsFormsFormStyleEntity,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
 import { serializeCssVariables, withBrandToken, withButtonRadiusPx } from './style-tokens';
@@ -49,6 +50,9 @@ export class DesignStateService {
    * result distinguishes a load failure from a genuinely empty gallery.
    */
   public async loadStyles(assignedStyleId?: string | null): Promise<StyleLoadResult> {
+    if (FormsEngineBase.Instance.Loaded) {
+      return { success: true, styles: this.stylesFromEngine(assignedStyleId) };
+    }
     const gallery = 'IsActive = 1 AND DisplayRank > 0';
     const filter = assignedStyleId ? `(${gallery}) OR ID='${assignedStyleId}'` : gallery;
     try {
@@ -74,8 +78,26 @@ export class DesignStateService {
     }
   }
 
+  /** Build the gallery + assigned-style list from the already-loaded `FormsEngineBase` cache. */
+  private stylesFromEngine(assignedStyleId?: string | null): mjBizAppsFormsFormStyleEntity[] {
+    const styles = [...FormsEngineBase.Instance.GalleryFormStyles];
+    if (assignedStyleId) {
+      const assigned = FormsEngineBase.Instance.FormStyleById(assignedStyleId);
+      if (assigned && !styles.some((s) => s.ID.toLowerCase() === assigned.ID.toLowerCase())) {
+        styles.unshift(assigned);
+      }
+    }
+    return styles;
+  }
+
   /** Load a single style by id (e.g. a form's assigned style, for previewing). */
   public async loadStyleById(styleId: string): Promise<mjBizAppsFormsFormStyleEntity | null> {
+    if (FormsEngineBase.Instance.Loaded) {
+      const cached = FormsEngineBase.Instance.FormStyleById(styleId);
+      if (cached) {
+        return cached;
+      }
+    }
     const style = await this.md.GetEntityObject<mjBizAppsFormsFormStyleEntity>(
       FORMS_ENTITY.FormStyle,
       this.user,

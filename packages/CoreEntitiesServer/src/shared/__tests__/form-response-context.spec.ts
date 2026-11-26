@@ -45,10 +45,22 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
     }
   }
   class RunView {
-    constructor(private readonly provider?: { RunView(p: unknown, u?: unknown): Promise<unknown> } | null) {}
+    constructor(
+      private readonly provider?: {
+        RunView(p: unknown, u?: unknown): Promise<unknown>;
+        RunViews?(ps: unknown[], u?: unknown): Promise<unknown[]>;
+      } | null,
+    ) {}
     async RunView(params: unknown, user?: unknown): Promise<unknown> {
       if (!this.provider) throw new Error('global provider used');
       return this.provider.RunView(params, user);
+    }
+    async RunViews(params: unknown[], user?: unknown): Promise<unknown[]> {
+      if (!this.provider) throw new Error('global provider used');
+      if (this.provider.RunViews) {
+        return this.provider.RunViews(params, user);
+      }
+      return Promise.all(params.map((p) => this.provider!.RunView(p, user)));
     }
   }
   return { ...actual, Metadata, RunView };
