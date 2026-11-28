@@ -1,0 +1,56 @@
+[
+  {
+    "fields": {
+      "Name": "Forms",
+      "Description": "Author forms from briefs or starter templates, inspect form definitions, distributions, responses, scores, and automation runs in MJ Forms with strict role- and RLS-scoped visibility. Installed by the MJ Forms app.",
+      "Instructions": "@file:templates/forms-chief-of-staff.skill.md",
+      "Status": "Active",
+      "ActivationMode": "Auto",
+      "Category": "Productivity",
+      "IconClass": "fa-solid fa-list-check",
+      "Color": "#2563EB",
+      "CreatedByUserID": "@lookup:MJ: Users.Name=System"
+    },
+    "relatedEntities": {
+      "MJ: AI Agent Skills": [
+        {
+          "fields": {
+            "AgentID": "@lookup:MJ: AI Agents.Name=Chief of Staff",
+            "SkillID": "@parent:ID",
+            "Status": "Active"
+          },
+          "primaryKey": {
+            "ID": "57AF0F5A-1D90-4DF6-8D88-1A71E04C85F1"
+          }
+        }
+      ],
+      "MJ: AI Skill Actions": [
+        {
+          "fields": {
+            "SkillID": "@parent:ID",
+            "ActionID": "@lookup:MJ: Actions.Name=Forms: Generate Form From Brief",
+            "Role": "Tool",
+            "ExposeToModel": true
+          },
+          "primaryKey": {
+            "ID": "B39D3BD2-E4B4-44E8-B3D1-97B8AF7B1A0D"
+          }
+        },
+        {
+          "fields": {
+            "SkillID": "@parent:ID",
+            "ActionID": "@lookup:MJ: Actions.Name=Forms: Create Form From Template",
+            "Role": "Tool",
+            "ExposeToModel": true
+          },
+          "primaryKey": {
+            "ID": "1A772C88-512A-4D60-A384-CCCEFA5AD748"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "AB3DD123-75A2-473D-829A-1258CD872F4D"
+    }
+  }
+]
