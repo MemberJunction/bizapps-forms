@@ -268,8 +268,12 @@ Automation Runs and Form Response Answers), because the outbox file redefines
 `spCreate`/`spUpdateFormAutomationRun` to add `@FormAutomationEventID`. Whichever file defines a
 procedure last is what a host keeps, so the outbox file carries #310's datestamps-only result
 `SELECT`s as well; its header (edit 4) says why that merge is by hand.
-`V202610201910__v0.16.x__Restore_Full_Row_Save_Return.sql` (#315) redefines the four procedures
-last, so a host keeps the full-row return that every published MJ expects.
+`V202610201910__v0.16.x__Restore_Full_Row_Save_Return.sql` (#315) temporarily restored the
+full-row return while MJ Forms still supported MJ 6.1 LTS. Once MJ Forms moved to MJ 6.2
+(`>=6.2.0-edge.8`, pinned to `6.2.1`, which ships MJ commit `f033cb970b`),
+`V202611201230__v1.1.x__SaveReturnMode_DatestampsOnly_StoredProcedures.sql` re-enabled
+`SaveReturnMode: 'datestamps_only'` (and `TrackRecordChanges = 0`) atomically on
+`FormAutomationRun` and `FormResponseAnswer` while keeping `@FormAutomationEventID`.
 
 None sets **`READ_COMMITTED_SNAPSHOT`**, which a host needs — that is a host step, in
 [`docs/local-host.md` §5](local-host.md#5-host-requirements-since-303-the-automation-outbox-and-read_committed_snapshot).
